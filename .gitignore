@@ -1,3 +1,8 @@
-/ARCHITECTURE.md
-/CLAUDE.md
-/REFACTORING_SUMMARY.md
+python/__pycache__/ayon_service.cpython-310.pyc
+python/__pycache__/cleanup_service.cpython-310.pyc
+python/__pycache__/config.cpython-310.pyc
+python/__pycache__/file_operations.cpython-310.pyc
+python/__pycache__/mp4_maker.cpython-310.pyc
+python/__pycache__/pass_builder.cpython-310.pyc
+python/__pycache__/render_service.cpython-310.pyc
+python/__pycache__/utils.cpython-310.pyc
