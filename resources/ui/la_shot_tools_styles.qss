@@ -1,0 +1,236 @@
+/* Enhanced Stylesheet for Luma Shot Tools
+ * This stylesheet adds enhancements on top of qdarkstyle
+ * Provides better spacing, animations preparation, and visual polish
+ */
+
+/* Group Boxes - Enhanced with better styling */
+QGroupBox {
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding-top: 18px;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 4px 10px;
+    background-color: #2b2b2b;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    color: #4a9eff;
+    left: 10px;
+}
+
+/* Primary Action Button - Build Passes */
+QPushButton#BuildPasses {
+    background-color: #0e4d92;
+    color: #ffffff;
+    border: 1px solid #1a5fb4;
+    font-weight: bold;
+    font-size: 11pt;
+    border-radius: 4px;
+}
+
+QPushButton#BuildPasses:hover:enabled {
+    background-color: #1a5fb4;
+    border-color: #2575ca;
+}
+
+QPushButton#BuildPasses:pressed:enabled {
+    background-color: #0a3d74;
+}
+
+QPushButton#BuildPasses:disabled {
+    background-color: #2a2a2a;
+    color: #666666;
+    border-color: #333333;
+}
+
+/* Danger Button - Clean Files */
+QPushButton#CleanFiles {
+    background-color: #8b2e2e;
+    color: #ffffff;
+    border: 1px solid #a33c3c;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+QPushButton#CleanFiles:hover:enabled {
+    background-color: #a33c3c;
+    border-color: #bb4a4a;
+}
+
+QPushButton#CleanFiles:pressed:enabled {
+    background-color: #6b1e1e;
+}
+
+/* Secondary Buttons - Consistent Styling */
+QPushButton#ScanRenders,
+QPushButton#RescanCleanFiles,
+QPushButton#browsetofile {
+    min-height: 28px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+QPushButton#ScanRenders:hover,
+QPushButton#RescanCleanFiles:hover,
+QPushButton#browsetofile:hover {
+    background-color: #4a4a4a;
+}
+
+/* List Widgets - Better Selection */
+QListWidget {
+    border-radius: 4px;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 8px;
+    border-radius: 3px;
+    margin: 2px;
+}
+
+QListWidget::item:hover {
+    background-color: #2d2d2d;
+}
+
+QListWidget::item:selected {
+    background-color: #0e4d92;
+    color: #ffffff;
+}
+
+QListWidget::item:selected:active {
+    background-color: #1a5fb4;
+}
+
+/* Tab Widget - Enhanced Tabs */
+QTabWidget::pane {
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    padding: 10px 20px;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    min-width: 100px;
+}
+
+QTabBar::tab:selected {
+    border-bottom: 2px solid #4a9eff;
+}
+
+/* Progress Bar - Smooth Gradient */
+QProgressBar {
+    border-radius: 4px;
+    text-align: center;
+    font-weight: bold;
+}
+
+QProgressBar::chunk {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #0e4d92, stop:1 #1a5fb4);
+    border-radius: 3px;
+}
+
+/* Spin Box - Better Styling */
+QSpinBox {
+    border-radius: 4px;
+    padding: 6px;
+    min-height: 24px;
+}
+
+QSpinBox::up-button,
+QSpinBox::down-button {
+    border: none;
+    width: 16px;
+}
+
+/* Combo Box - Better Styling */
+QComboBox {
+    border-radius: 4px;
+    padding: 6px 12px;
+    min-height: 24px;
+}
+
+/* Check Boxes - Better Indicators */
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #0e4d92;
+    border-color: #1a5fb4;
+}
+
+/* Radio Buttons - Better Indicators */
+QRadioButton::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 10px;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #0e4d92;
+    border-color: #1a5fb4;
+}
+
+/* Status Label - Color Coding */
+QLabel#StatusLabel {
+    color: #4a9eff;
+    font-weight: 500;
+    padding: 5px;
+}
+
+/* Render Path Label */
+QLabel#RenderPath {
+    padding: 8px;
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Hint Labels */
+QLabel#passesHint,
+QLabel#comingSoonLabel {
+    color: #888888;
+    font-style: italic;
+}
+
+/* Status Frame */
+QFrame#statusBar {
+    border-radius: 4px;
+}
+
+/* Scroll Bars - Refined */
+QScrollBar:vertical {
+    border-radius: 7px;
+    width: 14px;
+}
+
+QScrollBar::handle:vertical {
+    border-radius: 7px;
+    min-height: 30px;
+}
+
+QScrollBar:horizontal {
+    border-radius: 7px;
+    height: 14px;
+}
+
+QScrollBar::handle:horizontal {
+    border-radius: 7px;
+    min-width: 30px;
+}
+
+/* Tool Tips */
+QToolTip {
+    border-radius: 4px;
+    padding: 6px;
+}
