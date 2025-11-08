@@ -122,7 +122,54 @@ class LumaShotTools(QtWidgets.QWidget):
         file = QFile(QDARKSTYLE_PATH)
         file.open(QFile.ReadOnly | QFile.Text)
         stream = QTextStream(file)
-        app.setStyleSheet(stream.readAll())
+        base_style = stream.readAll()
+
+        # Add custom tab styling for bigger, slicker tabs on the right
+        custom_tab_style = """
+        QTabWidget::pane {
+            border: 2px solid #455364;
+            border-radius: 6px;
+            background-color: #19232D;
+        }
+
+        QTabWidget::tab-bar {
+            alignment: center;
+        }
+
+        QTabBar::tab {
+            background-color: #19232D;
+            border: 2px solid #455364;
+            border-right: none;
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+            min-width: 140px;
+            min-height: 70px;
+            padding: 15px 25px;
+            margin: 4px 0px;
+            font-size: 14pt;
+            font-weight: 600;
+            color: #9DA5B4;
+        }
+
+        QTabBar::tab:selected {
+            background-color: #1A5FB4;
+            color: #FFFFFF;
+            border-color: #4A9EFF;
+            border-right: 3px solid #4A9EFF;
+        }
+
+        QTabBar::tab:hover:!selected {
+            background-color: #2A3F54;
+            color: #E0E0E0;
+            border-color: #5A7FA0;
+        }
+
+        QTabBar::tab:selected:hover {
+            background-color: #1E6DC8;
+        }
+        """
+
+        app.setStyleSheet(base_style + custom_tab_style)
 
         # Setup animations
         if ANIMATIONS_ENABLED:
