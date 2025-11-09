@@ -61,6 +61,20 @@ except ImportError:
     print("ui_animations/loading_overlay modules not found - animations disabled")
 
 
+
+import ctypes
+
+
+
+kernel32 = ctypes.WinDLL('kernel32')
+
+user32 = ctypes.WinDLL('user32')
+
+SW_HIDE = 0
+
+hWnd = kernel32.GetConsoleWindow()
+user32.ShowWindow(hWnd, SW_HIDE)
+
 # ============================================================================
 # GLOBAL STATE (to be refactored later)
 # ============================================================================
@@ -139,7 +153,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui = QtUiTools.QUiLoader().load(UI_FILE_PATH, parentWidget=self)
         self.parent = parent
         self.change_val[int].connect(self.set_progress_val)
-        self.setWindowTitle(f"{APP_TITLE} - {shot}")
+        self.setWindowTitle(f"{APP_TITLE} - {jobname} - {shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
         # Setup log redirection

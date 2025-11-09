@@ -61,7 +61,7 @@ AYON_DEFAULT_HEIGHT = 1080
 # ============================================================================
 
 APP_ID = u'luma.tools.shotbuilder.001'
-APP_TITLE = "Luma Shot Tools"
+APP_TITLE = "Luma Tools"
 
 # Frame padding
 FRAME_PADDING = 4

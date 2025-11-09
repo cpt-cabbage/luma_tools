@@ -75,6 +75,7 @@ def find_hip_files(dirname):
 def find_comp_files(compdirname):
     """
     Find compositing files (Nuke/Fusion) containing 'Compositing' in the name.
+    Ignores files with 'baking' in the name.
 
     Args:
         compdirname: Directory to search
@@ -86,7 +87,7 @@ def find_comp_files(compdirname):
     for root, dirs, files in os.walk(compdirname):
         for file in files:
             if any(file.endswith(ext) for ext in COMP_EXTENSIONS):
-                if "Compositing" in file:
+                if "Compositing" in file and "baking" not in file.lower():
                     compfiles.append(file)
     return compfiles
 
