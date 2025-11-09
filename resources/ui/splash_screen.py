@@ -8,7 +8,7 @@ from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
 import os
-from loading_styles import LoadingStyles
+from ui_components import LoadingStyles
 
 
 class SpinnerWidget(QWidget):

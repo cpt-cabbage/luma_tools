@@ -43,15 +43,12 @@ from pass_builder import pass_builder
 from mp4_maker import generate_mp4, get_output_filename
 
 # Import animation and loading modules
-from ui_animations import enhance_ui, StatusColors
-from loading_overlay import InlineSpinner
+from ui_components import enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles
 from splash_screen import SplashScreen
 
 # Import new modular services
 from state_manager import app_state
 from scan_service import DirectoryScanner
-from ui_styling import apply_stylesheet
-from loading_styles import LoadingStyles
 
 
 
