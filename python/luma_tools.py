@@ -278,11 +278,9 @@ class LumaShotTools(QtWidgets.QWidget):
         denoisedpath = os.path.dirname(framename) + f"\{filename}"
 
         # Find passes (shows inline spinner automatically)
-        self._detect_passes(denoisedpath)
-
-        # Select previously saved passes
+        # Note: Pass selection happens in _detect_passes callback after passes are loaded
         app_state.passesfile = get_pass_file_path(app_state.working_dir, app_state.currentrender)
-        self._select_saved_passes(app_state.passesfile)
+        self._detect_passes(denoisedpath)
 
     def _detect_passes(self, render_file):
         """Detect passes in render file with spinner animation - runs on background thread."""
@@ -302,6 +300,9 @@ class LumaShotTools(QtWidgets.QWidget):
             # Add passes to list
             for key in channels.keys():
                 self.ui.Passes.addItem(key)
+
+            # Select previously saved passes (now that list is populated)
+            self._select_saved_passes(app_state.passesfile)
 
             # Enable build button
             if len(channels) >= 1:
@@ -325,11 +326,21 @@ class LumaShotTools(QtWidgets.QWidget):
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
         selectedpasses = load_pass_config(passes_file)
+        print(f"DEBUG: Loaded passes from file: {selectedpasses}")
+        print(f"DEBUG: Pass names to select: {list(selectedpasses.keys()) if selectedpasses else 'None'}")
+
+        # Debug: print all items currently in the list
+        all_items = [self.ui.Passes.item(i).text() for i in range(self.ui.Passes.count())]
+        print(f"DEBUG: Available passes in UI: {all_items}")
+
         if selectedpasses:
             for pass_name in list(selectedpasses):
-                matching_items = self.ui.Passes.findItems(pass_name, Qt.MatchEndsWith)
+                print(f"DEBUG: Looking for pass: '{pass_name}'")
+                matching_items = self.ui.Passes.findItems(pass_name, Qt.MatchExactly)
+                print(f"DEBUG: Found {len(matching_items)} matching items for '{pass_name}'")
                 for item in matching_items:
                     item.setSelected(True)
+                    print(f"DEBUG: Selected item: '{item.text()}'")
 
     # ========================================================================
     # PASS BUILDING HANDLERS
@@ -384,7 +395,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         def on_result(result):
             """Called when build completes successfully."""
-            self.animator.update_loading_message(main_title, "Build complete!")
+            self.animator.update_loading_message("Build Submitted", "Build complete!")
             self.animator.update_loading_progress(100)
             # Small delay to show completion
             QTimer.singleShot(500, lambda: self._finish_build_success(use_farm))

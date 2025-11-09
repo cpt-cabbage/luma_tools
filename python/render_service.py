@@ -53,7 +53,7 @@ def detect_passes(render_file):
 
             key = key.strip()
             channelgroup = channels.get(key, [])
-            channelgroup.append(ch)
+            channelgroup.append(ch.strip())
             channels[key] = channelgroup
 
     # Manual Passes - Normals
