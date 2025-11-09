@@ -191,6 +191,7 @@ class SplashScreen(QWidget):
         # Add widgets to layout
         layout.addStretch()
         layout.addWidget(logo_container)
+        layout.addStretch()  # Move logo up away from spinner
         # Title label removed for cleaner design
         layout.addWidget(spinner_container)
         layout.addWidget(self.main_label)

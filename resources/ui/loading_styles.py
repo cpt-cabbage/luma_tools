@@ -34,7 +34,7 @@ class LoadingStyles:
     OVERLAY_SUB_SIZE = "10pt"
 
     # Logo
-    LOGO_SIZE_SPLASH = (180, 180)  # Larger for splash screen - increased for more prominence
+    LOGO_SIZE_SPLASH = (200, 200)  # Larger for splash screen - increased for more prominence
     LOGO_SIZE_OVERLAY = (100, 100)  # Smaller for overlay
 
     # Spinner
@@ -46,7 +46,7 @@ class LoadingStyles:
     SPINNER_ROTATION_INTERVAL = 50  # milliseconds (20 FPS)
 
     # Layout
-    SPLASH_SIZE = (500, 400)  # Increased height to accommodate larger logo
+    SPLASH_SIZE = (500, 450)  # Increased height to accommodate larger logo
     SPLASH_MARGIN = 40
     SPLASH_SPACING = 15  # Reduced spacing for better fit
     OVERLAY_SPACING = 20
