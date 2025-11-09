@@ -51,6 +51,7 @@ from splash_screen import SplashScreen
 from state_manager import app_state
 from scan_service import DirectoryScanner
 from ui_styling import apply_stylesheet
+from loading_styles import LoadingStyles
 
 
 
