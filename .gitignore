@@ -14,3 +14,6 @@ python/__pycache__/mp4_maker.cpython-310.pyc
 python/__pycache__/pass_builder.cpython-310.pyc
 python/__pycache__/render_service.cpython-310.pyc
 python/__pycache__/utils.cpython-310.pyc
+python/__pycache__/ayon_service.cpython-310.pyc
+python/__pycache__/pass_builder.cpython-310.pyc
+.claude/settings.local.json

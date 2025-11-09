@@ -163,7 +163,9 @@ def create_ayon_metadata(
     user,
     output_subdirectory,
     working_dir,
-    render_file
+    render_file,
+    project_code=None,
+    task_type=None
 ):
     """
     Create AYON metadata JSON for farm publishing.
@@ -180,11 +182,31 @@ def create_ayon_metadata(
         output_subdirectory: Output subdirectory
         working_dir: Working directory
         render_file: Render file name
+        project_code: Optional project code (defaults to project_name)
+        task_type: Optional task type (defaults to "Compositing")
 
     Returns:
         dict: Metadata dictionary
     """
     logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
+
+    # Use defaults if not provided
+    if project_code is None:
+        # Try to get project code from AYON API
+        if AYON_AVAILABLE:
+            try:
+                project_entity = get_project(project_name)
+                project_code = project_entity.get("code", project_name)
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Could not get project code from AYON: {e}")
+                project_code = project_name
+        else:
+            project_code = project_name
+
+    if task_type is None:
+        # Default to Compositing since this is for render compositing
+        task_type = "Compositing"
 
     # Generate file list
     expected_files = []
@@ -196,6 +218,7 @@ def create_ayon_metadata(
     staging_dir_path = staging_dir_path.replace("\\", "/")
 
     # Create representations
+    # Note: Files are already on shared storage, pre-mark as available at studio site
     representations = [{
         "name": "exr",
         "ext": "exr",
@@ -213,6 +236,11 @@ def create_ayon_metadata(
             },
             "display": AYON_DISPLAY,
             "view": AYON_VIEW
+        },
+        # Pre-populate active sites to prevent SiteAlreadyPresentError
+        "site": {
+            "name": "studio",
+            "provider": "local_drive"
         }
     }]
 
@@ -224,6 +252,7 @@ def create_ayon_metadata(
         "families": ["render", "review"],
         "folderPath": folder_path,
         "task": task,
+        "host": "houdini",  # Host application - required for review extraction
         "frameStart": start_frame,
         "frameEnd": end_frame,
         "frameStartHandle": start_frame,
@@ -233,6 +262,8 @@ def create_ayon_metadata(
         "fps": AYON_DEFAULT_FPS,
         "source": "{root[work]}/" + working_dir.split("work/")[-1] + render_file,
         "representations": representations,
+        # Mark this as farm/local publish to help sitesync plugin logic
+        "farm": True,
         # Required fields
         "aov": "",
         "colorspace": AYON_COLORSPACE,
@@ -254,9 +285,9 @@ def create_ayon_metadata(
         "useSequenceForReview": True,
         "version": 1,
         "anatomyData": {
-            "project": {"name": project_name, "code": project_name},
+            "project": {"name": project_name, "code": project_code},
             "folder": {"name": os.path.basename(folder_path)},
-            "task": {"name": task, "type": "render"},
+            "task": {"name": task, "type": task_type},
             "root": {"work": renders_path.split("work")[0] + "work"}
         }
     }

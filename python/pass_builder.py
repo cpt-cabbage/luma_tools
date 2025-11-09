@@ -241,6 +241,21 @@ class PassBuilder:
             if QT_AVAILABLE:
                 QApplication.processEvents()
 
+        # Get task type mapping (task name -> task type)
+        # Common task types: Compositing, Lighting, Animation, etc.
+        task_type_map = {
+            "compositing": "Compositing",
+            "comp": "Compositing",
+            "lighting": "Lighting",
+            "lgt": "Lighting",
+            "lookdev": "Lookdev",
+            "look": "Lookdev",
+            "animation": "Animation",
+            "anim": "Animation",
+        }
+        # Get task type from mapping, default to capitalize the task name
+        task_type = task_type_map.get(task.lower(), task.capitalize())
+
         metadata = create_ayon_metadata(
             project_name,
             render_name,
@@ -252,7 +267,9 @@ class PassBuilder:
             user,
             output_subdirectory,
             working_dir,
-            render_file
+            render_file,
+            project_code=None,  # Will auto-fetch from AYON
+            task_type=task_type
         )
 
         # Write metadata file

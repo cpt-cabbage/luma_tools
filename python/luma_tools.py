@@ -151,7 +151,7 @@ class LumaShotTools(QtWidgets.QWidget):
         # Pass Builder tab
         self.ui.ScanRenders.clicked.connect(self.on_scan_renders_clicked)
         self.ui.RendersList.itemSelectionChanged.connect(self.on_render_selection_changed)
-        self.ui.BuildPasses.clicked.connect(self.on_build_passes_clicked)
+        self.ui.BuildPasses.pressed.connect(self.on_build_passes_clicked)
         self.ui.CurrentVer.valueChanged.connect(self.on_scan_renders_clicked)
 
         # MP4 Maker tab
@@ -280,9 +280,11 @@ class LumaShotTools(QtWidgets.QWidget):
     def on_build_passes_clicked(self):
         """Build render files with selected passes."""
         # Show loading overlay IMMEDIATELY
+        QApplication.processEvents()
+        window.repaint()
         if ANIMATIONS_ENABLED:
             window.animator.show_loading(
-                "Building Render Passes",
+                "Submitting Render Passes",
                 "Preparing to build...",
                 show_progress=True
             )
@@ -298,7 +300,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # Phase 1: Collect selected passes
             if ANIMATIONS_ENABLED:
                 self.animator.update_loading_message(
-                    "Building Render Passes",
+                    "Submitting Render Passes",
                     "Collecting selected passes..."
                 )
                 self.animator.update_loading_progress(5)
@@ -313,7 +315,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # Phase 2: Write pass configuration
             if ANIMATIONS_ENABLED:
                 self.animator.update_loading_message(
-                    "Building Render Passes",
+                    "Submitting Render Passes",
                     "Writing pass configuration file..."
                 )
                 self.animator.update_loading_progress(15)
@@ -326,7 +328,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
             if ANIMATIONS_ENABLED:
                 self.animator.update_loading_message(
-                    "Building Render Passes",
+                    "Submitting Render Passes",
                     f"Submitting to {build_location}..."
                 )
                 self.animator.update_loading_progress(25)
@@ -354,7 +356,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # Phase 4: Complete
             if ANIMATIONS_ENABLED:
                 self.animator.update_loading_message(
-                    "Building Render Passes",
+                    "Submitting Render Passes",
                     "Build complete!"
                 )
                 self.animator.update_loading_progress(100)
@@ -378,7 +380,7 @@ class LumaShotTools(QtWidgets.QWidget):
     def _build_progress_callback(self, progress, message):
         """Callback for build progress updates from pass_builder."""
         if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message("Building Render Passes", message)
+            self.animator.update_loading_message("Submitting Render Passes", message)
             self.animator.update_loading_progress(progress)
 
     def _write_pass_config(self, passes_dictionary):
@@ -408,7 +410,7 @@ class LumaShotTools(QtWidgets.QWidget):
                 StatusColors.SUCCESS
             )
         else:
-            self.ui.StatusLabel.setText("Render build complete!")
+            self.ui.StatusLabel.setText("Farm Submission complete!")
 
     # ========================================================================
     # MP4 MAKER TAB HANDLERS
