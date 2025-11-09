@@ -15,9 +15,10 @@ from render_service import build_oiio_command, execute_oiio_local, load_pass_con
 from ayon_service import (
     submit_oiio_to_deadline,
     AYON_AVAILABLE,
-    DEADLINE_AVAILABLE
+    DEADLINE_AVAILABLE,
+    FarmPublishStrategy,
+    LocalPublishStrategy
 )
-from publish_strategy import FarmPublishStrategy, LocalPublishStrategy
 
 # Try to import Qt for processEvents
 try:
