@@ -1204,45 +1204,122 @@ class LumaShotTools(QtWidgets.QWidget):
 
 # Global window reference
 window = None
+splash = None
 
-def create_and_show_window():
-    """Create the main window and show it."""
-    global window
+
+def create_window_and_scan():
+    """Create the main window (hidden) and run the initial scan."""
+    global window, splash
+
+    # Update splash progress
+    if ANIMATIONS_ENABLED and splash:
+        splash.update_progress(30, "Initializing Luma Shot Tools", "Creating main window...")
+        QApplication.processEvents()
+
+    # Create window but don't show it yet
     window = LumaShotTools()
-    window.show()
 
-    # Close splash if it exists
-    if ANIMATIONS_ENABLED and 'splash' in globals():
-        splash.stop_animation()
-        splash.close()
+    # Update splash progress
+    if ANIMATIONS_ENABLED and splash:
+        splash.update_progress(50, "Initializing Luma Shot Tools", "Starting initial scan...")
+        QApplication.processEvents()
 
-    # Run scanner after window is visible
-    QTimer.singleShot(100, run_initial_scan)
+    # Schedule the scanner to run
+    QTimer.singleShot(100, run_initial_scan_with_splash)
 
 
-def run_initial_scan():
-    """Run the initial directory scan after the window is shown."""
-    global window
+def run_initial_scan_with_splash():
+    """Run the initial scan while updating splash screen progress."""
+    global window, splash
+
     if window is None:
         return
 
-    # Show loading overlay for initial scan
-    if ANIMATIONS_ENABLED:
-        window.animator.show_loading(
-            "Scanning Directories",
-            "Starting initial scan...",
-            show_progress=True
-        )
-        window.animator.update_loading_progress(50)
+    # Temporarily disable the window's loading overlay during initial scan
+    original_show_loading = None
+    original_update_message = None
+    original_update_progress = None
+    original_hide_loading = None
 
-    QApplication.processEvents()
+    if ANIMATIONS_ENABLED and hasattr(window, 'animator'):
+        # Save original methods
+        original_show_loading = window.animator.show_loading
+        original_update_message = window.animator.update_loading_message
+        original_update_progress = window.animator.update_loading_progress
+        original_hide_loading = window.animator.hide_loading
 
-    # Run initial scanner
+        # Replace with splash update methods
+        def splash_show_loading(main_text, sub_text="", show_progress=True):
+            if splash:
+                progress = 60  # Start at 60% for scanning
+                splash.update_progress(progress, main_text, sub_text)
+                QApplication.processEvents()
+
+        def splash_update_message(main_text, sub_text=""):
+            if splash:
+                # Keep progress advancing during scan
+                current_progress = splash.progress_bar.value()
+                new_progress = min(current_progress + 5, 90)
+                splash.update_progress(new_progress, main_text, sub_text)
+                QApplication.processEvents()
+
+        def splash_update_progress(value):
+            if splash:
+                # Map the progress to 60-90 range
+                mapped_progress = 60 + int(value * 0.3)
+                current_text = splash.main_label.text()
+                current_sub = splash.sub_label.text()
+                splash.update_progress(mapped_progress, current_text, current_sub)
+                QApplication.processEvents()
+
+        def splash_hide_loading():
+            pass  # Don't hide, we'll handle it after scan
+
+        # Monkey-patch the animator methods
+        window.animator.show_loading = splash_show_loading
+        window.animator.update_loading_message = splash_update_message
+        window.animator.update_loading_progress = splash_update_progress
+        window.animator.hide_loading = splash_hide_loading
+
+    # Run the scanner
     window.run_scanner()
 
-    # Hide loading overlay
-    if ANIMATIONS_ENABLED:
-        window.animator.hide_loading()
+    # Restore original methods
+    if ANIMATIONS_ENABLED and hasattr(window, 'animator'):
+        window.animator.show_loading = original_show_loading
+        window.animator.update_loading_message = original_update_message
+        window.animator.update_loading_progress = original_update_progress
+        window.animator.hide_loading = original_hide_loading
+
+    # Scan complete - show window and close splash
+    finish_initialization()
+
+
+def finish_initialization():
+    """Finish initialization by showing the window and closing splash."""
+    global window, splash
+
+    if ANIMATIONS_ENABLED and splash:
+        splash.update_progress(100, "Initialization Complete", "Opening application...")
+        QApplication.processEvents()
+
+        # Small delay to show completion
+        QTimer.singleShot(300, show_window_and_close_splash)
+    else:
+        show_window_and_close_splash()
+
+
+def show_window_and_close_splash():
+    """Show the main window and close the splash screen."""
+    global window, splash
+
+    if window:
+        window.show()
+
+    if ANIMATIONS_ENABLED and splash:
+        splash.stop_animation()
+        splash.close()
+        splash = None
 
 
 # Show splash screen and initialize
@@ -1256,14 +1333,20 @@ if ANIMATIONS_ENABLED:
     # Process events to ensure splash is visible
     QApplication.processEvents()
 
-    # Create window after short delay to ensure splash is visible
-    QTimer.singleShot(200, create_and_show_window)
+    # Start initialization after splash is visible
+    QTimer.singleShot(200, create_window_and_scan)
 
 else:
     # No animations - create window directly
     window = LumaShotTools()
     window.show()
-    QTimer.singleShot(100, run_initial_scan)
+
+    # Run scanner without splash
+    def run_scanner_no_splash():
+        if window:
+            window.run_scanner()
+
+    QTimer.singleShot(100, run_scanner_no_splash)
 
 # Start event loop
 sys.exit(app.exec_())
