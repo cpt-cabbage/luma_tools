@@ -152,6 +152,10 @@ class LumaShotTools(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(LumaShotTools, self).__init__()
 
+        # Set window flags for frameless, rounded style (same as splash screen)
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
         # Load UI
         self.ui = QtUiTools.QUiLoader().load(UI_FILE_PATH, parentWidget=self)
         self.parent = parent
@@ -165,9 +169,8 @@ class LumaShotTools(QtWidgets.QWidget):
         sys.stdout = self.log_stream
         sys.stderr = self.log_stream
 
-        # Set window size from UI file and make it resizable
-        self.resize(self.ui.size())
-        self.setMinimumSize(self.ui.minimumSize())
+        # Set window size from UI file and make it non-resizable
+        self.setFixedSize(self.ui.size())
 
         # Load QDarkStyle as base theme
         file = QFile(QDARKSTYLE_PATH)
@@ -216,6 +219,20 @@ class LumaShotTools(QtWidgets.QWidget):
             x = self.ui.passesGroupBox.width() - 30
             y = 5
             self.passes_spinner.move(x, y)
+
+    def paintEvent(self, event):
+        """Paint the rounded background and border (same style as splash screen)."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw rounded rectangle background
+        bg_color = QColor(LoadingStyles.BACKGROUND_COLOR)
+        bg_color.setAlpha(240)
+        border_color = QColor(LoadingStyles.PRIMARY_COLOR)
+        border_color.setAlpha(100)
+        painter.setBrush(bg_color)
+        painter.setPen(QPen(border_color, 2))
+        painter.drawRoundedRect(self.rect(), LoadingStyles.BORDER_RADIUS, LoadingStyles.BORDER_RADIUS)
 
     def _connect_signals(self):
         """Connect all UI signals to handlers."""
