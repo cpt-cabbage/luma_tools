@@ -60,6 +60,30 @@ The application accepts command-line arguments for shot context, parsed by `stat
 
 ## Architecture Patterns
 
+### Threading Model (Critical)
+The application uses Qt's QThreadPool + QRunnable pattern for background operations:
+
+**Worker Pattern (`ui_components.py`):**
+- `Worker(QRunnable)` - Generic worker class that wraps functions for background execution
+- `WorkerSignals` - Defines signals for thread communication: `started`, `finished`, `error`, `result`, `progress`
+- All long-running operations execute via `QThreadPool.globalInstance().start(worker)`
+
+**Thread Safety:**
+- `ApplicationState` (state_manager.py) uses `threading.RLock()` for all property access
+- All state reads/writes are protected by the reentrant lock
+- Qt Signals automatically queue cross-thread communication to main GUI thread
+
+**Usage Pattern:**
+```python
+worker = Worker(some_function, arg1, arg2)
+worker.signals.result.connect(handle_result)
+worker.signals.error.connect(handle_error)
+worker.signals.progress.connect(update_progress)
+QThreadPool.globalInstance().start(worker)
+```
+
+**IMPORTANT:** Never update Qt widgets directly from worker threads. Always use signals or `DirectoryScannerSignals` for cross-thread GUI updates.
+
 ### Strategy Pattern for Publishing
 The codebase uses the Strategy Pattern in `ayon_service.py` to handle farm vs local publishing:
 - `PublishStrategy` (ABC) - Base strategy interface
@@ -71,15 +95,16 @@ This eliminates code duplication and makes it easy to extend with new publishing
 ### Service-Oriented Design
 Each major feature is encapsulated in a dedicated service module:
 - Services are stateless where possible
-- Shared state managed through `state_manager.app_state`
+- Shared state managed through `state_manager.app_state` (thread-safe singleton)
 - Main window delegates to services rather than implementing business logic
 
 ### UI Event Flow
 1. User interacts with Qt widget
 2. Signal connected to handler in `LumaShotTools` class
-3. Handler updates UI state and calls service functions
-4. Services report progress via callbacks
-5. Callbacks update loading overlay or status messages
+3. Handler creates Worker and submits to QThreadPool
+4. Worker executes service function in background thread
+5. Worker emits progress signals (safe cross-thread communication)
+6. Main thread receives signals and updates UI (loading overlay, status messages)
 
 ## Key Workflows
 
@@ -151,6 +176,31 @@ Deadline job defaults in `config.py`:
 
 ## Development Practices
 
+### Environment Setup
+**Virtual Environment:**
+- Python venv located at `python/venv/`
+- Activated automatically by `luma_tools.bat`
+- To activate manually (Windows): `python\venv\Scripts\activate.bat`
+
+**No Build Process:**
+- Application runs directly from source (no compilation needed)
+- No linting/testing infrastructure currently in place
+
+### Debugging
+**Console Output:**
+- Application hides console window by default (via Windows API)
+- All `print()` statements redirect to Log tab in UI
+- Check Log tab for debug output and error messages
+
+**Debugging Workers:**
+- Worker errors emit `error` signal with traceback
+- Check console/log for `"Worker error:"` messages
+- Use `print()` statements - they're redirected to UI log widget
+
+**Qt Signal Debugging:**
+- Signal connections are printed during startup
+- Failed signal connections usually silent - check connection syntax
+
 ### Modifying UI
 - UI layout defined in `resources/ui/la_shottools_ui.ui` (Qt Designer file)
 - Styles in `resources/ui/la_shot_tools_styles.qss`
@@ -160,11 +210,18 @@ Deadline job defaults in `config.py`:
 ### Adding New Features
 1. Create service module in `python/` if needed
 2. Add configuration to `config.py`
-3. Add UI elements to `.ui` file
+3. Add UI elements to `.ui` file (use Qt Designer)
 4. Connect signals in `_connect_signals()`
 5. Implement handler in `LumaShotTools` class
-6. Use loading overlay for long operations: `animator.show_loading()`
-7. Report progress via callbacks to update UI
+6. **For long operations:** Wrap in Worker and submit to QThreadPool
+7. Use loading overlay: `animator.show_loading()`
+8. Report progress via callbacks to update UI
+
+**Thread Safety Checklist for New Features:**
+- ✓ Access `app_state` properties (automatically thread-safe via RLock)
+- ✓ Update GUI via signals from worker threads
+- ✗ Never call Qt widget methods directly from worker threads
+- ✗ Never access Qt widgets from service functions (pass callbacks instead)
 
 ### Working with AYON
 - Import checks: `AYON_AVAILABLE` and `DEADLINE_AVAILABLE` flags
@@ -201,3 +258,35 @@ Loading overlay supports:
 - Qt signals/slots for event handling
 - Global `app_state` singleton manages shared state
 - Print statements used for logging (redirected to UI log widget)
+
+## Common Pitfalls and Important Notes
+
+**Threading Errors:**
+- Most common error: Calling Qt widget methods from worker threads
+- Symptom: Crashes or "QObject: Cannot create children for a parent that is in a different thread"
+- Solution: Use signals for all cross-thread GUI updates
+
+**State Management:**
+- `app_state` is thread-safe - access properties normally
+- Never store state in service modules (they should be stateless)
+- For UI-specific state, store in `LumaShotTools` instance variables
+
+**Worker Progress Callbacks:**
+- Workers auto-inject `progress_callback` if function signature includes it
+- Don't manually pass `progress_callback` to Worker - it's handled automatically
+- Progress callback receives: `(int: percentage, str: message)`
+
+**AYON/Deadline Availability:**
+- Check `AYON_AVAILABLE` and `DEADLINE_AVAILABLE` before using features
+- These are False when imports fail (e.g., outside production environment)
+- Gracefully degrade functionality when unavailable
+
+**Path Handling:**
+- Windows uses backslashes, but code uses both `/` and `\`
+- Use `normalize_path()` from utils to standardize paths
+- AYON paths use forward slashes - convert with `convert_to_ayon_folder_path()`
+
+**DirectoryScanner Signals:**
+- `DirectoryScannerSignals` provides thread-safe GUI updates during scans
+- These signals are connected in `_connect_scanner_signals()`
+- Add new signal types to `DirectoryScannerSignals` class if needed
