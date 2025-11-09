@@ -29,17 +29,9 @@ from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 
 # Import our modular services
-from config import UI_FILE_PATH, QDARKSTYLE_PATH, CUSTOM_STYLE_PATH, ICON_PATH, APP_ID, APP_TITLE
-from utils import get_trailing_number, remove_after, get_folder_size
-from file_operations import (
-    find_renders,
-    find_hip_files,
-    find_comp_files,
-    read_comp_file,
-    get_lookdev_directory,
-    get_comp_directory,
-    fast_scandir
-)
+from config import UI_FILE_PATH, ICON_PATH, APP_ID, APP_TITLE
+from utils import get_trailing_number, remove_after
+from file_operations import find_renders
 from render_service import (
     detect_passes,
     load_pass_config,
@@ -54,6 +46,11 @@ from mp4_maker import generate_mp4, get_output_filename
 from ui_animations import enhance_ui, StatusColors
 from loading_overlay import InlineSpinner
 from splash_screen import SplashScreen
+
+# Import new modular services
+from state_manager import app_state
+from scan_service import DirectoryScanner
+from ui_styling import apply_stylesheet
 
 
 
@@ -71,55 +68,19 @@ hWnd = kernel32.GetConsoleWindow()
 user32.ShowWindow(hWnd, SW_HIDE)
 
 # ============================================================================
-# GLOBAL STATE (to be refactored later)
+# GLOBAL STATE - Managed by state_manager
 # ============================================================================
-jobname = sys.argv[1]
-shot = sys.argv[2]
-task = sys.argv[3]
-shotpath = sys.argv[4]
-user = sys.argv[5]
-output_subdirectory = sys.argv[6]
 
-print("Full command: " + str(sys.argv))
-print(f"jobname = {jobname}")
-print(f"shot = {shot}")
-print(f"task = {task}")
-print(f"shotpath = {shotpath}")
-print(f"user = {user}")
-print(f"output_subdirectory = {output_subdirectory}")
+# Initialize application state from command line arguments
+app_state.initialize_from_args(sys.argv)
 
-# Application state
+# Application instance
 app = QApplication.instance()
 if app is None:
     app = QApplication(sys.argv)
 
-# Global variables (kept for backward compatibility)
-renders = []
-channels = {}
-WorkingDir = ""
-currentrender = ""
-passesfile = ""
-lookdevDir = ""
-latestrender = ""
-searchpath = ""
-startframe = 0
-endframe = 0
-
-# MP4 Maker global variables
-mp4_renders = []
-mp4_searchpath = ""
-mp4_custom_path = ""
-mp4_startframe = 0
-mp4_endframe = 0
-mp4_output_path = ""
-
-# rePublish global variables
-republish_renders = []
-republish_searchpath = ""
-republish_custom_path = ""
-republish_startframe = 0
-republish_endframe = 0
-republish_selected_render = None
+# Apply stylesheet
+apply_stylesheet(app)
 
 # Set up Windows things
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
@@ -160,7 +121,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui = QtUiTools.QUiLoader().load(UI_FILE_PATH, parentWidget=self)
         self.parent = parent
         self.change_val[int].connect(self.set_progress_val)
-        self.setWindowTitle(f"{APP_TITLE} - {jobname} - {shot}")
+        self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
         # Setup log redirection
@@ -172,24 +133,6 @@ class LumaShotTools(QtWidgets.QWidget):
         # Set window size from UI file and make it non-resizable
         self.setFixedSize(self.ui.size())
 
-        # Load QDarkStyle as base theme
-        file = QFile(QDARKSTYLE_PATH)
-        file.open(QFile.ReadOnly | QFile.Text)
-        stream = QTextStream(file)
-        base_style = stream.readAll()
-        file.close()
-
-        # Load custom stylesheet enhancements
-        custom_file = QFile(CUSTOM_STYLE_PATH)
-        custom_file.open(QFile.ReadOnly | QFile.Text)
-        custom_stream = QTextStream(custom_file)
-        custom_style = custom_stream.readAll()
-        custom_file.close()
-
-        # Apply combined stylesheet (custom style overrides base)
-        app.setStyleSheet(base_style + "\n" + custom_style)
-        print(f"Loaded custom stylesheet from: {CUSTOM_STYLE_PATH}")
-
         # Setup animations
         self.animator = enhance_ui(self)
         print("UI animations enabled")
@@ -198,6 +141,9 @@ class LumaShotTools(QtWidgets.QWidget):
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
         # Position will be set in showEvent when widget is fully laid out
         print("Inline spinner created for pass detection")
+
+        # Initialize scanner
+        self.scanner = DirectoryScanner(app_state, self.ui, self.animator)
 
         # Connect signals
         self._connect_signals()
@@ -295,28 +241,26 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
-        global renders, searchpath
-
         self.ui.RendersList.clear()
         self.ui.Passes.clear()
 
         # Build search path
-        searchpath = self.ui.RenderPath.text()
-        currentver = get_trailing_number(searchpath)
+        app_state.searchpath = self.ui.RenderPath.text()
+        currentver = get_trailing_number(app_state.searchpath)
         paddedcurrentver = '{:03d}'.format(int(currentver))
-        split_path = searchpath.rsplit("_", 1)
-        searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
+        split_path = app_state.searchpath.rsplit("_", 1)
+        app_state.searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
         newver = self.ui.CurrentVer.value()
         paddednewver = '{:03d}'.format(newver)
-        searchpath += paddednewver
-        self.ui.RenderPath.setText(searchpath)
+        app_state.searchpath += paddednewver
+        self.ui.RenderPath.setText(app_state.searchpath)
 
         # Find renders
-        renders = find_renders(searchpath)
+        app_state.renders = find_renders(app_state.searchpath)
         self.ui.BuildPasses.setEnabled(False)
 
-        if len(renders) > 0:
-            for render_seq in renders:
+        if len(app_state.renders) > 0:
+            for render_seq in app_state.renders:
                 self.ui.RendersList.addItem(str(render_seq).split("\\")[-1])
             self.ui.RendersList.setEnabled(True)
         else:
@@ -325,31 +269,27 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_render_selection_changed(self):
         """Update passes when selected render changes."""
-        global startframe, endframe, currentrender, passesfile
-
         sel0 = self.ui.RendersList.currentRow()
-        if sel0 < 0 or sel0 >= len(renders):
+        if sel0 < 0 or sel0 >= len(app_state.renders):
             return
 
         index = sel0
-        startframe = renders[index].start()
-        endframe = renders[index].end()
-        framename = renders[index].frame(startframe)
+        app_state.startframe = app_state.renders[index].start()
+        app_state.endframe = app_state.renders[index].end()
+        framename = app_state.renders[index].frame(app_state.startframe)
         filename = os.path.basename(framename)
-        currentrender = filename.split(".")[0]
+        app_state.currentrender = filename.split(".")[0]
         denoisedpath = os.path.dirname(framename) + f"\{filename}"
 
         # Find passes (shows inline spinner automatically)
         self._detect_passes(denoisedpath)
 
         # Select previously saved passes
-        passesfile = get_pass_file_path(WorkingDir, currentrender)
-        self._select_saved_passes(passesfile)
+        app_state.passesfile = get_pass_file_path(app_state.working_dir, app_state.currentrender)
+        self._select_saved_passes(app_state.passesfile)
 
     def _detect_passes(self, render_file):
         """Detect passes in render file with spinner animation."""
-        global channels
-
         self.ui.Passes.clear()
 
         # Show inline spinner
@@ -358,17 +298,17 @@ class LumaShotTools(QtWidgets.QWidget):
         QApplication.processEvents()
 
         # Detect passes using service
-        channels = detect_passes(render_file)
+        app_state.channels = detect_passes(render_file)
 
         # Hide spinner
         self.passes_spinner.stop()
 
         # Add passes to list
-        for key in channels.keys():
+        for key in app_state.channels.keys():
             self.ui.Passes.addItem(key)
 
         # Enable build button
-        if len(channels) >= 1:
+        if len(app_state.channels) >= 1:
             self.ui.BuildPasses.setEnabled(True)
             self.animator.pulse_button(self.ui.BuildPasses)
         else:
@@ -424,7 +364,7 @@ class LumaShotTools(QtWidgets.QWidget):
             for item in self.ui.Passes.selectedItems():
                 channellist.append(item.text())
 
-            final_channels = dict((k, channels[k]) for k in channellist if k in channels)
+            final_channels = dict((k, app_state.channels[k]) for k in channellist if k in app_state.channels)
 
             # Phase 2: Write pass configuration
             self.animator.update_loading_message(
@@ -452,17 +392,17 @@ class LumaShotTools(QtWidgets.QWidget):
             # Execute build with progress callback
 
             pass_builder.build_passes(
-                passes_file=passesfile,
-                renders_path=searchpath,
-                start_frame=startframe,
-                end_frame=endframe,
+                passes_file=app_state.passesfile,
+                renders_path=app_state.searchpath,
+                start_frame=app_state.startframe,
+                end_frame=app_state.endframe,
                 use_farm=use_farm,
-                project_name=jobname,
-                shot=shot,
+                project_name=app_state.jobname,
+                shot=app_state.shot,
                 parent_job_id="NONE",
-                task=task,
-                user=user,
-                output_subdirectory=output_subdirectory,
+                task=app_state.task,
+                user=app_state.user,
+                output_subdirectory=app_state.output_subdirectory,
                 do_publish=True,
                 progress_callback=self._build_progress_callback
             )
@@ -496,7 +436,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _write_pass_config(self, passes_dictionary):
         """Write pass configuration to file."""
-        save_pass_config(passesfile, passes_dictionary)
+        save_pass_config(app_state.passesfile, passes_dictionary)
         self._write_settings_file()
 
     def _write_settings_file(self):
@@ -505,7 +445,7 @@ class LumaShotTools(QtWidgets.QWidget):
         settings = {}
         settings['overridehou'] = self.ui.OverrideHou.isChecked()
 
-        shot_data_dir = os.path.join(WorkingDir, "shot_data")
+        shot_data_dir = os.path.join(app_state.working_dir, "shot_data")
         os.makedirs(shot_data_dir, exist_ok=True)
 
         settings_file = os.path.join(shot_data_dir, 'shot_settings.json')
@@ -536,8 +476,6 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_mp4_browse_custom_path_clicked(self):
         """Browse for custom directory containing image sequences."""
-        global mp4_custom_path
-
         # Default to user's Videos folder
         default_dir = os.path.join(os.path.expanduser("~"), "Videos")
 
@@ -550,95 +488,93 @@ class LumaShotTools(QtWidgets.QWidget):
         )
 
         if custom_dir:
-            mp4_custom_path = custom_dir
-            self.ui.MP4CustomPathLabel.setText(f"Custom path: {mp4_custom_path}")
+            app_state.mp4_custom_path = custom_dir
+            self.ui.MP4CustomPathLabel.setText(f"Custom path: {app_state.mp4_custom_path}")
             self.ui.MP4CustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
-            print(f"MP4 Maker: Custom path set to: {mp4_custom_path}")
+            print(f"MP4 Maker: Custom path set to: {app_state.mp4_custom_path}")
 
             # Trigger scan
             self.on_mp4_scan_renders_clicked()
 
     def on_mp4_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
-        global mp4_renders, mp4_searchpath
-
         self.ui.MP4RendersList.clear()
 
         # Build search path (same logic as Pass Builder)
-        mp4_searchpath = self.ui.MP4RenderPath.text()
+        app_state.mp4_searchpath = self.ui.MP4RenderPath.text()
 
         # Handle version change
-        if mp4_searchpath:
-            currentver = get_trailing_number(mp4_searchpath)
+        if app_state.mp4_searchpath:
+            currentver = get_trailing_number(app_state.mp4_searchpath)
             paddedcurrentver = '{:03d}'.format(int(currentver))
-            split_path = mp4_searchpath.rsplit("_", 1)
-            mp4_searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
+            split_path = app_state.mp4_searchpath.rsplit("_", 1)
+            app_state.mp4_searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
             newver = self.ui.MP4CurrentVer.value()
             paddednewver = '{:03d}'.format(newver)
-            mp4_searchpath += paddednewver
-            self.ui.MP4RenderPath.setText(mp4_searchpath)
+            app_state.mp4_searchpath += paddednewver
+            self.ui.MP4RenderPath.setText(app_state.mp4_searchpath)
 
         # Update "For Comp" radio button label with actual subdirectory name
-        self.ui.MP4UseForComp.setText(f"Denoised ({output_subdirectory.title()})")
+        self.ui.MP4UseForComp.setText(f"Denoised ({app_state.output_subdirectory.title()})")
 
         # Determine which source to scan based on radio buttons
-        mp4_renders = []
+        app_state.mp4_renders = []
         self.ui.MP4Generate.setEnabled(False)
 
-        print(f"MP4 Maker: Scanning path: {mp4_searchpath}")
+        print(f"MP4 Maker: Scanning path: {app_state.mp4_searchpath}")
 
         if self.ui.MP4UseForComp.isChecked():
             # Check for renders in for_comp subdirectory
-            for_comp_path = os.path.join(mp4_searchpath, output_subdirectory)
-            print(f"MP4 Maker: Scanning {output_subdirectory} path: {for_comp_path}")
+            for_comp_path = os.path.join(app_state.mp4_searchpath, app_state.output_subdirectory)
+            print(f"MP4 Maker: Scanning {app_state.output_subdirectory} path: {for_comp_path}")
             if os.path.exists(for_comp_path):
                 # Use fileseq directly instead of find_renders which hardcodes denoised subdirectory
                 import fileseq
                 search_pattern = os.path.join(for_comp_path, "*.exr")
                 print(f"MP4 Maker: Search pattern: {search_pattern}")
                 for_comp_renders = list(fileseq.findSequencesOnDisk(search_pattern))
-                print(f"MP4 Maker: Found {len(for_comp_renders)} renders in {output_subdirectory}")
+                print(f"MP4 Maker: Found {len(for_comp_renders)} renders in {app_state.output_subdirectory}")
                 for render_seq in for_comp_renders:
-                    mp4_renders.append((output_subdirectory, render_seq))
+                    app_state.mp4_renders.append((app_state.output_subdirectory, render_seq))
             else:
-                print(f"MP4 Maker: {output_subdirectory} path does not exist")
+                print(f"MP4 Maker: {app_state.output_subdirectory} path does not exist")
 
         elif self.ui.MP4UseRaw.isChecked():
             # Check root path (for raw/non-denoised renders)
-            print(f"MP4 Maker: Scanning raw render path: {mp4_searchpath}")
-            if os.path.exists(mp4_searchpath):
+            print(f"MP4 Maker: Scanning raw render path: {app_state.mp4_searchpath}")
+            if os.path.exists(app_state.mp4_searchpath):
                 # Use fileseq directly instead of find_renders which hardcodes denoised subdirectory
                 import fileseq
-                search_pattern = os.path.join(mp4_searchpath, "*.exr")
+                search_pattern = os.path.join(app_state.mp4_searchpath, "*.exr")
                 print(f"MP4 Maker: Search pattern: {search_pattern}")
                 root_renders = list(fileseq.findSequencesOnDisk(search_pattern))
                 print(f"MP4 Maker: Found {len(root_renders)} renders in root")
                 for render_seq in root_renders:
-                    mp4_renders.append(("raw", render_seq))
+                    app_state.mp4_renders.append(("raw", render_seq))
             else:
                 print(f"MP4 Maker: Raw render path does not exist")
 
         elif self.ui.MP4UseCustom.isChecked():
             # Check custom path
-            print(f"MP4 Maker: Scanning custom path: {mp4_custom_path}")
-            if mp4_custom_path and os.path.exists(mp4_custom_path):
+            print(f"MP4 Maker: Scanning custom path: {app_state.mp4_custom_path}")
+            if app_state.mp4_custom_path and os.path.exists(app_state.mp4_custom_path):
                 # Use fileseq directly to find all EXR sequences
                 import fileseq
-                search_pattern = os.path.join(mp4_custom_path, "*.exr")
+                search_pattern = os.path.join(app_state.mp4_custom_path, "*.exr")
                 print(f"MP4 Maker: Search pattern: {search_pattern}")
                 custom_renders = list(fileseq.findSequencesOnDisk(search_pattern))
                 print(f"MP4 Maker: Found {len(custom_renders)} renders in custom path")
                 for render_seq in custom_renders:
-                    mp4_renders.append(("custom", render_seq))
-            elif not mp4_custom_path:
+                    app_state.mp4_renders.append(("custom", render_seq))
+            elif not app_state.mp4_custom_path:
                 print(f"MP4 Maker: No custom path selected - please browse to a directory")
             else:
-                print(f"MP4 Maker: Custom path does not exist: {mp4_custom_path}")
+                print(f"MP4 Maker: Custom path does not exist: {app_state.mp4_custom_path}")
 
         # Populate list
-        print(f"MP4 Maker: Total renders found: {len(mp4_renders)}")
-        if len(mp4_renders) > 0:
-            for subdir, render_seq in mp4_renders:
+        print(f"MP4 Maker: Total renders found: {len(app_state.mp4_renders)}")
+        if len(app_state.mp4_renders) > 0:
+            for subdir, render_seq in app_state.mp4_renders:
                 # Get just the filename
                 full_path = str(render_seq).split("\\")
                 display_name = full_path[-1]
@@ -650,31 +586,29 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_mp4_render_selection_changed(self):
         """Update MP4 state when selected render changes."""
-        global mp4_startframe, mp4_endframe, mp4_output_path
-
         sel0 = self.ui.MP4RendersList.currentRow()
-        if sel0 < 0 or sel0 >= len(mp4_renders):
+        if sel0 < 0 or sel0 >= len(app_state.mp4_renders):
             self.ui.MP4Generate.setEnabled(False)
             return
 
         index = sel0
         # mp4_renders is now a list of tuples: (subdir, render_seq)
-        subdir, render_seq = mp4_renders[index]
-        mp4_startframe = render_seq.start()
-        mp4_endframe = render_seq.end()
+        subdir, render_seq = app_state.mp4_renders[index]
+        app_state.mp4_startframe = render_seq.start()
+        app_state.mp4_endframe = render_seq.end()
 
-        print(f"MP4 Maker: Selected render from '{subdir}' - frames {mp4_startframe} to {mp4_endframe}")
+        print(f"MP4 Maker: Selected render from '{subdir}' - frames {app_state.mp4_startframe} to {app_state.mp4_endframe}")
 
         # Automatically set output path to user's Videos folder
         framename = render_seq.frame(render_seq.start())
         filename = os.path.basename(framename)
         render_name = filename.split(".")[0]
-        default_filename = get_output_filename(render_name, shot)
+        default_filename = get_output_filename(render_name, app_state.shot)
         videos_folder = os.path.join(os.path.expanduser("~"), "Videos")
-        mp4_output_path = os.path.join(videos_folder, default_filename)
+        app_state.mp4_output_path = os.path.join(videos_folder, default_filename)
 
         # Update UI
-        self.ui.MP4OutputPath.setText(mp4_output_path)
+        self.ui.MP4OutputPath.setText(app_state.mp4_output_path)
         self.ui.MP4OutputPath.setStyleSheet("color: white; font-size: 9pt;")
 
         # Enable generate button
@@ -683,19 +617,17 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_mp4_browse_output_clicked(self):
         """Browse for MP4 output location."""
-        global mp4_output_path
-
         # Get current render name for default filename
         sel0 = self.ui.MP4RendersList.currentRow()
-        default_filename = f"{shot}_preview.mp4"
+        default_filename = f"{app_state.shot}_preview.mp4"
 
-        if sel0 >= 0 and sel0 < len(mp4_renders):
+        if sel0 >= 0 and sel0 < len(app_state.mp4_renders):
             # mp4_renders is now a list of tuples: (subdir, render_seq)
-            subdir, render_seq = mp4_renders[sel0]
+            subdir, render_seq = app_state.mp4_renders[sel0]
             framename = render_seq.frame(render_seq.start())
             filename = os.path.basename(framename)
             render_name = filename.split(".")[0]
-            default_filename = get_output_filename(render_name, shot)
+            default_filename = get_output_filename(render_name, app_state.shot)
 
         # Open file dialog with default location in user's Videos folder
         output_file, _ = QFileDialog.getSaveFileName(
@@ -706,8 +638,8 @@ class LumaShotTools(QtWidgets.QWidget):
         )
 
         if output_file:
-            mp4_output_path = output_file
-            self.ui.MP4OutputPath.setText(mp4_output_path)
+            app_state.mp4_output_path = output_file
+            self.ui.MP4OutputPath.setText(app_state.mp4_output_path)
             self.ui.MP4OutputPath.setStyleSheet("color: white; font-size: 9pt;")
 
             # Enable generate button if render is selected
@@ -731,7 +663,7 @@ class LumaShotTools(QtWidgets.QWidget):
         try:
             # Get selected render
             sel0 = self.ui.MP4RendersList.currentRow()
-            if sel0 < 0 or sel0 >= len(mp4_renders):
+            if sel0 < 0 or sel0 >= len(app_state.mp4_renders):
                 raise ValueError("No render selected")
 
             # Phase 1: Get render info
@@ -743,8 +675,8 @@ class LumaShotTools(QtWidgets.QWidget):
             QApplication.processEvents()
 
             # mp4_renders is now a list of tuples: (subdir, render_seq)
-            subdir, render_seq = mp4_renders[sel0]
-            framename = render_seq.frame(mp4_startframe)
+            subdir, render_seq = app_state.mp4_renders[sel0]
+            framename = render_seq.frame(app_state.mp4_startframe)
 
             # Build input pattern for ffmpeg
             # Convert from fileseq format to ffmpeg format
@@ -772,9 +704,9 @@ class LumaShotTools(QtWidgets.QWidget):
             # Phase 3: Generate MP4
             success = generate_mp4(
                 input_pattern,
-                mp4_output_path,
-                mp4_startframe,
-                mp4_endframe,
+                app_state.mp4_output_path,
+                app_state.mp4_startframe,
+                app_state.mp4_endframe,
                 quality_index=quality_index,
                 burn_in_timecode=burn_in_timecode,
                 progress_callback=self._mp4_progress_callback
@@ -812,7 +744,7 @@ class LumaShotTools(QtWidgets.QWidget):
         """Called after successful MP4 generation to show completion message."""
         self.animator.hide_loading()
         self.animator.update_status_animated(
-            f"MP4 generated: {os.path.basename(mp4_output_path)}",
+            f"MP4 generated: {os.path.basename(app_state.mp4_output_path)}",
             StatusColors.SUCCESS
         )
     # ========================================================================
@@ -830,8 +762,6 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_republish_browse_custom_path_clicked(self):
         """Handle custom path browse button click for rePublish."""
-        global republish_custom_path
-
         # Default to user's Videos folder
         default_path = os.path.join(os.path.expanduser("~"), "Videos")
         if not os.path.exists(default_path):
@@ -846,7 +776,7 @@ class LumaShotTools(QtWidgets.QWidget):
         )
 
         if custom_dir:
-            republish_custom_path = custom_dir
+            app_state.republish_custom_path = custom_dir
             # Update label to show selected path
             self.ui.RePublishCustomPathLabel.setText(f"Custom path: {custom_dir}")
             self.ui.RePublishCustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
@@ -856,37 +786,36 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_republish_scan_renders_clicked(self):
         """Scan for renders to republish based on selected source type."""
-        global republish_renders, republish_searchpath
         import fileseq
 
         # Update searchpath with current version
         current_ver = self.ui.RePublishCurrentVer.value()
-        if republish_searchpath:
+        if app_state.republish_searchpath:
             # Extract base path and replace version number
             import re
             # Match patterns like _v001, _v002, etc.
-            republish_searchpath = re.sub(r'_v\d{3}', f'_v{current_ver:03d}', republish_searchpath)
-            self.ui.RePublishRenderPath.setText(republish_searchpath)
+            app_state.republish_searchpath = re.sub(r'_v\d{3}', f'_v{current_ver:03d}', app_state.republish_searchpath)
+            self.ui.RePublishRenderPath.setText(app_state.republish_searchpath)
 
         # Update "For Comp" label if output_subdirectory is set
-        if output_subdirectory:
-            self.ui.RePublishUseForComp.setText(f"Denoised ({output_subdirectory.title()})")
+        if app_state.output_subdirectory:
+            self.ui.RePublishUseForComp.setText(f"Denoised ({app_state.output_subdirectory.title()})")
 
         # Clear previous list
         self.ui.RePublishRendersList.clear()
-        republish_renders = []
+        app_state.republish_renders = []
 
         # Determine which source to scan
         search_path = ""
         if self.ui.RePublishUseForComp.isChecked():
-            if output_subdirectory:
-                search_path = os.path.join(republish_searchpath, output_subdirectory)
+            if app_state.output_subdirectory:
+                search_path = os.path.join(app_state.republish_searchpath, app_state.output_subdirectory)
             else:
-                search_path = republish_searchpath
+                search_path = app_state.republish_searchpath
         elif self.ui.RePublishUseRaw.isChecked():
-            search_path = republish_searchpath
+            search_path = app_state.republish_searchpath
         elif self.ui.RePublishUseCustom.isChecked():
-            search_path = republish_custom_path
+            search_path = app_state.republish_custom_path
 
         if not search_path or not os.path.exists(search_path):
             self.ui.RePublishStatusLabel.setText("Status: Invalid path")
@@ -904,7 +833,7 @@ class LumaShotTools(QtWidgets.QWidget):
                 subdir = rel_path if rel_path != "." else ""
 
                 # Store tuple of (subdir, sequence_object)
-                republish_renders.append((subdir, seq))
+                app_state.republish_renders.append((subdir, seq))
 
                 # Display name
                 if subdir and subdir != ".":
@@ -915,7 +844,7 @@ class LumaShotTools(QtWidgets.QWidget):
                 self.ui.RePublishRendersList.addItem(display_name)
 
             # Update status
-            count = len(republish_renders)
+            count = len(app_state.republish_renders)
             self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
 
         except Exception as e:
@@ -924,31 +853,29 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_republish_render_selection_changed(self):
         """Handle render selection in rePublish list."""
-        global republish_startframe, republish_endframe, republish_selected_render
-
         selected_items = self.ui.RePublishRendersList.selectedItems()
         if not selected_items:
             self.ui.RePublishPublish.setEnabled(False)
-            republish_selected_render = None
+            app_state.republish_selected_render = None
             return
 
         # Get selected index
         selected_idx = self.ui.RePublishRendersList.currentRow()
-        if selected_idx < 0 or selected_idx >= len(republish_renders):
+        if selected_idx < 0 or selected_idx >= len(app_state.republish_renders):
             return
 
         # Get the fileseq object
-        _, seq = republish_renders[selected_idx]  # subdir not needed here
-        republish_selected_render = seq
+        _, seq = app_state.republish_renders[selected_idx]  # subdir not needed here
+        app_state.republish_selected_render = seq
 
         # Extract frame range
-        republish_startframe = seq.start()
-        republish_endframe = seq.end()
+        app_state.republish_startframe = seq.start()
+        app_state.republish_endframe = seq.end()
 
         # Update status with frame range
         self.ui.RePublishStatusLabel.setText(
             f"Status: Selected {seq.basename()}\n"
-            f"Frames: {republish_startframe}-{republish_endframe}"
+            f"Frames: {app_state.republish_startframe}-{app_state.republish_endframe}"
         )
 
         # Auto-populate product name if empty
@@ -971,12 +898,10 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_republish_publish_clicked(self):
         """Handle publish to AYON button click."""
-        global republish_selected_render, republish_startframe, republish_endframe
-
         self.animator.animate_button_click(self.ui.RePublishPublish)
 
         # Validate selection
-        if not republish_selected_render:
+        if not app_state.republish_selected_render:
             self.ui.RePublishStatusLabel.setText("Status: No render selected")
             return
 
@@ -987,7 +912,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         if not product_name:
             # Extract clean render name from sequence basename
-            base = republish_selected_render.basename()
+            base = app_state.republish_selected_render.basename()
             parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
             product_name = parts[0] if parts else base.replace("#", "").strip(".")
 
@@ -996,8 +921,8 @@ class LumaShotTools(QtWidgets.QWidget):
 
         try:
             # Get render path information
-            seq = republish_selected_render
-            first_frame = seq.frame(republish_startframe)
+            seq = app_state.republish_selected_render
+            first_frame = seq.frame(app_state.republish_startframe)
             render_dir = os.path.dirname(first_frame)
 
             # Get the base filename pattern for the sequence
@@ -1011,26 +936,26 @@ class LumaShotTools(QtWidgets.QWidget):
             from ayon_service import publish_to_ayon_local, submit_ayon_publish_to_deadline
 
             # Extract project and shot from searchpath
-            folder_path = convert_to_ayon_folder_path(shotpath, jobname)
+            folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
 
             # Create metadata
             metadata = create_ayon_metadata(
-                project_name=jobname,
+                project_name=app_state.jobname,
                 render_name=product_name,
-                start_frame=republish_startframe,
-                end_frame=republish_endframe,
+                start_frame=app_state.republish_startframe,
+                end_frame=app_state.republish_endframe,
                 renders_path=render_dir,
                 folder_path=folder_path,
                 task=task,
-                user=user,
+                user=app_state.user,
                 output_subdirectory="",
-                working_dir=WorkingDir,
+                working_dir=app_state.working_dir,
                 render_file=render_file
             )
 
             # Write metadata file to working directory, not render directory
             metadata_filename = f"ayon_{render_file}_{product_name}.json"
-            metadata_path = os.path.join(WorkingDir, metadata_filename)
+            metadata_path = os.path.join(app_state.working_dir, metadata_filename)
             metadata_path = write_metadata_file(metadata, metadata_path)
 
             if not metadata_path:
@@ -1063,10 +988,10 @@ class LumaShotTools(QtWidgets.QWidget):
                 # Publish locally with correct arguments
                 success = publish_to_ayon_local(
                     metadata_path,
-                    jobname,  # project_name
+                    app_state.jobname,  # project_name
                     folder_path,
                     task,
-                    user
+                    app_state.user
                 )
 
                 if success:
@@ -1103,13 +1028,13 @@ class LumaShotTools(QtWidgets.QWidget):
                 count = 0
                 for dir_name in render_dirs:
                     count += 1
-                    status_msg = f"Removing Renders: {lookdevDir}\\img\\renders\\{dir_name}"
+                    status_msg = f"Removing Renders: {app_state.lookdev_dir}\\img\\renders\\{dir_name}"
                     self.animator.update_status_animated(status_msg, StatusColors.WARNING)
                     print(status_msg)
                     self.change_val.emit(int(count / len(render_dirs) * 100))
                     QApplication.processEvents()
 
-                cleanup_renders(lookdevDir, render_dirs)
+                cleanup_renders(app_state.lookdev_dir, render_dirs)
 
         # Cleanup USD
         if self.ui.CleanUSD.isChecked():
@@ -1119,19 +1044,19 @@ class LumaShotTools(QtWidgets.QWidget):
                 for dir_name in usd_dirs:
                     count += 1
                     self.change_val.emit(int(count / len(usd_dirs) * 100))
-                    status_msg = f"Removing USDs: {lookdevDir}\\usd_files\\{dir_name}"
+                    status_msg = f"Removing USDs: {app_state.lookdev_dir}\\usd_files\\{dir_name}"
                     self.animator.update_status_animated(status_msg, StatusColors.WARNING)
                     QApplication.processEvents()
                     print(status_msg)
 
-                cleanup_usd(lookdevDir, usd_dirs)
+                cleanup_usd(app_state.lookdev_dir, usd_dirs)
 
         # Cleanup HIP backups
         if self.ui.HIPBackups.isChecked():
             self.change_val.emit(0)
-            status_msg = f"Removing Hip Backups Folder: {lookdevDir}\\backup\\"
+            status_msg = f"Removing Hip Backups Folder: {app_state.lookdev_dir}\\backup\\"
             self.animator.update_status_animated(status_msg, StatusColors.WARNING)
-            cleanup_hip_backups(lookdevDir)
+            cleanup_hip_backups(app_state.lookdev_dir)
             self.change_val.emit(100)
             QApplication.processEvents()
 
@@ -1140,328 +1065,25 @@ class LumaShotTools(QtWidgets.QWidget):
         self.run_scanner()
 
     # ========================================================================
-    # DIRECTORY SCANNER
+    # DIRECTORY SCANNER (Now uses scan_service module)
     # ========================================================================
 
     def run_scanner(self):
-        """Scan directories for renders, USD, HIP files, and comps."""
-        global lookdevDir, WorkingDir, latestrender
-
-        # Show loading overlay
-        self.animator.show_loading(
-            "Scanning Directories",
-            "Initializing scan...",
-            show_progress=True
-        )
-        QApplication.processEvents()
-
+        """Scan directories for renders, USD, HIP files, and comps using scan_service."""
+        # Clear UI elements
         self.ui.CleanFiles.setEnabled(False)
         self.ui.USDSClean.clear()
         self.ui.RendersClean.clear()
 
-        # Get lookdev directory
-        lookdevDir = get_lookdev_directory(shotpath)
-        print(f"lookdev Dir: {lookdevDir}")
+        # Delegate to scanner service
+        self.scanner.scan_all()
 
-        # ====================================================================
-        # FIND RENDER DIRECTORY
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Scanning Render Files",
-            "Searching for render directories..."
-        )
-
-        try:
-            dirs = fast_scandir(lookdevDir)
-        except:
-            dirs = ()
-            print("No Renders Found")
-
-        render_folders = []
-        RenderDirectory = ""
-
-        if len(dirs) > 0:
-            for i in dirs:
-                if r"lookdev\img\renders" in i:
-                    render_folders.append(i)
-
-            try:
-                RenderDirectory = render_folders[0]
-                RenderDirectory = remove_after(RenderDirectory, r"lookdev\img\renders")
-                self.ui.Renderlabel.setText(f'Render Directory Found: {RenderDirectory}')
-                QApplication.processEvents()
-            except:
-                self.ui.RendersList.setEnabled(False)
-                print("No Renders Found!")
-        else:
-            self.ui.Renderlabel.setText('Render Directory Not Found!')
-            QApplication.processEvents()
-            self.ui.CleanRender.setEnabled(False)
-            self.ui.CleanRender.setChecked(False)
-
-        # ====================================================================
-        # FIND USD DIRECTORY
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Scanning USD Files",
-            "Searching for USD directories..."
-        )
-
-        try:
-            dirs = fast_scandir(lookdevDir)
-        except:
-            dirs = ()
-
-        usd_folders = []
-        USDDirectory = ""
-
-        if len(dirs) > 0:
-            for i in dirs:
-                if r"lookdev\usd_files" in i:
-                    usd_folders.append(i)
-
-            try:
-                USDDirectory = usd_folders[0]
-                USDDirectory = remove_after(USDDirectory, r"lookdev\usd_files")
-                self.ui.USDlabel.setText(f'USD Directory Found: {USDDirectory}')
-                QApplication.processEvents()
-            except:
-                USDDirectory = ""
-                print("No USDs Found!")
-        else:
-            USDDirectory = ""
-            self.ui.USDlabel.setText('USD Directory Not Found!')
-            self.ui.CleanUSD.setEnabled(False)
-            self.ui.CleanUSD.setChecked(False)
-            QApplication.processEvents()
-
-        # ====================================================================
-        # FIND HIPS
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Scanning HIP Files",
-            "Searching for Houdini project files..."
-        )
-        self.animator.update_loading_progress(34)
-
-        hipfiles = find_hip_files(lookdevDir)
-        hipcount = len(hipfiles)
-        self.ui.HipNumber.setText(f'Amount of Hipfiles: {hipcount}')
-
-        HipFile = ""
-        if hipcount > 0:
-            sorted(hipfiles)
-            HipFile = hipfiles[0]
-            temp = HipFile.rsplit("_", 1)
-            HipFile = temp[0]
-            self.ui.HIPlabel.setText(f'HIP Found: {HipFile}')
-            QApplication.processEvents()
-        else:
-            self.ui.HIPlabel.setText('HIPS Not Found!')
-            QApplication.processEvents()
-
-        # ====================================================================
-        # RENDER FILES
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Processing Render Files",
-            "Organizing render versions..."
-        )
-        self.animator.update_loading_progress(50)
-
-        FoundRenderFiles = []
-        WorkingDir = ""
-
-        if RenderDirectory != "":
-            WorkingDir = remove_after(RenderDirectory, "lookdev")
-            Renderdir = sorted(next(os.walk(RenderDirectory))[1])
-            QApplication.processEvents()
-
-            if len(Renderdir) < 2:
-                self.ui.LatestRender.setText("Latest Render: None")
-
-            for dir_name in Renderdir:
-                if HipFile in dir_name:
-                    FoundRenderFiles.append(dir_name)
-                    self.ui.RendersClean.addItem(str(dir_name))
-                    self.ui.RendersClean.scrollToBottom()
-                    QApplication.processEvents()
-
-            if FoundRenderFiles:
-                # Find the latest version that has renders (not empty)
-                latestrender = None
-                for render_version in reversed(FoundRenderFiles):
-                    # Check if this version has renders in the denoised folder
-                    version_path = os.path.join(RenderDirectory, render_version)
-                    test_renders = find_renders(version_path)
-                    if len(test_renders) > 0:
-                        latestrender = render_version
-                        break
-
-                # If we found a version with renders, use it
-                if latestrender:
-                    FoundRenderFiles.remove(latestrender)
-                    self.ui.LatestRender.setText(f"Latest Render: {latestrender}")
-                    latestver = get_trailing_number(latestrender)
-                    self.ui.CurrentVer.setRange(0, int(latestver))
-                else:
-                    # No versions have renders - fall back to latest version
-                    latestrender = FoundRenderFiles[-1]
-                    FoundRenderFiles.pop(-1)
-                    self.ui.LatestRender.setText(f"Latest Render: {latestrender} (empty)")
-                    latestver = get_trailing_number(latestrender)
-                    self.ui.CurrentVer.setRange(0, int(latestver))
-                QApplication.processEvents()
-
-        # ====================================================================
-        # USD FILES
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Processing USD Files",
-            "Organizing USD versions..."
-        )
-        self.animator.update_loading_progress(66)
-
-        FoundUSDFiles = []
-        if USDDirectory:
-            USDdir = sorted(next(os.walk(USDDirectory))[1])
-            QApplication.processEvents()
-
-            for dir_name in USDdir:
-                FoundUSDFiles.append(dir_name)
-                self.ui.USDSClean.addItem(str(dir_name))
-                self.ui.USDSClean.scrollToBottom()
-                QApplication.processEvents()
-
-            if len(FoundUSDFiles) > 0:
-                latestUSD = FoundUSDFiles[-1]
-                FoundUSDFiles.pop(-1)
-                self.ui.LatestUSD.setText(f"Latest USD: {latestUSD}")
-                self.ui.USDSClean.scrollToBottom()
-                QApplication.processEvents()
-                self.ui.CleanFiles.setEnabled(True)
-            else:
-                self.ui.LatestUSD.setText("Latest USD: None")
-                QApplication.processEvents()
-
-        # Set render path
-        if RenderDirectory != "":
-            searchpath = RenderDirectory + "\\" + latestrender
-            self.ui.RenderPath.setText(searchpath)
-            currentver = get_trailing_number(latestrender)
-            self.ui.CurrentVer.setValue(int(currentver))
-
-        # Find renders
+        # Scan for renders in the current path
         try:
             self.on_scan_renders_clicked()
         except:
             self.ui.LatestRender.setText("Latest Render: None")
             self.ui.StatusLabel.setText('Cant find any renders')
-
-        # Calculate folder size
-        try:
-            self.animator.update_loading_message(
-                "Calculating Size",
-                "Computing total directory size..."
-            )
-            self.animator.update_loading_progress(75)
-
-            QApplication.processEvents()
-            TotalSize = get_folder_size(lookdevDir)
-            self.ui.FolderSize.setText(f"Total Size: {str(TotalSize)}")
-            QApplication.processEvents()
-        except:
-            self.ui.FolderSize.setText('Error calculating Size')
-            self.ui.StatusLabel.setText('Error calculating Size')
-
-        # ====================================================================
-        # FIND COMPS
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Scanning Comp Files",
-            "Searching for composition files..."
-        )
-        self.animator.update_loading_progress(85)
-
-        CompDir = get_comp_directory(shotpath)
-
-        try:
-            dirs = fast_scandir(CompDir)
-        except:
-            dirs = ()
-
-        comp_folders = []
-
-        if len(dirs) > 0:
-            for i in dirs:
-                if r"Compositing" in i:
-                    comp_folders.append(i)
-
-            try:
-                CompDirectory = comp_folders[0]
-                CompDirectory = remove_after(CompDirectory, r"\Compositing" + "\\")
-                comps = sorted(find_comp_files(CompDirectory))
-                latestcomp = comps[-1]
-                self.ui.Complabel.setText(f'Latest Comp Found: {CompDirectory + latestcomp}')
-
-                # Read comp file and deselect renders in use
-                renders_in_comp = read_comp_file(CompDirectory + latestcomp, HipFile)
-                self._deselect_renders_in_comp(renders_in_comp)
-                QApplication.processEvents()
-            except:
-                print("No Comp Dir Found!")
-        else:
-            self.ui.Complabel.setText('Comp Directory Not Found!')
-            QApplication.processEvents()
-
-        # ====================================================================
-        # INITIALIZE MP4 MAKER TAB
-        # ====================================================================
-        self.animator.update_loading_message(
-            "Initializing MP4 Maker",
-            "Setting up MP4 Maker tab..."
-        )
-        self.animator.update_loading_progress(95)
-
-        # Set MP4 render path to same as pass builder
-        if RenderDirectory != "":
-            self.ui.MP4RenderPath.setText(searchpath)
-            currentver = get_trailing_number(latestrender)
-            self.ui.MP4CurrentVer.setValue(int(currentver))
-            self.ui.MP4CurrentVer.setRange(0, int(currentver))
-
-        # ====================================================================
-        # INITIALIZE REPUBLISH TAB
-        # ====================================================================
-        global republish_searchpath
-        self.animator.update_loading_message(
-            "Initializing rePublish",
-            "Setting up rePublish tab..."
-        )
-        self.animator.update_loading_progress(97)
-
-        # Set rePublish render path to same as pass builder and MP4 maker
-        if RenderDirectory != "":
-            republish_searchpath = searchpath
-            self.ui.RePublishRenderPath.setText(searchpath)
-            currentver = get_trailing_number(latestrender)
-            self.ui.RePublishCurrentVer.setValue(int(currentver))
-            self.ui.RePublishCurrentVer.setRange(0, int(currentver))
-
-            # Set default task to the current task from command line args
-            task_index = self.ui.RePublishTask.findText(task, Qt.MatchFixedString)
-            if task_index >= 0:
-                self.ui.RePublishTask.setCurrentIndex(task_index)
-            else:
-                # If task not found in dropdown, add it and select it
-                self.ui.RePublishTask.addItem(task)
-                self.ui.RePublishTask.setCurrentText(task)
-
-        # Final progress
-        self.animator.update_loading_progress(100)
-        self.animator.hide_loading()
-        self.animator.update_status_animated('Scanning Complete!', StatusColors.SUCCESS)
-        self.ui.CleanFiles.setEnabled(True)
 
     def _deselect_renders_in_comp(self, renders_in_comp):
         """Deselect renders that are in use by comp files."""
