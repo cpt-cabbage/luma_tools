@@ -48,13 +48,13 @@ QTabBar {
 QTabBar::tab {
     background-color: transparent;
     color: #a1a1a1;
-    padding: 16px 40px;
+    padding: 24px 60px;
     margin-right: 6px;
     border: none;
     border-bottom: 3px solid transparent;
     font-weight: 600;
-    font-size: 11pt;
-    min-width: 120px;
+    font-size: 12pt;
+    min-width: 140px;
 }
 
 QTabBar::tab:hover {
