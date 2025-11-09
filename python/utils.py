@@ -202,3 +202,48 @@ def pad_frame_number(frame_number, padding=4):
         '0042'
     """
     return str(frame_number).zfill(padding)
+
+
+def update_path_version(path, new_version):
+    """
+    Update version number in a path string.
+
+    This function finds version patterns like '_v001', '_v002', etc. in a path
+    and replaces them with the new version number.
+
+    Args:
+        path: Path string containing a version number (e.g., '/path/to/render_v001')
+        new_version: New version number (int)
+
+    Returns:
+        str: Updated path with new version number
+
+    Example:
+        >>> update_path_version('/render/shot_v003/file.exr', 5)
+        '/render/shot_v005/file.exr'
+    """
+    return re.sub(r'_v\d{3}', f'_v{new_version:03d}', path)
+
+
+def scan_exr_sequences(path):
+    """
+    Scan a directory for EXR image sequences using fileseq.
+
+    Args:
+        path: Directory path to scan for EXR sequences
+
+    Returns:
+        list: List of fileseq.FileSequence objects found in the directory
+
+    Example:
+        >>> sequences = scan_exr_sequences('/path/to/renders')
+        >>> for seq in sequences:
+        ...     print(seq)
+    """
+    try:
+        import fileseq
+        search_pattern = os.path.join(path, "*.exr")
+        return list(fileseq.findSequencesOnDisk(search_pattern))
+    except Exception as e:
+        print(f"Error scanning EXR sequences in {path}: {e}")
+        return []

@@ -12,15 +12,12 @@ import tempfile
 import shutil
 from typing import Optional, Callable
 
+import sys
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
+
 from config import FFMPEG_PATH, OIIO_PATH, get_ocio_config, FRAME_PADDING
 from utils import normalize_path
-
-# Try to import Qt for processEvents
-try:
-    from PySide2.QtWidgets import QApplication
-    QT_AVAILABLE = True
-except ImportError:
-    QT_AVAILABLE = False
+from ui_components import report_progress
 
 
 def get_crf_value(quality_index: int) -> int:
@@ -242,10 +239,7 @@ def generate_mp4(
 
     try:
         # Report progress
-        if progress_callback:
-            progress_callback(5, "Preparing conversion...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        report_progress(progress_callback, 5, "Preparing conversion...")
 
         # Normalize paths
         input_sequence_path = normalize_path(input_sequence_path)
@@ -273,10 +267,7 @@ def generate_mp4(
             temp_dir = tempfile.mkdtemp(prefix="mp4_maker_")
             print(f"Created temporary directory: {temp_dir}")
 
-            if progress_callback:
-                progress_callback(8, "Converting EXR to PNG with OIIO...")
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+            report_progress(progress_callback, 8, "Converting EXR to PNG with OIIO...")
 
             # Step 1: Convert EXR to PNG using OIIO
             success = convert_exr_to_png_with_oiio(
@@ -298,10 +289,7 @@ def generate_mp4(
             ffmpeg_input_pattern = input_sequence_path
 
         # Step 2: Encode sequence to MP4 using FFmpeg
-        if progress_callback:
-            progress_callback(55, "Encoding MP4 with FFmpeg...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        report_progress(progress_callback, 55, "Encoding MP4 with FFmpeg...")
 
         # Build FFmpeg command
         frame_count = end_frame - start_frame + 1
@@ -398,10 +386,7 @@ def generate_mp4(
             return False
 
         # Success
-        if progress_callback:
-            progress_callback(98, "MP4 generation complete!")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        report_progress(progress_callback, 98, "MP4 generation complete!")
 
         print(f"MP4 successfully generated: {output_mp4_path}")
         return True

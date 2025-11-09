@@ -29,7 +29,7 @@ from PySide2.QtCore import QThreadPool
 
 # Import our modular services
 from config import UI_FILE_PATH, ICON_PATH, APP_ID, APP_TITLE
-from utils import get_trailing_number, remove_after
+from utils import get_trailing_number, remove_after, update_path_version, scan_exr_sequences
 from file_operations import find_renders
 from render_service import (
     detect_passes,
@@ -358,13 +358,8 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Build search path
         app_state.searchpath = self.ui.RenderPath.text()
-        currentver = get_trailing_number(app_state.searchpath)
-        paddedcurrentver = '{:03d}'.format(int(currentver))
-        split_path = app_state.searchpath.rsplit("_", 1)
-        app_state.searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
         newver = self.ui.CurrentVer.value()
-        paddednewver = '{:03d}'.format(newver)
-        app_state.searchpath += paddednewver
+        app_state.searchpath = update_path_version(app_state.searchpath, newver)
         self.ui.RenderPath.setText(app_state.searchpath)
 
         # Find renders
@@ -618,13 +613,8 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Handle version change
         if app_state.mp4_searchpath:
-            currentver = get_trailing_number(app_state.mp4_searchpath)
-            paddedcurrentver = '{:03d}'.format(int(currentver))
-            split_path = app_state.mp4_searchpath.rsplit("_", 1)
-            app_state.mp4_searchpath = split_path[0] + r"_" + split_path[1].replace(paddedcurrentver, "")[-1]
             newver = self.ui.MP4CurrentVer.value()
-            paddednewver = '{:03d}'.format(newver)
-            app_state.mp4_searchpath += paddednewver
+            app_state.mp4_searchpath = update_path_version(app_state.mp4_searchpath, newver)
             self.ui.MP4RenderPath.setText(app_state.mp4_searchpath)
 
         # Update "For Comp" radio button label with actual subdirectory name
@@ -641,11 +631,9 @@ class LumaShotTools(QtWidgets.QWidget):
             for_comp_path = os.path.join(app_state.mp4_searchpath, app_state.output_subdirectory)
             print(f"MP4 Maker: Scanning {app_state.output_subdirectory} path: {for_comp_path}")
             if os.path.exists(for_comp_path):
-                # Use fileseq directly instead of find_renders which hardcodes denoised subdirectory
-                import fileseq
-                search_pattern = os.path.join(for_comp_path, "*.exr")
-                print(f"MP4 Maker: Search pattern: {search_pattern}")
-                for_comp_renders = list(fileseq.findSequencesOnDisk(search_pattern))
+                # Use scan_exr_sequences to find renders
+                print(f"MP4 Maker: Scanning path: {for_comp_path}")
+                for_comp_renders = scan_exr_sequences(for_comp_path)
                 print(f"MP4 Maker: Found {len(for_comp_renders)} renders in {app_state.output_subdirectory}")
                 for render_seq in for_comp_renders:
                     app_state.mp4_renders.append((app_state.output_subdirectory, render_seq))
@@ -656,11 +644,8 @@ class LumaShotTools(QtWidgets.QWidget):
             # Check root path (for raw/non-denoised renders)
             print(f"MP4 Maker: Scanning raw render path: {app_state.mp4_searchpath}")
             if os.path.exists(app_state.mp4_searchpath):
-                # Use fileseq directly instead of find_renders which hardcodes denoised subdirectory
-                import fileseq
-                search_pattern = os.path.join(app_state.mp4_searchpath, "*.exr")
-                print(f"MP4 Maker: Search pattern: {search_pattern}")
-                root_renders = list(fileseq.findSequencesOnDisk(search_pattern))
+                # Use scan_exr_sequences to find renders
+                root_renders = scan_exr_sequences(app_state.mp4_searchpath)
                 print(f"MP4 Maker: Found {len(root_renders)} renders in root")
                 for render_seq in root_renders:
                     app_state.mp4_renders.append(("raw", render_seq))
@@ -671,11 +656,8 @@ class LumaShotTools(QtWidgets.QWidget):
             # Check custom path
             print(f"MP4 Maker: Scanning custom path: {app_state.mp4_custom_path}")
             if app_state.mp4_custom_path and os.path.exists(app_state.mp4_custom_path):
-                # Use fileseq directly to find all EXR sequences
-                import fileseq
-                search_pattern = os.path.join(app_state.mp4_custom_path, "*.exr")
-                print(f"MP4 Maker: Search pattern: {search_pattern}")
-                custom_renders = list(fileseq.findSequencesOnDisk(search_pattern))
+                # Use scan_exr_sequences to find all EXR sequences
+                custom_renders = scan_exr_sequences(app_state.mp4_custom_path)
                 print(f"MP4 Maker: Found {len(custom_renders)} renders in custom path")
                 for render_seq in custom_renders:
                     app_state.mp4_renders.append(("custom", render_seq))
@@ -914,10 +896,7 @@ class LumaShotTools(QtWidgets.QWidget):
         # Update searchpath with current version
         current_ver = self.ui.RePublishCurrentVer.value()
         if app_state.republish_searchpath:
-            # Extract base path and replace version number
-            import re
-            # Match patterns like _v001, _v002, etc.
-            app_state.republish_searchpath = re.sub(r'_v\d{3}', f'_v{current_ver:03d}', app_state.republish_searchpath)
+            app_state.republish_searchpath = update_path_version(app_state.republish_searchpath, current_ver)
             self.ui.RePublishRenderPath.setText(app_state.republish_searchpath)
 
         # Update "For Comp" label if output_subdirectory is set
@@ -944,10 +923,9 @@ class LumaShotTools(QtWidgets.QWidget):
             self.ui.RePublishStatusLabel.setText("Status: Invalid path")
             return
 
-        # Find EXR sequences using fileseq
+        # Find EXR sequences using scan_exr_sequences
         try:
-            search_pattern = os.path.join(search_path, "*.exr")
-            sequences = list(fileseq.findSequencesOnDisk(search_pattern))
+            sequences = scan_exr_sequences(search_path)
 
             for seq in sequences:
                 # Extract subdirectory name if applicable

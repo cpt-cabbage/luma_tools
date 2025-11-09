@@ -634,6 +634,35 @@ class PublishStrategy(ABC):
         """
         pass
 
+    def _build_paths(self, renders_path, shot, project_name):
+        """Build working directory and folder paths."""
+        working_dir = renders_path.split("work")[0] + "work"
+        if not working_dir.endswith("/"):
+            working_dir += "/"
+
+        folder_path_raw = working_dir.partition(shot)[0] + shot
+        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
+
+        print(f"Folder Path (AYON hierarchy): {folder_path}")
+        print(f"Working Directory: {working_dir}")
+
+        return working_dir, folder_path
+
+    def _write_metadata(self, renders_path, output_subdirectory, render_file, render_name, metadata):
+        """Write metadata file to disk."""
+        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
+        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
+        metadata_path = normalize_path(metadata_path)
+
+        return write_metadata_file(metadata, metadata_path)
+
+    def _report_progress(self, callback, progress, message):
+        """Report progress if callback provided."""
+        if callback:
+            callback(progress, message)
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
 
 class FarmPublishStrategy(PublishStrategy):
     """Strategy for publishing to AYON via Deadline farm."""
@@ -714,35 +743,6 @@ class FarmPublishStrategy(PublishStrategy):
             print("Failed to submit AYON publish job")
             return False
 
-    def _build_paths(self, renders_path, shot, project_name):
-        """Build working directory and folder paths."""
-        working_dir = renders_path.split("work")[0] + "work"
-        if not working_dir.endswith("/"):
-            working_dir += "/"
-
-        folder_path_raw = working_dir.partition(shot)[0] + shot
-        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
-
-        print(f"Folder Path (AYON hierarchy): {folder_path}")
-        print(f"Working Directory: {working_dir}")
-
-        return working_dir, folder_path
-
-    def _write_metadata(self, renders_path, output_subdirectory, render_file, render_name, metadata):
-        """Write metadata file to disk."""
-        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
-        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
-        metadata_path = normalize_path(metadata_path)
-
-        return write_metadata_file(metadata, metadata_path)
-
-    def _report_progress(self, callback, progress, message):
-        """Report progress if callback provided."""
-        if callback:
-            callback(progress, message)
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
 
 class LocalPublishStrategy(PublishStrategy):
     """Strategy for publishing to AYON locally (not via farm)."""
@@ -819,32 +819,3 @@ class LocalPublishStrategy(PublishStrategy):
         else:
             print("AYON local publish failed")
             return False
-
-    def _build_paths(self, renders_path, shot, project_name):
-        """Build working directory and folder paths."""
-        working_dir = renders_path.split("work")[0] + "work"
-        if not working_dir.endswith("/"):
-            working_dir += "/"
-
-        folder_path_raw = working_dir.partition(shot)[0] + shot
-        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
-
-        print(f"Folder Path (AYON hierarchy): {folder_path}")
-        print(f"Working Directory: {working_dir}")
-
-        return working_dir, folder_path
-
-    def _write_metadata(self, renders_path, output_subdirectory, render_file, render_name, metadata):
-        """Write metadata file to disk."""
-        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
-        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
-        metadata_path = normalize_path(metadata_path)
-
-        return write_metadata_file(metadata, metadata_path)
-
-    def _report_progress(self, callback, progress, message):
-        """Report progress if callback provided."""
-        if callback:
-            callback(progress, message)
-            if QT_AVAILABLE:
-                QApplication.processEvents()

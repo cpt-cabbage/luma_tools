@@ -8,10 +8,15 @@ import subprocess
 import json
 import os
 import re
+import sys
 from typing import Dict, List
 
 from config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
 from utils import substring_after, remove_after
+
+# Import UI utilities
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
+from ui_components import report_progress
 
 
 def detect_passes(render_file):
@@ -267,11 +272,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
             print(f"First frame command: {local_command}")
 
         # Update progress and process Qt events to keep UI responsive
-        if progress_callback:
-            progress_callback(progress, f"Processing frame {frame_num}/{end_frame}...")
-            # Process Qt events to keep UI responsive (like MP4 maker does)
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        report_progress(progress_callback, progress, f"Processing frame {frame_num}/{end_frame}...")
 
         try:
             result = subprocess.run(

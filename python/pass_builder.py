@@ -6,6 +6,7 @@ Uses strategy pattern to handle farm vs local publishing without code duplicatio
 """
 
 import os
+import sys
 from typing import Optional, Callable
 
 # Import our modular services
@@ -20,12 +21,9 @@ from ayon_service import (
     LocalPublishStrategy
 )
 
-# Try to import Qt for processEvents
-try:
-    from PySide2.QtWidgets import QApplication
-    QT_AVAILABLE = True
-except ImportError:
-    QT_AVAILABLE = False
+# Import UI utilities
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
+from ui_components import report_progress
 
 
 class PassBuilder:
@@ -124,19 +122,13 @@ class PassBuilder:
         )
 
         # Build OIIO command
-        if progress_callback:
-            progress_callback(40, "Building OIIO command...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        report_progress(progress_callback, 40, "Building OIIO command...")
 
         oiio_args = build_oiio_command(passes, denoised, renders, output)
 
         # Handle farm submission or local execution
         if use_farm:
-            if progress_callback:
-                progress_callback(50, "Submitting OIIO job to Deadline...")
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+            report_progress(progress_callback, 50, "Submitting OIIO job to Deadline...")
 
             self.build_job_id = submit_oiio_to_deadline(
                 OIIO_PATH,
@@ -148,17 +140,11 @@ class PassBuilder:
                 parent_job_id if parent_job_id != "NONE" else None
             )
 
-            if progress_callback:
-                progress_callback(70, f"OIIO job submitted (ID: {self.build_job_id})")
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+            report_progress(progress_callback, 70, f"OIIO job submitted (ID: {self.build_job_id})")
 
             # Handle publishing using strategy pattern
             if do_publish and AYON_AVAILABLE:
-                if progress_callback:
-                    progress_callback(75, "Preparing AYON publish...")
-                    if QT_AVAILABLE:
-                        QApplication.processEvents()
+                report_progress(progress_callback, 75, "Preparing AYON publish...")
 
                 success = self.farm_strategy.publish(
                     project_name,
@@ -181,10 +167,7 @@ class PassBuilder:
                         QApplication.processEvents()
         else:
             # Local execution
-            if progress_callback:
-                progress_callback(50, "Executing OIIO locally...")
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+            report_progress(progress_callback, 50, "Executing OIIO locally...")
 
             # Execute OIIO frame by frame with progress tracking
             success = execute_oiio_local(
@@ -198,17 +181,11 @@ class PassBuilder:
             if not success:
                 raise RuntimeError("OIIO local execution failed")
 
-            if progress_callback:
-                progress_callback(90, "OIIO execution complete!")
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+            report_progress(progress_callback, 90, "OIIO execution complete!")
 
             # Handle publishing locally using strategy pattern
             if do_publish and AYON_AVAILABLE:
-                if progress_callback:
-                    progress_callback(91, "Preparing AYON publish...")
-                    if QT_AVAILABLE:
-                        QApplication.processEvents()
+                report_progress(progress_callback, 91, "Preparing AYON publish...")
 
                 success = self.local_strategy.publish(
                     project_name,
