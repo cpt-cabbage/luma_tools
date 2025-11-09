@@ -357,6 +357,97 @@ def write_metadata_file(metadata_dict, output_path):
         return None
 
 
+def publish_to_ayon_local(
+    metadata_path,
+    project_name,
+    folder_path,
+    task,
+    user
+):
+    """
+    Execute AYON publish locally (not on farm).
+
+    Args:
+        metadata_path: Path to metadata JSON
+        project_name: AYON project name
+        folder_path: AYON folder path
+        task: Task name
+        user: Username
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not AYON_AVAILABLE:
+        print("AYON not available, skipping publish")
+        return False
+
+    # Get bundle name
+    bundle = get_ayon_bundle()
+
+    # Find AYON console executable
+    ayon_console = None
+
+    # Try to find AYON from common locations
+    possible_paths = [
+        r"L:\tools\_studio_tools\AYON\ayon_console.exe",
+        r"C:\Program Files\AYON\ayon_console.exe",
+        os.path.join(os.environ.get("AYON_ROOT", ""), "ayon_console.exe")
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            ayon_console = path
+            break
+
+    if not ayon_console:
+        print("ERROR: Could not find ayon_console.exe")
+        return False
+
+    # Build AYON console command
+    cmd = [ayon_console]
+    cmd.extend(["--headless", "publish", metadata_path])
+
+    # Add bundle arguments
+    if bundle == "staging":
+        cmd.append("--use-staging")
+    elif bundle != "production":
+        cmd.extend(["--bundle", bundle])
+
+    # Set environment variables for the process
+    env = os.environ.copy()
+    env["AYON_PROJECT_NAME"] = project_name
+    env["AYON_FOLDER_PATH"] = folder_path
+    env["AYON_TASK_NAME"] = task
+    env["AYON_BUNDLE_NAME"] = bundle
+    env["AYON_USERNAME"] = user
+
+    print(f"Executing AYON publish locally: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+
+        print(f"AYON Publish STDOUT: {result.stdout}")
+        if result.stderr:
+            print(f"AYON Publish STDERR: {result.stderr}")
+
+        if result.returncode == 0:
+            print('AYON Publish Local Process Successful')
+            return True
+        else:
+            print(f'AYON Publish Local Process Failed with code {result.returncode}')
+            return False
+
+    except Exception as e:
+        print(f'AYON Publish Local Process Failed: {e}')
+        return False
+
+
 def submit_ayon_publish_to_deadline(
     project_name,
     render_name,

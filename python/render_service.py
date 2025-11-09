@@ -193,42 +193,115 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
     return oiio_args
 
 
-def execute_oiio_local(oiio_path, oiio_args):
+def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, progress_callback=None):
     """
-    Execute OIIO command locally.
+    Execute OIIO command locally, frame by frame (like the farm does).
 
     Args:
         oiio_path: Path to oiiotool executable
-        oiio_args: Arguments for oiiotool
+        oiio_args: Arguments for oiiotool (with frame token placeholders)
+        start_frame: Starting frame number (if None, executes command once)
+        end_frame: Ending frame number (if None, executes command once)
+        progress_callback: Optional callback function(progress, message) for progress updates
 
     Returns:
         bool: True if successful, False otherwise
     """
-    local_command = f'"{oiio_path}" {oiio_args}'
-    print(f"Local Command: {local_command}")
+    # If no frame range specified, execute once
+    if start_frame is None or end_frame is None:
+        local_command = f'"{oiio_path}" {oiio_args}'
+        print(f"Local Command: {local_command}")
 
-    try:
-        result = subprocess.run(
-            local_command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-        print(f"STDOUT: {result.stdout}")
-        if result.stderr:
-            print(f"STDERR: {result.stderr}")
+        try:
+            result = subprocess.run(
+                local_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            print(f"STDOUT: {result.stdout}")
+            if result.stderr:
+                print(f"STDERR: {result.stderr}")
 
-        if result.returncode == 0:
-            print('OIIO Local Process Successful')
-            return True
-        else:
-            print(f'OIIO Local Process Failed with code {result.returncode}')
+            if result.returncode == 0:
+                print('OIIO Local Process Successful')
+                return True
+            else:
+                print(f'OIIO Local Process Failed with code {result.returncode}')
+                return False
+
+        except Exception as e:
+            print(f'OIIO Local Process Failed: {e}')
             return False
 
-    except Exception as e:
-        print(f'OIIO Local Process Failed: {e}')
+    # Execute frame by frame (like farm does)
+    total_frames = end_frame - start_frame + 1
+    failed_frames = []
+
+    print(f"Executing OIIO locally for frames {start_frame}-{end_frame} ({total_frames} frames)")
+    print(f"OIIO args template: {oiio_args}")
+
+    # Import Qt for event processing
+    try:
+        from PySide2.QtWidgets import QApplication
+        QT_AVAILABLE = True
+    except ImportError:
+        QT_AVAILABLE = False
+
+    for frame_num in range(start_frame, end_frame + 1):
+        # Calculate progress (50-90% range for OIIO execution)
+        frame_index = frame_num - start_frame
+        progress = 50 + int((frame_index / total_frames) * 40)
+
+        # Replace frame token with actual frame number
+        # Deadline uses <STARTFRAME%{padding}> format - need to replace with actual frame
+        # Example: <STARTFRAME%4> becomes 1001 (4-digit padding)
+        import re
+        frame_args = re.sub(r'<STARTFRAME%(\d+)>', lambda m: f"{frame_num:0{m.group(1)}d}", oiio_args)
+
+        local_command = f'"{oiio_path}" -v {frame_args}'
+
+        # Print first command for debugging
+        if frame_num == start_frame:
+            print(f"First frame command: {local_command}")
+
+        # Update progress and process Qt events to keep UI responsive
+        if progress_callback:
+            progress_callback(progress, f"Processing frame {frame_num}/{end_frame}...")
+            # Process Qt events to keep UI responsive (like MP4 maker does)
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
+        try:
+            result = subprocess.run(
+                local_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+
+            if result.returncode != 0:
+                error_msg = f"Frame {frame_num} failed with code {result.returncode}"
+                print(error_msg)
+                if result.stderr:
+                    print(f"STDERR: {result.stderr}")
+                failed_frames.append(frame_num)
+            else:
+                print(f"Frame {frame_num} completed successfully")
+
+        except Exception as e:
+            print(f'Frame {frame_num} failed: {e}')
+            failed_frames.append(frame_num)
+
+    # Report results
+    if failed_frames:
+        print(f'OIIO Local Process completed with {len(failed_frames)} failed frames: {failed_frames}')
         return False
+    else:
+        print(f'OIIO Local Process Successful - all {total_frames} frames completed')
+        return True
 
 
 def get_render_basename(render_path):

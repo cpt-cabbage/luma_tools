@@ -282,12 +282,12 @@
               </property>
               <item>
                <property name="text">
-                <string>Farm (Recommended)</string>
+                <string>Local</string>
                </property>
               </item>
               <item>
                <property name="text">
-                <string>Local (Not working)</string>
+                <string>Farm</string>
                </property>
               </item>
              </widget>

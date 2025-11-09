@@ -17,6 +17,7 @@ from ayon_service import (
     create_ayon_metadata,
     write_metadata_file,
     submit_ayon_publish_to_deadline,
+    publish_to_ayon_local,
     AYON_AVAILABLE,
     DEADLINE_AVAILABLE
 )
@@ -180,11 +181,173 @@ class PassBuilder:
             # Local execution
             if progress_callback:
                 progress_callback(50, "Executing OIIO locally...")
+                if QT_AVAILABLE:
+                    QApplication.processEvents()
 
-            execute_oiio_local(OIIO_PATH, oiio_args)
+            # Execute OIIO frame by frame with progress tracking
+            success = execute_oiio_local(
+                OIIO_PATH,
+                oiio_args,
+                start_frame,
+                end_frame,
+                progress_callback
+            )
+
+            if not success:
+                raise RuntimeError("OIIO local execution failed")
 
             if progress_callback:
-                progress_callback(95, "Local execution complete!")
+                progress_callback(90, "OIIO execution complete!")
+                if QT_AVAILABLE:
+                    QApplication.processEvents()
+
+            # Handle publishing locally
+            if do_publish and AYON_AVAILABLE:
+                if progress_callback:
+                    progress_callback(91, "Preparing AYON publish...")
+                    if QT_AVAILABLE:
+                        QApplication.processEvents()
+
+                self._publish_to_ayon_local(
+                    project_name,
+                    self.render_name,
+                    start_frame,
+                    end_frame,
+                    renders_path,
+                    shot,
+                    task,
+                    user,
+                    output_subdirectory,
+                    render_file,
+                    progress_callback
+                )
+
+                if progress_callback:
+                    progress_callback(100, "Local build and publish complete!")
+                    if QT_AVAILABLE:
+                        QApplication.processEvents()
+            else:
+                if progress_callback:
+                    progress_callback(95, "Local execution complete!")
+
+    def _publish_to_ayon_local(
+        self,
+        project_name,
+        render_name,
+        start_frame,
+        end_frame,
+        renders_path,
+        shot,
+        task,
+        user,
+        output_subdirectory,
+        render_file,
+        progress_callback=None
+    ):
+        """
+        Internal method to handle AYON publishing locally (not via farm).
+
+        Args:
+            project_name: AYON project name
+            render_name: Render name
+            start_frame: Start frame
+            end_frame: End frame
+            renders_path: Path to renders
+            shot: Shot name
+            task: Task name
+            user: Username
+            output_subdirectory: Output subdirectory
+            render_file: Render file name
+            progress_callback: Optional progress callback
+        """
+        print(f"Starting AYON local publish for {render_name}")
+
+        if progress_callback:
+            progress_callback(92, "Building AYON folder paths...")
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
+        # Build working directory path
+        working_dir = renders_path.split("work")[0] + "work"
+        if not working_dir.endswith("/"):
+            working_dir += "/"
+
+        # Build folder path (AYON folder path, not file system path)
+        folder_path_raw = working_dir.partition(shot)[0] + shot
+        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
+
+        print(f"Folder Path (AYON hierarchy): {folder_path}")
+        print(f"Working Directory: {working_dir}")
+
+        # Create AYON metadata
+        if progress_callback:
+            progress_callback(94, "Creating AYON metadata...")
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
+        # Get task type mapping
+        task_type_map = {
+            "compositing": "Compositing",
+            "comp": "Compositing",
+            "lighting": "Lighting",
+            "lgt": "Lighting",
+            "lookdev": "Lookdev",
+            "look": "Lookdev",
+            "animation": "Animation",
+            "anim": "Animation",
+        }
+        task_type = task_type_map.get(task.lower(), task.capitalize())
+
+        metadata = create_ayon_metadata(
+            project_name,
+            render_name,
+            start_frame,
+            end_frame,
+            renders_path,
+            folder_path,
+            task,
+            user,
+            output_subdirectory,
+            working_dir,
+            render_file,
+            project_code=None,
+            task_type=task_type
+        )
+
+        # Write metadata file
+        if progress_callback:
+            progress_callback(96, "Writing metadata file...")
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
+        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
+        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
+        metadata_path = normalize_path(metadata_path)
+
+        written_path = write_metadata_file(metadata, metadata_path)
+
+        if not written_path:
+            print("Failed to write metadata file, skipping publish")
+            return
+
+        # Execute AYON publish locally
+        if progress_callback:
+            progress_callback(97, "Publishing to AYON...")
+            if QT_AVAILABLE:
+                QApplication.processEvents()
+
+        success = publish_to_ayon_local(
+            metadata_path,
+            project_name,
+            folder_path,
+            task,
+            user
+        )
+
+        if success:
+            print(f"AYON local publish completed successfully")
+        else:
+            print("AYON local publish failed")
 
     def _publish_to_ayon(
         self,
@@ -201,7 +364,7 @@ class PassBuilder:
         progress_callback=None
     ):
         """
-        Internal method to handle AYON publishing.
+        Internal method to handle AYON publishing (via farm).
 
         Args:
             project_name: AYON project name
@@ -314,10 +477,6 @@ class PassBuilder:
 # Create singleton instance for backward compatibility
 pass_builder = PassBuilder()
 
-
-print("=" * 60)
-print("LOADING: pass_builder.py (NEW REFACTORED VERSION)")
-print("=" * 60)
 
 if __name__ == "__main__":
     print("Pass Builder module loaded successfully")
