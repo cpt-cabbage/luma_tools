@@ -1,7 +1,9 @@
 """
 MP4 Maker Service Module.
 
-Handles MP4 video generation from EXR sequences using OIIO for color conversion and FFmpeg for encoding.
+Handles MP4 video generation from image sequences.
+- For EXR files: Uses OIIO for color conversion, then FFmpeg for encoding
+- For other formats (PNG, JPG, etc.): Uses FFmpeg directly
 """
 
 import os
@@ -49,10 +51,10 @@ def build_ffmpeg_command(
     ocio_config: Optional[str] = None
 ) -> list:
     """
-    Build FFmpeg command for EXR to MP4 conversion with ACES/OCIO support.
+    Build FFmpeg command for image sequence to MP4 conversion.
 
     Args:
-        input_pattern: Input file pattern (e.g., "render.%04d.exr")
+        input_pattern: Input file pattern (e.g., "render.%04d.exr", "frame.%04d.png")
         output_path: Output MP4 file path
         start_frame: Start frame number
         end_frame: End frame number
@@ -220,9 +222,9 @@ def generate_mp4(
     progress_callback: Optional[Callable[[int, str], None]] = None
 ) -> bool:
     """
-    Generate MP4 from EXR sequence using two-step process:
-    1. Convert EXR to PNG using OIIO (proper color management)
-    2. Encode PNG to MP4 using FFmpeg
+    Generate MP4 from image sequence.
+    - For EXR files: Uses two-step process (EXR -> PNG via OIIO -> MP4 via FFmpeg)
+    - For other formats: Uses FFmpeg directly on the original files
 
     Args:
         input_sequence_path: Path to input sequence (with frame number pattern)
@@ -257,35 +259,51 @@ def generate_mp4(
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
-        # Create temporary directory for PNG files
-        temp_dir = tempfile.mkdtemp(prefix="mp4_maker_")
-        print(f"Created temporary directory: {temp_dir}")
+        # Detect file extension to determine if we need OIIO conversion
+        # Extract extension from the pattern (e.g., "render.%04d.exr" -> ".exr")
+        file_ext = os.path.splitext(input_sequence_path)[1].lower()
+        is_exr = file_ext == ".exr"
 
-        if progress_callback:
-            progress_callback(8, "Converting EXR to PNG with OIIO...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+        # Determine input pattern for FFmpeg
+        if is_exr:
+            # EXR files need OIIO conversion for proper color management
+            print(f"Detected EXR format - will convert to PNG using OIIO")
 
-        # Step 1: Convert EXR to PNG using OIIO
-        success = convert_exr_to_png_with_oiio(
-            input_sequence_path,
-            temp_dir,
-            start_frame,
-            end_frame,
-            progress_callback
-        )
+            # Create temporary directory for PNG files
+            temp_dir = tempfile.mkdtemp(prefix="mp4_maker_")
+            print(f"Created temporary directory: {temp_dir}")
 
-        if not success:
-            raise RuntimeError("OIIO conversion failed")
+            if progress_callback:
+                progress_callback(8, "Converting EXR to PNG with OIIO...")
+                if QT_AVAILABLE:
+                    QApplication.processEvents()
 
-        # Step 2: Encode PNG sequence to MP4 using FFmpeg
+            # Step 1: Convert EXR to PNG using OIIO
+            success = convert_exr_to_png_with_oiio(
+                input_sequence_path,
+                temp_dir,
+                start_frame,
+                end_frame,
+                progress_callback
+            )
+
+            if not success:
+                raise RuntimeError("OIIO conversion failed")
+
+            # Use PNG files as input for FFmpeg
+            ffmpeg_input_pattern = os.path.join(temp_dir, f"frame_%04d.png")
+        else:
+            # Non-EXR files can be used directly by FFmpeg
+            print(f"Detected {file_ext} format - will use directly with FFmpeg")
+            ffmpeg_input_pattern = input_sequence_path
+
+        # Step 2: Encode sequence to MP4 using FFmpeg
         if progress_callback:
             progress_callback(55, "Encoding MP4 with FFmpeg...")
             if QT_AVAILABLE:
                 QApplication.processEvents()
 
-        # Build FFmpeg command for PNG input
-        png_pattern = os.path.join(temp_dir, f"frame_%04d.png")
+        # Build FFmpeg command
         frame_count = end_frame - start_frame + 1
 
         cmd = [
@@ -293,7 +311,7 @@ def generate_mp4(
             "-y",  # Overwrite output
             "-start_number", str(start_frame),
             "-framerate", "25",
-            "-i", png_pattern,
+            "-i", ffmpeg_input_pattern,
             "-frames:v", str(frame_count),
         ]
 
