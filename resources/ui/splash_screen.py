@@ -1,8 +1,3 @@
-"""
-Splash Screen for Luma Shot Tools
-Displays immediately on startup with initialization running in a separate thread.
-"""
-
 from PySide2.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve
 from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap

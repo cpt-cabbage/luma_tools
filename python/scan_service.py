@@ -1,10 +1,3 @@
-"""
-Scan Service - Directory scanning and file discovery.
-
-This module extracts the scanning logic from the monolithic run_scanner() method
-into focused, reusable functions.
-"""
-
 import os
 from utils import get_trailing_number, remove_after, get_folder_size
 from file_operations import (

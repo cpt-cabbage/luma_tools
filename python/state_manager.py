@@ -1,10 +1,3 @@
-"""
-State Manager - Centralized application state.
-
-This module centralizes all global state that was previously scattered
-across luma_tools.py, providing a clean interface for state management.
-"""
-
 
 class ApplicationState:
     """Central state management for the application."""

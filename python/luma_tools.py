@@ -14,9 +14,7 @@ import ctypes
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)  # Parent directory of 'python'
 
-# Add paths - support both Windows network paths and local development
-sys.path.append(r"L:\tools\_studio_tools\luma_tools\python")
-sys.path.append(r"L:\tools\_studio_tools\luma_tools\resources\ui")
+
 
 # Also add local paths for development/testing
 sys.path.append(os.path.join(PROJECT_ROOT, "python"))

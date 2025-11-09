@@ -1,15 +1,3 @@
-"""
-Consolidated UI Components for Luma Shot Tools
-
-This module combines all UI-related functionality including:
-- Loading styles and constants
-- Loading overlay and spinner widgets
-- UI animations and effects
-- Stylesheet loading and application
-
-Provides a unified interface for all UI components used throughout the application.
-"""
-
 import os
 import math
 from PySide2.QtCore import (
