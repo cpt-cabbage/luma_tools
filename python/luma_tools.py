@@ -51,14 +51,9 @@ from pass_builder import pass_builder
 from mp4_maker import generate_mp4, get_output_filename
 
 # Import animation and loading modules
-try:
-    from ui_animations import enhance_ui, StatusColors
-    from loading_overlay import InlineSpinner
-    from splash_screen import SplashScreen
-    ANIMATIONS_ENABLED = True
-except ImportError:
-    ANIMATIONS_ENABLED = False
-    print("ui_animations/loading_overlay modules not found - animations disabled")
+from ui_animations import enhance_ui, StatusColors
+from loading_overlay import InlineSpinner
+from splash_screen import SplashScreen
 
 
 
@@ -193,16 +188,13 @@ class LumaShotTools(QtWidgets.QWidget):
         print(f"Loaded custom stylesheet from: {CUSTOM_STYLE_PATH}")
 
         # Setup animations
-        if ANIMATIONS_ENABLED:
-            self.animator = enhance_ui(self)
-            print("UI animations enabled")
+        self.animator = enhance_ui(self)
+        print("UI animations enabled")
 
-            # Create inline spinner for pass detection
-            self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
-            # Position will be set in showEvent when widget is fully laid out
-            print("Inline spinner created for pass detection")
-        else:
-            print("UI animations disabled")
+        # Create inline spinner for pass detection
+        self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
+        # Position will be set in showEvent when widget is fully laid out
+        print("Inline spinner created for pass detection")
 
         # Connect signals
         self._connect_signals()
@@ -215,8 +207,7 @@ class LumaShotTools(QtWidgets.QWidget):
         """Override showEvent to position spinner after window is laid out."""
         super().showEvent(event)
         # Position the spinner after the UI is fully laid out
-        if ANIMATIONS_ENABLED and hasattr(self, 'passes_spinner'):
-            self._position_spinner()
+        self._position_spinner()
 
     def _position_spinner(self):
         """Position the inline spinner in the top-right of the passes group box."""
@@ -345,8 +336,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.Passes.clear()
 
         # Show inline spinner
-        if ANIMATIONS_ENABLED and hasattr(self, 'passes_spinner'):
-            self.passes_spinner.start()
+        self.passes_spinner.start()
 
         QApplication.processEvents()
 
@@ -354,8 +344,7 @@ class LumaShotTools(QtWidgets.QWidget):
         channels = detect_passes(render_file)
 
         # Hide spinner
-        if ANIMATIONS_ENABLED and hasattr(self, 'passes_spinner'):
-            self.passes_spinner.stop()
+        self.passes_spinner.stop()
 
         # Add passes to list
         for key in channels.keys():
@@ -364,8 +353,7 @@ class LumaShotTools(QtWidgets.QWidget):
         # Enable build button
         if len(channels) >= 1:
             self.ui.BuildPasses.setEnabled(True)
-            if ANIMATIONS_ENABLED:
-                self.animator.pulse_button(self.ui.BuildPasses)
+            self.animator.pulse_button(self.ui.BuildPasses)
         else:
             self.ui.BuildPasses.setEnabled(False)
 
@@ -391,29 +379,27 @@ class LumaShotTools(QtWidgets.QWidget):
         # Show loading overlay IMMEDIATELY
         QApplication.processEvents()
         window.repaint()
-        if ANIMATIONS_ENABLED:
-            window.animator.show_loading(
-                main_title,
-                "Preparing to build...",
-                show_progress=True
-            )
-            # Force immediate UI update
-            QApplication.processEvents()
-            window.repaint()
+        window.animator.show_loading(
+            main_title,
+            "Preparing to build...",
+            show_progress=True
+        )
+        # Force immediate UI update
+        QApplication.processEvents()
+        window.repaint()
 
-            # Add click animation after overlay is shown
-            self.animator.animate_button_click(self.ui.BuildPasses)
-            QApplication.processEvents()
-            window.repaint()
+        # Add click animation after overlay is shown
+        self.animator.animate_button_click(self.ui.BuildPasses)
+        QApplication.processEvents()
+        window.repaint()
 
         try:
             # Phase 1: Collect selected passes
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    main_title,
-                    "Collecting selected passes..."
-                )
-                self.animator.update_loading_progress(5)
+            self.animator.update_loading_message(
+                main_title,
+                "Collecting selected passes..."
+            )
+            self.animator.update_loading_progress(5)
             QApplication.processEvents()
             window.repaint()
 
@@ -424,12 +410,11 @@ class LumaShotTools(QtWidgets.QWidget):
             final_channels = dict((k, channels[k]) for k in channellist if k in channels)
 
             # Phase 2: Write pass configuration
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    main_title,
-                    "Writing pass configuration file..."
-                )
-                self.animator.update_loading_progress(15)
+            self.animator.update_loading_message(
+                main_title,
+                "Writing pass configuration file..."
+            )
+            self.animator.update_loading_progress(15)
             QApplication.processEvents()
             window.repaint()
 
@@ -439,12 +424,11 @@ class LumaShotTools(QtWidgets.QWidget):
             build_location = "farm" if use_farm else "local"
             action_text = "Submitting to" if use_farm else "Building on"
 
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    main_title,
-                    f"{action_text} {build_location}..."
-                )
-                self.animator.update_loading_progress(25)
+            self.animator.update_loading_message(
+                main_title,
+                f"{action_text} {build_location}..."
+            )
+            self.animator.update_loading_progress(25)
             QApplication.processEvents()
             window.repaint()
 
@@ -467,12 +451,11 @@ class LumaShotTools(QtWidgets.QWidget):
             )
 
             # Phase 4: Complete
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    main_title,
-                    "Build complete!"
-                )
-                self.animator.update_loading_progress(100)
+            self.animator.update_loading_message(
+                main_title,
+                "Build complete!"
+            )
+            self.animator.update_loading_progress(100)
             QApplication.processEvents()
 
             # Small delay to show completion
@@ -480,23 +463,19 @@ class LumaShotTools(QtWidgets.QWidget):
 
         except Exception as e:
             # Handle errors
-            if ANIMATIONS_ENABLED:
-                self.animator.hide_loading()
-                self.animator.update_status_animated(
-                    f"Build failed: {str(e)}",
-                    StatusColors.ERROR
-                )
-            else:
-                self.ui.StatusLabel.setText(f"Build failed: {str(e)}")
+            self.animator.hide_loading()
+            self.animator.update_status_animated(
+                f"Build failed: {str(e)}",
+                StatusColors.ERROR
+            )
             print(f"Build error: {e}")
 
     def _build_progress_callback(self, progress, message):
         """Callback for build progress updates from pass_builder."""
         use_farm = (self.ui.BuildType.currentIndex() == 1)
         main_title = "Submitting To Deadline" if use_farm else "Building EXRs"
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(main_title, message)
-            self.animator.update_loading_progress(progress)
+        self.animator.update_loading_message(main_title, message)
+        self.animator.update_loading_progress(progress)
 
     def _write_pass_config(self, passes_dictionary):
         """Write pass configuration to file."""
@@ -519,14 +498,11 @@ class LumaShotTools(QtWidgets.QWidget):
     def _finish_build_success(self, use_farm):
         """Called after successful build to show completion message."""
         completion_msg = "Farm submission complete!" if use_farm else "Local build and publish complete!"
-        if ANIMATIONS_ENABLED:
-            self.animator.hide_loading()
-            self.animator.update_status_animated(
-                completion_msg,
-                StatusColors.SUCCESS
-            )
-        else:
-            self.ui.StatusLabel.setText(completion_msg)
+        self.animator.hide_loading()
+        self.animator.update_status_animated(
+            completion_msg,
+            StatusColors.SUCCESS
+        )
 
     # ========================================================================
     # MP4 MAKER TAB HANDLERS
@@ -686,8 +662,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Enable generate button
         self.ui.MP4Generate.setEnabled(True)
-        if ANIMATIONS_ENABLED:
-            self.animator.pulse_button(self.ui.MP4Generate)
+        self.animator.pulse_button(self.ui.MP4Generate)
 
     def on_mp4_browse_output_clicked(self):
         """Browse for MP4 output location."""
@@ -721,22 +696,20 @@ class LumaShotTools(QtWidgets.QWidget):
             # Enable generate button if render is selected
             if self.ui.MP4RendersList.currentRow() >= 0:
                 self.ui.MP4Generate.setEnabled(True)
-                if ANIMATIONS_ENABLED:
-                    self.animator.pulse_button(self.ui.MP4Generate)
+                self.animator.pulse_button(self.ui.MP4Generate)
 
     def on_mp4_generate_clicked(self):
         """Generate MP4 from selected render."""
         # Show loading overlay
-        if ANIMATIONS_ENABLED:
-            window.animator.show_loading(
-                "Generating MP4",
-                "Preparing to convert...",
-                show_progress=True
-            )
-            QApplication.processEvents()
-            window.repaint()
-            self.animator.animate_button_click(self.ui.MP4Generate)
-            QApplication.processEvents()
+        window.animator.show_loading(
+            "Generating MP4",
+            "Preparing to convert...",
+            show_progress=True
+        )
+        QApplication.processEvents()
+        window.repaint()
+        self.animator.animate_button_click(self.ui.MP4Generate)
+        QApplication.processEvents()
 
         try:
             # Get selected render
@@ -745,12 +718,11 @@ class LumaShotTools(QtWidgets.QWidget):
                 raise ValueError("No render selected")
 
             # Phase 1: Get render info
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    "Generating MP4",
-                    "Analyzing render sequence..."
-                )
-                self.animator.update_loading_progress(5)
+            self.animator.update_loading_message(
+                "Generating MP4",
+                "Analyzing render sequence..."
+            )
+            self.animator.update_loading_progress(5)
             QApplication.processEvents()
 
             # mp4_renders is now a list of tuples: (subdir, render_seq)
@@ -770,12 +742,11 @@ class LumaShotTools(QtWidgets.QWidget):
                 raise ValueError(f"Unexpected filename format: {base_filename}")
 
             # Phase 2: Get settings
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    "Generating MP4",
-                    "Configuring conversion settings..."
-                )
-                self.animator.update_loading_progress(8)
+            self.animator.update_loading_message(
+                "Generating MP4",
+                "Configuring conversion settings..."
+            )
+            self.animator.update_loading_progress(8)
             QApplication.processEvents()
 
             quality_index = self.ui.MP4Quality.currentIndex()
@@ -794,12 +765,11 @@ class LumaShotTools(QtWidgets.QWidget):
 
             # Phase 4: Complete
             if success:
-                if ANIMATIONS_ENABLED:
-                    self.animator.update_loading_message(
-                        "Generating MP4",
-                        "MP4 generation complete!"
-                    )
-                    self.animator.update_loading_progress(100)
+                self.animator.update_loading_message(
+                    "Generating MP4",
+                    "MP4 generation complete!"
+                )
+                self.animator.update_loading_progress(100)
                 QApplication.processEvents()
 
                 # Small delay to show completion
@@ -809,33 +779,25 @@ class LumaShotTools(QtWidgets.QWidget):
 
         except Exception as e:
             # Handle errors
-            if ANIMATIONS_ENABLED:
-                self.animator.hide_loading()
-                self.animator.update_status_animated(
-                    f"MP4 generation failed: {str(e)}",
-                    StatusColors.ERROR
-                )
-            else:
-                self.ui.StatusLabel.setText(f"MP4 generation failed: {str(e)}")
+            self.animator.hide_loading()
+            self.animator.update_status_animated(
+                f"MP4 generation failed: {str(e)}",
+                StatusColors.ERROR
+            )
             print(f"MP4 generation error: {e}")
 
     def _mp4_progress_callback(self, progress, message):
         """Callback for MP4 generation progress updates."""
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message("Generating MP4", message)
-            self.animator.update_loading_progress(progress)
+        self.animator.update_loading_message("Generating MP4", message)
+        self.animator.update_loading_progress(progress)
 
     def _finish_mp4_success(self):
         """Called after successful MP4 generation to show completion message."""
-        if ANIMATIONS_ENABLED:
-            self.animator.hide_loading()
-            self.animator.update_status_animated(
-                f"MP4 generated: {os.path.basename(mp4_output_path)}",
-                StatusColors.SUCCESS
-            )
-        else:
-            self.ui.StatusLabel.setText(f"MP4 generated: {os.path.basename(mp4_output_path)}")
-
+        self.animator.hide_loading()
+        self.animator.update_status_animated(
+            f"MP4 generated: {os.path.basename(mp4_output_path)}",
+            StatusColors.SUCCESS
+        )
     # ========================================================================
     # REPUBLISH TAB HANDLERS
     # ========================================================================
@@ -988,15 +950,13 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.RePublishPublish.setEnabled(True)
 
         # Pulse animation if enabled
-        if ANIMATIONS_ENABLED:
-            self.animator.pulse_button(self.ui.RePublishPublish)
+        self.animator.pulse_button(self.ui.RePublishPublish)
 
     def on_republish_publish_clicked(self):
         """Handle publish to AYON button click."""
         global republish_selected_render, republish_startframe, republish_endframe
 
-        if ANIMATIONS_ENABLED:
-            self.animator.animate_button_click(self.ui.RePublishPublish)
+        self.animator.animate_button_click(self.ui.RePublishPublish)
 
         # Validate selection
         if not republish_selected_render:
@@ -1015,8 +975,7 @@ class LumaShotTools(QtWidgets.QWidget):
             product_name = parts[0] if parts else base.replace("#", "").strip(".")
 
         # Show loading overlay
-        if ANIMATIONS_ENABLED:
-            self.animator.show_loading("Publishing to AYON", "Preparing metadata...")
+        self.animator.show_loading("Publishing to AYON", "Preparing metadata...")
 
         try:
             # Get render path information
@@ -1060,9 +1019,8 @@ class LumaShotTools(QtWidgets.QWidget):
             if not metadata_path:
                 raise Exception("Failed to write metadata file")
 
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message("Publishing to AYON",
-                    "Submitting to farm..." if use_farm else "Publishing locally...")
+            self.animator.update_loading_message("Publishing to AYON",
+                "Submitting to farm..." if use_farm else "Publishing locally...")
 
             # Publish
             if use_farm:
@@ -1080,11 +1038,8 @@ class LumaShotTools(QtWidgets.QWidget):
                     success_msg = f"Published to farm!\nJob ID: {job_id}"
                     self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
 
-                    if ANIMATIONS_ENABLED:
-                        self.animator.hide_loading()
-                        self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
-                    else:
-                        self.ui.StatusLabel.setText(success_msg)
+                    self.animator.hide_loading()
+                    self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
                 else:
                     raise Exception("Failed to submit to Deadline")
             else:
@@ -1101,11 +1056,8 @@ class LumaShotTools(QtWidgets.QWidget):
                     success_msg = f"Published: {product_name}"
                     self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
 
-                    if ANIMATIONS_ENABLED:
-                        self.animator.hide_loading()
-                        self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
-                    else:
-                        self.ui.StatusLabel.setText(success_msg)
+                    self.animator.hide_loading()
+                    self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
                 else:
                     raise Exception("Local publish failed")
 
@@ -1113,12 +1065,8 @@ class LumaShotTools(QtWidgets.QWidget):
             error_msg = f"Publish failed: {str(e)}"
             self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
 
-            if ANIMATIONS_ENABLED:
-                self.animator.hide_loading()
-                self.animator.update_status_animated(error_msg, StatusColors.ERROR)
-            else:
-                self.ui.StatusLabel.setText(error_msg)
-
+            self.animator.hide_loading()
+            self.animator.update_status_animated(error_msg, StatusColors.ERROR)
             print(f"Publish error: {e}")
             import traceback
             traceback.print_exc()
@@ -1129,8 +1077,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_clean_files_clicked(self):
         """Handle cleanup button click."""
-        if ANIMATIONS_ENABLED:
-            self.animator.animate_button_click(self.ui.CleanFiles)
+        self.animator.animate_button_click(self.ui.CleanFiles)
 
         # Cleanup renders
         if self.ui.CleanRender.isChecked():
@@ -1140,10 +1087,7 @@ class LumaShotTools(QtWidgets.QWidget):
                 for dir_name in render_dirs:
                     count += 1
                     status_msg = f"Removing Renders: {lookdevDir}\\img\\renders\\{dir_name}"
-                    if ANIMATIONS_ENABLED:
-                        self.animator.update_status_animated(status_msg, StatusColors.WARNING)
-                    else:
-                        self.ui.StatusLabel.setText(status_msg)
+                    self.animator.update_status_animated(status_msg, StatusColors.WARNING)
                     print(status_msg)
                     self.change_val.emit(int(count / len(render_dirs) * 100))
                     QApplication.processEvents()
@@ -1159,10 +1103,7 @@ class LumaShotTools(QtWidgets.QWidget):
                     count += 1
                     self.change_val.emit(int(count / len(usd_dirs) * 100))
                     status_msg = f"Removing USDs: {lookdevDir}\\usd_files\\{dir_name}"
-                    if ANIMATIONS_ENABLED:
-                        self.animator.update_status_animated(status_msg, StatusColors.WARNING)
-                    else:
-                        self.ui.StatusLabel.setText(status_msg)
+                    self.animator.update_status_animated(status_msg, StatusColors.WARNING)
                     QApplication.processEvents()
                     print(status_msg)
 
@@ -1172,21 +1113,13 @@ class LumaShotTools(QtWidgets.QWidget):
         if self.ui.HIPBackups.isChecked():
             self.change_val.emit(0)
             status_msg = f"Removing Hip Backups Folder: {lookdevDir}\\backup\\"
-            if ANIMATIONS_ENABLED:
-                self.animator.update_status_animated(status_msg, StatusColors.WARNING)
-            else:
-                self.ui.StatusLabel.setText(status_msg)
-
+            self.animator.update_status_animated(status_msg, StatusColors.WARNING)
             cleanup_hip_backups(lookdevDir)
             self.change_val.emit(100)
             QApplication.processEvents()
 
         # Final status
-        if ANIMATIONS_ENABLED:
-            self.animator.update_status_animated("Cleanup Done", StatusColors.SUCCESS)
-        else:
-            self.ui.StatusLabel.setText("Cleanup Done")
-
+        self.animator.update_status_animated("Cleanup Done", StatusColors.SUCCESS)
         self.run_scanner()
 
     # ========================================================================
@@ -1198,12 +1131,11 @@ class LumaShotTools(QtWidgets.QWidget):
         global lookdevDir, WorkingDir, latestrender
 
         # Show loading overlay
-        if ANIMATIONS_ENABLED:
-            self.animator.show_loading(
-                "Scanning Directories",
-                "Initializing scan...",
-                show_progress=True
-            )
+        self.animator.show_loading(
+            "Scanning Directories",
+            "Initializing scan...",
+            show_progress=True
+        )
         QApplication.processEvents()
 
         self.ui.CleanFiles.setEnabled(False)
@@ -1217,11 +1149,10 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # FIND RENDER DIRECTORY
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Scanning Render Files",
-                "Searching for render directories..."
-            )
+        self.animator.update_loading_message(
+            "Scanning Render Files",
+            "Searching for render directories..."
+        )
 
         try:
             dirs = fast_scandir(lookdevDir)
@@ -1254,11 +1185,10 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # FIND USD DIRECTORY
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Scanning USD Files",
-                "Searching for USD directories..."
-            )
+        self.animator.update_loading_message(
+            "Scanning USD Files",
+            "Searching for USD directories..."
+        )
 
         try:
             dirs = fast_scandir(lookdevDir)
@@ -1291,12 +1221,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # FIND HIPS
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Scanning HIP Files",
-                "Searching for Houdini project files..."
-            )
-            self.animator.update_loading_progress(34)
+        self.animator.update_loading_message(
+            "Scanning HIP Files",
+            "Searching for Houdini project files..."
+        )
+        self.animator.update_loading_progress(34)
 
         hipfiles = find_hip_files(lookdevDir)
         hipcount = len(hipfiles)
@@ -1317,12 +1246,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # RENDER FILES
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Processing Render Files",
-                "Organizing render versions..."
-            )
-            self.animator.update_loading_progress(50)
+        self.animator.update_loading_message(
+            "Processing Render Files",
+            "Organizing render versions..."
+        )
+        self.animator.update_loading_progress(50)
 
         FoundRenderFiles = []
         WorkingDir = ""
@@ -1371,12 +1299,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # USD FILES
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Processing USD Files",
-                "Organizing USD versions..."
-            )
-            self.animator.update_loading_progress(66)
+        self.animator.update_loading_message(
+            "Processing USD Files",
+            "Organizing USD versions..."
+        )
+        self.animator.update_loading_progress(66)
 
         FoundUSDFiles = []
         if USDDirectory:
@@ -1416,12 +1343,11 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Calculate folder size
         try:
-            if ANIMATIONS_ENABLED:
-                self.animator.update_loading_message(
-                    "Calculating Size",
-                    "Computing total directory size..."
-                )
-                self.animator.update_loading_progress(75)
+            self.animator.update_loading_message(
+                "Calculating Size",
+                "Computing total directory size..."
+            )
+            self.animator.update_loading_progress(75)
 
             QApplication.processEvents()
             TotalSize = get_folder_size(lookdevDir)
@@ -1434,12 +1360,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # FIND COMPS
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Scanning Comp Files",
-                "Searching for composition files..."
-            )
-            self.animator.update_loading_progress(85)
+        self.animator.update_loading_message(
+            "Scanning Comp Files",
+            "Searching for composition files..."
+        )
+        self.animator.update_loading_progress(85)
 
         CompDir = get_comp_directory(shotpath)
 
@@ -1475,12 +1400,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # ====================================================================
         # INITIALIZE MP4 MAKER TAB
         # ====================================================================
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Initializing MP4 Maker",
-                "Setting up MP4 Maker tab..."
-            )
-            self.animator.update_loading_progress(95)
+        self.animator.update_loading_message(
+            "Initializing MP4 Maker",
+            "Setting up MP4 Maker tab..."
+        )
+        self.animator.update_loading_progress(95)
 
         # Set MP4 render path to same as pass builder
         if RenderDirectory != "":
@@ -1493,12 +1417,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # INITIALIZE REPUBLISH TAB
         # ====================================================================
         global republish_searchpath
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_message(
-                "Initializing rePublish",
-                "Setting up rePublish tab..."
-            )
-            self.animator.update_loading_progress(97)
+        self.animator.update_loading_message(
+            "Initializing rePublish",
+            "Setting up rePublish tab..."
+        )
+        self.animator.update_loading_progress(97)
 
         # Set rePublish render path to same as pass builder and MP4 maker
         if RenderDirectory != "":
@@ -1518,13 +1441,9 @@ class LumaShotTools(QtWidgets.QWidget):
                 self.ui.RePublishTask.setCurrentText(task)
 
         # Final progress
-        if ANIMATIONS_ENABLED:
-            self.animator.update_loading_progress(100)
-            self.animator.hide_loading()
-            self.animator.update_status_animated('Scanning Complete!', StatusColors.SUCCESS)
-        else:
-            self.ui.StatusLabel.setText('Scanning Done')
-
+        self.animator.update_loading_progress(100)
+        self.animator.hide_loading()
+        self.animator.update_status_animated('Scanning Complete!', StatusColors.SUCCESS)
         self.ui.CleanFiles.setEnabled(True)
 
     def _deselect_renders_in_comp(self, renders_in_comp):
@@ -1553,7 +1472,7 @@ def create_window_and_scan():
     global window, splash
 
     # Update splash progress
-    if ANIMATIONS_ENABLED and splash:
+    if splash:
         splash.update_progress(30, "Initializing Luma Shot Tools", "Creating main window...")
         QApplication.processEvents()
 
@@ -1561,7 +1480,7 @@ def create_window_and_scan():
     window = LumaShotTools()
 
     # Update splash progress
-    if ANIMATIONS_ENABLED and splash:
+    if splash:
         splash.update_progress(50, "Initializing Luma Shot Tools", "Starting initial scan...")
         QApplication.processEvents()
 
@@ -1582,7 +1501,7 @@ def run_initial_scan_with_splash():
     original_update_progress = None
     original_hide_loading = None
 
-    if ANIMATIONS_ENABLED and hasattr(window, 'animator'):
+    if hasattr(window, 'animator'):
         # Save original methods
         original_show_loading = window.animator.show_loading
         original_update_message = window.animator.update_loading_message
@@ -1626,7 +1545,7 @@ def run_initial_scan_with_splash():
     window.run_scanner()
 
     # Restore original methods
-    if ANIMATIONS_ENABLED and hasattr(window, 'animator'):
+    if hasattr(window, 'animator'):
         window.animator.show_loading = original_show_loading
         window.animator.update_loading_message = original_update_message
         window.animator.update_loading_progress = original_update_progress
@@ -1640,14 +1559,12 @@ def finish_initialization():
     """Finish initialization by showing the window and closing splash."""
     global window, splash
 
-    if ANIMATIONS_ENABLED and splash:
+    if splash:
         splash.update_progress(100, "Initialization Complete", "Opening application...")
         QApplication.processEvents()
 
-        # Small delay to show completion
-        QTimer.singleShot(300, show_window_and_close_splash)
-    else:
-        show_window_and_close_splash()
+    # Small delay to show completion
+    QTimer.singleShot(300, show_window_and_close_splash)
 
 
 def show_window_and_close_splash():
@@ -1657,37 +1574,24 @@ def show_window_and_close_splash():
     if window:
         window.show()
 
-    if ANIMATIONS_ENABLED and splash:
+    if splash:
         splash.stop_animation()
         splash.close()
         splash = None
 
 
 # Show splash screen and initialize
-if ANIMATIONS_ENABLED:
-    # Create and show splash screen
-    splash = SplashScreen()
-    splash.start_animation()
-    splash.update_progress(10, "Initializing Luma Shot Tools", "Loading application...")
-    splash.show()
+# Create and show splash screen
+splash = SplashScreen()
+splash.start_animation()
+splash.update_progress(10, "Initializing Luma Shot Tools", "Loading application...")
+splash.show()
 
-    # Process events to ensure splash is visible
-    QApplication.processEvents()
+# Process events to ensure splash is visible
+QApplication.processEvents()
 
-    # Start initialization after splash is visible
-    QTimer.singleShot(200, create_window_and_scan)
-
-else:
-    # No animations - create window directly
-    window = LumaShotTools()
-    window.show()
-
-    # Run scanner without splash
-    def run_scanner_no_splash():
-        if window:
-            window.run_scanner()
-
-    QTimer.singleShot(100, run_scanner_no_splash)
+# Start initialization after splash is visible
+QTimer.singleShot(200, create_window_and_scan)
 
 # Start event loop
 sys.exit(app.exec_())

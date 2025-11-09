@@ -7,6 +7,8 @@ from PySide2.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEas
 from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
+import os
+from .loading_styles import LoadingStyles
 
 
 class SpinnerWidget(QWidget):
@@ -19,21 +21,21 @@ class SpinnerWidget(QWidget):
         self.angle = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.rotate)
-        self.setMinimumSize(80, 80)
-        self.setMaximumSize(80, 80)
+        self.setMinimumSize(*LoadingStyles.SPINNER_SIZE)
+        self.setMaximumSize(*LoadingStyles.SPINNER_SIZE)
 
         # Spinner colors
-        self.primary_color = QColor(74, 158, 255)  # #4a9eff
+        self.primary_color = LoadingStyles.PRIMARY_COLOR
 
         # Animation properties
-        self.line_count = 12
-        self.line_length = 20
-        self.line_width = 3
-        self.inner_radius = 15
+        self.line_count = LoadingStyles.SPINNER_LINE_COUNT
+        self.line_length = LoadingStyles.SPINNER_LINE_LENGTH
+        self.line_width = LoadingStyles.SPINNER_LINE_WIDTH
+        self.inner_radius = LoadingStyles.SPINNER_INNER_RADIUS
 
     def start(self):
         """Start the spinner animation."""
-        self.timer.start(50)  # 20 FPS for smooth animation
+        self.timer.start(LoadingStyles.SPINNER_ROTATION_INTERVAL)
 
     def stop(self):
         """Stop the spinner animation."""
@@ -41,7 +43,7 @@ class SpinnerWidget(QWidget):
 
     def rotate(self):
         """Rotate the spinner."""
-        self.angle = (self.angle + 30) % 360
+        self.angle = (self.angle + LoadingStyles.SPINNER_ROTATION_ANGLE) % 360
         self.update()
 
     def paintEvent(self, event):
@@ -90,7 +92,7 @@ class SplashScreen(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         # Set fixed size
-        self.setFixedSize(500, 300)
+        self.setFixedSize(*LoadingStyles.SPLASH_SIZE)
 
         # Center on screen
         self.center_on_screen()
@@ -112,15 +114,29 @@ class SplashScreen(QWidget):
         """Set up the splash screen UI."""
         # Main layout
         layout = QVBoxLayout()
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(20)
+        layout.setContentsMargins(LoadingStyles.SPLASH_MARGIN, LoadingStyles.SPLASH_MARGIN,
+                                  LoadingStyles.SPLASH_MARGIN, LoadingStyles.SPLASH_MARGIN)
+        layout.setSpacing(LoadingStyles.SPLASH_SPACING)
+
+        # Logo
+        logo_path = LoadingStyles.get_logo_path()
+        self.logo_label = QLabel()
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Scale to a reasonable size while maintaining aspect ratio
+            scaled_pixmap = pixmap.scaled(
+                *LoadingStyles.LOGO_SIZE_SPLASH,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.logo_label.setPixmap(scaled_pixmap)
+        self.logo_label.setAlignment(Qt.AlignCenter)
 
         # Title
         self.title_label = QLabel("Luma Shot Tools")
         self.title_label.setAlignment(Qt.AlignCenter)
-        title_font = QFont("Segoe UI", 24, QFont.Bold)
-        self.title_label.setFont(title_font)
-        self.title_label.setStyleSheet("color: #4a9eff;")
+        self.title_label.setFont(LoadingStyles.TITLE_FONT)
+        self.title_label.setStyleSheet(f"color: {LoadingStyles.PRIMARY_COLOR_STR};")
 
         # Spinner
         self.spinner = SpinnerWidget()
@@ -132,16 +148,14 @@ class SplashScreen(QWidget):
         # Main status label
         self.main_label = QLabel("Initializing...")
         self.main_label.setAlignment(Qt.AlignCenter)
-        main_font = QFont("Segoe UI", 12)
-        self.main_label.setFont(main_font)
-        self.main_label.setStyleSheet("color: #ffffff;")
+        self.main_label.setFont(LoadingStyles.MAIN_TEXT_FONT)
+        self.main_label.setStyleSheet(f"color: {LoadingStyles.TEXT_PRIMARY_COLOR_STR};")
 
         # Sub status label
         self.sub_label = QLabel("Starting application...")
         self.sub_label.setAlignment(Qt.AlignCenter)
-        sub_font = QFont("Segoe UI", 9)
-        self.sub_label.setFont(sub_font)
-        self.sub_label.setStyleSheet("color: #888888;")
+        self.sub_label.setFont(LoadingStyles.SUB_TEXT_FONT)
+        self.sub_label.setStyleSheet(f"color: {LoadingStyles.TEXT_TERTIARY_COLOR_STR};")
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -149,21 +163,14 @@ class SplashScreen(QWidget):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(4)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #2a2a2a;
-                border: none;
-                border-radius: 2px;
-            }
-            QProgressBar::chunk {
-                background-color: #4a9eff;
-                border-radius: 2px;
-            }
-        """)
+        self.progress_bar.setFixedHeight(LoadingStyles.PROGRESS_BAR_SPLASH_HEIGHT)
+        self.progress_bar.setStyleSheet(LoadingStyles.get_progress_bar_stylesheet(
+            LoadingStyles.PROGRESS_BAR_SPLASH_HEIGHT
+        ))
 
         # Add widgets to layout
         layout.addStretch()
+        layout.addWidget(self.logo_label)
         layout.addWidget(self.title_label)
         layout.addWidget(spinner_container)
         layout.addWidget(self.main_label)
@@ -179,9 +186,13 @@ class SplashScreen(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw rounded rectangle background
-        painter.setBrush(QColor(30, 30, 30, 240))
-        painter.setPen(QPen(QColor(74, 158, 255, 100), 2))
-        painter.drawRoundedRect(self.rect(), 15, 15)
+        bg_color = QColor(LoadingStyles.BACKGROUND_COLOR)
+        bg_color.setAlpha(240)
+        border_color = QColor(LoadingStyles.PRIMARY_COLOR)
+        border_color.setAlpha(100)
+        painter.setBrush(bg_color)
+        painter.setPen(QPen(border_color, 2))
+        painter.drawRoundedRect(self.rect(), LoadingStyles.BORDER_RADIUS, LoadingStyles.BORDER_RADIUS)
 
     def update_progress(self, progress, main_text, sub_text):
         """Update the splash screen progress."""

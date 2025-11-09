@@ -10,8 +10,10 @@ from PySide2.QtCore import (
 from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect
 )
-from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
+from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 import math
+import os
+from .loading_styles import LoadingStyles
 
 
 class SpinnerWidget(QWidget):
@@ -24,21 +26,21 @@ class SpinnerWidget(QWidget):
         self.angle = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.rotate)
-        self.setMinimumSize(80, 80)
+        self.setMinimumSize(*LoadingStyles.SPINNER_SIZE)
 
         # Spinner colors
-        self.primary_color = QColor(74, 158, 255)  # #4a9eff
-        self.secondary_color = QColor(42, 42, 42)  # #2a2a2a
+        self.primary_color = LoadingStyles.PRIMARY_COLOR
+        self.secondary_color = LoadingStyles.SECONDARY_BG_COLOR
 
         # Animation properties
-        self.line_count = 12
-        self.line_length = 20
-        self.line_width = 3
-        self.inner_radius = 15
+        self.line_count = LoadingStyles.SPINNER_LINE_COUNT
+        self.line_length = LoadingStyles.SPINNER_LINE_LENGTH
+        self.line_width = LoadingStyles.SPINNER_LINE_WIDTH
+        self.inner_radius = LoadingStyles.SPINNER_INNER_RADIUS
 
     def start(self):
         """Start the spinner animation."""
-        self.timer.start(50)  # 20 FPS for smooth animation
+        self.timer.start(LoadingStyles.SPINNER_ROTATION_INTERVAL)
 
     def stop(self):
         """Stop the spinner animation."""
@@ -46,7 +48,7 @@ class SpinnerWidget(QWidget):
 
     def rotate(self):
         """Rotate the spinner."""
-        self.angle = (self.angle + 30) % 360
+        self.angle = (self.angle + LoadingStyles.SPINNER_ROTATION_ANGLE) % 360
         self.update()
 
     def paintEvent(self, event):
@@ -96,7 +98,7 @@ class PulsingDotsWidget(QWidget):
         self.timer.timeout.connect(self.pulse)
         self.setMinimumSize(80, 30)
 
-        self.dot_color = QColor(74, 158, 255)  # #4a9eff
+        self.dot_color = LoadingStyles.PRIMARY_COLOR
         self.dot_radius = 8
         self.dot_spacing = 20
 
@@ -157,17 +159,26 @@ class LoadingOverlay(QWidget):
 
         # Setup overlay appearance
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet("""
-            LoadingOverlay {
-                background-color: rgba(30, 30, 30, 220);
-                border-radius: 10px;
-            }
-        """)
+        self.setStyleSheet(LoadingStyles.get_overlay_background_stylesheet())
 
         # Create layout
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(20)
+        layout.setSpacing(LoadingStyles.OVERLAY_SPACING)
+
+        # Create logo
+        logo_path = LoadingStyles.get_logo_path()
+        self.logo_label = QLabel(self)
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Scale to a reasonable size while maintaining aspect ratio
+            scaled_pixmap = pixmap.scaled(
+                *LoadingStyles.LOGO_SIZE_OVERLAY,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.logo_label.setPixmap(scaled_pixmap)
+        self.logo_label.setAlignment(Qt.AlignCenter)
 
         # Create loading animation
         if style == 'spinner':
@@ -178,25 +189,12 @@ class LoadingOverlay(QWidget):
         # Create status label
         self.status_label = QLabel("Loading...", self)
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("""
-            QLabel {
-                color: #4a9eff;
-                font-size: 16pt;
-                font-weight: bold;
-                background: transparent;
-            }
-        """)
+        self.status_label.setStyleSheet(LoadingStyles.get_status_label_stylesheet())
 
         # Create sub-status label
         self.substatus_label = QLabel("", self)
         self.substatus_label.setAlignment(Qt.AlignCenter)
-        self.substatus_label.setStyleSheet("""
-            QLabel {
-                color: #a0a0a0;
-                font-size: 10pt;
-                background: transparent;
-            }
-        """)
+        self.substatus_label.setStyleSheet(LoadingStyles.get_substatus_label_stylesheet())
 
         # Create progress bar (optional, hidden by default)
         self.progress_bar = QProgressBar(self)
@@ -204,24 +202,14 @@ class LoadingOverlay(QWidget):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedWidth(300)
-        self.progress_bar.setFixedHeight(6)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: rgba(42, 42, 42, 180);
-                border: none;
-                border-radius: 3px;
-            }
-            QProgressBar::chunk {
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                                  stop:0 #0e4d92, stop:1 #4a9eff);
-                border-radius: 3px;
-            }
-        """)
+        self.progress_bar.setFixedWidth(LoadingStyles.PROGRESS_BAR_OVERLAY_WIDTH)
+        self.progress_bar.setFixedHeight(LoadingStyles.PROGRESS_BAR_OVERLAY_HEIGHT)
+        self.progress_bar.setStyleSheet(LoadingStyles.get_overlay_progress_stylesheet())
         self.progress_bar.hide()
 
         # Add widgets to layout
         layout.addStretch()
+        layout.addWidget(self.logo_label, alignment=Qt.AlignCenter)
         layout.addWidget(self.animation_widget, alignment=Qt.AlignCenter)
         layout.addWidget(self.status_label)
         layout.addWidget(self.substatus_label)
@@ -277,7 +265,7 @@ class LoadingOverlay(QWidget):
         self.fade_out()
 
         # Hide after fade
-        QTimer.singleShot(300, self.hide)
+        QTimer.singleShot(LoadingStyles.FADE_DURATION, self.hide)
 
     def update_message(self, message, submessage=""):
         """
@@ -301,8 +289,10 @@ class LoadingOverlay(QWidget):
             self.progress_bar.show()
         self.progress_bar.setValue(value)
 
-    def fade_in(self, duration=300):
+    def fade_in(self, duration=None):
         """Fade in the overlay."""
+        if duration is None:
+            duration = LoadingStyles.FADE_DURATION
         self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
         self.fade_animation.setDuration(duration)
         self.fade_animation.setStartValue(0.0)
@@ -310,8 +300,10 @@ class LoadingOverlay(QWidget):
         self.fade_animation.setEasingCurve(QEasingCurve.InOutCubic)
         self.fade_animation.start()
 
-    def fade_out(self, duration=300):
+    def fade_out(self, duration=None):
         """Fade out the overlay."""
+        if duration is None:
+            duration = LoadingStyles.FADE_DURATION
         self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
         self.fade_animation.setDuration(duration)
         self.fade_animation.setStartValue(1.0)
@@ -391,7 +383,7 @@ class InlineSpinner(QWidget):
         self.setFixedSize(size, size)
 
         # Spinner colors
-        self.primary_color = QColor(74, 158, 255)  # #4a9eff
+        self.primary_color = LoadingStyles.PRIMARY_COLOR
 
         # Animation properties
         self.line_count = 8
