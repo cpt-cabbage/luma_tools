@@ -46,6 +46,7 @@ from mp4_maker import generate_mp4, get_output_filename
 try:
     from ui_animations import enhance_ui, StatusColors
     from loading_overlay import InlineSpinner
+    from splash_screen import SplashScreen
     ANIMATIONS_ENABLED = True
 except ImportError:
     ANIMATIONS_ENABLED = False
@@ -1193,34 +1194,51 @@ class LumaShotTools(QtWidgets.QWidget):
 # APPLICATION ENTRY POINT
 # ============================================================================
 
-# Create and show window
-window = LumaShotTools()
+def initialize_application():
+    """
+    Initialize the application.
+    This function is called after the splash screen is shown.
+    """
+    # Create window
+    window = LumaShotTools()
 
-# Show loading from the start
+    # Show loading overlay for initial scan
+    if ANIMATIONS_ENABLED:
+        window.animator.show_loading(
+            "Initializing Luma Shot Tools",
+            "Starting initial scan...",
+            show_progress=True
+        )
+        window.animator.update_loading_progress(50)
+
+    QApplication.processEvents()
+
+    # Run initial scanner
+    window.run_scanner()
+
+    # Hide loading overlay
+    if ANIMATIONS_ENABLED:
+        window.animator.hide_loading()
+
+    return window
+
+
+# Show splash screen and initialize
 if ANIMATIONS_ENABLED:
-    window.animator.show_loading(
-        "Initializing Luma Shot Tools",
-        "Loading application...",
-        show_progress=True
-    )
-    window.animator.update_loading_progress(10)
+    # Create and show splash screen
+    splash = SplashScreen()
+    splash.start_animation()
+    splash.show()
 
-# Show window
-window.show()
-QApplication.processEvents()
+    # Process events to ensure splash is visible
+    QApplication.processEvents()
 
-# Update loading message for initial scan
-if ANIMATIONS_ENABLED:
-    window.animator.update_loading_message(
-        "Initializing Luma Shot Tools",
-        "Starting initial scan..."
-    )
-    window.animator.update_loading_progress(20)
-
-QApplication.processEvents()
-
-# Run initial scanner
-window.run_scanner()
+    # Run initialization with splash
+    splash.run_with_initialization(initialize_application)
+else:
+    # No animations - create window directly
+    window = initialize_application()
+    window.show()
 
 # Start event loop
 sys.exit(app.exec_())
