@@ -18,12 +18,17 @@ from ayon_service import (
     AYON_AVAILABLE,
     DEADLINE_AVAILABLE,
     FarmPublishStrategy,
-    LocalPublishStrategy
-)
+    LocalPublishStrategy)
 
 # Import UI utilities
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
 from ui_components import report_progress
+
+# Try to import Qt for processEvents
+try:
+    from PySide2.QtWidgets import QApplication
+except ImportError:
+    QApplication = None
 
 
 class PassBuilder:
@@ -163,8 +168,7 @@ class PassBuilder:
 
                 if success and progress_callback:
                     progress_callback(95, "Jobs submitted successfully!")
-                    if QT_AVAILABLE:
-                        QApplication.processEvents()
+                    QApplication.processEvents()
         else:
             # Local execution
             report_progress(progress_callback, 50, "Executing OIIO locally...")
@@ -204,8 +208,7 @@ class PassBuilder:
 
                 if success and progress_callback:
                     progress_callback(100, "Local build and publish complete!")
-                    if QT_AVAILABLE:
-                        QApplication.processEvents()
+                    QApplication.processEvents()
             else:
                 if progress_callback:
                     progress_callback(95, "Local execution complete!")

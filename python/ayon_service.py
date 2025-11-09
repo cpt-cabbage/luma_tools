@@ -59,11 +59,9 @@ except ImportError as e:
     DEADLINE_AVAILABLE = False
 
 # Try to import Qt for processEvents
-try:
-    from PySide2.QtWidgets import QApplication
-    QT_AVAILABLE = True
-except ImportError:
-    QT_AVAILABLE = False
+
+from PySide2.QtWidgets import QApplication
+
 
 
 # Task type mapping (shared across all strategies)
@@ -660,8 +658,7 @@ class PublishStrategy(ABC):
         """Report progress if callback provided."""
         if callback:
             callback(progress, message)
-            if QT_AVAILABLE:
-                QApplication.processEvents()
+            QApplication.processEvents()
 
 
 class FarmPublishStrategy(PublishStrategy):

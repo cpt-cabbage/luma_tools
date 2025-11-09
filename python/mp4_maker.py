@@ -18,6 +18,11 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resour
 from config import FFMPEG_PATH, OIIO_PATH, get_ocio_config, FRAME_PADDING
 from utils import normalize_path
 from ui_components import report_progress
+# Try to import Qt for processEvents
+try:
+    from PySide2.QtWidgets import QApplication
+except ImportError:
+    QApplication = None
 
 
 def get_crf_value(quality_index: int) -> int:
@@ -199,8 +204,7 @@ def convert_exr_to_png_with_oiio(
                     min(progress, 50),
                     f"Converting frame {frame} to PNG ({i+1}/{frame_count})..."
                 )
-                if QT_AVAILABLE:
-                    QApplication.processEvents()
+                QApplication.processEvents()
 
         return True
 
@@ -362,8 +366,7 @@ def generate_mp4(
                             min(progress, 95),
                             f"Encoding MP4: frame {current_frame}/{frame_count}..."
                         )
-                        if QT_AVAILABLE:
-                            QApplication.processEvents()
+                        QApplication.processEvents()
                 except (ValueError, IndexError):
                     pass
 
