@@ -42,13 +42,25 @@ class SpinnerWidget(QWidget):
         self.line_width = LoadingStyles.SPINNER_LINE_WIDTH
         self.inner_radius = LoadingStyles.SPINNER_INNER_RADIUS
 
+        # Event processing timer to keep UI responsive during blocking operations
+        self.event_timer = QTimer(self)
+        self.event_timer.timeout.connect(self._process_events)
+
+    def _process_events(self):
+        """Process Qt events to keep the UI responsive."""
+        from PySide2.QtWidgets import QApplication
+        QApplication.processEvents()
+
     def start(self):
         """Start the spinner animation."""
         self.timer.start(LoadingStyles.SPINNER_ROTATION_INTERVAL)
+        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
+        self.event_timer.start(16)
 
     def stop(self):
         """Stop the spinner animation."""
         self.timer.stop()
+        self.event_timer.stop()
 
     def rotate(self):
         """Rotate the spinner."""
@@ -109,13 +121,25 @@ class PulsingDotsWidget(QWidget):
         self.dot_radius = 8
         self.dot_spacing = 20
 
+        # Event processing timer to keep UI responsive during blocking operations
+        self.event_timer = QTimer(self)
+        self.event_timer.timeout.connect(self._process_events)
+
+    def _process_events(self):
+        """Process Qt events to keep the UI responsive."""
+        from PySide2.QtWidgets import QApplication
+        QApplication.processEvents()
+
     def start(self):
         """Start the pulsing animation."""
         self.timer.start(400)  # Pulse every 400ms
+        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
+        self.event_timer.start(16)
 
     def stop(self):
         """Stop the pulsing animation."""
         self.timer.stop()
+        self.event_timer.stop()
 
     def pulse(self):
         """Move to next dot."""
@@ -403,17 +427,29 @@ class InlineSpinner(QWidget):
         self.line_width = max(2, int(size * 0.08))
         self.inner_radius = int(size * 0.15)
 
+        # Event processing timer to keep UI responsive during blocking operations
+        self.event_timer = QTimer(self)
+        self.event_timer.timeout.connect(self._process_events)
+
         # Start hidden
         self.hide()
+
+    def _process_events(self):
+        """Process Qt events to keep the UI responsive."""
+        from PySide2.QtWidgets import QApplication
+        QApplication.processEvents()
 
     def start(self):
         """Start the spinner animation and show."""
         self.show()
         self.timer.start(80)  # Faster rotation for smaller spinner
+        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
+        self.event_timer.start(16)
 
     def stop(self):
         """Stop the spinner animation and hide."""
         self.timer.stop()
+        self.event_timer.stop()
         self.hide()
 
     def rotate(self):
