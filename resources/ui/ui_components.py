@@ -121,21 +121,21 @@ class ThreadedOperation(QObject):
 class LoadingStyles:
     """Unified styling constants for loading screens."""
 
-    # Colors
-    PRIMARY_COLOR = QColor(180, 180, 180)  # #b4b4b4 - Monochromatic gray (for spinner)
-    BACKGROUND_COLOR = QColor(30, 30, 30)  # #1e1e1e - Dark background
-    SECONDARY_BG_COLOR = QColor(42, 42, 42)  # #2a2a2a - Lighter dark
+    # Colors - AYON Theme
+    PRIMARY_COLOR = QColor(74, 158, 255)  # #4a9eff - Light blue accent (for spinner)
+    BACKGROUND_COLOR = QColor(33, 37, 43)  # #21252b - Dark background
+    SECONDARY_BG_COLOR = QColor(44, 49, 58)  # #2c313a - Lighter dark
     TEXT_PRIMARY_COLOR = QColor(255, 255, 255)  # #ffffff - White
-    TEXT_SECONDARY_COLOR = QColor(160, 160, 160)  # #a0a0a0 - Gray
-    TEXT_TERTIARY_COLOR = QColor(136, 136, 136)  # #888888 - Darker gray
+    TEXT_SECONDARY_COLOR = QColor(197, 202, 211)  # #c5cad3 - Light gray
+    TEXT_TERTIARY_COLOR = QColor(121, 126, 137)  # #797e89 - Darker gray
 
     # Color strings (for stylesheets)
-    PRIMARY_COLOR_STR = "#b4b4b4"
-    BACKGROUND_COLOR_STR = "#1e1e1e"
-    SECONDARY_BG_COLOR_STR = "#2a2a2a"
+    PRIMARY_COLOR_STR = "#4a9eff"
+    BACKGROUND_COLOR_STR = "#21252b"
+    SECONDARY_BG_COLOR_STR = "#2c313a"
     TEXT_PRIMARY_COLOR_STR = "#ffffff"
-    TEXT_SECONDARY_COLOR_STR = "#a0a0a0"
-    TEXT_TERTIARY_COLOR_STR = "#888888"
+    TEXT_SECONDARY_COLOR_STR = "#c5cad3"
+    TEXT_TERTIARY_COLOR_STR = "#797e89"
 
     # Fonts
     TITLE_FONT = QFont("Segoe UI", 24, QFont.Bold)
@@ -202,13 +202,13 @@ class LoadingStyles:
         """Get progress bar stylesheet for overlay (with gradient)."""
         return f"""
             QProgressBar {{
-                background-color: rgba(42, 42, 42, 180);
+                background-color: rgba(44, 49, 58, 180);
                 border: none;
                 border-radius: 3px;
             }}
             QProgressBar::chunk {{
                 background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                                  stop:0 #0e4d92, stop:1 {LoadingStyles.PRIMARY_COLOR_STR});
+                                                  stop:0 #5cadff, stop:1 {LoadingStyles.PRIMARY_COLOR_STR});
                 border-radius: 3px;
             }}
         """
@@ -218,7 +218,7 @@ class LoadingStyles:
         """Get overlay background stylesheet."""
         return """
             LoadingOverlay {
-                background-color: rgba(30, 30, 30, 220);
+                background-color: rgba(33, 37, 43, 220);
                 border-radius: 10px;
             }
         """
@@ -819,7 +819,7 @@ class UIAnimations:
         self.progress_animation.setDuration(duration)
         self.progress_animation.start()
 
-    def update_status_animated(self, message, color="#3b82f6"):
+    def update_status_animated(self, message, color="#4a9eff"):
         """
         Update status label with fade animation.
 
@@ -857,7 +857,7 @@ class UIAnimations:
         def pulse_on():
             button.setStyleSheet(
                 original_style +
-                "background-color: #60a5fa; border: 2px solid #3b82f6;"
+                "background-color: #5cadff; border: 2px solid #4a9eff;"
             )
             QTimer.singleShot(300, pulse_off)
 
@@ -959,11 +959,11 @@ class UIAnimations:
 
 
 class StatusColors:
-    """Predefined colors for status messages - Modern UI Palette."""
+    """Predefined colors for status messages - AYON Theme Palette."""
     SUCCESS = "#10b981"  # Modern green
     ERROR = "#ef4444"    # Modern red
     WARNING = "#f59e0b"  # Modern orange
-    INFO = "#3b82f6"     # Modern blue
+    INFO = "#4a9eff"     # AYON blue
     SCANNING = "#8b5cf6" # Modern purple
 
 
