@@ -11,7 +11,7 @@ class LoadingStyles:
     """Unified styling constants for loading screens."""
 
     # Colors
-    PRIMARY_COLOR = QColor(74, 158, 255)  # #4a9eff - Blue accent
+    PRIMARY_COLOR = QColor(180, 180, 180)  # #b4b4b4 - Monochromatic gray (for spinner)
     BACKGROUND_COLOR = QColor(30, 30, 30)  # #1e1e1e - Dark background
     SECONDARY_BG_COLOR = QColor(42, 42, 42)  # #2a2a2a - Lighter dark
     TEXT_PRIMARY_COLOR = QColor(255, 255, 255)  # #ffffff - White
@@ -19,7 +19,7 @@ class LoadingStyles:
     TEXT_TERTIARY_COLOR = QColor(136, 136, 136)  # #888888 - Darker gray
 
     # Color strings (for stylesheets)
-    PRIMARY_COLOR_STR = "#4a9eff"
+    PRIMARY_COLOR_STR = "#b4b4b4"
     BACKGROUND_COLOR_STR = "#1e1e1e"
     SECONDARY_BG_COLOR_STR = "#2a2a2a"
     TEXT_PRIMARY_COLOR_STR = "#ffffff"
@@ -34,21 +34,21 @@ class LoadingStyles:
     OVERLAY_SUB_SIZE = "10pt"
 
     # Logo
-    LOGO_SIZE_SPLASH = (120, 120)  # Larger for splash screen
+    LOGO_SIZE_SPLASH = (180, 180)  # Larger for splash screen - increased for more prominence
     LOGO_SIZE_OVERLAY = (100, 100)  # Smaller for overlay
 
     # Spinner
-    SPINNER_SIZE = (80, 80)
+    SPINNER_SIZE = (40, 40)  # Reduced size for cleaner look
     SPINNER_LINE_COUNT = 12
-    SPINNER_LINE_LENGTH = 20
-    SPINNER_LINE_WIDTH = 3
-    SPINNER_INNER_RADIUS = 15
+    SPINNER_LINE_LENGTH = 10  # Shorter lines for smaller spinner
+    SPINNER_LINE_WIDTH = 2  # Thinner lines
+    SPINNER_INNER_RADIUS = 6  # Smaller inner radius
     SPINNER_ROTATION_INTERVAL = 50  # milliseconds (20 FPS)
 
     # Layout
-    SPLASH_SIZE = (500, 300)
+    SPLASH_SIZE = (500, 400)  # Increased height to accommodate larger logo
     SPLASH_MARGIN = 40
-    SPLASH_SPACING = 20
+    SPLASH_SPACING = 15  # Reduced spacing for better fit
     OVERLAY_SPACING = 20
     BORDER_RADIUS = 15
     OVERLAY_BORDER_RADIUS = 10

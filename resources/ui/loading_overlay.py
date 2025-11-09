@@ -13,7 +13,7 @@ from PySide2.QtWidgets import (
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 import math
 import os
-from .loading_styles import LoadingStyles
+from loading_styles import LoadingStyles
 
 
 class SpinnerWidget(QWidget):
@@ -27,6 +27,10 @@ class SpinnerWidget(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.rotate)
         self.setMinimumSize(*LoadingStyles.SPINNER_SIZE)
+
+        # Make background transparent
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet("background: transparent;")
 
         # Spinner colors
         self.primary_color = LoadingStyles.PRIMARY_COLOR
@@ -55,6 +59,9 @@ class SpinnerWidget(QWidget):
         """Paint the spinner."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # Clear background to transparent
+        painter.fillRect(self.rect(), Qt.transparent)
 
         # Center the spinner
         width = self.width()
@@ -169,6 +176,10 @@ class LoadingOverlay(QWidget):
         # Create logo
         logo_path = LoadingStyles.get_logo_path()
         self.logo_label = QLabel(self)
+        self.logo_label.setStyleSheet("background: transparent;")
+        # Set minimum size to ensure logo is not cut off
+        self.logo_label.setMinimumSize(*LoadingStyles.LOGO_SIZE_OVERLAY)
+        self.logo_label.setMaximumSize(*LoadingStyles.LOGO_SIZE_OVERLAY)
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             # Scale to a reasonable size while maintaining aspect ratio
@@ -179,6 +190,7 @@ class LoadingOverlay(QWidget):
             )
             self.logo_label.setPixmap(scaled_pixmap)
         self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setScaledContents(False)  # Don't scale contents, use actual pixmap size
 
         # Create loading animation
         if style == 'spinner':

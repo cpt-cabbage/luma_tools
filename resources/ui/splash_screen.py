@@ -8,7 +8,7 @@ from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
 import os
-from .loading_styles import LoadingStyles
+from loading_styles import LoadingStyles
 
 
 class SpinnerWidget(QWidget):
@@ -23,6 +23,10 @@ class SpinnerWidget(QWidget):
         self.timer.timeout.connect(self.rotate)
         self.setMinimumSize(*LoadingStyles.SPINNER_SIZE)
         self.setMaximumSize(*LoadingStyles.SPINNER_SIZE)
+
+        # Make background transparent
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet("background: transparent;")
 
         # Spinner colors
         self.primary_color = LoadingStyles.PRIMARY_COLOR
@@ -50,6 +54,9 @@ class SpinnerWidget(QWidget):
         """Paint the spinner."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # Clear background to transparent
+        painter.fillRect(self.rect(), Qt.transparent)
 
         # Center the spinner
         width = self.width()
@@ -118,9 +125,18 @@ class SplashScreen(QWidget):
                                   LoadingStyles.SPLASH_MARGIN, LoadingStyles.SPLASH_MARGIN)
         layout.setSpacing(LoadingStyles.SPLASH_SPACING)
 
-        # Logo
+        # Logo container for proper centering
         logo_path = LoadingStyles.get_logo_path()
+        logo_container = QWidget()
+        logo_container.setStyleSheet("background: transparent;")
+        logo_layout = QVBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.setAlignment(Qt.AlignCenter)
+
         self.logo_label = QLabel()
+        self.logo_label.setStyleSheet("background: transparent;")
+        # Set size to ensure logo is not cut off
+        self.logo_label.setFixedSize(*LoadingStyles.LOGO_SIZE_SPLASH)
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             # Scale to a reasonable size while maintaining aspect ratio
@@ -131,16 +147,20 @@ class SplashScreen(QWidget):
             )
             self.logo_label.setPixmap(scaled_pixmap)
         self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setScaledContents(False)  # Don't scale contents, use actual pixmap size
 
-        # Title
-        self.title_label = QLabel("Luma Shot Tools")
-        self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setFont(LoadingStyles.TITLE_FONT)
-        self.title_label.setStyleSheet(f"color: {LoadingStyles.PRIMARY_COLOR_STR};")
+        logo_layout.addWidget(self.logo_label, alignment=Qt.AlignCenter)
+
+        # Title - removed for cleaner logo-only design
+        # self.title_label = QLabel("Luma Shot Tools")
+        # self.title_label.setAlignment(Qt.AlignCenter)
+        # self.title_label.setFont(LoadingStyles.TITLE_FONT)
+        # self.title_label.setStyleSheet(f"color: {LoadingStyles.PRIMARY_COLOR_STR};")
 
         # Spinner
         self.spinner = SpinnerWidget()
         spinner_container = QWidget()
+        spinner_container.setStyleSheet("background: transparent;")
         spinner_layout = QVBoxLayout(spinner_container)
         spinner_layout.addWidget(self.spinner, alignment=Qt.AlignCenter)
         spinner_layout.setContentsMargins(0, 0, 0, 0)
@@ -149,13 +169,13 @@ class SplashScreen(QWidget):
         self.main_label = QLabel("Initializing...")
         self.main_label.setAlignment(Qt.AlignCenter)
         self.main_label.setFont(LoadingStyles.MAIN_TEXT_FONT)
-        self.main_label.setStyleSheet(f"color: {LoadingStyles.TEXT_PRIMARY_COLOR_STR};")
+        self.main_label.setStyleSheet(f"color: {LoadingStyles.TEXT_PRIMARY_COLOR_STR}; background: transparent;")
 
         # Sub status label
         self.sub_label = QLabel("Starting application...")
         self.sub_label.setAlignment(Qt.AlignCenter)
         self.sub_label.setFont(LoadingStyles.SUB_TEXT_FONT)
-        self.sub_label.setStyleSheet(f"color: {LoadingStyles.TEXT_TERTIARY_COLOR_STR};")
+        self.sub_label.setStyleSheet(f"color: {LoadingStyles.TEXT_TERTIARY_COLOR_STR}; background: transparent;")
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -171,7 +191,7 @@ class SplashScreen(QWidget):
         # Add widgets to layout
         layout.addStretch()
         layout.addWidget(self.logo_label)
-        layout.addWidget(self.title_label)
+        # Title label removed for cleaner design
         layout.addWidget(spinner_container)
         layout.addWidget(self.main_label)
         layout.addWidget(self.sub_label)
