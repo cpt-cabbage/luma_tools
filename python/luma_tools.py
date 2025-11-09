@@ -114,7 +114,7 @@ class LumaShotTools(QtWidgets.QWidget):
         super(LumaShotTools, self).__init__()
 
         # Set window flags for frameless, rounded style (same as splash screen)
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        # self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         # Load UI
