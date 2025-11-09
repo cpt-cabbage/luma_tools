@@ -1061,8 +1061,13 @@ class LumaShotTools(QtWidgets.QWidget):
     # DIRECTORY SCANNER (Now uses scan_service module)
     # ========================================================================
 
-    def run_scanner(self):
-        """Scan directories for renders, USD, HIP files, and comps - runs on background thread."""
+    def run_scanner(self, on_complete=None):
+        """
+        Scan directories for renders, USD, HIP files, and comps - runs on background thread.
+
+        Args:
+            on_complete: Optional callback to call when scanning completes
+        """
         # Clear UI elements
         self.ui.CleanFiles.setEnabled(False)
         self.ui.USDSClean.clear()
@@ -1080,11 +1085,19 @@ class LumaShotTools(QtWidgets.QWidget):
             # Hide loading overlay
             self.animator.hide_loading()
 
+            # Call completion callback if provided
+            if on_complete:
+                on_complete()
+
         def on_error(error_msg, traceback_str):
             """Called when scanning fails."""
             self.animator.hide_loading()
             print(f"Scanner error: {error_msg}")
             print(traceback_str)
+
+            # Call completion callback even on error
+            if on_complete:
+                on_complete()
 
         # Create worker and run scan on background thread
         worker = Worker(self.scanner.scan_all)
@@ -1139,36 +1152,33 @@ def run_initial_scan_with_splash():
     if window is None:
         return
 
-    # Temporarily disable the window's loading overlay during initial scan
-    original_show_loading = None
-    original_update_message = None
-    original_update_progress = None
-    original_hide_loading = None
+    # Store original methods for restoration
+    original_methods = {}
 
     if hasattr(window, 'animator'):
         # Save original methods
-        original_show_loading = window.animator.show_loading
-        original_update_message = window.animator.update_loading_message
-        original_update_progress = window.animator.update_loading_progress
-        original_hide_loading = window.animator.hide_loading
+        original_methods['show_loading'] = window.animator.show_loading
+        original_methods['update_message'] = window.animator.update_loading_message
+        original_methods['update_progress'] = window.animator.update_loading_progress
+        original_methods['hide_loading'] = window.animator.hide_loading
 
         # Replace with splash update methods
         def splash_show_loading(main_text, sub_text="", show_progress=True):
             if splash:
-                progress = 60  # Start at 60% for scanning
+                progress = 50  # Start at 50% for scanning
                 splash.update_progress(progress, main_text, sub_text)
 
         def splash_update_message(main_text, sub_text=""):
             if splash:
                 # Keep progress advancing during scan
                 current_progress = splash.progress_bar.value()
-                new_progress = min(current_progress + 5, 90)
+                new_progress = min(current_progress + 2, 90)
                 splash.update_progress(new_progress, main_text, sub_text)
 
         def splash_update_progress(value):
             if splash:
-                # Map the progress to 60-90 range
-                mapped_progress = 60 + int(value * 0.3)
+                # Map the progress to 50-90 range
+                mapped_progress = 50 + int(value * 0.4)
                 current_text = splash.main_label.text()
                 current_sub = splash.sub_label.text()
                 splash.update_progress(mapped_progress, current_text, current_sub)
@@ -1182,18 +1192,20 @@ def run_initial_scan_with_splash():
         window.animator.update_loading_progress = splash_update_progress
         window.animator.hide_loading = splash_hide_loading
 
-    # Run the scanner
-    window.run_scanner()
+    def on_scan_complete():
+        """Called when the scanner completes."""
+        # Restore original methods
+        if hasattr(window, 'animator') and original_methods:
+            window.animator.show_loading = original_methods['show_loading']
+            window.animator.update_loading_message = original_methods['update_message']
+            window.animator.update_loading_progress = original_methods['update_progress']
+            window.animator.hide_loading = original_methods['hide_loading']
 
-    # Restore original methods
-    if hasattr(window, 'animator'):
-        window.animator.show_loading = original_show_loading
-        window.animator.update_loading_message = original_update_message
-        window.animator.update_loading_progress = original_update_progress
-        window.animator.hide_loading = original_hide_loading
+        # Scan complete - show window and close splash
+        finish_initialization()
 
-    # Scan complete - show window and close splash
-    finish_initialization()
+    # Run the scanner with completion callback
+    window.run_scanner(on_complete=on_scan_complete)
 
 
 def finish_initialization():
