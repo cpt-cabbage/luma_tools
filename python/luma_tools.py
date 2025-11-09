@@ -1202,18 +1202,34 @@ class LumaShotTools(QtWidgets.QWidget):
 # APPLICATION ENTRY POINT
 # ============================================================================
 
-def initialize_application():
-    """
-    Initialize the application.
-    This function is called after the splash screen is shown.
-    """
-    # Create window
+# Global window reference
+window = None
+
+def create_and_show_window():
+    """Create the main window and show it."""
+    global window
     window = LumaShotTools()
+    window.show()
+
+    # Close splash if it exists
+    if ANIMATIONS_ENABLED and 'splash' in globals():
+        splash.stop_animation()
+        splash.close()
+
+    # Run scanner after window is visible
+    QTimer.singleShot(100, run_initial_scan)
+
+
+def run_initial_scan():
+    """Run the initial directory scan after the window is shown."""
+    global window
+    if window is None:
+        return
 
     # Show loading overlay for initial scan
     if ANIMATIONS_ENABLED:
         window.animator.show_loading(
-            "Initializing Luma Shot Tools",
+            "Scanning Directories",
             "Starting initial scan...",
             show_progress=True
         )
@@ -1228,25 +1244,26 @@ def initialize_application():
     if ANIMATIONS_ENABLED:
         window.animator.hide_loading()
 
-    return window
-
 
 # Show splash screen and initialize
 if ANIMATIONS_ENABLED:
     # Create and show splash screen
     splash = SplashScreen()
     splash.start_animation()
+    splash.update_progress(10, "Initializing Luma Shot Tools", "Loading application...")
     splash.show()
 
     # Process events to ensure splash is visible
     QApplication.processEvents()
 
-    # Run initialization with splash
-    splash.run_with_initialization(initialize_application)
+    # Create window after short delay to ensure splash is visible
+    QTimer.singleShot(200, create_and_show_window)
+
 else:
     # No animations - create window directly
-    window = initialize_application()
+    window = LumaShotTools()
     window.show()
+    QTimer.singleShot(100, run_initial_scan)
 
 # Start event loop
 sys.exit(app.exec_())
