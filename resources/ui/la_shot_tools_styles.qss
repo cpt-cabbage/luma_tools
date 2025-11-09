@@ -252,7 +252,8 @@ QLabel {
 }
 
 QLabel#RenderPath,
-QLabel#MP4RenderPath {
+QLabel#MP4RenderPath,
+QLabel#RePublishRenderPath {
     background-color: rgba(59, 130, 246, 0.08);
     border: 1px solid rgba(59, 130, 246, 0.25);
     border-radius: 7px;
@@ -265,7 +266,8 @@ QLabel#MP4RenderPath {
 
 QLabel#passesHint,
 QLabel#MP4CustomPathLabel,
-QLabel#MP4OutputPath {
+QLabel#MP4OutputPath,
+QLabel#RePublishCustomPathLabel {
     color: #a1a1a1;
     font-style: italic;
     font-size: 10pt;

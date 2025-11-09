@@ -118,6 +118,14 @@ mp4_startframe = 0
 mp4_endframe = 0
 mp4_output_path = ""
 
+# rePublish global variables
+republish_renders = []
+republish_searchpath = ""
+republish_custom_path = ""
+republish_startframe = 0
+republish_endframe = 0
+republish_selected_render = None
+
 # Set up Windows things
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
@@ -229,7 +237,6 @@ class LumaShotTools(QtWidgets.QWidget):
         # MP4 Maker tab
         self.ui.MP4ScanRenders.clicked.connect(self.on_mp4_scan_renders_clicked)
         self.ui.MP4CurrentVer.valueChanged.connect(self.on_mp4_scan_renders_clicked)
-        self.ui.MP4UseDenoised.toggled.connect(self.on_mp4_source_changed)
         self.ui.MP4UseForComp.toggled.connect(self.on_mp4_source_changed)
         self.ui.MP4UseRaw.toggled.connect(self.on_mp4_source_changed)
         self.ui.MP4UseCustom.toggled.connect(self.on_mp4_source_changed)
@@ -237,6 +244,16 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.MP4RendersList.itemSelectionChanged.connect(self.on_mp4_render_selection_changed)
         self.ui.MP4BrowseOutput.clicked.connect(self.on_mp4_browse_output_clicked)
         self.ui.MP4Generate.clicked.connect(self.on_mp4_generate_clicked)
+
+        # rePublish tab
+        self.ui.RePublishScanRenders.clicked.connect(self.on_republish_scan_renders_clicked)
+        self.ui.RePublishCurrentVer.valueChanged.connect(self.on_republish_scan_renders_clicked)
+        self.ui.RePublishUseForComp.toggled.connect(self.on_republish_source_changed)
+        self.ui.RePublishUseRaw.toggled.connect(self.on_republish_source_changed)
+        self.ui.RePublishUseCustom.toggled.connect(self.on_republish_source_changed)
+        self.ui.RePublishBrowseCustomPath.clicked.connect(self.on_republish_browse_custom_path_clicked)
+        self.ui.RePublishRendersList.itemSelectionChanged.connect(self.on_republish_render_selection_changed)
+        self.ui.RePublishPublish.clicked.connect(self.on_republish_publish_clicked)
 
         # Shot Cleaner tab
         self.ui.RescanCleanFiles.clicked.connect(self.run_scanner)
@@ -541,7 +558,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         if custom_dir:
             mp4_custom_path = custom_dir
-            self.ui.MP4CustomPathLabel.setText(mp4_custom_path)
+            self.ui.MP4CustomPathLabel.setText(f"Custom path: {mp4_custom_path}")
             self.ui.MP4CustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
             print(f"MP4 Maker: Custom path set to: {mp4_custom_path}")
 
@@ -569,7 +586,7 @@ class LumaShotTools(QtWidgets.QWidget):
             self.ui.MP4RenderPath.setText(mp4_searchpath)
 
         # Update "For Comp" radio button label with actual subdirectory name
-        self.ui.MP4UseForComp.setText(output_subdirectory.title())
+        self.ui.MP4UseForComp.setText(f"Denoised ({output_subdirectory.title()})")
 
         # Determine which source to scan based on radio buttons
         mp4_renders = []
@@ -577,23 +594,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         print(f"MP4 Maker: Scanning path: {mp4_searchpath}")
 
-        if self.ui.MP4UseDenoised.isChecked():
-            # Check for renders in denoised subdirectory
-            denoised_path = os.path.join(mp4_searchpath, "denoised")
-            print(f"MP4 Maker: Scanning denoised path: {denoised_path}")
-            if os.path.exists(denoised_path):
-                # Use fileseq directly instead of find_renders which hardcodes denoised subdirectory
-                import fileseq
-                search_pattern = os.path.join(denoised_path, "*.exr")
-                print(f"MP4 Maker: Search pattern: {search_pattern}")
-                denoised_renders = list(fileseq.findSequencesOnDisk(search_pattern))
-                print(f"MP4 Maker: Found {len(denoised_renders)} renders in denoised")
-                for render_seq in denoised_renders:
-                    mp4_renders.append(("denoised", render_seq))
-            else:
-                print(f"MP4 Maker: Denoised path does not exist")
-
-        elif self.ui.MP4UseForComp.isChecked():
+        if self.ui.MP4UseForComp.isChecked():
             # Check for renders in for_comp subdirectory
             for_comp_path = os.path.join(mp4_searchpath, output_subdirectory)
             print(f"MP4 Maker: Scanning {output_subdirectory} path: {for_comp_path}")
@@ -834,6 +835,293 @@ class LumaShotTools(QtWidgets.QWidget):
             )
         else:
             self.ui.StatusLabel.setText(f"MP4 generated: {os.path.basename(mp4_output_path)}")
+
+    # ========================================================================
+    # REPUBLISH TAB HANDLERS
+    # ========================================================================
+
+    def on_republish_source_changed(self):
+        """Handle rePublish source type radio button changes."""
+        # Enable/disable custom path browse button
+        is_custom = self.ui.RePublishUseCustom.isChecked()
+        self.ui.RePublishBrowseCustomPath.setEnabled(is_custom)
+
+        # Trigger scan when source changes
+        self.on_republish_scan_renders_clicked()
+
+    def on_republish_browse_custom_path_clicked(self):
+        """Handle custom path browse button click for rePublish."""
+        global republish_custom_path
+
+        # Default to user's Videos folder
+        default_path = os.path.join(os.path.expanduser("~"), "Videos")
+        if not os.path.exists(default_path):
+            default_path = os.path.expanduser("~")
+
+        # Open directory dialog
+        custom_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Custom Render Directory",
+            default_path,
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if custom_dir:
+            republish_custom_path = custom_dir
+            # Update label to show selected path
+            self.ui.RePublishCustomPathLabel.setText(f"Custom path: {custom_dir}")
+            self.ui.RePublishCustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
+
+            # Trigger scan
+            self.on_republish_scan_renders_clicked()
+
+    def on_republish_scan_renders_clicked(self):
+        """Scan for renders to republish based on selected source type."""
+        global republish_renders, republish_searchpath
+        import fileseq
+
+        # Update searchpath with current version
+        current_ver = self.ui.RePublishCurrentVer.value()
+        if republish_searchpath:
+            # Extract base path and replace version number
+            import re
+            # Match patterns like _v001, _v002, etc.
+            republish_searchpath = re.sub(r'_v\d{3}', f'_v{current_ver:03d}', republish_searchpath)
+            self.ui.RePublishRenderPath.setText(republish_searchpath)
+
+        # Update "For Comp" label if output_subdirectory is set
+        if output_subdirectory:
+            self.ui.RePublishUseForComp.setText(f"Denoised ({output_subdirectory.title()})")
+
+        # Clear previous list
+        self.ui.RePublishRendersList.clear()
+        republish_renders = []
+
+        # Determine which source to scan
+        search_path = ""
+        if self.ui.RePublishUseForComp.isChecked():
+            if output_subdirectory:
+                search_path = os.path.join(republish_searchpath, output_subdirectory)
+            else:
+                search_path = republish_searchpath
+        elif self.ui.RePublishUseRaw.isChecked():
+            search_path = republish_searchpath
+        elif self.ui.RePublishUseCustom.isChecked():
+            search_path = republish_custom_path
+
+        if not search_path or not os.path.exists(search_path):
+            self.ui.RePublishStatusLabel.setText("Status: Invalid path")
+            return
+
+        # Find EXR sequences using fileseq
+        try:
+            search_pattern = os.path.join(search_path, "*.exr")
+            sequences = list(fileseq.findSequencesOnDisk(search_pattern))
+
+            for seq in sequences:
+                # Extract subdirectory name if applicable
+                seq_path = str(seq)
+                rel_path = os.path.relpath(os.path.dirname(seq_path), search_path)
+                subdir = rel_path if rel_path != "." else ""
+
+                # Store tuple of (subdir, sequence_object)
+                republish_renders.append((subdir, seq))
+
+                # Display name
+                if subdir and subdir != ".":
+                    display_name = f"{subdir}/{seq.basename()}"
+                else:
+                    display_name = seq.basename()
+
+                self.ui.RePublishRendersList.addItem(display_name)
+
+            # Update status
+            count = len(republish_renders)
+            self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
+
+        except Exception as e:
+            print(f"Error scanning renders for republish: {e}")
+            self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {str(e)}")
+
+    def on_republish_render_selection_changed(self):
+        """Handle render selection in rePublish list."""
+        global republish_startframe, republish_endframe, republish_selected_render
+
+        selected_items = self.ui.RePublishRendersList.selectedItems()
+        if not selected_items:
+            self.ui.RePublishPublish.setEnabled(False)
+            republish_selected_render = None
+            return
+
+        # Get selected index
+        selected_idx = self.ui.RePublishRendersList.currentRow()
+        if selected_idx < 0 or selected_idx >= len(republish_renders):
+            return
+
+        # Get the fileseq object
+        _, seq = republish_renders[selected_idx]  # subdir not needed here
+        republish_selected_render = seq
+
+        # Extract frame range
+        republish_startframe = seq.start()
+        republish_endframe = seq.end()
+
+        # Update status with frame range
+        self.ui.RePublishStatusLabel.setText(
+            f"Status: Selected {seq.basename()}\n"
+            f"Frames: {republish_startframe}-{republish_endframe}"
+        )
+
+        # Auto-populate product name if empty
+        if not self.ui.RePublishProductName.text():
+            # Extract render name from sequence
+            # basename() returns something like "render.####.exr"
+            # We need to extract just "render" part
+            base = seq.basename()
+            # Split by dots and filter out empty strings and hash patterns
+            parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
+            # Take the first part (the actual render name) and remove extension
+            render_name = parts[0] if parts else base.replace("#", "").strip(".")
+            self.ui.RePublishProductName.setText(render_name)
+
+        # Enable publish button
+        self.ui.RePublishPublish.setEnabled(True)
+
+        # Pulse animation if enabled
+        if ANIMATIONS_ENABLED:
+            self.animator.pulse_button(self.ui.RePublishPublish)
+
+    def on_republish_publish_clicked(self):
+        """Handle publish to AYON button click."""
+        global republish_selected_render, republish_startframe, republish_endframe
+
+        if ANIMATIONS_ENABLED:
+            self.animator.animate_button_click(self.ui.RePublishPublish)
+
+        # Validate selection
+        if not republish_selected_render:
+            self.ui.RePublishStatusLabel.setText("Status: No render selected")
+            return
+
+        # Get options
+        task = self.ui.RePublishTask.currentText()
+        use_farm = self.ui.RePublishUseFarm.isChecked()
+        product_name = self.ui.RePublishProductName.text().strip()
+
+        if not product_name:
+            # Extract clean render name from sequence basename
+            base = republish_selected_render.basename()
+            parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
+            product_name = parts[0] if parts else base.replace("#", "").strip(".")
+
+        # Show loading overlay
+        if ANIMATIONS_ENABLED:
+            self.animator.show_loading("Publishing to AYON", "Preparing metadata...")
+
+        try:
+            # Get render path information
+            seq = republish_selected_render
+            first_frame = seq.frame(republish_startframe)
+            render_dir = os.path.dirname(first_frame)
+
+            # Get the base filename pattern for the sequence
+            # fileseq format: basename.####.ext, we need basename.%04d.ext for metadata
+            base_name = seq.basename()
+            frame_padding = len(seq.frameSet().frameRange().split("-")[0])
+            render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
+
+            # Determine folder path from searchpath
+            from ayon_service import convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file
+            from ayon_service import publish_to_ayon_local, submit_ayon_publish_to_deadline
+
+            # Extract project and shot from searchpath
+            folder_path = convert_to_ayon_folder_path(shotpath, jobname)
+
+            # Create metadata
+            metadata = create_ayon_metadata(
+                project_name=jobname,
+                render_name=product_name,
+                start_frame=republish_startframe,
+                end_frame=republish_endframe,
+                renders_path=render_dir,
+                folder_path=folder_path,
+                task=task,
+                user=user,
+                output_subdirectory="",
+                working_dir=WorkingDir,
+                render_file=render_file
+            )
+
+            # Write metadata file to working directory, not render directory
+            metadata_filename = f"ayon_{render_file}_{product_name}.json"
+            metadata_path = os.path.join(WorkingDir, metadata_filename)
+            metadata_path = write_metadata_file(metadata, metadata_path)
+
+            if not metadata_path:
+                raise Exception("Failed to write metadata file")
+
+            if ANIMATIONS_ENABLED:
+                self.animator.update_loading_message("Publishing to AYON",
+                    "Submitting to farm..." if use_farm else "Publishing locally...")
+
+            # Publish
+            if use_farm:
+                # Submit to Deadline
+                job_id = submit_ayon_publish_to_deadline(
+                    metadata_path=metadata_path,
+                    job_name=f"Publish_{product_name}",
+                    priority=50,
+                    pool="",
+                    group="",
+                    dependency_job_id=None
+                )
+
+                if job_id:
+                    success_msg = f"Published to farm!\nJob ID: {job_id}"
+                    self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
+
+                    if ANIMATIONS_ENABLED:
+                        self.animator.hide_loading()
+                        self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
+                    else:
+                        self.ui.StatusLabel.setText(success_msg)
+                else:
+                    raise Exception("Failed to submit to Deadline")
+            else:
+                # Publish locally with correct arguments
+                success = publish_to_ayon_local(
+                    metadata_path,
+                    jobname,  # project_name
+                    folder_path,
+                    task,
+                    user
+                )
+
+                if success:
+                    success_msg = f"Published: {product_name}"
+                    self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
+
+                    if ANIMATIONS_ENABLED:
+                        self.animator.hide_loading()
+                        self.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
+                    else:
+                        self.ui.StatusLabel.setText(success_msg)
+                else:
+                    raise Exception("Local publish failed")
+
+        except Exception as e:
+            error_msg = f"Publish failed: {str(e)}"
+            self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
+
+            if ANIMATIONS_ENABLED:
+                self.animator.hide_loading()
+                self.animator.update_status_animated(error_msg, StatusColors.ERROR)
+            else:
+                self.ui.StatusLabel.setText(error_msg)
+
+            print(f"Publish error: {e}")
+            import traceback
+            traceback.print_exc()
 
     # ========================================================================
     # CLEANUP TAB HANDLERS
@@ -1200,6 +1488,34 @@ class LumaShotTools(QtWidgets.QWidget):
             currentver = get_trailing_number(latestrender)
             self.ui.MP4CurrentVer.setValue(int(currentver))
             self.ui.MP4CurrentVer.setRange(0, int(currentver))
+
+        # ====================================================================
+        # INITIALIZE REPUBLISH TAB
+        # ====================================================================
+        global republish_searchpath
+        if ANIMATIONS_ENABLED:
+            self.animator.update_loading_message(
+                "Initializing rePublish",
+                "Setting up rePublish tab..."
+            )
+            self.animator.update_loading_progress(97)
+
+        # Set rePublish render path to same as pass builder and MP4 maker
+        if RenderDirectory != "":
+            republish_searchpath = searchpath
+            self.ui.RePublishRenderPath.setText(searchpath)
+            currentver = get_trailing_number(latestrender)
+            self.ui.RePublishCurrentVer.setValue(int(currentver))
+            self.ui.RePublishCurrentVer.setRange(0, int(currentver))
+
+            # Set default task to the current task from command line args
+            task_index = self.ui.RePublishTask.findText(task, Qt.MatchFixedString)
+            if task_index >= 0:
+                self.ui.RePublishTask.setCurrentIndex(task_index)
+            else:
+                # If task not found in dropdown, add it and select it
+                self.ui.RePublishTask.addItem(task)
+                self.ui.RePublishTask.setCurrentText(task)
 
         # Final progress
         if ANIMATIONS_ENABLED:
