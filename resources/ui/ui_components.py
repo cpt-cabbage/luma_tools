@@ -716,6 +716,10 @@ class UIAnimations:
         self._animations = []  # Keep references to prevent garbage collection
         self.loading = None  # Loading manager
 
+        # Splash screen redirection (avoids monkey-patching)
+        self.redirect_to_splash = False
+        self.splash_screen = None
+
     def setup_animations(self):
         """Setup all animations for the UI."""
         # Setup button animations
@@ -928,12 +932,19 @@ class UIAnimations:
             submessage: Optional secondary message
             show_progress: Whether to show progress bar
         """
-        if self.loading:
+        # Redirect to splash screen if flag is set
+        if self.redirect_to_splash and self.splash_screen:
+            progress = 50  # Start at 50% for scanning
+            self.splash_screen.update_progress(progress, message, submessage)
+        elif self.loading:
             self.loading.show(message, submessage, show_progress)
 
     def hide_loading(self):
         """Hide loading overlay."""
-        if self.loading:
+        # Don't hide if redirecting to splash (splash handles its own lifecycle)
+        if self.redirect_to_splash and self.splash_screen:
+            pass  # Splash screen will close itself
+        elif self.loading:
             self.loading.hide()
 
     def update_loading_message(self, message, submessage=""):
@@ -944,7 +955,13 @@ class UIAnimations:
             message: New main message
             submessage: New secondary message
         """
-        if self.loading:
+        # Redirect to splash screen if flag is set
+        if self.redirect_to_splash and self.splash_screen:
+            # Keep progress advancing during scan
+            current_progress = self.splash_screen.progress_bar.value()
+            new_progress = min(current_progress + 2, 90)
+            self.splash_screen.update_progress(new_progress, message, submessage)
+        elif self.loading:
             self.loading.update_message(message, submessage)
 
     def update_loading_progress(self, value):
@@ -954,7 +971,14 @@ class UIAnimations:
         Args:
             value: Progress value (0-100)
         """
-        if self.loading:
+        # Redirect to splash screen if flag is set
+        if self.redirect_to_splash and self.splash_screen:
+            # Map the progress to 50-90 range
+            mapped_progress = 50 + int(value * 0.4)
+            current_text = self.splash_screen.main_label.text()
+            current_sub = self.splash_screen.sub_label.text()
+            self.splash_screen.update_progress(mapped_progress, current_text, current_sub)
+        elif self.loading:
             self.loading.update_progress(value)
 
 

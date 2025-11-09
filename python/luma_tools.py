@@ -132,6 +132,8 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Setup animations
         self.animator = enhance_ui(self)
+        self.animator.redirect_to_splash = False  # Flag for splash screen redirection
+        self.animator.splash_screen = None
         print("UI animations enabled")
 
         # Create inline spinner for pass detection
@@ -142,7 +144,10 @@ class LumaShotTools(QtWidgets.QWidget):
         # Initialize scanner
         self.scanner = DirectoryScanner(app_state, self.ui, self.animator)
 
-        # Connect signals
+        # Connect scanner signals for thread-safe GUI updates
+        self._connect_scanner_signals()
+
+        # Connect UI signals
         self._connect_signals()
 
         # Initialize UI state
@@ -176,6 +181,117 @@ class LumaShotTools(QtWidgets.QWidget):
         painter.setBrush(bg_color)
         painter.setPen(QPen(border_color, 2))
         painter.drawRoundedRect(self.rect(), LoadingStyles.BORDER_RADIUS, LoadingStyles.BORDER_RADIUS)
+
+    def _connect_scanner_signals(self):
+        """Connect DirectoryScanner signals to GUI update slots (thread-safe)."""
+        # Text updates
+        self.scanner.signals.set_label_text.connect(self._on_set_label_text)
+
+        # List operations
+        self.scanner.signals.add_list_item.connect(self._on_add_list_item)
+        self.scanner.signals.clear_list.connect(self._on_clear_list)
+        self.scanner.signals.scroll_list_to_bottom.connect(self._on_scroll_list_to_bottom)
+        self.scanner.signals.select_all_items.connect(self._on_select_all_items)
+        self.scanner.signals.deselect_items_matching.connect(self._on_deselect_items_matching)
+
+        # Widget state
+        self.scanner.signals.set_widget_enabled.connect(self._on_set_widget_enabled)
+        self.scanner.signals.set_widget_checked.connect(self._on_set_widget_checked)
+
+        # Spinbox operations
+        self.scanner.signals.set_spinbox_range.connect(self._on_set_spinbox_range)
+        self.scanner.signals.set_spinbox_value.connect(self._on_set_spinbox_value)
+
+        # Combobox operations
+        self.scanner.signals.set_combobox_text.connect(self._on_set_combobox_text)
+
+    @QtCore.Slot(str, str)
+    def _on_set_label_text(self, widget_name, text):
+        """Set text on a label or line edit widget."""
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            widget.setText(text)
+
+    @QtCore.Slot(str, str)
+    def _on_add_list_item(self, list_name, item_text):
+        """Add an item to a list widget."""
+        list_widget = getattr(self.ui, list_name, None)
+        if list_widget:
+            list_widget.addItem(item_text)
+
+    @QtCore.Slot(str)
+    def _on_clear_list(self, list_name):
+        """Clear a list widget."""
+        list_widget = getattr(self.ui, list_name, None)
+        if list_widget:
+            list_widget.clear()
+
+    @QtCore.Slot(str)
+    def _on_scroll_list_to_bottom(self, list_name):
+        """Scroll a list widget to the bottom."""
+        list_widget = getattr(self.ui, list_name, None)
+        if list_widget:
+            list_widget.scrollToBottom()
+
+    @QtCore.Slot(str)
+    def _on_select_all_items(self, list_name):
+        """Select all items in a list widget."""
+        list_widget = getattr(self.ui, list_name, None)
+        if list_widget:
+            list_widget.selectAll()
+
+    @QtCore.Slot(str, str)
+    def _on_deselect_items_matching(self, list_name, text_to_match):
+        """Deselect items matching text in a list widget."""
+        from PySide2.QtCore import Qt
+        list_widget = getattr(self.ui, list_name, None)
+        if list_widget:
+            matching_items = list_widget.findItems(text_to_match, Qt.MatchContains)
+            for item in matching_items:
+                item.setSelected(False)
+
+    @QtCore.Slot(str, bool)
+    def _on_set_widget_enabled(self, widget_name, enabled):
+        """Enable/disable a widget."""
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            widget.setEnabled(enabled)
+
+    @QtCore.Slot(str, bool)
+    def _on_set_widget_checked(self, widget_name, checked):
+        """Set checked state of a widget."""
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            widget.setChecked(checked)
+
+    @QtCore.Slot(str, int, int)
+    def _on_set_spinbox_range(self, widget_name, min_val, max_val):
+        """Set range of a spinbox widget."""
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            widget.setRange(min_val, max_val)
+
+    @QtCore.Slot(str, int)
+    def _on_set_spinbox_value(self, widget_name, value):
+        """Set value of a spinbox widget."""
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            widget.setValue(value)
+
+    @QtCore.Slot(str, str)
+    def _on_set_combobox_text(self, widget_name, text):
+        """Set text/selection of a combobox widget."""
+        from PySide2.QtCore import Qt
+        widget = getattr(self.ui, widget_name, None)
+        if widget:
+            # Try to find and select the item
+            index = widget.findText(text, Qt.MatchFixedString)
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            else:
+                # If not found, add it and select it
+                widget.addItem(text)
+                widget.setCurrentText(text)
 
     def _connect_signals(self):
         """Connect all UI signals to handlers."""
@@ -1163,54 +1279,17 @@ def run_initial_scan_with_splash():
     if window is None:
         return
 
-    # Store original methods for restoration
-    original_methods = {}
-
+    # Enable splash screen redirection using flag-based approach
     if hasattr(window, 'animator'):
-        # Save original methods
-        original_methods['show_loading'] = window.animator.show_loading
-        original_methods['update_message'] = window.animator.update_loading_message
-        original_methods['update_progress'] = window.animator.update_loading_progress
-        original_methods['hide_loading'] = window.animator.hide_loading
-
-        # Replace with splash update methods
-        def splash_show_loading(main_text, sub_text="", show_progress=True):
-            if splash:
-                progress = 50  # Start at 50% for scanning
-                splash.update_progress(progress, main_text, sub_text)
-
-        def splash_update_message(main_text, sub_text=""):
-            if splash:
-                # Keep progress advancing during scan
-                current_progress = splash.progress_bar.value()
-                new_progress = min(current_progress + 2, 90)
-                splash.update_progress(new_progress, main_text, sub_text)
-
-        def splash_update_progress(value):
-            if splash:
-                # Map the progress to 50-90 range
-                mapped_progress = 50 + int(value * 0.4)
-                current_text = splash.main_label.text()
-                current_sub = splash.sub_label.text()
-                splash.update_progress(mapped_progress, current_text, current_sub)
-
-        def splash_hide_loading():
-            pass  # Don't hide, we'll handle it after scan
-
-        # Monkey-patch the animator methods
-        window.animator.show_loading = splash_show_loading
-        window.animator.update_loading_message = splash_update_message
-        window.animator.update_loading_progress = splash_update_progress
-        window.animator.hide_loading = splash_hide_loading
+        window.animator.redirect_to_splash = True
+        window.animator.splash_screen = splash
 
     def on_scan_complete():
         """Called when the scanner completes."""
-        # Restore original methods
-        if hasattr(window, 'animator') and original_methods:
-            window.animator.show_loading = original_methods['show_loading']
-            window.animator.update_loading_message = original_methods['update_message']
-            window.animator.update_loading_progress = original_methods['update_progress']
-            window.animator.hide_loading = original_methods['hide_loading']
+        # Disable splash screen redirection
+        if hasattr(window, 'animator'):
+            window.animator.redirect_to_splash = False
+            window.animator.splash_screen = None
 
         # Scan complete - show window and close splash
         finish_initialization()

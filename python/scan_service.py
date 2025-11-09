@@ -1,4 +1,5 @@
 import os
+from PySide2.QtCore import QObject, Signal
 from utils import get_trailing_number, remove_after, get_folder_size
 from file_operations import (
     fast_scandir,
@@ -11,8 +12,45 @@ from file_operations import (
 )
 
 
+class DirectoryScannerSignals(QObject):
+    """
+    Qt signals for thread-safe communication from scanner to GUI.
+
+    All GUI updates from the scanner worker thread must go through these signals
+    to ensure thread safety. Signals are automatically queued and executed on the
+    main GUI thread.
+    """
+    # Widget text updates: (widget_name, text)
+    set_label_text = Signal(str, str)
+
+    # List widget operations: (list_name, item_text)
+    add_list_item = Signal(str, str)
+    clear_list = Signal(str)
+    scroll_list_to_bottom = Signal(str)
+    select_all_items = Signal(str)
+    deselect_items_matching = Signal(str, str)  # (list_name, text_to_match)
+
+    # Widget enable/disable: (widget_name, enabled)
+    set_widget_enabled = Signal(str, bool)
+
+    # Widget checked state: (widget_name, checked)
+    set_widget_checked = Signal(str, bool)
+
+    # Spin box range/value: (widget_name, min, max, value)
+    set_spinbox_range = Signal(str, int, int)
+    set_spinbox_value = Signal(str, int)
+
+    # Combo box selection: (widget_name, text)
+    set_combobox_text = Signal(str, str)
+
+
 class DirectoryScanner:
-    """Handles directory scanning and file discovery operations."""
+    """
+    Handles directory scanning and file discovery operations.
+
+    Thread-safe: Uses Qt signals for all GUI updates to ensure safe
+    cross-thread communication.
+    """
 
     def __init__(self, state, ui, animator):
         """
@@ -26,6 +64,7 @@ class DirectoryScanner:
         self.state = state
         self.ui = ui
         self.animator = animator
+        self.signals = DirectoryScannerSignals()
 
     def scan_all(self, progress_callback=None):
         """
@@ -105,14 +144,14 @@ class DirectoryScanner:
             try:
                 render_directory = render_folders[0]
                 render_directory = remove_after(render_directory, r"lookdev\img\renders")
-                self.ui.Renderlabel.setText(f'Render Directory Found: {render_directory}')
+                self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
             except:
-                self.ui.RendersList.setEnabled(False)
+                self.signals.set_widget_enabled.emit('RendersList', False)
                 print("No Renders Found!")
         else:
-            self.ui.Renderlabel.setText('Render Directory Not Found!')
-            self.ui.CleanRender.setEnabled(False)
-            self.ui.CleanRender.setChecked(False)
+            self.signals.set_label_text.emit('Renderlabel', 'Render Directory Not Found!')
+            self.signals.set_widget_enabled.emit('CleanRender', False)
+            self.signals.set_widget_checked.emit('CleanRender', False)
 
         return render_directory
 
@@ -139,15 +178,15 @@ class DirectoryScanner:
             try:
                 usd_directory = usd_folders[0]
                 usd_directory = remove_after(usd_directory, r"lookdev\usd_files")
-                self.ui.USDlabel.setText(f'USD Directory Found: {usd_directory}')
+                self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
             except:
                 usd_directory = ""
                 print("No USDs Found!")
         else:
             usd_directory = ""
-            self.ui.USDlabel.setText('USD Directory Not Found!')
-            self.ui.CleanUSD.setEnabled(False)
-            self.ui.CleanUSD.setChecked(False)
+            self.signals.set_label_text.emit('USDlabel', 'USD Directory Not Found!')
+            self.signals.set_widget_enabled.emit('CleanUSD', False)
+            self.signals.set_widget_checked.emit('CleanUSD', False)
 
         return usd_directory
 
@@ -160,7 +199,7 @@ class DirectoryScanner:
         """
         hipfiles = find_hip_files(self.state.lookdev_dir)
         hipcount = len(hipfiles)
-        self.ui.HipNumber.setText(f'Amount of Hipfiles: {hipcount}')
+        self.signals.set_label_text.emit('HipNumber', f'Amount of Hipfiles: {hipcount}')
 
         hip_file = ""
         if hipcount > 0:
@@ -168,9 +207,9 @@ class DirectoryScanner:
             hip_file = hipfiles[0]
             temp = hip_file.rsplit("_", 1)
             hip_file = temp[0]
-            self.ui.HIPlabel.setText(f'HIP Found: {hip_file}')
+            self.signals.set_label_text.emit('HIPlabel', f'HIP Found: {hip_file}')
         else:
-            self.ui.HIPlabel.setText('HIPS Not Found!')
+            self.signals.set_label_text.emit('HIPlabel', 'HIPS Not Found!')
 
         return hip_file
 
@@ -193,13 +232,13 @@ class DirectoryScanner:
             renderdir = sorted(next(os.walk(render_directory))[1])
 
             if len(renderdir) < 2:
-                self.ui.LatestRender.setText("Latest Render: None")
+                self.signals.set_label_text.emit('LatestRender', "Latest Render: None")
 
             for dir_name in renderdir:
                 if hip_file in dir_name:
                     found_render_files.append(dir_name)
-                    self.ui.RendersClean.addItem(str(dir_name))
-                    self.ui.RendersClean.scrollToBottom()
+                    self.signals.add_list_item.emit('RendersClean', str(dir_name))
+                    self.signals.scroll_list_to_bottom.emit('RendersClean')
 
             if found_render_files:
                 # Find the latest version that has renders (not empty)
@@ -215,23 +254,23 @@ class DirectoryScanner:
                 # If we found a version with renders, use it
                 if self.state.latestrender:
                     found_render_files.remove(self.state.latestrender)
-                    self.ui.LatestRender.setText(f"Latest Render: {self.state.latestrender}")
+                    self.signals.set_label_text.emit('LatestRender', f"Latest Render: {self.state.latestrender}")
                     latestver = get_trailing_number(self.state.latestrender)
-                    self.ui.CurrentVer.setRange(0, int(latestver))
+                    self.signals.set_spinbox_range.emit('CurrentVer', 0, int(latestver))
                 else:
                     # No versions have renders - fall back to latest version
                     self.state.latestrender = found_render_files[-1]
                     found_render_files.pop(-1)
-                    self.ui.LatestRender.setText(f"Latest Render: {self.state.latestrender} (empty)")
+                    self.signals.set_label_text.emit('LatestRender', f"Latest Render: {self.state.latestrender} (empty)")
                     latestver = get_trailing_number(self.state.latestrender)
-                    self.ui.CurrentVer.setRange(0, int(latestver))
+                    self.signals.set_spinbox_range.emit('CurrentVer', 0, int(latestver))
 
             # Set render path
             if self.state.latestrender:
                 self.state.searchpath = render_directory + "\\" + self.state.latestrender
-                self.ui.RenderPath.setText(self.state.searchpath)
+                self.signals.set_label_text.emit('RenderPath', self.state.searchpath)
                 currentver = get_trailing_number(self.state.latestrender)
-                self.ui.CurrentVer.setValue(int(currentver))
+                self.signals.set_spinbox_value.emit('CurrentVer', int(currentver))
 
         return found_render_files
 
@@ -248,26 +287,26 @@ class DirectoryScanner:
 
             for dir_name in usddir:
                 found_usd_files.append(dir_name)
-                self.ui.USDSClean.addItem(str(dir_name))
-                self.ui.USDSClean.scrollToBottom()
+                self.signals.add_list_item.emit('USDSClean', str(dir_name))
+                self.signals.scroll_list_to_bottom.emit('USDSClean')
 
             if len(found_usd_files) > 0:
                 latest_usd = found_usd_files[-1]
                 found_usd_files.pop(-1)
-                self.ui.LatestUSD.setText(f"Latest USD: {latest_usd}")
-                self.ui.USDSClean.scrollToBottom()
-                self.ui.CleanFiles.setEnabled(True)
+                self.signals.set_label_text.emit('LatestUSD', f"Latest USD: {latest_usd}")
+                self.signals.scroll_list_to_bottom.emit('USDSClean')
+                self.signals.set_widget_enabled.emit('CleanFiles', True)
             else:
-                self.ui.LatestUSD.setText("Latest USD: None")
+                self.signals.set_label_text.emit('LatestUSD', "Latest USD: None")
 
     def calculate_folder_size(self):
         """Calculate and display total folder size."""
         try:
             total_size = get_folder_size(self.state.lookdev_dir)
-            self.ui.FolderSize.setText(f"Total Size: {str(total_size)}")
+            self.signals.set_label_text.emit('FolderSize', f"Total Size: {str(total_size)}")
         except:
-            self.ui.FolderSize.setText('Error calculating Size')
-            self.ui.StatusLabel.setText('Error calculating Size')
+            self.signals.set_label_text.emit('FolderSize', 'Error calculating Size')
+            self.signals.set_label_text.emit('StatusLabel', 'Error calculating Size')
 
     def scan_comp_files(self, hip_file):
         """
@@ -295,7 +334,7 @@ class DirectoryScanner:
                 comp_directory = remove_after(comp_directory, r"\Compositing" + "\\")
                 comps = sorted(find_comp_files(comp_directory))
                 latestcomp = comps[-1]
-                self.ui.Complabel.setText(f'Latest Comp Found: {comp_directory + latestcomp}')
+                self.signals.set_label_text.emit('Complabel', f'Latest Comp Found: {comp_directory + latestcomp}')
 
                 # Read comp file and deselect renders in use
                 renders_in_comp = read_comp_file(comp_directory + latestcomp, hip_file)
@@ -303,7 +342,7 @@ class DirectoryScanner:
             except:
                 print("No Comp Dir Found!")
         else:
-            self.ui.Complabel.setText('Comp Directory Not Found!')
+            self.signals.set_label_text.emit('Complabel', 'Comp Directory Not Found!')
 
     def initialize_mp4_maker(self, render_directory):
         """
@@ -314,10 +353,10 @@ class DirectoryScanner:
         """
         if render_directory != "" and self.state.latestrender:
             searchpath = render_directory + "\\" + self.state.latestrender
-            self.ui.MP4RenderPath.setText(searchpath)
+            self.signals.set_label_text.emit('MP4RenderPath', searchpath)
             currentver = get_trailing_number(self.state.latestrender)
-            self.ui.MP4CurrentVer.setValue(int(currentver))
-            self.ui.MP4CurrentVer.setRange(0, int(currentver))
+            self.signals.set_spinbox_value.emit('MP4CurrentVer', int(currentver))
+            self.signals.set_spinbox_range.emit('MP4CurrentVer', 0, int(currentver))
 
     def initialize_republish(self, render_directory):
         """
@@ -329,20 +368,13 @@ class DirectoryScanner:
         if render_directory != "" and self.state.latestrender:
             searchpath = render_directory + "\\" + self.state.latestrender
             self.state.republish_searchpath = searchpath
-            self.ui.RePublishRenderPath.setText(searchpath)
+            self.signals.set_label_text.emit('RePublishRenderPath', searchpath)
             currentver = get_trailing_number(self.state.latestrender)
-            self.ui.RePublishCurrentVer.setValue(int(currentver))
-            self.ui.RePublishCurrentVer.setRange(0, int(currentver))
+            self.signals.set_spinbox_value.emit('RePublishCurrentVer', int(currentver))
+            self.signals.set_spinbox_range.emit('RePublishCurrentVer', 0, int(currentver))
 
             # Set default task to the current task from command line args
-            from PySide2.QtCore import Qt
-            task_index = self.ui.RePublishTask.findText(self.state.task, Qt.MatchFixedString)
-            if task_index >= 0:
-                self.ui.RePublishTask.setCurrentIndex(task_index)
-            else:
-                # If task not found in dropdown, add it and select it
-                self.ui.RePublishTask.addItem(self.state.task)
-                self.ui.RePublishTask.setCurrentText(self.state.task)
+            self.signals.set_combobox_text.emit('RePublishTask', self.state.task)
 
     def _deselect_renders_in_comp(self, renders_in_comp):
         """
@@ -351,15 +383,12 @@ class DirectoryScanner:
         Args:
             renders_in_comp: List of render names used in comp
         """
-        from PySide2.QtCore import Qt
-        self.ui.RendersClean.selectAll()
-        self.ui.USDSClean.selectAll()
+        self.signals.select_all_items.emit('RendersClean')
+        self.signals.select_all_items.emit('USDSClean')
 
         if renders_in_comp:
             for render_name in renders_in_comp:
-                matching_items = self.ui.RendersClean.findItems(render_name, Qt.MatchContains)
-                for item in matching_items:
-                    item.setSelected(False)
+                self.signals.deselect_items_matching.emit('RendersClean', render_name)
 
     def _update_progress(self, progress, main_text, sub_text=""):
         """
