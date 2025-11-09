@@ -1,15 +1,113 @@
 import os
 import math
+import traceback
 from PySide2.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize,
     QRectF, Signal, QObject, QRect, QSequentialAnimationGroup,
-    QParallelAnimationGroup, QFile, QTextStream
+    QParallelAnimationGroup, QFile, QTextStream, QThread, QRunnable,
+    QThreadPool, Slot
 )
 from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
     QApplication
 )
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
+
+
+# ============================================================================
+# THREADING UTILITIES - QThread Workers for Background Operations
+# ============================================================================
+
+class WorkerSignals(QObject):
+    """
+    Defines the signals available from a running worker thread.
+
+    Signals:
+        started: Emitted when the worker starts
+        finished: Emitted when the worker finishes successfully
+        error: Emitted when an error occurs (str: error message, str: traceback)
+        result: Emitted with the result of the operation (object: result)
+        progress: Emitted with progress updates (int: percentage, str: message)
+    """
+    started = Signal()
+    finished = Signal()
+    error = Signal(str, str)  # error message, traceback
+    result = Signal(object)   # result data
+    progress = Signal(int, str)  # progress percentage, message
+
+
+class Worker(QRunnable):
+    """
+    Generic worker thread for running functions in the background.
+
+    This prevents blocking the GUI thread and keeps spinners smooth.
+
+    Usage:
+        worker = Worker(some_function, arg1, arg2, kwarg1=value1)
+        worker.signals.result.connect(handle_result)
+        worker.signals.error.connect(handle_error)
+        worker.signals.progress.connect(update_progress)
+        QThreadPool.globalInstance().start(worker)
+    """
+
+    def __init__(self, fn, *args, **kwargs):
+        """
+        Initialize the worker.
+
+        Args:
+            fn: The function to run in the background
+            *args: Positional arguments to pass to the function
+            **kwargs: Keyword arguments to pass to the function
+                     Note: 'progress_callback' kwarg will be replaced with signal emitter
+        """
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+        # Replace progress_callback with signal emitter if present
+        if 'progress_callback' in self.kwargs:
+            del self.kwargs['progress_callback']
+        self.kwargs['progress_callback'] = self.signals.progress.emit
+
+    @Slot()
+    def run(self):
+        """
+        Execute the worker function with error handling.
+        """
+        try:
+            self.signals.started.emit()
+            result = self.fn(*self.args, **self.kwargs)
+            self.signals.result.emit(result)
+            self.signals.finished.emit()
+        except Exception as e:
+            error_msg = str(e)
+            tb = traceback.format_exc()
+            self.signals.error.emit(error_msg, tb)
+            print(f"Worker error: {error_msg}")
+            print(tb)
+
+
+class ThreadedOperation(QObject):
+    """
+    Helper class to manage threaded operations with proper cleanup.
+
+    Usage:
+        operation = ThreadedOperation(function, arg1, arg2)
+        operation.signals.result.connect(handle_result)
+        operation.signals.error.connect(handle_error)
+        operation.start()
+    """
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.worker = Worker(fn, *args, **kwargs)
+        self.signals = self.worker.signals
+
+    def start(self):
+        """Start the operation on a background thread."""
+        QThreadPool.globalInstance().start(self.worker)
 
 
 # ============================================================================
@@ -175,24 +273,13 @@ class SpinnerWidget(QWidget):
         self.line_width = LoadingStyles.SPINNER_LINE_WIDTH
         self.inner_radius = LoadingStyles.SPINNER_INNER_RADIUS
 
-        # Event processing timer to keep UI responsive during blocking operations
-        self.event_timer = QTimer(self)
-        self.event_timer.timeout.connect(self._process_events)
-
-    def _process_events(self):
-        """Process Qt events to keep the UI responsive."""
-        QApplication.processEvents()
-
     def start(self):
         """Start the spinner animation."""
         self.timer.start(LoadingStyles.SPINNER_ROTATION_INTERVAL)
-        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
-        self.event_timer.start(16)
 
     def stop(self):
         """Stop the spinner animation."""
         self.timer.stop()
-        self.event_timer.stop()
 
     def rotate(self):
         """Rotate the spinner."""
@@ -253,24 +340,13 @@ class PulsingDotsWidget(QWidget):
         self.dot_radius = 8
         self.dot_spacing = 20
 
-        # Event processing timer to keep UI responsive during blocking operations
-        self.event_timer = QTimer(self)
-        self.event_timer.timeout.connect(self._process_events)
-
-    def _process_events(self):
-        """Process Qt events to keep the UI responsive."""
-        QApplication.processEvents()
-
     def start(self):
         """Start the pulsing animation."""
         self.timer.start(400)  # Pulse every 400ms
-        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
-        self.event_timer.start(16)
 
     def stop(self):
         """Stop the pulsing animation."""
         self.timer.stop()
-        self.event_timer.stop()
 
     def pulse(self):
         """Move to next dot."""
@@ -333,28 +409,17 @@ class InlineSpinner(QWidget):
         self.line_width = max(2, int(size * 0.08))
         self.inner_radius = int(size * 0.15)
 
-        # Event processing timer to keep UI responsive during blocking operations
-        self.event_timer = QTimer(self)
-        self.event_timer.timeout.connect(self._process_events)
-
         # Start hidden
         self.hide()
-
-    def _process_events(self):
-        """Process Qt events to keep the UI responsive."""
-        QApplication.processEvents()
 
     def start(self):
         """Start the spinner animation and show."""
         self.show()
         self.timer.start(80)  # Faster rotation for smaller spinner
-        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
-        self.event_timer.start(16)
 
     def stop(self):
         """Stop the spinner animation and hide."""
         self.timer.stop()
-        self.event_timer.stop()
         self.hide()
 
     def rotate(self):

@@ -1,9 +1,9 @@
-from PySide2.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve
+from PySide2.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QThreadPool
 from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
 import os
-from ui_components import LoadingStyles
+from ui_components import LoadingStyles, Worker
 
 
 class SpinnerWidget(QWidget):
@@ -32,25 +32,13 @@ class SpinnerWidget(QWidget):
         self.line_width = LoadingStyles.SPINNER_LINE_WIDTH
         self.inner_radius = LoadingStyles.SPINNER_INNER_RADIUS
 
-        # Event processing timer to keep UI responsive during blocking operations
-        self.event_timer = QTimer(self)
-        self.event_timer.timeout.connect(self._process_events)
-
-    def _process_events(self):
-        """Process Qt events to keep the UI responsive."""
-        from PySide2.QtWidgets import QApplication
-        QApplication.processEvents()
-
     def start(self):
         """Start the spinner animation."""
         self.timer.start(LoadingStyles.SPINNER_ROTATION_INTERVAL)
-        # Start event processing timer at higher frequency (every 16ms ~= 60 FPS)
-        self.event_timer.start(16)
 
     def stop(self):
         """Stop the spinner animation."""
         self.timer.stop()
-        self.event_timer.stop()
 
     def rotate(self):
         """Rotate the spinner."""
@@ -244,41 +232,44 @@ class SplashScreen(QWidget):
 
     def run_with_initialization(self, init_callback):
         """
-        Show splash and run initialization callback using QTimer.
-        This keeps the splash responsive while initialization happens.
+        Show splash and run initialization callback on a background thread.
+        This keeps the splash spinner smooth while initialization happens.
 
         Args:
-            init_callback: A function that will be called after the splash is shown.
+            init_callback: A function that will be called on a background thread.
                           Should return the main window.
         """
         from PySide2.QtCore import QTimer
-        from PySide2.QtWidgets import QApplication
 
-        def do_init():
-            """Perform initialization."""
-            try:
-                # Update progress
-                self.update_progress(30, "Initializing Luma Shot Tools", "Creating main window...")
-                QApplication.processEvents()
+        def progress_update(progress, message):
+            """Update progress from worker thread."""
+            if progress <= 30:
+                self.update_progress(progress, "Initializing Luma Shot Tools", message)
+            elif progress <= 90:
+                self.update_progress(progress, "Initializing Luma Shot Tools", message)
+            else:
+                self.update_progress(progress, "Initializing Luma Shot Tools", "Almost ready...")
 
-                # Call the initialization callback
-                window = init_callback()
+        def on_result(window):
+            """Called when initialization completes successfully."""
+            self.update_progress(100, "Initializing Luma Shot Tools", "Ready!")
+            # Small delay before closing splash
+            QTimer.singleShot(300, lambda: self._finish_initialization(window))
 
-                # Update progress
-                self.update_progress(90, "Initializing Luma Shot Tools", "Almost ready...")
-                QApplication.processEvents()
+        def on_error(error_msg, traceback_str):
+            """Called when initialization fails."""
+            print(f"Error during initialization: {error_msg}")
+            print(traceback_str)
+            self.close()
 
-                # Close splash and show window
-                QTimer.singleShot(500, lambda: self._finish_initialization(window))
+        # Create worker for initialization
+        worker = Worker(init_callback)
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        worker.signals.progress.connect(progress_update)
 
-            except Exception as e:
-                print(f"Error during initialization: {e}")
-                import traceback
-                traceback.print_exc()
-                self.close()
-
-        # Start initialization after a short delay to ensure splash is visible
-        QTimer.singleShot(100, do_init)
+        # Start worker after a short delay to ensure splash is visible
+        QTimer.singleShot(100, lambda: QThreadPool.globalInstance().start(worker))
 
     def _finish_initialization(self, window):
         """Finish initialization and show the main window."""

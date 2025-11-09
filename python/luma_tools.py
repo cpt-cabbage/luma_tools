@@ -25,6 +25,7 @@ from PySide2 import QtCore, QtUiTools, QtWidgets
 from PySide2.QtCore import *
 from PySide2.QtGui import *
 from PySide2.QtWidgets import *
+from PySide2.QtCore import QThreadPool
 
 # Import our modular services
 from config import UI_FILE_PATH, ICON_PATH, APP_ID, APP_TITLE
@@ -41,7 +42,7 @@ from pass_builder import pass_builder
 from mp4_maker import generate_mp4, get_output_filename
 
 # Import animation and loading modules
-from ui_components import enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles
+from ui_components import enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles, Worker
 from splash_screen import SplashScreen
 
 # Import new modular services
@@ -216,7 +217,6 @@ class LumaShotTools(QtWidgets.QWidget):
     def set_progress_val(self, val):
         """Update progress bar value."""
         self.ui.progressBar.setValue(val)
-        QApplication.processEvents()
 
     @QtCore.Slot(str)
     def append_log(self, message):
@@ -285,30 +285,42 @@ class LumaShotTools(QtWidgets.QWidget):
         self._select_saved_passes(app_state.passesfile)
 
     def _detect_passes(self, render_file):
-        """Detect passes in render file with spinner animation."""
+        """Detect passes in render file with spinner animation - runs on background thread."""
         self.ui.Passes.clear()
 
         # Show inline spinner
         self.passes_spinner.start()
 
-        QApplication.processEvents()
+        def on_result(channels):
+            """Called when pass detection completes."""
+            # Hide spinner
+            self.passes_spinner.stop()
 
-        # Detect passes using service
-        app_state.channels = detect_passes(render_file)
+            # Store channels
+            app_state.channels = channels
 
-        # Hide spinner
-        self.passes_spinner.stop()
+            # Add passes to list
+            for key in channels.keys():
+                self.ui.Passes.addItem(key)
 
-        # Add passes to list
-        for key in app_state.channels.keys():
-            self.ui.Passes.addItem(key)
+            # Enable build button
+            if len(channels) >= 1:
+                self.ui.BuildPasses.setEnabled(True)
+                self.animator.pulse_button(self.ui.BuildPasses)
+            else:
+                self.ui.BuildPasses.setEnabled(False)
 
-        # Enable build button
-        if len(app_state.channels) >= 1:
-            self.ui.BuildPasses.setEnabled(True)
-            self.animator.pulse_button(self.ui.BuildPasses)
-        else:
+        def on_error(error_msg, traceback_str):
+            """Called when pass detection fails."""
+            self.passes_spinner.stop()
+            print(f"Pass detection error: {error_msg}")
             self.ui.BuildPasses.setEnabled(False)
+
+        # Create worker and run on background thread
+        worker = Worker(detect_passes, render_file)
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        QThreadPool.globalInstance().start(worker)
 
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
@@ -324,111 +336,89 @@ class LumaShotTools(QtWidgets.QWidget):
     # ========================================================================
 
     def on_build_passes_clicked(self):
-        """Build render files with selected passes."""
+        """Build render files with selected passes - runs on background thread."""
         # Determine build type for UI messages
         use_farm = (self.ui.BuildType.currentIndex() == 1)
         main_title = "Submitting Render Passes" if use_farm else "Building Render Passes"
 
-        # Show loading overlay IMMEDIATELY
-        QApplication.processEvents()
-        window.repaint()
-        window.animator.show_loading(
+        # Show loading overlay
+        self.animator.show_loading(
             main_title,
             "Preparing to build...",
             show_progress=True
         )
-        # Force immediate UI update
-        QApplication.processEvents()
-        window.repaint()
 
-        # Add click animation after overlay is shown
+        # Add click animation
         self.animator.animate_button_click(self.ui.BuildPasses)
-        QApplication.processEvents()
-        window.repaint()
 
-        try:
-            # Phase 1: Collect selected passes
-            self.animator.update_loading_message(
-                main_title,
-                "Collecting selected passes..."
-            )
-            self.animator.update_loading_progress(5)
-            QApplication.processEvents()
-            window.repaint()
+        # Collect selected passes on main thread (UI access)
+        channellist = []
+        for item in self.ui.Passes.selectedItems():
+            channellist.append(item.text())
 
-            channellist = []
-            for item in self.ui.Passes.selectedItems():
-                channellist.append(item.text())
+        final_channels = dict((k, app_state.channels[k]) for k in channellist if k in app_state.channels)
 
-            final_channels = dict((k, app_state.channels[k]) for k in channellist if k in app_state.channels)
+        # Write pass configuration (quick operation, can stay on main thread)
+        self.animator.update_loading_message(
+            main_title,
+            "Writing pass configuration file..."
+        )
+        self.animator.update_loading_progress(15)
+        self._write_pass_config(final_channels)
 
-            # Phase 2: Write pass configuration
-            self.animator.update_loading_message(
-                main_title,
-                "Writing pass configuration file..."
-            )
-            self.animator.update_loading_progress(15)
-            QApplication.processEvents()
-            window.repaint()
+        # Prepare build parameters
+        build_location = "farm" if use_farm else "local"
+        action_text = "Submitting to" if use_farm else "Building on"
 
-            self._write_pass_config(final_channels)
+        self.animator.update_loading_message(
+            main_title,
+            f"{action_text} {build_location}..."
+        )
+        self.animator.update_loading_progress(25)
 
-            # Phase 3: Submit to farm or build locally
-            build_location = "farm" if use_farm else "local"
-            action_text = "Submitting to" if use_farm else "Building on"
+        def on_progress(progress, message):
+            """Update UI with build progress."""
+            progress_title = "Submitting To Deadline" if use_farm else "Building EXRs"
+            self.animator.update_loading_message(progress_title, message)
+            self.animator.update_loading_progress(progress)
 
-            self.animator.update_loading_message(
-                main_title,
-                f"{action_text} {build_location}..."
-            )
-            self.animator.update_loading_progress(25)
-            QApplication.processEvents()
-            window.repaint()
-
-            # Execute build with progress callback
-
-            pass_builder.build_passes(
-                passes_file=app_state.passesfile,
-                renders_path=app_state.searchpath,
-                start_frame=app_state.startframe,
-                end_frame=app_state.endframe,
-                use_farm=use_farm,
-                project_name=app_state.jobname,
-                shot=app_state.shot,
-                parent_job_id="NONE",
-                task=app_state.task,
-                user=app_state.user,
-                output_subdirectory=app_state.output_subdirectory,
-                do_publish=True,
-                progress_callback=self._build_progress_callback
-            )
-
-            # Phase 4: Complete
-            self.animator.update_loading_message(
-                main_title,
-                "Build complete!"
-            )
+        def on_result(result):
+            """Called when build completes successfully."""
+            self.animator.update_loading_message(main_title, "Build complete!")
             self.animator.update_loading_progress(100)
-            QApplication.processEvents()
-
             # Small delay to show completion
             QTimer.singleShot(500, lambda: self._finish_build_success(use_farm))
 
-        except Exception as e:
-            # Handle errors
+        def on_error(error_msg, traceback_str):
+            """Called when build fails."""
             self.animator.hide_loading()
             self.animator.update_status_animated(
-                f"Build failed: {str(e)}",
+                f"Build failed: {error_msg}",
                 StatusColors.ERROR
             )
-            print(f"Build error: {e}")
+            print(f"Build error: {error_msg}")
+            print(traceback_str)
 
-    def _build_progress_callback(self, progress, message):
-        """Callback for build progress updates from pass_builder."""
-        use_farm = (self.ui.BuildType.currentIndex() == 1)
-        main_title = "Submitting To Deadline" if use_farm else "Building EXRs"
-        self.animator.update_loading_message(main_title, message)
-        self.animator.update_loading_progress(progress)
+        # Create worker and run build on background thread
+        worker = Worker(
+            pass_builder.build_passes,
+            passes_file=app_state.passesfile,
+            renders_path=app_state.searchpath,
+            start_frame=app_state.startframe,
+            end_frame=app_state.endframe,
+            use_farm=use_farm,
+            project_name=app_state.jobname,
+            shot=app_state.shot,
+            parent_job_id="NONE",
+            task=app_state.task,
+            user=app_state.user,
+            output_subdirectory=app_state.output_subdirectory,
+            do_publish=True
+        )
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        worker.signals.progress.connect(on_progress)
+        QThreadPool.globalInstance().start(worker)
 
     def _write_pass_config(self, passes_dictionary):
         """Write pass configuration to file."""
@@ -644,97 +634,107 @@ class LumaShotTools(QtWidgets.QWidget):
                 self.animator.pulse_button(self.ui.MP4Generate)
 
     def on_mp4_generate_clicked(self):
-        """Generate MP4 from selected render."""
+        """Generate MP4 from selected render - runs on background thread."""
         # Show loading overlay
-        window.animator.show_loading(
+        self.animator.show_loading(
             "Generating MP4",
             "Preparing to convert...",
             show_progress=True
         )
-        QApplication.processEvents()
-        window.repaint()
         self.animator.animate_button_click(self.ui.MP4Generate)
-        QApplication.processEvents()
 
-        try:
-            # Get selected render
-            sel0 = self.ui.MP4RendersList.currentRow()
-            if sel0 < 0 or sel0 >= len(app_state.mp4_renders):
-                raise ValueError("No render selected")
-
-            # Phase 1: Get render info
-            self.animator.update_loading_message(
-                "Generating MP4",
-                "Analyzing render sequence..."
+        # Get selected render (UI access on main thread)
+        sel0 = self.ui.MP4RendersList.currentRow()
+        if sel0 < 0 or sel0 >= len(app_state.mp4_renders):
+            self.animator.hide_loading()
+            self.animator.update_status_animated(
+                "No render selected",
+                StatusColors.ERROR
             )
-            self.animator.update_loading_progress(5)
-            QApplication.processEvents()
+            return
 
-            # mp4_renders is now a list of tuples: (subdir, render_seq)
-            subdir, render_seq = app_state.mp4_renders[sel0]
-            framename = render_seq.frame(app_state.mp4_startframe)
+        # Get render info
+        self.animator.update_loading_message(
+            "Generating MP4",
+            "Analyzing render sequence..."
+        )
+        self.animator.update_loading_progress(5)
 
-            # Build input pattern for ffmpeg
-            # Convert from fileseq format to ffmpeg format
-            base_dir = os.path.dirname(framename)
-            base_filename = os.path.basename(framename)
-            # Replace frame number with ffmpeg pattern
-            parts = base_filename.split(".")
-            if len(parts) >= 3:
-                # Format: name.####.exr
-                input_pattern = os.path.join(base_dir, f"{parts[0]}.%04d.exr")
-            else:
-                raise ValueError(f"Unexpected filename format: {base_filename}")
+        # mp4_renders is now a list of tuples: (subdir, render_seq)
+        subdir, render_seq = app_state.mp4_renders[sel0]
+        framename = render_seq.frame(app_state.mp4_startframe)
 
-            # Phase 2: Get settings
-            self.animator.update_loading_message(
-                "Generating MP4",
-                "Configuring conversion settings..."
+        # Build input pattern for ffmpeg
+        base_dir = os.path.dirname(framename)
+        base_filename = os.path.basename(framename)
+        parts = base_filename.split(".")
+        if len(parts) < 3:
+            self.animator.hide_loading()
+            self.animator.update_status_animated(
+                f"Unexpected filename format: {base_filename}",
+                StatusColors.ERROR
             )
-            self.animator.update_loading_progress(8)
-            QApplication.processEvents()
+            return
 
-            quality_index = self.ui.MP4Quality.currentIndex()
-            burn_in_timecode = self.ui.MP4BurnInTimecode.isChecked()
+        # Format: name.####.exr
+        input_pattern = os.path.join(base_dir, f"{parts[0]}.%04d.exr")
 
-            # Phase 3: Generate MP4
-            success = generate_mp4(
-                input_pattern,
-                app_state.mp4_output_path,
-                app_state.mp4_startframe,
-                app_state.mp4_endframe,
-                quality_index=quality_index,
-                burn_in_timecode=burn_in_timecode,
-                progress_callback=self._mp4_progress_callback
-            )
+        # Get settings
+        self.animator.update_loading_message(
+            "Generating MP4",
+            "Configuring conversion settings..."
+        )
+        self.animator.update_loading_progress(8)
 
-            # Phase 4: Complete
+        quality_index = self.ui.MP4Quality.currentIndex()
+        burn_in_timecode = self.ui.MP4BurnInTimecode.isChecked()
+
+        def on_progress(progress, message):
+            """Update UI with MP4 generation progress."""
+            self.animator.update_loading_message("Generating MP4", message)
+            self.animator.update_loading_progress(progress)
+
+        def on_result(success):
+            """Called when MP4 generation completes."""
             if success:
                 self.animator.update_loading_message(
                     "Generating MP4",
                     "MP4 generation complete!"
                 )
                 self.animator.update_loading_progress(100)
-                QApplication.processEvents()
-
                 # Small delay to show completion
                 QTimer.singleShot(500, lambda: self._finish_mp4_success())
             else:
-                raise RuntimeError("MP4 generation failed")
+                self.animator.hide_loading()
+                self.animator.update_status_animated(
+                    "MP4 generation failed",
+                    StatusColors.ERROR
+                )
 
-        except Exception as e:
-            # Handle errors
+        def on_error(error_msg, traceback_str):
+            """Called when MP4 generation fails."""
             self.animator.hide_loading()
             self.animator.update_status_animated(
-                f"MP4 generation failed: {str(e)}",
+                f"MP4 generation failed: {error_msg}",
                 StatusColors.ERROR
             )
-            print(f"MP4 generation error: {e}")
+            print(f"MP4 generation error: {error_msg}")
+            print(traceback_str)
 
-    def _mp4_progress_callback(self, progress, message):
-        """Callback for MP4 generation progress updates."""
-        self.animator.update_loading_message("Generating MP4", message)
-        self.animator.update_loading_progress(progress)
+        # Create worker and run MP4 generation on background thread
+        worker = Worker(
+            generate_mp4,
+            input_pattern,
+            app_state.mp4_output_path,
+            app_state.mp4_startframe,
+            app_state.mp4_endframe,
+            quality_index=quality_index,
+            burn_in_timecode=burn_in_timecode
+        )
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        worker.signals.progress.connect(on_progress)
+        QThreadPool.globalInstance().start(worker)
 
     def _finish_mp4_success(self):
         """Called after successful MP4 generation to show completion message."""
@@ -1028,7 +1028,6 @@ class LumaShotTools(QtWidgets.QWidget):
                     self.animator.update_status_animated(status_msg, StatusColors.WARNING)
                     print(status_msg)
                     self.change_val.emit(int(count / len(render_dirs) * 100))
-                    QApplication.processEvents()
 
                 cleanup_renders(app_state.lookdev_dir, render_dirs)
 
@@ -1042,7 +1041,6 @@ class LumaShotTools(QtWidgets.QWidget):
                     self.change_val.emit(int(count / len(usd_dirs) * 100))
                     status_msg = f"Removing USDs: {app_state.lookdev_dir}\\usd_files\\{dir_name}"
                     self.animator.update_status_animated(status_msg, StatusColors.WARNING)
-                    QApplication.processEvents()
                     print(status_msg)
 
                 cleanup_usd(app_state.lookdev_dir, usd_dirs)
@@ -1054,7 +1052,6 @@ class LumaShotTools(QtWidgets.QWidget):
             self.animator.update_status_animated(status_msg, StatusColors.WARNING)
             cleanup_hip_backups(app_state.lookdev_dir)
             self.change_val.emit(100)
-            QApplication.processEvents()
 
         # Final status
         self.animator.update_status_animated("Cleanup Done", StatusColors.SUCCESS)
@@ -1065,21 +1062,35 @@ class LumaShotTools(QtWidgets.QWidget):
     # ========================================================================
 
     def run_scanner(self):
-        """Scan directories for renders, USD, HIP files, and comps using scan_service."""
+        """Scan directories for renders, USD, HIP files, and comps - runs on background thread."""
         # Clear UI elements
         self.ui.CleanFiles.setEnabled(False)
         self.ui.USDSClean.clear()
         self.ui.RendersClean.clear()
 
-        # Delegate to scanner service
-        self.scanner.scan_all()
+        def on_result(result):
+            """Called when scanning completes."""
+            # Scan for renders in the current path
+            try:
+                self.on_scan_renders_clicked()
+            except:
+                self.ui.LatestRender.setText("Latest Render: None")
+                self.ui.StatusLabel.setText('Cant find any renders')
 
-        # Scan for renders in the current path
-        try:
-            self.on_scan_renders_clicked()
-        except:
-            self.ui.LatestRender.setText("Latest Render: None")
-            self.ui.StatusLabel.setText('Cant find any renders')
+            # Hide loading overlay
+            self.animator.hide_loading()
+
+        def on_error(error_msg, traceback_str):
+            """Called when scanning fails."""
+            self.animator.hide_loading()
+            print(f"Scanner error: {error_msg}")
+            print(traceback_str)
+
+        # Create worker and run scan on background thread
+        worker = Worker(self.scanner.scan_all)
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        QThreadPool.globalInstance().start(worker)
 
     def _deselect_renders_in_comp(self, renders_in_comp):
         """Deselect renders that are in use by comp files."""
@@ -1109,7 +1120,6 @@ def create_window_and_scan():
     # Update splash progress
     if splash:
         splash.update_progress(30, "Initializing Luma Shot Tools", "Creating main window...")
-        QApplication.processEvents()
 
     # Create window but don't show it yet
     window = LumaShotTools()
@@ -1117,7 +1127,6 @@ def create_window_and_scan():
     # Update splash progress
     if splash:
         splash.update_progress(50, "Initializing Luma Shot Tools", "Starting initial scan...")
-        QApplication.processEvents()
 
     # Schedule the scanner to run
     QTimer.singleShot(100, run_initial_scan_with_splash)
@@ -1148,7 +1157,6 @@ def run_initial_scan_with_splash():
             if splash:
                 progress = 60  # Start at 60% for scanning
                 splash.update_progress(progress, main_text, sub_text)
-                QApplication.processEvents()
 
         def splash_update_message(main_text, sub_text=""):
             if splash:
@@ -1156,7 +1164,6 @@ def run_initial_scan_with_splash():
                 current_progress = splash.progress_bar.value()
                 new_progress = min(current_progress + 5, 90)
                 splash.update_progress(new_progress, main_text, sub_text)
-                QApplication.processEvents()
 
         def splash_update_progress(value):
             if splash:
@@ -1165,7 +1172,6 @@ def run_initial_scan_with_splash():
                 current_text = splash.main_label.text()
                 current_sub = splash.sub_label.text()
                 splash.update_progress(mapped_progress, current_text, current_sub)
-                QApplication.processEvents()
 
         def splash_hide_loading():
             pass  # Don't hide, we'll handle it after scan
@@ -1196,7 +1202,6 @@ def finish_initialization():
 
     if splash:
         splash.update_progress(100, "Initialization Complete", "Opening application...")
-        QApplication.processEvents()
 
     # Small delay to show completion
     QTimer.singleShot(300, show_window_and_close_splash)
