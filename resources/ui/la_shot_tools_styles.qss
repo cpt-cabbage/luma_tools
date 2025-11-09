@@ -47,7 +47,7 @@ QTabBar {
 }
 
 QTabBar::tab {
-    background-color: transparent;
+    background-color: #000000ff;
     color: #a1a1a1;
     padding: 24px 40px;
     margin-right: 0px;
@@ -65,9 +65,9 @@ QTabBar::tab:hover {
 }
 
 QTabBar::tab:selected {
-    background-color: transparent;
-    color: #3b82f6;
-    border-bottom: 3px solid #3b82f6;
+    background-color: #000000ff;
+    color: #000000ff;
+    border-bottom: 3px solid #ffffffff;
 }
 
 /* ============================================================================

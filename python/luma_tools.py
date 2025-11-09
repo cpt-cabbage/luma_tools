@@ -622,7 +622,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_mp4_render_selection_changed(self):
         """Update MP4 state when selected render changes."""
-        global mp4_startframe, mp4_endframe
+        global mp4_startframe, mp4_endframe, mp4_output_path
 
         sel0 = self.ui.MP4RendersList.currentRow()
         if sel0 < 0 or sel0 >= len(mp4_renders):
@@ -637,11 +637,22 @@ class LumaShotTools(QtWidgets.QWidget):
 
         print(f"MP4 Maker: Selected render from '{subdir}' - frames {mp4_startframe} to {mp4_endframe}")
 
-        # Enable generate button if output path is set
-        if mp4_output_path:
-            self.ui.MP4Generate.setEnabled(True)
-            if ANIMATIONS_ENABLED:
-                self.animator.pulse_button(self.ui.MP4Generate)
+        # Automatically set output path to user's Videos folder
+        framename = render_seq.frame(render_seq.start())
+        filename = os.path.basename(framename)
+        render_name = filename.split(".")[0]
+        default_filename = get_output_filename(render_name, shot)
+        videos_folder = os.path.join(os.path.expanduser("~"), "Videos")
+        mp4_output_path = os.path.join(videos_folder, default_filename)
+
+        # Update UI
+        self.ui.MP4OutputPath.setText(mp4_output_path)
+        self.ui.MP4OutputPath.setStyleSheet("color: white; font-size: 9pt;")
+
+        # Enable generate button
+        self.ui.MP4Generate.setEnabled(True)
+        if ANIMATIONS_ENABLED:
+            self.animator.pulse_button(self.ui.MP4Generate)
 
     def on_mp4_browse_output_clicked(self):
         """Browse for MP4 output location."""
@@ -659,11 +670,11 @@ class LumaShotTools(QtWidgets.QWidget):
             render_name = filename.split(".")[0]
             default_filename = get_output_filename(render_name, shot)
 
-        # Open file dialog
+        # Open file dialog with default location in user's Videos folder
         output_file, _ = QFileDialog.getSaveFileName(
             None,
             "Save MP4 As",
-            os.path.join(shotpath, default_filename),
+            os.path.join(os.path.expanduser("~"), "Videos", default_filename),
             "MP4 Video (*.mp4)"
         )
 

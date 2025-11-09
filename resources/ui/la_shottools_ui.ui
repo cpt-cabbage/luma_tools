@@ -320,7 +320,7 @@
                <string>Build render with selected passes (Ctrl+S)</string>
               </property>
               <property name="text">
-               <string>Build with Selected Passes</string>
+               <string>Build</string>
               </property>
               <property name="shortcut">
                <string>Ctrl+S</string>
