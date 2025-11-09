@@ -1,7 +1,8 @@
 """
-Pass Builder for AYON Integration (Refactored).
+Pass Builder for AYON Integration (Refactored with Strategy Pattern).
 
-Builds composite passes from rendered layers and publishes to AYON via Deadline farm.
+Builds composite passes from rendered layers and publishes to AYON.
+Uses strategy pattern to handle farm vs local publishing without code duplication.
 """
 
 import os
@@ -13,14 +14,10 @@ from utils import normalize_path
 from render_service import build_oiio_command, execute_oiio_local, load_pass_config
 from ayon_service import (
     submit_oiio_to_deadline,
-    convert_to_ayon_folder_path,
-    create_ayon_metadata,
-    write_metadata_file,
-    submit_ayon_publish_to_deadline,
-    publish_to_ayon_local,
     AYON_AVAILABLE,
     DEADLINE_AVAILABLE
 )
+from publish_strategy import FarmPublishStrategy, LocalPublishStrategy
 
 # Try to import Qt for processEvents
 try:
@@ -33,12 +30,15 @@ except ImportError:
 class PassBuilder:
     """
     Build and publish render passes for AYON pipeline.
+    Uses strategy pattern for flexible publishing (farm vs local).
     """
 
     def __init__(self):
-        """Initialize pass builder."""
+        """Initialize pass builder with publishing strategies."""
         self.build_job_id = None
         self.render_name = None
+        self.farm_strategy = FarmPublishStrategy()
+        self.local_strategy = LocalPublishStrategy()
 
     def build_passes(
         self,
@@ -152,14 +152,14 @@ class PassBuilder:
                 if QT_AVAILABLE:
                     QApplication.processEvents()
 
-            # Handle publishing
+            # Handle publishing using strategy pattern
             if do_publish and AYON_AVAILABLE:
                 if progress_callback:
                     progress_callback(75, "Preparing AYON publish...")
                     if QT_AVAILABLE:
                         QApplication.processEvents()
 
-                self._publish_to_ayon(
+                success = self.farm_strategy.publish(
                     project_name,
                     self.render_name,
                     start_frame,
@@ -170,10 +170,11 @@ class PassBuilder:
                     user,
                     output_subdirectory,
                     render_file,
+                    self.build_job_id,
                     progress_callback
                 )
 
-                if progress_callback:
+                if success and progress_callback:
                     progress_callback(95, "Jobs submitted successfully!")
                     if QT_AVAILABLE:
                         QApplication.processEvents()
@@ -201,14 +202,14 @@ class PassBuilder:
                 if QT_AVAILABLE:
                     QApplication.processEvents()
 
-            # Handle publishing locally
+            # Handle publishing locally using strategy pattern
             if do_publish and AYON_AVAILABLE:
                 if progress_callback:
                     progress_callback(91, "Preparing AYON publish...")
                     if QT_AVAILABLE:
                         QApplication.processEvents()
 
-                self._publish_to_ayon_local(
+                success = self.local_strategy.publish(
                     project_name,
                     self.render_name,
                     start_frame,
@@ -219,259 +220,17 @@ class PassBuilder:
                     user,
                     output_subdirectory,
                     render_file,
+                    None,  # No build_job_id for local
                     progress_callback
                 )
 
-                if progress_callback:
+                if success and progress_callback:
                     progress_callback(100, "Local build and publish complete!")
                     if QT_AVAILABLE:
                         QApplication.processEvents()
             else:
                 if progress_callback:
                     progress_callback(95, "Local execution complete!")
-
-    def _publish_to_ayon_local(
-        self,
-        project_name,
-        render_name,
-        start_frame,
-        end_frame,
-        renders_path,
-        shot,
-        task,
-        user,
-        output_subdirectory,
-        render_file,
-        progress_callback=None
-    ):
-        """
-        Internal method to handle AYON publishing locally (not via farm).
-
-        Args:
-            project_name: AYON project name
-            render_name: Render name
-            start_frame: Start frame
-            end_frame: End frame
-            renders_path: Path to renders
-            shot: Shot name
-            task: Task name
-            user: Username
-            output_subdirectory: Output subdirectory
-            render_file: Render file name
-            progress_callback: Optional progress callback
-        """
-        print(f"Starting AYON local publish for {render_name}")
-
-        if progress_callback:
-            progress_callback(92, "Building AYON folder paths...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        # Build working directory path
-        working_dir = renders_path.split("work")[0] + "work"
-        if not working_dir.endswith("/"):
-            working_dir += "/"
-
-        # Build folder path (AYON folder path, not file system path)
-        folder_path_raw = working_dir.partition(shot)[0] + shot
-        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
-
-        print(f"Folder Path (AYON hierarchy): {folder_path}")
-        print(f"Working Directory: {working_dir}")
-
-        # Create AYON metadata
-        if progress_callback:
-            progress_callback(94, "Creating AYON metadata...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        # Get task type mapping
-        task_type_map = {
-            "compositing": "Compositing",
-            "comp": "Compositing",
-            "lighting": "Lighting",
-            "lgt": "Lighting",
-            "lookdev": "Lookdev",
-            "look": "Lookdev",
-            "animation": "Animation",
-            "anim": "Animation",
-        }
-        task_type = task_type_map.get(task.lower(), task.capitalize())
-
-        metadata = create_ayon_metadata(
-            project_name,
-            render_name,
-            start_frame,
-            end_frame,
-            renders_path,
-            folder_path,
-            task,
-            user,
-            output_subdirectory,
-            working_dir,
-            render_file,
-            project_code=None,
-            task_type=task_type
-        )
-
-        # Write metadata file
-        if progress_callback:
-            progress_callback(96, "Writing metadata file...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
-        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
-        metadata_path = normalize_path(metadata_path)
-
-        written_path = write_metadata_file(metadata, metadata_path)
-
-        if not written_path:
-            print("Failed to write metadata file, skipping publish")
-            return
-
-        # Execute AYON publish locally
-        if progress_callback:
-            progress_callback(97, "Publishing to AYON...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        success = publish_to_ayon_local(
-            metadata_path,
-            project_name,
-            folder_path,
-            task,
-            user
-        )
-
-        if success:
-            print(f"AYON local publish completed successfully")
-        else:
-            print("AYON local publish failed")
-
-    def _publish_to_ayon(
-        self,
-        project_name,
-        render_name,
-        start_frame,
-        end_frame,
-        renders_path,
-        shot,
-        task,
-        user,
-        output_subdirectory,
-        render_file,
-        progress_callback=None
-    ):
-        """
-        Internal method to handle AYON publishing (via farm).
-
-        Args:
-            project_name: AYON project name
-            render_name: Render name
-            start_frame: Start frame
-            end_frame: End frame
-            renders_path: Path to renders
-            shot: Shot name
-            task: Task name
-            user: Username
-            output_subdirectory: Output subdirectory
-            render_file: Render file name
-            progress_callback: Optional progress callback
-        """
-        print(f"Starting AYON publish setup for {render_name}")
-
-        if progress_callback:
-            progress_callback(78, "Building AYON folder paths...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        # Build working directory path
-        working_dir = renders_path.split("work")[0] + "work"
-        if not working_dir.endswith("/"):
-            working_dir += "/"
-
-        # Build folder path (AYON folder path, not file system path)
-        folder_path_raw = working_dir.partition(shot)[0] + shot
-        folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
-
-        print(f"Folder Path (AYON hierarchy): {folder_path}")
-        print(f"Working Directory: {working_dir}")
-
-        # Create AYON metadata
-        if progress_callback:
-            progress_callback(82, "Creating AYON metadata...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        # Get task type mapping (task name -> task type)
-        # Common task types: Compositing, Lighting, Animation, etc.
-        task_type_map = {
-            "compositing": "Compositing",
-            "comp": "Compositing",
-            "lighting": "Lighting",
-            "lgt": "Lighting",
-            "lookdev": "Lookdev",
-            "look": "Lookdev",
-            "animation": "Animation",
-            "anim": "Animation",
-        }
-        # Get task type from mapping, default to capitalize the task name
-        task_type = task_type_map.get(task.lower(), task.capitalize())
-
-        metadata = create_ayon_metadata(
-            project_name,
-            render_name,
-            start_frame,
-            end_frame,
-            renders_path,
-            folder_path,
-            task,
-            user,
-            output_subdirectory,
-            working_dir,
-            render_file,
-            project_code=None,  # Will auto-fetch from AYON
-            task_type=task_type
-        )
-
-        # Write metadata file
-        if progress_callback:
-            progress_callback(86, "Writing metadata file...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
-        metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
-        metadata_path = normalize_path(metadata_path)
-
-        written_path = write_metadata_file(metadata, metadata_path)
-
-        if not written_path:
-            print("Failed to write metadata file, skipping publish")
-            return
-
-        # Submit publish job to Deadline
-        if progress_callback:
-            progress_callback(90, "Submitting publish job to Deadline...")
-            if QT_AVAILABLE:
-                QApplication.processEvents()
-
-        publish_job_id = submit_ayon_publish_to_deadline(
-            project_name,
-            render_name,
-            render_file,
-            metadata_path,
-            folder_path,
-            task,
-            user,
-            self.build_job_id
-        )
-
-        if publish_job_id:
-            print(f"AYON publish job submitted: {publish_job_id}")
-        else:
-            print("Failed to submit AYON publish job")
 
 
 # Create singleton instance for backward compatibility
