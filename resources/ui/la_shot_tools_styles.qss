@@ -1,236 +1,557 @@
-/* Enhanced Stylesheet for Luma Shot Tools
- * This stylesheet adds enhancements on top of qdarkstyle
- * Provides better spacing, animations preparation, and visual polish
+/* ============================================================================
+ * LUMA SHOT TOOLS - MODERN UI STYLESHEET
+ * Fresh, modern, and intuitive design system
+ * ============================================================================ */
+
+/* ============================================================================
+ * COLOR PALETTE
+ * ============================================================================ */
+/* Primary Colors:
+ * - Background Dark: #1a1a1a
+ * - Background Card: #242424
+ * - Surface: #2d2d2d
+ * - Accent Blue: #3b82f6 (modern blue)
+ * - Accent Blue Hover: #60a5fa
+ * - Accent Blue Active: #2563eb
+ * - Success Green: #10b981
+ * - Warning Orange: #f59e0b
+ * - Danger Red: #ef4444
+ * - Text Primary: #f5f5f5
+ * - Text Secondary: #a1a1a1
+ * - Border: #404040
  */
 
-/* Group Boxes - Enhanced with better styling */
+/* ============================================================================
+ * BASE WIDGET STYLING
+ * ============================================================================ */
+QWidget {
+    background-color: #1a1a1a;
+    color: #f5f5f5;
+    font-family: "Segoe UI", "San Francisco", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10pt;
+}
+
+/* ============================================================================
+ * TAB WIDGET - MODERN DESIGN
+ * ============================================================================ */
+QTabWidget::pane {
+    border: none;
+    background-color: #1a1a1a;
+    border-radius: 0px;
+}
+
+QTabBar {
+    background-color: #242424;
+    border-bottom: 1px solid #404040;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #a1a1a1;
+    padding: 14px 32px;
+    margin-right: 4px;
+    border: none;
+    border-bottom: 3px solid transparent;
+    font-weight: 600;
+    font-size: 10pt;
+    min-width: 100px;
+}
+
+QTabBar::tab:hover {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #f5f5f5;
+}
+
+QTabBar::tab:selected {
+    background-color: transparent;
+    color: #3b82f6;
+    border-bottom: 3px solid #3b82f6;
+}
+
+/* ============================================================================
+ * GROUP BOXES - MODERN CARD DESIGN
+ * ============================================================================ */
 QGroupBox {
-    border: 1px solid #3d3d3d;
-    border-radius: 6px;
-    margin-top: 14px;
-    padding-top: 18px;
-    font-weight: bold;
+    background-color: #242424;
+    border: 1px solid #404040;
+    border-radius: 12px;
+    margin-top: 20px;
+    padding: 20px;
+    padding-top: 32px;
+    font-weight: 600;
+    font-size: 10pt;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 4px 10px;
-    background-color: #2b2b2b;
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    color: #4a9eff;
-    left: 10px;
-}
-
-/* Primary Action Button - Build Passes */
-QPushButton#BuildPasses {
-    background-color: #0e4d92;
+    padding: 6px 14px;
+    background-color: #3b82f6;
+    border: none;
+    border-radius: 6px;
     color: #ffffff;
-    border: 1px solid #1a5fb4;
-    font-weight: bold;
+    font-weight: 700;
+    font-size: 9pt;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    left: 16px;
+    top: 8px;
+}
+
+/* ============================================================================
+ * PRIMARY BUTTONS - HERO ACTIONS
+ * ============================================================================ */
+QPushButton#BuildPasses,
+QPushButton#MP4Generate {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #3b82f6, stop:1 #2563eb);
+    color: #ffffff;
+    border: none;
+    font-weight: 700;
     font-size: 11pt;
-    border-radius: 4px;
+    border-radius: 8px;
+    padding: 14px 24px;
+    letter-spacing: 0.5px;
 }
 
-QPushButton#BuildPasses:hover:enabled {
-    background-color: #1a5fb4;
-    border-color: #2575ca;
+QPushButton#BuildPasses:hover:enabled,
+QPushButton#MP4Generate:hover:enabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #60a5fa, stop:1 #3b82f6);
 }
 
-QPushButton#BuildPasses:pressed:enabled {
-    background-color: #0a3d74;
+QPushButton#BuildPasses:pressed:enabled,
+QPushButton#MP4Generate:pressed:enabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2563eb, stop:1 #1d4ed8);
+    padding: 16px 22px 12px 26px;
 }
 
-QPushButton#BuildPasses:disabled {
-    background-color: #2a2a2a;
+QPushButton#BuildPasses:disabled,
+QPushButton#MP4Generate:disabled {
+    background: #2d2d2d;
+    color: #666666;
+    border: 1px solid #404040;
+}
+
+/* ============================================================================
+ * DANGER BUTTON - DESTRUCTIVE ACTIONS
+ * ============================================================================ */
+QPushButton#CleanFiles {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #ef4444, stop:1 #dc2626);
+    color: #ffffff;
+    border: none;
+    font-weight: 700;
+    font-size: 10pt;
+    border-radius: 8px;
+    padding: 12px 24px;
+    letter-spacing: 0.5px;
+}
+
+QPushButton#CleanFiles:hover:enabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #f87171, stop:1 #ef4444);
+}
+
+QPushButton#CleanFiles:pressed:enabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #dc2626, stop:1 #b91c1c);
+    padding: 14px 22px 10px 26px;
+}
+
+/* ============================================================================
+ * SECONDARY BUTTONS - UTILITY ACTIONS
+ * ============================================================================ */
+QPushButton {
+    background-color: #2d2d2d;
+    color: #f5f5f5;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+    font-size: 9pt;
+    min-height: 32px;
+}
+
+QPushButton:hover {
+    background-color: #363636;
+    border-color: #505050;
+}
+
+QPushButton:pressed {
+    background-color: #252525;
+    border-color: #3b82f6;
+}
+
+QPushButton:disabled {
+    background-color: #1f1f1f;
     color: #666666;
     border-color: #333333;
 }
 
-/* Danger Button - Clean Files */
-QPushButton#CleanFiles {
-    background-color: #8b2e2e;
-    color: #ffffff;
-    border: 1px solid #a33c3c;
-    font-weight: bold;
-    border-radius: 4px;
-}
-
-QPushButton#CleanFiles:hover:enabled {
-    background-color: #a33c3c;
-    border-color: #bb4a4a;
-}
-
-QPushButton#CleanFiles:pressed:enabled {
-    background-color: #6b1e1e;
-}
-
-/* Secondary Buttons - Consistent Styling */
-QPushButton#ScanRenders,
-QPushButton#RescanCleanFiles,
-QPushButton#browsetofile {
-    min-height: 28px;
-    border-radius: 4px;
-    font-weight: 500;
-}
-
-QPushButton#ScanRenders:hover,
-QPushButton#RescanCleanFiles:hover,
-QPushButton#browsetofile:hover {
-    background-color: #4a4a4a;
-}
-
-/* List Widgets - Better Selection */
+/* ============================================================================
+ * LIST WIDGETS - MODERN SELECTION DESIGN
+ * ============================================================================ */
 QListWidget {
-    border-radius: 4px;
+    background-color: #1a1a1a;
+    border: 1px solid #404040;
+    border-radius: 8px;
     outline: none;
+    padding: 4px;
 }
 
 QListWidget::item {
-    padding: 8px;
-    border-radius: 3px;
-    margin: 2px;
+    background-color: transparent;
+    color: #f5f5f5;
+    padding: 12px 14px;
+    border-radius: 6px;
+    margin: 2px 0px;
+    border: none;
 }
 
 QListWidget::item:hover {
-    background-color: #2d2d2d;
-}
-
-QListWidget::item:selected {
-    background-color: #0e4d92;
+    background-color: rgba(59, 130, 246, 0.15);
     color: #ffffff;
 }
 
+QListWidget::item:selected {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #3b82f6, stop:1 #2563eb);
+    color: #ffffff;
+    font-weight: 600;
+}
+
 QListWidget::item:selected:active {
-    background-color: #1a5fb4;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #60a5fa, stop:1 #3b82f6);
 }
 
-/* Tab Widget - Enhanced Tabs */
-QTabWidget::pane {
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    top: -1px;
+QListWidget:disabled {
+    background-color: #1f1f1f;
+    border-color: #333333;
 }
 
-QTabBar::tab {
-    padding: 10px 20px;
-    margin-right: 2px;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    min-width: 100px;
+/* ============================================================================
+ * LABELS - MODERN TYPOGRAPHY
+ * ============================================================================ */
+QLabel {
+    color: #f5f5f5;
+    background-color: transparent;
+    border: none;
 }
 
-QTabBar::tab:selected {
-    border-bottom: 2px solid #4a9eff;
+QLabel#RenderPath,
+QLabel#MP4RenderPath {
+    background-color: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: #60a5fa;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 9pt;
 }
 
-/* Progress Bar - Smooth Gradient */
-QProgressBar {
-    border-radius: 4px;
-    text-align: center;
-    font-weight: bold;
+QLabel#passesHint,
+QLabel#MP4CustomPathLabel,
+QLabel#MP4OutputPath {
+    color: #a1a1a1;
+    font-style: italic;
+    font-size: 9pt;
 }
 
-QProgressBar::chunk {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #0e4d92, stop:1 #1a5fb4);
-    border-radius: 3px;
+QLabel#StatusLabel {
+    color: #3b82f6;
+    font-weight: 600;
+    font-size: 10pt;
 }
 
-/* Spin Box - Better Styling */
+QLabel#LatestRender,
+QLabel#LatestUSD {
+    color: #10b981;
+    font-weight: 600;
+    padding: 4px 0px;
+}
+
+/* ============================================================================
+ * SPIN BOXES - MODERN NUMBER INPUT
+ * ============================================================================ */
 QSpinBox {
-    border-radius: 4px;
-    padding: 6px;
-    min-height: 24px;
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-height: 32px;
+    color: #f5f5f5;
+    font-weight: 600;
+    selection-background-color: #3b82f6;
+}
+
+QSpinBox:hover {
+    border-color: #505050;
+    background-color: #363636;
+}
+
+QSpinBox:focus {
+    border-color: #3b82f6;
+    background-color: #2d2d2d;
 }
 
 QSpinBox::up-button,
 QSpinBox::down-button {
+    background-color: transparent;
     border: none;
-    width: 16px;
+    width: 20px;
 }
 
-/* Combo Box - Better Styling */
+QSpinBox::up-button:hover,
+QSpinBox::down-button:hover {
+    background-color: rgba(59, 130, 246, 0.2);
+}
+
+QSpinBox::up-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid #a1a1a1;
+    width: 0px;
+    height: 0px;
+    margin: 0px 6px;
+}
+
+QSpinBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #a1a1a1;
+    width: 0px;
+    height: 0px;
+    margin: 0px 6px;
+}
+
+/* ============================================================================
+ * COMBO BOXES - MODERN DROPDOWNS
+ * ============================================================================ */
 QComboBox {
-    border-radius: 4px;
-    padding: 6px 12px;
-    min-height: 24px;
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-height: 32px;
+    color: #f5f5f5;
+    font-weight: 600;
+    selection-background-color: #3b82f6;
 }
 
-/* Check Boxes - Better Indicators */
+QComboBox:hover {
+    border-color: #505050;
+    background-color: #363636;
+}
+
+QComboBox:focus {
+    border-color: #3b82f6;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #a1a1a1;
+    width: 0px;
+    height: 0px;
+    margin-right: 8px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 10px 14px;
+    min-height: 28px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: rgba(59, 130, 246, 0.2);
+}
+
+/* ============================================================================
+ * CHECK BOXES - MODERN TOGGLES
+ * ============================================================================ */
+QCheckBox {
+    color: #f5f5f5;
+    spacing: 8px;
+    font-weight: 600;
+}
+
 QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #404040;
+    border-radius: 5px;
+    background-color: #2d2d2d;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #3b82f6;
+    background-color: rgba(59, 130, 246, 0.1);
 }
 
 QCheckBox::indicator:checked {
-    background-color: #0e4d92;
-    border-color: #1a5fb4;
+    background-color: #3b82f6;
+    border-color: #3b82f6;
+    image: none;
 }
 
-/* Radio Buttons - Better Indicators */
+QCheckBox::indicator:checked {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                      stop:0 #3b82f6, stop:1 #2563eb);
+}
+
+QCheckBox::indicator:checked::after {
+    content: "✓";
+    color: white;
+}
+
+/* ============================================================================
+ * RADIO BUTTONS - MODERN OPTION SELECTORS
+ * ============================================================================ */
+QRadioButton {
+    color: #f5f5f5;
+    spacing: 8px;
+    font-weight: 600;
+}
+
 QRadioButton::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 10px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #404040;
+    border-radius: 11px;
+    background-color: #2d2d2d;
+}
+
+QRadioButton::indicator:hover {
+    border-color: #3b82f6;
+    background-color: rgba(59, 130, 246, 0.1);
 }
 
 QRadioButton::indicator:checked {
-    background-color: #0e4d92;
-    border-color: #1a5fb4;
+    background-color: #2d2d2d;
+    border-color: #3b82f6;
+    border-width: 6px;
 }
 
-/* Status Label - Color Coding */
-QLabel#StatusLabel {
-    color: #4a9eff;
-    font-weight: 500;
-    padding: 5px;
+/* ============================================================================
+ * PROGRESS BAR - MODERN PROGRESS INDICATOR
+ * ============================================================================ */
+QProgressBar {
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 700;
+    color: #ffffff;
+    min-height: 28px;
 }
 
-/* Render Path Label */
-QLabel#RenderPath {
-    padding: 8px;
-    border-radius: 4px;
-    background-color: rgba(0, 0, 0, 0.3);
-}
-
-/* Hint Labels */
-QLabel#passesHint,
-QLabel#comingSoonLabel {
-    color: #888888;
-    font-style: italic;
-}
-
-/* Status Frame */
-QFrame#statusBar {
-    border-radius: 4px;
-}
-
-/* Scroll Bars - Refined */
-QScrollBar:vertical {
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #3b82f6, stop:1 #10b981);
     border-radius: 7px;
-    width: 14px;
+}
+
+/* ============================================================================
+ * SCROLL BARS - MODERN MINIMALIST DESIGN
+ * ============================================================================ */
+QScrollBar:vertical {
+    background-color: transparent;
+    width: 12px;
+    margin: 0px;
 }
 
 QScrollBar::handle:vertical {
-    border-radius: 7px;
+    background-color: #404040;
     min-height: 30px;
+    border-radius: 6px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #505050;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: none;
 }
 
 QScrollBar:horizontal {
-    border-radius: 7px;
-    height: 14px;
+    background-color: transparent;
+    height: 12px;
+    margin: 0px;
 }
 
 QScrollBar::handle:horizontal {
-    border-radius: 7px;
+    background-color: #404040;
     min-width: 30px;
+    border-radius: 6px;
+    margin: 2px;
 }
 
-/* Tool Tips */
+QScrollBar::handle:horizontal:hover {
+    background-color: #505050;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+/* ============================================================================
+ * STATUS FRAME - MODERN STATUS BAR
+ * ============================================================================ */
+QFrame#statusBar {
+    background-color: #242424;
+    border: none;
+    border-top: 1px solid #404040;
+    border-radius: 0px;
+}
+
+/* ============================================================================
+ * TOOL TIPS - MODERN HOVER INFORMATION
+ * ============================================================================ */
 QToolTip {
-    border-radius: 4px;
-    padding: 6px;
+    background-color: #2d2d2d;
+    color: #f5f5f5;
+    border: 1px solid #3b82f6;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 9pt;
+}
+
+/* ============================================================================
+ * ANIMATIONS & TRANSITIONS
+ * ============================================================================ */
+QPushButton, QComboBox, QSpinBox, QListWidget::item, QCheckBox::indicator, QRadioButton::indicator {
+    /* Smooth transitions handled by Qt's animation framework */
 }

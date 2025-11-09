@@ -142,7 +142,7 @@ class UIAnimations:
         self.progress_animation.setDuration(duration)
         self.progress_animation.start()
 
-    def update_status_animated(self, message, color="#4a9eff"):
+    def update_status_animated(self, message, color="#3b82f6"):
         """
         Update status label with fade animation.
 
@@ -154,7 +154,7 @@ class UIAnimations:
         self.ui.StatusLabel.setText(message)
 
         # Apply color
-        self.ui.StatusLabel.setStyleSheet(f"color: {color}; font-weight: 500;")
+        self.ui.StatusLabel.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 10pt;")
 
         # Fade animation
         fade_anim = QPropertyAnimation(self.status_opacity, b"opacity")
@@ -180,7 +180,7 @@ class UIAnimations:
         def pulse_on():
             button.setStyleSheet(
                 original_style +
-                "background-color: #1a5fb4; border: 2px solid #4a9eff;"
+                "background-color: #60a5fa; border: 2px solid #3b82f6;"
             )
             QTimer.singleShot(300, pulse_off)
 
@@ -282,12 +282,12 @@ class UIAnimations:
 
 
 class StatusColors:
-    """Predefined colors for status messages."""
-    SUCCESS = "#4ecca3"
-    ERROR = "#ee6055"
-    WARNING = "#ffa726"
-    INFO = "#4a9eff"
-    SCANNING = "#a78bfa"
+    """Predefined colors for status messages - Modern UI Palette."""
+    SUCCESS = "#10b981"  # Modern green
+    ERROR = "#ef4444"    # Modern red
+    WARNING = "#f59e0b"  # Modern orange
+    INFO = "#3b82f6"     # Modern blue
+    SCANNING = "#8b5cf6" # Modern purple
 
 
 def enhance_ui(parent_widget):

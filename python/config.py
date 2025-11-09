@@ -7,6 +7,15 @@ All tool paths, defaults, and constants in one place.
 import os
 
 # ============================================================================
+# BASE PATHS
+# ============================================================================
+
+# Get the directory where this config file is located
+_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+# Get the root directory of luma_tools (parent of python/)
+_ROOT_DIR = os.path.dirname(_CONFIG_DIR)
+
+# ============================================================================
 # TOOL PATHS
 # ============================================================================
 
@@ -15,10 +24,11 @@ OIIO_INFO_PATH = r"L:\tools\_studio_tools\_openpype\CURRENT\vendor\bin\oiio\wind
 FFMPEG_PATH = r"L:\tools\_studio_tools\_openpype\CURRENT\vendor\bin\ffmpeg\windows\bin\ffmpeg.exe"
 DEADLINE_PATH = r"C:\Program Files\Thinkbox\Deadline10\bin\deadlinecommand.exe"
 
-# UI paths
-UI_FILE_PATH = r"L:\tools\_studio_tools\luma_tools\resources\ui\la_shottools_ui.ui"
-QDARKSTYLE_PATH = r"L:\tools\_studio_tools\luma_tools\python\venv\Lib\site-packages\qdarkstyle\dark\darkstyle.qss"
-ICON_PATH = r"L:\tools\_studio_tools\luma_tools\resources\logo_White_small_filled.png"
+# UI paths (relative to luma_tools root directory)
+UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
+QDARKSTYLE_PATH = os.path.join(_CONFIG_DIR, "venv", "Lib", "site-packages", "qdarkstyle", "dark", "darkstyle.qss")
+CUSTOM_STYLE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shot_tools_styles.qss")
+ICON_PATH = os.path.join(_ROOT_DIR, "resources", "logo_White_small_filled.png")
 
 # ============================================================================
 # DEADLINE DEFAULTS

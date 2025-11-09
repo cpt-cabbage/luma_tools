@@ -21,7 +21,7 @@ from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 
 # Import our modular services
-from config import UI_FILE_PATH, QDARKSTYLE_PATH, ICON_PATH, APP_ID, APP_TITLE
+from config import UI_FILE_PATH, QDARKSTYLE_PATH, CUSTOM_STYLE_PATH, ICON_PATH, APP_ID, APP_TITLE
 from utils import get_trailing_number, remove_after, get_folder_size
 from file_operations import (
     find_renders,
@@ -118,11 +118,23 @@ class LumaShotTools(QtWidgets.QWidget):
         self.setWindowTitle(f"{APP_TITLE} - {shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
-        # Load QDarkStyle
+        # Load QDarkStyle as base theme
         file = QFile(QDARKSTYLE_PATH)
         file.open(QFile.ReadOnly | QFile.Text)
         stream = QTextStream(file)
-        app.setStyleSheet(stream.readAll())
+        base_style = stream.readAll()
+        file.close()
+
+        # Load custom stylesheet enhancements
+        custom_file = QFile(CUSTOM_STYLE_PATH)
+        custom_file.open(QFile.ReadOnly | QFile.Text)
+        custom_stream = QTextStream(custom_file)
+        custom_style = custom_stream.readAll()
+        custom_file.close()
+
+        # Apply combined stylesheet (custom style overrides base)
+        app.setStyleSheet(base_style + "\n" + custom_style)
+        print(f"Loaded custom stylesheet from: {CUSTOM_STYLE_PATH}")
 
         # Setup animations
         if ANIMATIONS_ENABLED:
@@ -131,10 +143,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
             # Create inline spinner for pass detection
             self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
-            self.passes_spinner.move(
-                self.ui.passesGroupBox.width() - 30,
-                5
-            )
+            # Position will be set in showEvent when widget is fully laid out
             print("Inline spinner created for pass detection")
         else:
             print("UI animations disabled")
@@ -145,6 +154,21 @@ class LumaShotTools(QtWidgets.QWidget):
         # Initialize UI state
         self.ui.OverrideHou.setChecked(True)
         self.ui.BuildPasses.setEnabled(False)
+
+    def showEvent(self, event):
+        """Override showEvent to position spinner after window is laid out."""
+        super().showEvent(event)
+        # Position the spinner after the UI is fully laid out
+        if ANIMATIONS_ENABLED and hasattr(self, 'passes_spinner'):
+            self._position_spinner()
+
+    def _position_spinner(self):
+        """Position the inline spinner in the top-right of the passes group box."""
+        if hasattr(self, 'passes_spinner') and hasattr(self.ui, 'passesGroupBox'):
+            # Position in top-right corner with some padding
+            x = self.ui.passesGroupBox.width() - 30
+            y = 5
+            self.passes_spinner.move(x, y)
 
     def _connect_signals(self):
         """Connect all UI signals to handlers."""
@@ -945,11 +969,29 @@ class LumaShotTools(QtWidgets.QWidget):
                     QApplication.processEvents()
 
             if FoundRenderFiles:
-                latestrender = FoundRenderFiles[-1]
-                FoundRenderFiles.pop(-1)
-                self.ui.LatestRender.setText(f"Latest Render: {latestrender}")
-                latestver = get_trailing_number(latestrender)
-                self.ui.CurrentVer.setRange(0, int(latestver))
+                # Find the latest version that has renders (not empty)
+                latestrender = None
+                for render_version in reversed(FoundRenderFiles):
+                    # Check if this version has renders in the denoised folder
+                    version_path = os.path.join(RenderDirectory, render_version)
+                    test_renders = find_renders(version_path)
+                    if len(test_renders) > 0:
+                        latestrender = render_version
+                        break
+
+                # If we found a version with renders, use it
+                if latestrender:
+                    FoundRenderFiles.remove(latestrender)
+                    self.ui.LatestRender.setText(f"Latest Render: {latestrender}")
+                    latestver = get_trailing_number(latestrender)
+                    self.ui.CurrentVer.setRange(0, int(latestver))
+                else:
+                    # No versions have renders - fall back to latest version
+                    latestrender = FoundRenderFiles[-1]
+                    FoundRenderFiles.pop(-1)
+                    self.ui.LatestRender.setText(f"Latest Render: {latestrender} (empty)")
+                    latestver = get_trailing_number(latestrender)
+                    self.ui.CurrentVer.setRange(0, int(latestver))
                 QApplication.processEvents()
 
         # ====================================================================
