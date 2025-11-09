@@ -118,6 +118,10 @@ class LumaShotTools(QtWidgets.QWidget):
         self.setWindowTitle(f"{APP_TITLE} - {shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
+        # Set window size from UI file and make it resizable
+        self.resize(self.ui.size())
+        self.setMinimumSize(self.ui.minimumSize())
+
         # Load QDarkStyle as base theme
         file = QFile(QDARKSTYLE_PATH)
         file.open(QFile.ReadOnly | QFile.Text)

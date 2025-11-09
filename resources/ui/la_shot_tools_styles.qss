@@ -48,13 +48,13 @@ QTabBar {
 QTabBar::tab {
     background-color: transparent;
     color: #a1a1a1;
-    padding: 14px 32px;
-    margin-right: 4px;
+    padding: 16px 40px;
+    margin-right: 6px;
     border: none;
     border-bottom: 3px solid transparent;
     font-weight: 600;
-    font-size: 10pt;
-    min-width: 100px;
+    font-size: 11pt;
+    min-width: 120px;
 }
 
 QTabBar::tab:hover {
@@ -75,27 +75,27 @@ QGroupBox {
     background-color: #242424;
     border: 1px solid #404040;
     border-radius: 12px;
-    margin-top: 20px;
-    padding: 20px;
-    padding-top: 32px;
+    margin-top: 24px;
+    padding: 24px;
+    padding-top: 40px;
     font-weight: 600;
-    font-size: 10pt;
+    font-size: 11pt;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 6px 14px;
+    padding: 8px 16px;
     background-color: #3b82f6;
     border: none;
     border-radius: 6px;
     color: #ffffff;
     font-weight: 700;
-    font-size: 9pt;
+    font-size: 10pt;
     letter-spacing: 0.5px;
     text-transform: uppercase;
     left: 16px;
-    top: 8px;
+    top: 10px;
 }
 
 /* ============================================================================
@@ -108,10 +108,11 @@ QPushButton#MP4Generate {
     color: #ffffff;
     border: none;
     font-weight: 700;
-    font-size: 11pt;
+    font-size: 12pt;
     border-radius: 8px;
-    padding: 14px 24px;
+    padding: 16px 32px;
     letter-spacing: 0.5px;
+    min-height: 44px;
 }
 
 QPushButton#BuildPasses:hover:enabled,
@@ -124,7 +125,7 @@ QPushButton#BuildPasses:pressed:enabled,
 QPushButton#MP4Generate:pressed:enabled {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                 stop:0 #2563eb, stop:1 #1d4ed8);
-    padding: 16px 22px 12px 26px;
+    padding: 18px 30px 14px 34px;
 }
 
 QPushButton#BuildPasses:disabled,
@@ -143,10 +144,11 @@ QPushButton#CleanFiles {
     color: #ffffff;
     border: none;
     font-weight: 700;
-    font-size: 10pt;
+    font-size: 11pt;
     border-radius: 8px;
-    padding: 12px 24px;
+    padding: 14px 28px;
     letter-spacing: 0.5px;
+    min-height: 40px;
 }
 
 QPushButton#CleanFiles:hover:enabled {
@@ -157,7 +159,7 @@ QPushButton#CleanFiles:hover:enabled {
 QPushButton#CleanFiles:pressed:enabled {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                 stop:0 #dc2626, stop:1 #b91c1c);
-    padding: 14px 22px 10px 26px;
+    padding: 16px 26px 12px 30px;
 }
 
 /* ============================================================================
@@ -168,10 +170,10 @@ QPushButton {
     color: #f5f5f5;
     border: 1px solid #404040;
     border-radius: 6px;
-    padding: 8px 16px;
+    padding: 10px 20px;
     font-weight: 600;
-    font-size: 9pt;
-    min-height: 32px;
+    font-size: 10pt;
+    min-height: 36px;
 }
 
 QPushButton:hover {
@@ -204,10 +206,11 @@ QListWidget {
 QListWidget::item {
     background-color: transparent;
     color: #f5f5f5;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-radius: 6px;
-    margin: 2px 0px;
+    margin: 3px 0px;
     border: none;
+    font-size: 10pt;
 }
 
 QListWidget::item:hover {
@@ -246,10 +249,11 @@ QLabel#MP4RenderPath {
     background-color: rgba(59, 130, 246, 0.1);
     border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 6px;
-    padding: 10px 14px;
+    padding: 12px 16px;
     color: #60a5fa;
     font-family: "Consolas", "Monaco", monospace;
-    font-size: 9pt;
+    font-size: 10pt;
+    min-height: 36px;
 }
 
 QLabel#passesHint,
@@ -257,20 +261,23 @@ QLabel#MP4CustomPathLabel,
 QLabel#MP4OutputPath {
     color: #a1a1a1;
     font-style: italic;
-    font-size: 9pt;
+    font-size: 10pt;
+    padding: 4px 0px;
 }
 
 QLabel#StatusLabel {
     color: #3b82f6;
     font-weight: 600;
-    font-size: 10pt;
+    font-size: 11pt;
+    padding: 6px 0px;
 }
 
 QLabel#LatestRender,
 QLabel#LatestUSD {
     color: #10b981;
     font-weight: 600;
-    padding: 4px 0px;
+    font-size: 10pt;
+    padding: 6px 0px;
 }
 
 /* ============================================================================
@@ -280,10 +287,11 @@ QSpinBox {
     background-color: #2d2d2d;
     border: 1px solid #404040;
     border-radius: 6px;
-    padding: 8px 12px;
-    min-height: 32px;
+    padding: 10px 14px;
+    min-height: 36px;
     color: #f5f5f5;
     font-weight: 600;
+    font-size: 10pt;
     selection-background-color: #3b82f6;
 }
 
@@ -336,10 +344,11 @@ QComboBox {
     background-color: #2d2d2d;
     border: 1px solid #404040;
     border-radius: 6px;
-    padding: 8px 12px;
-    min-height: 32px;
+    padding: 10px 14px;
+    min-height: 36px;
     color: #f5f5f5;
     font-weight: 600;
+    font-size: 10pt;
     selection-background-color: #3b82f6;
 }
 
@@ -377,8 +386,9 @@ QComboBox QAbstractItemView {
 }
 
 QComboBox QAbstractItemView::item {
-    padding: 10px 14px;
-    min-height: 28px;
+    padding: 12px 16px;
+    min-height: 32px;
+    font-size: 10pt;
 }
 
 QComboBox QAbstractItemView::item:hover {
@@ -390,13 +400,15 @@ QComboBox QAbstractItemView::item:hover {
  * ============================================================================ */
 QCheckBox {
     color: #f5f5f5;
-    spacing: 8px;
+    spacing: 10px;
     font-weight: 600;
+    font-size: 10pt;
+    padding: 4px 0px;
 }
 
 QCheckBox::indicator {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border: 2px solid #404040;
     border-radius: 5px;
     background-color: #2d2d2d;
@@ -428,13 +440,15 @@ QCheckBox::indicator:checked::after {
  * ============================================================================ */
 QRadioButton {
     color: #f5f5f5;
-    spacing: 8px;
+    spacing: 10px;
     font-weight: 600;
+    font-size: 10pt;
+    padding: 4px 0px;
 }
 
 QRadioButton::indicator {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border: 2px solid #404040;
     border-radius: 11px;
     background-color: #2d2d2d;
@@ -461,7 +475,8 @@ QProgressBar {
     text-align: center;
     font-weight: 700;
     color: #ffffff;
-    min-height: 28px;
+    font-size: 10pt;
+    min-height: 32px;
 }
 
 QProgressBar::chunk {
