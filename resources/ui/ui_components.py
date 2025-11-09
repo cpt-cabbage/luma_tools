@@ -66,10 +66,14 @@ class Worker(QRunnable):
         self.kwargs = kwargs
         self.signals = WorkerSignals()
 
-        # Replace progress_callback with signal emitter if present
-        if 'progress_callback' in self.kwargs:
-            del self.kwargs['progress_callback']
-        self.kwargs['progress_callback'] = self.signals.progress.emit
+        # Only add progress_callback if the function accepts it
+        import inspect
+        sig = inspect.signature(fn)
+        if 'progress_callback' in sig.parameters:
+            # Replace progress_callback with signal emitter if present
+            if 'progress_callback' in self.kwargs:
+                del self.kwargs['progress_callback']
+            self.kwargs['progress_callback'] = self.signals.progress.emit
 
     @Slot()
     def run(self):
