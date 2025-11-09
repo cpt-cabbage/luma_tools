@@ -103,6 +103,21 @@ ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 # MAIN WINDOW CLASS
 # ============================================================================
 
+class LogStream(QtCore.QObject):
+    """Custom stream that redirects output to the log widget."""
+    message_written = QtCore.Signal(str)
+
+    def __init__(self):
+        super(LogStream, self).__init__()
+
+    def write(self, message):
+        if message.strip():  # Only emit non-empty messages
+            self.message_written.emit(message)
+
+    def flush(self):
+        pass
+
+
 class LumaShotTools(QtWidgets.QWidget):
     """Main application window."""
 
@@ -117,6 +132,12 @@ class LumaShotTools(QtWidgets.QWidget):
         self.change_val[int].connect(self.set_progress_val)
         self.setWindowTitle(f"{APP_TITLE} - {shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
+
+        # Setup log redirection
+        self.log_stream = LogStream()
+        self.log_stream.message_written.connect(self.append_log)
+        sys.stdout = self.log_stream
+        sys.stderr = self.log_stream
 
         # Set window size from UI file and make it resizable
         self.resize(self.ui.size())
@@ -198,11 +219,27 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.RescanCleanFiles.clicked.connect(self.run_scanner)
         self.ui.CleanFiles.clicked.connect(self.on_clean_files_clicked)
 
+        # Settings tab
+        self.ui.ClearLogButton.clicked.connect(self.on_clear_log_clicked)
+
     @QtCore.Slot(int)
     def set_progress_val(self, val):
         """Update progress bar value."""
         self.ui.progressBar.setValue(val)
         QApplication.processEvents()
+
+    @QtCore.Slot(str)
+    def append_log(self, message):
+        """Append a message to the log output widget."""
+        self.ui.LogOutput.append(message.rstrip())
+        # Auto-scroll to bottom
+        self.ui.LogOutput.verticalScrollBar().setValue(
+            self.ui.LogOutput.verticalScrollBar().maximum()
+        )
+
+    def on_clear_log_clicked(self):
+        """Clear the log output."""
+        self.ui.LogOutput.clear()
 
     # ========================================================================
     # RENDER TAB HANDLERS
