@@ -13,25 +13,7 @@ from typing import Optional, Dict, List, Callable
 
 from utils import normalize_path
 
-from config import (
-    DEADLINE_PATH,
-    DEADLINE_POOL,
-    DEADLINE_GROUP,
-    DEADLINE_PRIORITY_BUILD,
-    DEADLINE_PRIORITY_PUBLISH,
-    DEADLINE_DEPARTMENT,
-    DEADLINE_CHUNK_SIZE,
-    AYON_PRODUCT_TYPE,
-    AYON_FAMILY,
-    AYON_COLORSPACE,
-    AYON_DISPLAY,
-    AYON_VIEW,
-    AYON_DEFAULT_FPS,
-    AYON_DEFAULT_WIDTH,
-    AYON_DEFAULT_HEIGHT,
-    get_ocio_config,
-    get_ayon_bundle
-)
+from config import *
 
 # AYON imports
 try:
@@ -406,27 +388,10 @@ def publish_to_ayon_local(
     # Get bundle name
     bundle = get_ayon_bundle()
 
-    # Find AYON console executable
-    ayon_console = None
 
-    # Try to find AYON from common locations
-    possible_paths = [
-        r"L:\tools\_studio_tools\AYON\ayon_console.exe",
-        r"C:\Program Files\AYON\ayon_console.exe",
-        os.path.join(os.environ.get("AYON_ROOT", ""), "ayon_console.exe")
-    ]
-
-    for path in possible_paths:
-        if os.path.exists(path):
-            ayon_console = path
-            break
-
-    if not ayon_console:
-        print("ERROR: Could not find ayon_console.exe")
-        return False
 
     # Build AYON console command
-    cmd = [ayon_console]
+    cmd = [AYON_CONSOLE]
     cmd.extend(["--headless", "publish", metadata_path])
 
     # Add bundle arguments

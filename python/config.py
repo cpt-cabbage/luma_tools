@@ -21,6 +21,16 @@ _ROOT_DIR = os.path.dirname(_CONFIG_DIR)
 _AYON_DIR = os.environ.get("AYON_LAUNCHER_LOCAL_DIR")
 _DEADLINE_DIR = os.environ.get("DEADLINE_PATH") 
 
+def get_ocio_config():
+    """Get OCIO config path from environment."""
+    OCIO_SEARCHPATH = os.path.join(os.environ.get("BUILTIN_OCIO_ROOT"), "aces_2.0","*.ocio")
+    OIIO = glob.glob(OCIO_SEARCHPATH)[0]
+    return OIIO
+
+def get_ayon_bundle():
+    """Get AYON bundle name from environment."""
+    return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "production")
+
 # ============================================================================
 # TOOL PATHS
 # ============================================================================
@@ -34,8 +44,10 @@ OIIO_INFO_PATH = glob.glob(OIIO_INFO_ROOT)[0]
 FFMPEG_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
 FFMPEG_PATH = glob.glob(FFMPEG_ROOT)[0]
 
-
 DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR)
+
+AYON_CONSOLE_ROOT = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
+AYON_CONSOLE = glob.glob(AYON_CONSOLE_ROOT)[0]
 
 # UI paths (relative to luma_tools root directory)
 UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
@@ -126,17 +138,6 @@ DEFAULT_PASSES = ["CryptoMaterials", "P", "depth", "uv", "normal"]
 USER_SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools")
 USER_SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
 
-# ============================================================================
-# ENVIRONMENT VARIABLE FUNCTIONS
-# ============================================================================
 
 
-def get_ocio_config():
-    """Get OCIO config path from environment."""
-    OCIO_SEARCHPATH = os.path.join(os.environ.get("BUILTIN_OCIO_ROOT"), "aces_2.0","*.ocio")
-    OIIO = glob.glob(OCIO_SEARCHPATH)[0]
-    return OIIO
 
-def get_ayon_bundle():
-    """Get AYON bundle name from environment."""
-    return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "production")

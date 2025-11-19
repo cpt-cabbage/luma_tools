@@ -8,7 +8,18 @@ and lookdev file cleanup for shot-based workflows.
 
 import sys
 import os
-import ctypes
+from config import *
+
+# Set up Windows things
+if sys.platform == 'win32':
+    import ctypes
+
+    kernel32 = ctypes.WinDLL('kernel32')
+    user32 = ctypes.WinDLL('user32')
+    SW_HIDE = 0
+    hWnd = kernel32.GetConsoleWindow()
+    user32.ShowWindow(hWnd, SW_HIDE)
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,8 +38,8 @@ from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 from PySide2.QtCore import QThreadPool
 
-# Import our modular services
-from config import *
+
+
 from utils import get_trailing_number, remove_after, update_path_version, scan_exr_sequences
 from file_operations import find_renders
 from render_service import (
@@ -51,18 +62,6 @@ from scan_service import DirectoryScanner
 
 
 
-import ctypes
-import win32.lib.win32con as win32con
-
-
-kernel32 = ctypes.WinDLL('kernel32')
-
-user32 = ctypes.WinDLL('user32')
-
-SW_HIDE = 0
-
-hWnd = kernel32.GetConsoleWindow()
-user32.ShowWindow(hWnd, win32con.SW_HIDE)
 
 # ============================================================================
 # GLOBAL STATE - Managed by state_manager
@@ -79,8 +78,6 @@ if app is None:
 # Apply stylesheet
 apply_stylesheet(app)
 
-# Set up Windows things
-ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
 print("DEADLINE " + DEADLINE_PATH)
 print("OIIO " + OIIO_PATH)

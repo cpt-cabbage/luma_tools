@@ -449,11 +449,6 @@ QCheckBox::indicator:checked {
                                       stop:0 #4a9eff, stop:1 #3a8eef);
 }
 
-QCheckBox::indicator:checked::after {
-    content: "✓";
-    color: white;
-}
-
 /* ============================================================================
  * RADIO BUTTONS 
  * ============================================================================ */
