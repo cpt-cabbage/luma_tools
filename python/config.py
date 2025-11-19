@@ -5,6 +5,8 @@ All tool paths, defaults, and constants in one place.
 """
 
 import os
+import glob
+import shutil
 
 # ============================================================================
 # BASE PATHS
@@ -15,14 +17,25 @@ _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 # Get the root directory of luma_tools (parent of python/)
 _ROOT_DIR = os.path.dirname(_CONFIG_DIR)
 
+# GET ENV VARS
+_AYON_DIR = os.environ.get("AYON_LAUNCHER_LOCAL_DIR")
+_DEADLINE_DIR = os.environ.get("DEADLINE_PATH") 
+
 # ============================================================================
 # TOOL PATHS
 # ============================================================================
 
-OIIO_PATH = r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows\addons_resources\ayon_third_party\oiio_windows_83e412e9\bin\oiiotool.exe"
-OIIO_INFO_PATH = r"L:\tools\_studio_tools\_openpype\CURRENT\vendor\bin\oiio\windows\iinfo.exe"
-FFMPEG_PATH = r"L:\tools\_studio_tools\_openpype\CURRENT\vendor\bin\ffmpeg\windows\bin\ffmpeg.exe"
-DEADLINE_PATH = r"C:\Program Files\Thinkbox\Deadline10\bin\deadlinecommand.exe"
+OIIO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
+OIIO_PATH = glob.glob(OIIO_ROOT)[0]
+
+OIIO_INFO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "iinfo*")
+OIIO_INFO_PATH = glob.glob(OIIO_INFO_ROOT)[0]
+
+FFMPEG_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
+FFMPEG_PATH = glob.glob(FFMPEG_ROOT)[0]
+
+
+DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR)
 
 # UI paths (relative to luma_tools root directory)
 UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
@@ -96,16 +109,33 @@ EXCLUDED_CHANNELS = ["variance", "var", "Ci", "beauty", "a.Z"]
 NORMAL_CHANNELS = [" normal.x", " normal.y", " normal.z"]
 
 # ============================================================================
-# ENVIRONMENT VARIABLES
+# DEFAULT PASSES
 # ============================================================================
 
-def get_deadline_path():
-    """Get Deadline path from environment or use default."""
-    return os.getenv('DEADLINE_path', DEADLINE_PATH)
+# Always-included passes (user cannot deselect these)
+REQUIRED_PASSES = ["Beauty", "a"]
+
+# Default additional passes (user can customize this list in settings)
+DEFAULT_PASSES = ["CryptoMaterials", "P", "depth", "uv", "normal"]
+
+# ============================================================================
+# USER SETTINGS
+# ============================================================================
+
+# User settings file location (in user's home directory)
+USER_SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools")
+USER_SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
+
+# ============================================================================
+# ENVIRONMENT VARIABLE FUNCTIONS
+# ============================================================================
+
 
 def get_ocio_config():
     """Get OCIO config path from environment."""
-    return r"L:\tools\ocio\aces_1.2\config.ocio"
+    OCIO_SEARCHPATH = os.path.join(os.environ.get("BUILTIN_OCIO_ROOT"), "aces_2.0","*.ocio")
+    OIIO = glob.glob(OCIO_SEARCHPATH)[0]
+    return OIIO
 
 def get_ayon_bundle():
     """Get AYON bundle name from environment."""

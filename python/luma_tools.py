@@ -28,7 +28,7 @@ from PySide2.QtWidgets import *
 from PySide2.QtCore import QThreadPool
 
 # Import our modular services
-from config import UI_FILE_PATH, ICON_PATH, APP_ID, APP_TITLE
+from config import *
 from utils import get_trailing_number, remove_after, update_path_version, scan_exr_sequences
 from file_operations import find_renders
 from render_service import (
@@ -52,7 +52,7 @@ from scan_service import DirectoryScanner
 
 
 import ctypes
-
+import win32.lib.win32con as win32con
 
 
 kernel32 = ctypes.WinDLL('kernel32')
@@ -62,7 +62,7 @@ user32 = ctypes.WinDLL('user32')
 SW_HIDE = 0
 
 hWnd = kernel32.GetConsoleWindow()
-user32.ShowWindow(hWnd, SW_HIDE)
+user32.ShowWindow(hWnd, win32con.SW_HIDE)
 
 # ============================================================================
 # GLOBAL STATE - Managed by state_manager
@@ -82,7 +82,10 @@ apply_stylesheet(app)
 # Set up Windows things
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
-
+print("DEADLINE " + DEADLINE_PATH)
+print("OIIO " + OIIO_PATH)
+print("OIIO INFO " + OIIO_INFO_ROOT)
+print("FFMPEG " + FFMPEG_PATH)
 # ============================================================================
 # MAIN WINDOW CLASS
 # ============================================================================
@@ -153,6 +156,9 @@ class LumaShotTools(QtWidgets.QWidget):
         # Initialize UI state
         self.ui.OverrideHou.setChecked(True)
         self.ui.BuildPasses.setEnabled(False)
+
+        # Initialize default passes settings
+        self._load_default_passes_ui()
 
     def showEvent(self, event):
         """Override showEvent to position spinner after window is laid out."""
@@ -328,6 +334,10 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Settings tab
         self.ui.ClearLogButton.clicked.connect(self.on_clear_log_clicked)
+        self.ui.AddPassButton.clicked.connect(self.on_add_pass_clicked)
+        self.ui.RemovePassButton.clicked.connect(self.on_remove_pass_clicked)
+        self.ui.ResetPassesButton.clicked.connect(self.on_reset_passes_clicked)
+        self.ui.SaveSettingsButton.clicked.connect(self.on_save_settings_clicked)
 
     @QtCore.Slot(int)
     def set_progress_val(self, val):
@@ -346,6 +356,141 @@ class LumaShotTools(QtWidgets.QWidget):
     def on_clear_log_clicked(self):
         """Clear the log output."""
         self.ui.LogOutput.clear()
+
+    def _load_default_passes_ui(self):
+        """Load default passes into the settings UI."""
+        from settings_manager import get_default_passes
+        from config import REQUIRED_PASSES, DEFAULT_PASSES
+
+        self.ui.DefaultPassesList.clear()
+
+        # Get user's current default passes (or system defaults)
+        default_passes = get_default_passes()
+
+        # Populate the list with all available passes
+        all_available_passes = list(set(REQUIRED_PASSES + DEFAULT_PASSES + default_passes))
+
+        for pass_name in sorted(all_available_passes):
+            item = QtWidgets.QListWidgetItem(pass_name)
+
+            # Mark required passes as disabled (can't be removed)
+            if pass_name in REQUIRED_PASSES:
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                item.setToolTip("This pass is always included and cannot be removed")
+                # Make required passes visually distinct
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            else:
+                item.setToolTip("Select to include this pass by default")
+
+            self.ui.DefaultPassesList.addItem(item)
+
+            # Select the item if it's in the user's default passes or is required
+            if pass_name in default_passes or pass_name in REQUIRED_PASSES:
+                item.setSelected(True)
+
+        print(f"Loaded default passes UI with {len(all_available_passes)} passes")
+
+    def on_add_pass_clicked(self):
+        """Add a custom pass to the default passes list."""
+        from PySide2.QtWidgets import QInputDialog
+
+        pass_name, ok = QInputDialog.getText(
+            self,
+            "Add Pass",
+            "Enter pass name:",
+            QtWidgets.QLineEdit.Normal
+        )
+
+        if ok and pass_name:
+            pass_name = pass_name.strip()
+
+            # Check if pass already exists
+            existing_items = self.ui.DefaultPassesList.findItems(pass_name, Qt.MatchExactly)
+            if existing_items:
+                print(f"Pass '{pass_name}' already exists in the list")
+                return
+
+            # Add the new pass
+            item = QtWidgets.QListWidgetItem(pass_name)
+            item.setToolTip("Select to include this pass by default")
+            item.setSelected(True)  # Auto-select newly added passes
+            self.ui.DefaultPassesList.addItem(item)
+            print(f"Added custom pass: {pass_name}")
+
+    def on_remove_pass_clicked(self):
+        """Remove selected pass from the default passes list."""
+        from config import REQUIRED_PASSES
+
+        selected_items = self.ui.DefaultPassesList.selectedItems()
+
+        if not selected_items:
+            print("No passes selected for removal")
+            return
+
+        for item in selected_items:
+            pass_name = item.text()
+
+            # Don't allow removing required passes
+            if pass_name in REQUIRED_PASSES:
+                print(f"Cannot remove required pass: {pass_name}")
+                continue
+
+            # Remove the item
+            row = self.ui.DefaultPassesList.row(item)
+            self.ui.DefaultPassesList.takeItem(row)
+            print(f"Removed pass: {pass_name}")
+
+    def on_reset_passes_clicked(self):
+        """Reset default passes to system defaults."""
+        from PySide2.QtWidgets import QMessageBox
+
+        # Confirm reset
+        reply = QMessageBox.question(
+            self,
+            "Reset Default Passes",
+            "Reset to default pass list (CryptoMaterials, P, depth, uv, normal)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            from config import DEFAULT_PASSES
+            from settings_manager import set_default_passes
+
+            # Reset to system defaults
+            set_default_passes(DEFAULT_PASSES.copy())
+            print("Reset to default passes")
+
+            # Reload UI
+            self._load_default_passes_ui()
+
+    def on_save_settings_clicked(self):
+        """Save the current default passes settings."""
+        from config import REQUIRED_PASSES
+        from settings_manager import set_default_passes
+
+        # Collect selected passes (excluding required passes as they're always included)
+        selected_passes = []
+        for i in range(self.ui.DefaultPassesList.count()):
+            item = self.ui.DefaultPassesList.item(i)
+            pass_name = item.text()
+
+            # Skip required passes (they're always included automatically)
+            if pass_name in REQUIRED_PASSES:
+                continue
+
+            # Add selected passes
+            if item.isSelected():
+                selected_passes.append(pass_name)
+
+        # Save settings
+        set_default_passes(selected_passes)
+        print(f"Saved default passes: {selected_passes}")
+
+        # Show confirmation
+        self.animator.pulse_button(self.ui.SaveSettingsButton)
 
     # ========================================================================
     # RENDER TAB HANDLERS
@@ -402,15 +547,22 @@ class LumaShotTools(QtWidgets.QWidget):
 
         def on_result(channels):
             """Called when pass detection completes."""
+            from settings_manager import get_all_default_passes
+
             # Hide spinner
             self.passes_spinner.stop()
 
             # Store channels
             app_state.channels = channels
 
-            # Add passes to list
+            # Get default passes that should be hidden from the list
+            default_passes = get_all_default_passes()
+
+            # Add passes to list (exclude default passes - they're auto-included)
             for key in channels.keys():
-                self.ui.Passes.addItem(key)
+                # Skip passes that are in the default list
+                if key not in default_passes:
+                    self.ui.Passes.addItem(key)
 
             # Select previously saved passes (now that list is populated)
             self._select_saved_passes(app_state.passesfile)
@@ -435,23 +587,39 @@ class LumaShotTools(QtWidgets.QWidget):
         QThreadPool.globalInstance().start(worker)
 
     def _select_saved_passes(self, passes_file):
-        """Select previously saved passes in the UI."""
+        """
+        Select previously saved passes in the UI.
+        Note: Default passes are auto-included and hidden from the list.
+        """
+        from settings_manager import get_all_default_passes
+
         selectedpasses = load_pass_config(passes_file)
         print(f"DEBUG: Loaded passes from file: {selectedpasses}")
-        print(f"DEBUG: Pass names to select: {list(selectedpasses.keys()) if selectedpasses else 'None'}")
 
         # Debug: print all items currently in the list
         all_items = [self.ui.Passes.item(i).text() for i in range(self.ui.Passes.count())]
         print(f"DEBUG: Available passes in UI: {all_items}")
 
+        # Get default passes (these are auto-included and not shown in the list)
+        default_passes = get_all_default_passes()
+
         if selectedpasses:
-            for pass_name in list(selectedpasses):
-                print(f"DEBUG: Looking for pass: '{pass_name}'")
-                matching_items = self.ui.Passes.findItems(pass_name, Qt.MatchExactly)
-                print(f"DEBUG: Found {len(matching_items)} matching items for '{pass_name}'")
-                for item in matching_items:
-                    item.setSelected(True)
-                    print(f"DEBUG: Selected item: '{item.text()}'")
+            # Filter out default passes from the saved selection (they're auto-included)
+            passes_to_select = [p for p in selectedpasses.keys() if p not in default_passes]
+            print(f"Using saved passes from file (excluding auto-included): {passes_to_select}")
+        else:
+            # No saved passes and no manual selection needed (defaults are auto-included)
+            passes_to_select = []
+            print(f"No saved passes found, only default passes will be included: {default_passes}")
+
+        # Select the passes that are visible in the UI
+        for pass_name in passes_to_select:
+            print(f"DEBUG: Looking for pass: '{pass_name}'")
+            matching_items = self.ui.Passes.findItems(pass_name, Qt.MatchExactly)
+            print(f"DEBUG: Found {len(matching_items)} matching items for '{pass_name}'")
+            for item in matching_items:
+                item.setSelected(True)
+                print(f"DEBUG: Selected item: '{item.text()}'")
 
     # ========================================================================
     # PASS BUILDING HANDLERS
@@ -474,9 +642,22 @@ class LumaShotTools(QtWidgets.QWidget):
         self.animator.animate_button_click(self.ui.BuildPasses)
 
         # Collect selected passes on main thread (UI access)
+        from settings_manager import get_all_default_passes
+
         channellist = []
+        # Add manually selected passes from the UI
         for item in self.ui.Passes.selectedItems():
             channellist.append(item.text())
+
+        # Add default passes (auto-included, hidden from UI)
+        default_passes = get_all_default_passes()
+        for pass_name in default_passes:
+            if pass_name not in channellist:
+                channellist.append(pass_name)
+
+        print(f"Building with passes: {channellist}")
+        print(f"  - User selected: {[item.text() for item in self.ui.Passes.selectedItems()]}")
+        print(f"  - Auto-included defaults: {default_passes}")
 
         final_channels = dict((k, app_state.channels[k]) for k in channellist if k in app_state.channels)
 

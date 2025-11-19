@@ -186,7 +186,7 @@
             <item>
              <widget class="QLabel" name="passesHint">
               <property name="text">
-               <string>Beauty and Alpha included by default</string>
+               <string>Default passes not shown</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignCenter</set>
@@ -1257,24 +1257,57 @@
       <attribute name="title">
        <string>Settings</string>
       </attribute>
-      <layout class="QVBoxLayout" name="settingsLayout">
+      <layout class="QVBoxLayout" name="settingsMainLayout">
        <property name="spacing">
-        <number>24</number>
+        <number>0</number>
        </property>
        <property name="leftMargin">
-        <number>24</number>
+        <number>0</number>
        </property>
        <property name="topMargin">
-        <number>24</number>
+        <number>0</number>
        </property>
        <property name="rightMargin">
-        <number>24</number>
+        <number>0</number>
        </property>
        <property name="bottomMargin">
-        <number>24</number>
+        <number>0</number>
        </property>
        <item>
-        <widget class="QGroupBox" name="projectStatusGroupBox">
+        <widget class="QScrollArea" name="settingsScrollArea">
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <property name="frameShape">
+          <enum>QFrame::NoFrame</enum>
+         </property>
+         <widget class="QWidget" name="settingsScrollContent">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>1352</width>
+            <height>852</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="settingsLayout">
+           <property name="spacing">
+            <number>24</number>
+           </property>
+           <property name="leftMargin">
+            <number>24</number>
+           </property>
+           <property name="topMargin">
+            <number>24</number>
+           </property>
+           <property name="rightMargin">
+            <number>24</number>
+           </property>
+           <property name="bottomMargin">
+            <number>24</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="projectStatusGroupBox">
          <property name="title">
           <string>Project Status</string>
          </property>
@@ -1443,8 +1476,132 @@
          </layout>
         </widget>
        </item>
+       <item>
+        <widget class="QGroupBox" name="defaultPassesGroupBox">
+         <property name="title">
+          <string>Default Passes</string>
+         </property>
+         <property name="toolTip">
+          <string>Configure which passes are automatically selected when detecting passes</string>
+         </property>
+         <layout class="QVBoxLayout" name="defaultPassesLayout">
+          <item>
+           <widget class="QLabel" name="defaultPassesLabel">
+            <property name="text">
+             <string>Select passes to include by default (Beauty and Alpha are always included):</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="passesManagementLayout">
+            <item>
+             <widget class="QListWidget" name="DefaultPassesList">
+              <property name="toolTip">
+               <string>Select/deselect passes to include by default when building</string>
+              </property>
+              <property name="selectionMode">
+               <enum>QAbstractItemView::MultiSelection</enum>
+              </property>
+              <property name="minimumHeight">
+               <number>150</number>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QVBoxLayout" name="passesButtonsLayout">
+              <item>
+               <widget class="QPushButton" name="AddPassButton">
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>32</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string>Add Pass</string>
+                </property>
+                <property name="toolTip">
+                 <string>Add a custom pass name to the default list</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="RemovePassButton">
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>32</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string>Remove Pass</string>
+                </property>
+                <property name="toolTip">
+                 <string>Remove selected pass from the default list</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="ResetPassesButton">
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>32</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string>Reset to Default</string>
+                </property>
+                <property name="toolTip">
+                 <string>Reset to default pass list (CryptoMaterials, P, depth, uv, normal)</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="passesButtonsSpacer">
+                <property name="orientation">
+                 <enum>Qt::Vertical</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>20</width>
+                  <height>40</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QPushButton" name="SaveSettingsButton">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>36</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Save Settings</string>
+            </property>
+            <property name="toolTip">
+             <string>Save your default passes configuration</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
       </layout>
      </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
     </widget>
    </item>
    <item>
