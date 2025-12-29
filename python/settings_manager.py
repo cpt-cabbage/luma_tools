@@ -1,12 +1,19 @@
 """
 Settings manager for Luma Tools.
 
-Handles saving and loading user preferences.
+Handles saving and loading user preferences and global settings.
 """
 
 import os
 import json
-from config import USER_SETTINGS_DIR, USER_SETTINGS_FILE, DEFAULT_PASSES, REQUIRED_PASSES
+from config import (
+    USER_SETTINGS_DIR,
+    USER_SETTINGS_FILE,
+    DEFAULT_PASSES,
+    REQUIRED_PASSES,
+    DEFAULT_GLOBAL_SETTINGS_PATH,
+    GLOBAL_SETTINGS_FILENAME,
+)
 
 
 def ensure_settings_dir():
@@ -99,4 +106,390 @@ def set_default_passes(passes_list):
     """
     settings = load_user_settings()
     settings["default_passes"] = passes_list
+    save_user_settings(settings)
+
+
+def get_comfyui_path():
+    """
+    Get the configured ComfyUI installation path from global settings.
+
+    Returns:
+        str: Absolute path to ComfyUI directory
+    """
+    settings = load_global_settings()
+    path = settings.get("comfyui_path")
+
+    # Return default path if not configured
+    if not path:
+        return r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\ComfyUI_windows_portable\ComfyUI"
+
+    return path
+
+
+def set_comfyui_path(path):
+    """
+    Set the ComfyUI installation path in global settings.
+
+    Args:
+        path: Path to ComfyUI installation directory
+    """
+    settings = load_global_settings()
+    settings["comfyui_path"] = path
+    save_global_settings(settings)
+    print(f"Set ComfyUI path to: {path}")
+
+
+def get_comfyui_mode():
+    """
+    Get the ComfyUI installation mode.
+
+    Returns:
+        str: 'embedded' for portable install, 'standalone' for system install
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_mode", "embedded")
+
+
+def set_comfyui_mode(mode):
+    """
+    Set the ComfyUI installation mode.
+
+    Args:
+        mode: 'embedded' for portable install, 'standalone' for system install
+    """
+    if mode not in ("embedded", "standalone"):
+        raise ValueError(f"Invalid ComfyUI mode: {mode}. Must be 'embedded' or 'standalone'")
+    settings = load_global_settings()
+    settings["comfyui_mode"] = mode
+    save_global_settings(settings)
+    print(f"Set ComfyUI mode to: {mode}")
+
+
+def get_comfyui_python_path():
+    """
+    Get the Python executable path for ComfyUI based on mode.
+
+    Returns:
+        str: Path to Python executable, or None if using system Python
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_python_path", "")
+
+
+def set_comfyui_python_path(path):
+    """
+    Set the Python executable path for standalone ComfyUI.
+
+    Args:
+        path: Path to Python executable (venv or system)
+    """
+    settings = load_global_settings()
+    settings["comfyui_python_path"] = path
+    save_global_settings(settings)
+    print(f"Set ComfyUI Python path to: {path}")
+
+
+def get_comfyui_text_presets():
+    """
+    Get saved ComfyUI text presets.
+
+    Returns:
+        dict: Dictionary of preset_name -> preset_text
+    """
+    settings = load_user_settings()
+    # Check both keys for backward compatibility (prompt_presets was the old key)
+    presets = settings.get("comfyui_text_presets", {})
+    legacy_presets = settings.get("prompt_presets", {})
+    # Merge legacy presets (legacy takes precedence if both exist for migration)
+    return {**presets, **legacy_presets}
+
+
+def save_comfyui_text_preset(name, text):
+    """
+    Save a ComfyUI text preset.
+
+    Args:
+        name: Preset name
+        text: Preset text content
+    """
+    settings = load_user_settings()
+    if "comfyui_text_presets" not in settings:
+        settings["comfyui_text_presets"] = {}
+    settings["comfyui_text_presets"][name] = text
+    save_user_settings(settings)
+    print(f"Saved ComfyUI text preset: {name}")
+
+
+def delete_comfyui_text_preset(name):
+    """
+    Delete a ComfyUI text preset.
+
+    Args:
+        name: Preset name to delete
+    """
+    settings = load_user_settings()
+    deleted = False
+    # Check both keys for backward compatibility
+    if "comfyui_text_presets" in settings and name in settings["comfyui_text_presets"]:
+        del settings["comfyui_text_presets"][name]
+        deleted = True
+    if "prompt_presets" in settings and name in settings["prompt_presets"]:
+        del settings["prompt_presets"][name]
+        deleted = True
+    if deleted:
+        save_user_settings(settings)
+        print(f"Deleted ComfyUI text preset: {name}")
+
+
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
+
+def get_global_settings_path():
+    """
+    Get the path to the global settings directory.
+
+    Returns:
+        str: Path to global settings directory (user override or default)
+    """
+    settings = load_user_settings()
+    path = settings.get("global_settings_path")
+    if path and os.path.isdir(path):
+        return path
+    return DEFAULT_GLOBAL_SETTINGS_PATH
+
+
+def set_global_settings_path(path):
+    """
+    Set a custom global settings path.
+
+    Args:
+        path: Path to global settings directory
+    """
+    settings = load_user_settings()
+    settings["global_settings_path"] = path
+    save_user_settings(settings)
+    print(f"Set global settings path to: {path}")
+
+
+def _get_global_settings_file():
+    """Get the full path to the global settings file."""
+    return os.path.join(get_global_settings_path(), GLOBAL_SETTINGS_FILENAME)
+
+
+def _ensure_global_settings_dir():
+    """Ensure global settings directory exists."""
+    path = get_global_settings_path()
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print(f"Created global settings directory: {path}")
+
+
+def load_global_settings():
+    """
+    Load global settings from file.
+
+    Returns:
+        dict: Global settings dictionary
+    """
+    default_settings = {
+        "comfyui_workflow_presets": {}
+    }
+
+    settings_file = _get_global_settings_file()
+    if not os.path.exists(settings_file):
+        print(f"No global settings file found at {settings_file}, using defaults")
+        return default_settings
+
+    try:
+        with open(settings_file, 'r') as f:
+            settings = json.load(f)
+            print(f"Loaded global settings from: {settings_file}")
+            return settings
+    except Exception as e:
+        print(f"Error loading global settings: {e}")
+        return default_settings
+
+
+def save_global_settings(settings):
+    """
+    Save global settings to file.
+
+    Args:
+        settings: Dictionary containing global settings
+    """
+    _ensure_global_settings_dir()
+
+    settings_file = _get_global_settings_file()
+    try:
+        with open(settings_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+            print(f"Saved global settings to: {settings_file}")
+    except Exception as e:
+        print(f"Error saving global settings: {e}")
+
+
+# ============================================================================
+# COMFYUI WORKFLOW PRESETS (Global)
+# ============================================================================
+
+def get_comfyui_workflow_presets():
+    """
+    Get saved ComfyUI workflow presets from global settings.
+
+    Returns:
+        dict: Dictionary of preset_name -> {"path": workflow_path, "description": optional_description}
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_workflow_presets", {})
+
+
+def save_comfyui_workflow_preset(name, workflow_path, description=""):
+    """
+    Save a ComfyUI workflow preset to global settings.
+
+    Args:
+        name: Preset display name
+        workflow_path: Path to the workflow JSON file
+        description: Optional description for the preset
+    """
+    settings = load_global_settings()
+    if "comfyui_workflow_presets" not in settings:
+        settings["comfyui_workflow_presets"] = {}
+
+    settings["comfyui_workflow_presets"][name] = {
+        "path": workflow_path,
+        "description": description
+    }
+    save_global_settings(settings)
+    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path}")
+
+
+def delete_comfyui_workflow_preset(name):
+    """
+    Delete a ComfyUI workflow preset from global settings.
+
+    Args:
+        name: Preset name to delete
+    """
+    settings = load_global_settings()
+    if "comfyui_workflow_presets" in settings and name in settings["comfyui_workflow_presets"]:
+        del settings["comfyui_workflow_presets"][name]
+        save_global_settings(settings)
+        print(f"Deleted ComfyUI workflow preset: {name}")
+
+
+def get_comfyui_workflow_preset_path(name):
+    """
+    Get the workflow path for a specific preset.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        str: Path to workflow file, or None if not found
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict):
+            return preset.get("path")
+        # Legacy format: just the path string
+        return preset
+    return None
+
+
+# ============================================================================
+# LAST BROWSED DIRECTORIES
+# ============================================================================
+
+def get_last_browse_directory(context):
+    """
+    Get the last browsed directory for a specific context.
+
+    Args:
+        context: String identifier for the browse context (e.g., "comfyui_workflow",
+                 "comfyui_output", "mp4_custom", "republish_custom", "comfyui_images")
+
+    Returns:
+        str: Last browsed directory path, or empty string if not set
+    """
+    settings = load_user_settings()
+    directories = settings.get("last_browse_directories", {})
+    return directories.get(context, "")
+
+
+def set_last_browse_directory(context, directory):
+    """
+    Save the last browsed directory for a specific context.
+
+    Args:
+        context: String identifier for the browse context
+        directory: Directory path to save
+    """
+    if not directory:
+        return
+
+    settings = load_user_settings()
+    if "last_browse_directories" not in settings:
+        settings["last_browse_directories"] = {}
+    settings["last_browse_directories"][context] = directory
+    save_user_settings(settings)
+
+
+# ============================================================================
+# COMFYUI TAB STATE PERSISTENCE
+# ============================================================================
+
+def get_comfyui_tab_state():
+    """
+    Get the saved ComfyUI tab state.
+
+    Returns:
+        dict: Dictionary with keys:
+            - workflow_preset: Last selected workflow preset name
+            - output_directory: Last used output directory
+            - generation_count: Last used generation count
+            - editable_values: Dict of node_id -> value for editable nodes
+    """
+    settings = load_user_settings()
+    return settings.get("comfyui_tab_state", {})
+
+
+def save_comfyui_tab_state(state):
+    """
+    Save the ComfyUI tab state.
+
+    Args:
+        state: Dictionary containing tab state to save
+    """
+    settings = load_user_settings()
+    settings["comfyui_tab_state"] = state
+    save_user_settings(settings)
+
+
+# ============================================================================
+# TAB ORDER PERSISTENCE
+# ============================================================================
+
+def get_tab_order():
+    """
+    Get the saved tab order.
+
+    Returns:
+        list: List of tab object names in order, or empty list if not saved
+    """
+    settings = load_user_settings()
+    return settings.get("tab_order", [])
+
+
+def save_tab_order(tab_names):
+    """
+    Save the tab order.
+
+    Args:
+        tab_names: List of tab object names in their current order
+    """
+    settings = load_user_settings()
+    settings["tab_order"] = tab_names
     save_user_settings(settings)

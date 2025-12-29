@@ -66,6 +66,9 @@ DEADLINE_PRIORITY_PUBLISH = 50
 DEADLINE_DEPARTMENT = "compositing"
 DEADLINE_CHUNK_SIZE = 1
 
+DEADLINE_GROUP_COMPFYUI = "temp_compute"
+DEADLINE_PRIORITY_COMFYUI = 50
+
 # ============================================================================
 # AYON SETTINGS
 # ============================================================================
@@ -106,6 +109,7 @@ COMPOSITING_SUBPATH = "Compositing"
 COMP_EXTENSIONS = [".nk", ".comp"]
 HIP_EXTENSION = ".hip"
 EXR_EXTENSION = ".exr"
+COMFYUI_SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr"]
 
 # File naming patterns
 DENOISED_SUBDIRECTORY = "denoised"
@@ -137,6 +141,11 @@ DEFAULT_PASSES = ["CryptoMaterials", "P", "depth", "uv", "normal"]
 # User settings file location (in user's home directory)
 USER_SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools")
 USER_SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
+
+# Global settings (shared across all users)
+# Default global settings path - can be overridden by user settings
+DEFAULT_GLOBAL_SETTINGS_PATH = r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\global_settings"
+GLOBAL_SETTINGS_FILENAME = "global_settings.json"
 
 
 

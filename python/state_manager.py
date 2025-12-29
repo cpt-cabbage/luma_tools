@@ -50,6 +50,9 @@ class ApplicationState:
         self._republish_endframe = 0
         self._republish_selected_render = None
 
+        # ComfyUI state
+        self._comfyui_workflow_path = ""
+
     # Thread-safe property accessors
     @property
     def jobname(self):
@@ -330,6 +333,16 @@ class ApplicationState:
     def republish_selected_render(self, value):
         with self._lock:
             self._republish_selected_render = value
+
+    @property
+    def comfyui_workflow_path(self):
+        with self._lock:
+            return self._comfyui_workflow_path
+
+    @comfyui_workflow_path.setter
+    def comfyui_workflow_path(self, value):
+        with self._lock:
+            self._comfyui_workflow_path = value
 
     def initialize_from_args(self, args):
         """

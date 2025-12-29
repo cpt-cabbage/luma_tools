@@ -623,8 +623,50 @@ QLineEdit:focus {
 }
 
 /* ============================================================================
- * ANIMATIONS & TRANSITIONS
+ * MODERN COMPONENTS - EXTENSIONS
  * ============================================================================ */
-QPushButton, QComboBox, QSpinBox, QListWidget::item, QCheckBox::indicator, QRadioButton::indicator {
-    /* Smooth transitions handled by Qt's animation framework */
+
+/* Toast Notifications */
+#ToastNotification {
+    background-color: rgba(33, 37, 43, 0.95);
+    border: 1px solid #4a9eff;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+#ToastNotification QLabel {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* ComfyUI Specifics */
+#ComfyUIStatusBanner {
+    background-color: #2c3e50;
+    border-radius: 4px;
+}
+
+#EditableNodeCard {
+    background-color: #2c313a;
+    border: 1px solid #3c414b;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    padding: 10px;
+}
+
+#EditableNodeCard QLabel {
+    color: #4a9eff;
+    font-weight: 700;
+    font-size: 8pt;
+    text-transform: uppercase;
+}
+
+/* Batch Image Selector */
+BatchImageSelector {
+    background-color: transparent;
+}
+
+BatchImageSelector QListWidget {
+    background-color: #1a1d23;
+    border: 1px solid #3c414b;
+    border-radius: 6px;
 }

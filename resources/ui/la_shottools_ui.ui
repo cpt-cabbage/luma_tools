@@ -46,6 +46,9 @@
      <property name="tabsClosable">
       <bool>false</bool>
      </property>
+     <property name="movable">
+      <bool>true</bool>
+     </property>
      <widget class="QWidget" name="passbuilder">
       <attribute name="title">
        <string>Pass Builder</string>
@@ -1249,10 +1252,303 @@
          <property name="textVisible">
           <bool>true</bool>
          </property>
-        </widget>
-       </item>
-      </layout>
-     </widget>
+      </widget>
+      </item>
+     </layout>
+    </widget>
+    <widget class="QWidget" name="comfyui">
+     <attribute name="title">
+      <string>ComfyUI</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="comfyuiOuterLayout">
+        <item>
+         <widget class="QScrollArea" name="comfyuiScrollArea">
+          <property name="widgetResizable">
+           <bool>true</bool>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::NoFrame</enum>
+          </property>
+          <widget class="QWidget" name="comfyuiScrollContent">
+           <layout class="QVBoxLayout" name="comfyuiLayout">
+            <item>
+             <widget class="QGroupBox" name="comfyuiWorkflowGroupBox">
+              <property name="title">
+               <string>Workflow Preset</string>
+              </property>
+              <layout class="QVBoxLayout" name="comfyuiWorkflowLayout">
+               <item>
+                <layout class="QHBoxLayout" name="comfyuiPresetLayout">
+                 <item>
+                  <widget class="QLabel" name="ComfyUIPresetLabel">
+                   <property name="text">
+                    <string>Preset:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QComboBox" name="ComfyUIPresetCombo">
+                   <property name="minimumSize">
+                    <size>
+                     <width>200</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="toolTip">
+                    <string>Select a workflow preset</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="comfyuiPresetSpacer">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <layout class="QHBoxLayout" name="comfyuiPresetButtonsLayout">
+                 <item>
+                  <widget class="QPushButton" name="ComfyUIAddPreset">
+                   <property name="text">
+                    <string>Add Preset...</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Add a new workflow preset</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="ComfyUIDeletePreset">
+                   <property name="text">
+                    <string>Delete Preset</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Delete the selected workflow preset</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="comfyuiPresetButtonsSpacer">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <widget class="QLabel" name="ComfyUIWorkflowPath">
+                 <property name="text">
+                  <string>No workflow selected</string>
+                 </property>
+                 <property name="wordWrap">
+                  <bool>true</bool>
+                 </property>
+                 <property name="styleSheet">
+                  <string>color: #888888; font-style: italic;</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="comfyuiEditableNodesGroupBox">
+              <property name="title">
+               <string>Workflow Inputs</string>
+              </property>
+              <layout class="QVBoxLayout" name="comfyuiEditableNodesLayout"/>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="comfyuiSettingsGroupBox">
+              <property name="title">
+               <string>Generation Settings</string>
+              </property>
+              <layout class="QVBoxLayout" name="comfyuiSettingsLayout">
+               <item>
+                <layout class="QHBoxLayout" name="outputDirLayout">
+                 <item>
+                  <widget class="QLabel" name="label_output_dir">
+                   <property name="text">
+                    <string>Output Directory:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QLineEdit" name="ComfyUIOutputDir">
+                   <property name="placeholderText">
+                    <string>Select output directory...</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Directory where generated images will be saved</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="ComfyUIBrowseOutputDir">
+                   <property name="text">
+                    <string>Browse...</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Browse for output directory</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <layout class="QHBoxLayout" name="genCountLayout">
+                 <item>
+                  <widget class="QLabel" name="label_count">
+                   <property name="text">
+                    <string>Successive Generations:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSpinBox" name="ComfyUIGenerationCount">
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>100</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="spacer_gen">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <layout class="QHBoxLayout" name="seedLayout">
+                 <property name="spacing">
+                  <number>6</number>
+                 </property>
+                 <item>
+                  <widget class="QLabel" name="label_seed">
+                   <property name="text">
+                    <string>Seed:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSpinBox" name="ComfyUISeed">
+                   <property name="minimum">
+                    <number>0</number>
+                   </property>
+                   <property name="maximum">
+                    <number>2147483647</number>
+                   </property>
+                   <property name="toolTip">
+                    <string>Random seed for generation</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="ComfyUIRandomizeSeed">
+                   <property name="text">
+                    <string></string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Generate a new random seed</string>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>24</width>
+                     <height>24</height>
+                    </size>
+                   </property>
+                   <property name="maximumSize">
+                    <size>
+                     <width>24</width>
+                     <height>24</height>
+                    </size>
+                   </property>
+                   <property name="iconSize">
+                    <size>
+                     <width>16</width>
+                     <height>16</height>
+                    </size>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="spacer_seed">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="comfyuiSubmitGroupBox">
+              <property name="title">
+               <string>Submit</string>
+              </property>
+              <layout class="QVBoxLayout" name="comfyuiSubmitLayout">
+               <item>
+                <layout class="QHBoxLayout" name="serverModeLayout">
+                 <item>
+                  <widget class="QCheckBox" name="ComfyUIServerMode">
+                   <property name="text">
+                    <string>Server Mode (Persistent)</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Keep ComfyUI server running between jobs. Models stay loaded in GPU memory for faster subsequent generations. Server restarts only if workflow changes.</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="serverModeSpacer">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <widget class="QPushButton" name="ComfyUISubmit">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>40</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>Submit to Farm</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <spacer name="verticalSpacer_comfy">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
      <widget class="QWidget" name="settings">
       <attribute name="title">
        <string>Settings</string>
@@ -1593,6 +1889,211 @@
             </property>
            </widget>
           </item>
+          <item>
+           <widget class="QGroupBox" name="globalSettingsGroupBox">
+            <property name="title">
+             <string>Global Settings</string>
+            </property>
+            <property name="toolTip">
+             <string>Configure shared settings that apply to all users</string>
+            </property>
+            <layout class="QVBoxLayout" name="globalSettingsLayout">
+             <item>
+              <widget class="QLabel" name="globalSettingsLabel">
+               <property name="text">
+                <string>Global settings are shared across all users. Set a network path that all team members can access.</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="globalSettingsPathLayout">
+               <item>
+                <widget class="QLabel" name="globalSettingsPathLabel">
+                 <property name="text">
+                  <string>Global Settings Path:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="GlobalSettingsPathEdit">
+                 <property name="placeholderText">
+                  <string>Path to global settings directory...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Path to the directory where global settings are stored (e.g., workflow presets)</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="BrowseGlobalSettingsPath">
+                 <property name="text">
+                  <string>Browse...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Browse for global settings directory</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="QLabel" name="globalSettingsCurrentPath">
+               <property name="text">
+                <string>Current: (default path)</string>
+               </property>
+               <property name="styleSheet">
+                <string>color: #888888; font-style: italic;</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="comfyuiModeLayout">
+               <item>
+                <widget class="QLabel" name="comfyuiModeLabel">
+                 <property name="text">
+                  <string>ComfyUI Mode:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="ComfyUIModeCombo">
+                 <property name="toolTip">
+                  <string>Select ComfyUI installation type</string>
+                 </property>
+                 <item>
+                  <property name="text">
+                   <string>Embedded (Portable)</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Standalone</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item>
+                <spacer name="comfyuiModeSpacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="comfyuiPathLayout">
+               <item>
+                <widget class="QLabel" name="comfyuiPathLabel">
+                 <property name="text">
+                  <string>ComfyUI Path:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="ComfyUIPathEdit">
+                 <property name="placeholderText">
+                  <string>Path to ComfyUI installation...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Path to ComfyUI installation directory (contains main.py)</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="BrowseComfyUIPath">
+                 <property name="text">
+                  <string>Browse...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Browse for ComfyUI installation directory</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="comfyuiPythonLayout">
+               <item>
+                <widget class="QLabel" name="comfyuiPythonLabel">
+                 <property name="text">
+                  <string>Python Path:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="ComfyUIPythonEdit">
+                 <property name="placeholderText">
+                  <string>Path to Python executable (for standalone mode)...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Path to Python executable (venv or system) for standalone mode</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="BrowseComfyUIPython">
+                 <property name="text">
+                  <string>Browse...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Browse for Python executable</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="QLabel" name="comfyuiCurrentPath">
+               <property name="text">
+                <string>Current: (default path)</string>
+               </property>
+               <property name="styleSheet">
+                <string>color: #888888; font-style: italic;</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="SaveGlobalSettings">
+               <property name="minimumSize">
+                <size>
+                 <width>0</width>
+                 <height>32</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>Save Global Settings</string>
+               </property>
+               <property name="toolTip">
+                <string>Save all global settings</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <spacer name="settingsVerticalSpacer">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>40</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
          </layout>
         </widget>
        </item>
@@ -1600,10 +2101,10 @@
      </widget>
     </widget>
    </item>
-  </layout>
+   </layout>
+  </widget>
  </widget>
-    </widget>
-   </item>
+</item>
    <item>
     <widget class="QFrame" name="statusBar">
      <property name="minimumSize">

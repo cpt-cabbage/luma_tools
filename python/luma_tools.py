@@ -53,12 +53,42 @@ from pass_builder import pass_builder
 from mp4_maker import generate_mp4, get_output_filename
 
 # Import animation and loading modules
-from ui_components import enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles, Worker
+from ui_components import (
+    enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles, Worker,
+    BatchImageSelector, ComfyUIStatusBanner, CollapsibleSection, StepGroupBox,
+    ToastNotification, StepProgressIndicator, EmptyStateWidget, ThumbnailRenderList,
+    RenderListItem
+)
 from splash_screen import SplashScreen
+from icons import IconManager, TAB_COLORS
 
 # Import new modular services
 from state_manager import app_state
 from scan_service import DirectoryScanner
+from thumbnail_service import ThumbnailService
+from comfyui_service import extract_editable_nodes, EditableNode, submit_comfyui_job
+from spell_checker import SpellCheckTextEdit, is_spell_check_available
+from settings_manager import (
+    get_comfyui_text_presets,
+    save_comfyui_text_preset,
+    delete_comfyui_text_preset,
+    get_comfyui_workflow_presets,
+    save_comfyui_workflow_preset,
+    delete_comfyui_workflow_preset,
+    get_comfyui_workflow_preset_path,
+    get_global_settings_path,
+    set_global_settings_path,
+    get_comfyui_path,
+    set_comfyui_path,
+    get_comfyui_mode,
+    set_comfyui_mode,
+    get_comfyui_python_path,
+    set_comfyui_python_path,
+    get_last_browse_directory,
+    set_last_browse_directory,
+    get_comfyui_tab_state,
+    save_comfyui_tab_state,
+)
 
 
 
@@ -110,52 +140,101 @@ class LumaShotTools(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(LumaShotTools, self).__init__()
 
+        # Debug logging to file (writes before stdout redirect)
+        import tempfile
+        debug_log = os.path.join(tempfile.gettempdir(), "luma_tools_debug.log")
+        def _debug(msg):
+            with open(debug_log, "a") as f:
+                f.write(f"{msg}\n")
+                f.flush()
+        _debug("=== LumaShotTools.__init__ started ===")
+
         # Set window flags for frameless, rounded style (same as splash screen)
         # self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        _debug("1. setAttribute done")
 
         # Load UI
+        _debug("2. Loading UI file...")
         self.ui = QtUiTools.QUiLoader().load(UI_FILE_PATH, parentWidget=self)
+        _debug("3. UI loaded successfully")
         self.parent = parent
         self.change_val[int].connect(self.set_progress_val)
         self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
+        _debug("4. Window title and icon set")
 
         # Setup log redirection
         self.log_stream = LogStream()
         self.log_stream.message_written.connect(self.append_log)
         sys.stdout = self.log_stream
         sys.stderr = self.log_stream
+        _debug("5. Log stream redirected")
 
         # Set window size from UI file and make it non-resizable
         self.setFixedSize(self.ui.size())
+        _debug("6. Window size set")
 
         # Setup animations
+        _debug("7. Setting up animations...")
         self.animator = enhance_ui(self)
         self.animator.redirect_to_splash = False  # Flag for splash screen redirection
         self.animator.splash_screen = None
+        _debug("8. Animations done")
         print("UI animations enabled")
 
         # Create inline spinner for pass detection
+        _debug("9. Creating InlineSpinner...")
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
+        _debug("10. InlineSpinner created")
         # Position will be set in showEvent when widget is fully laid out
         print("Inline spinner created for pass detection")
 
         # Initialize scanner
+        _debug("11. Creating DirectoryScanner...")
         self.scanner = DirectoryScanner(app_state, self.ui, self.animator)
+        _debug("12. DirectoryScanner created")
 
         # Connect scanner signals for thread-safe GUI updates
+        _debug("13. Connecting scanner signals...")
         self._connect_scanner_signals()
+        _debug("14. Scanner signals connected")
 
         # Connect UI signals
+        _debug("15. Connecting UI signals...")
         self._connect_signals()
+        _debug("16. UI signals connected")
 
         # Initialize UI state
+        _debug("17. Setting initial UI state...")
         self.ui.OverrideHou.setChecked(True)
         self.ui.BuildPasses.setEnabled(False)
+        _debug("18. Initial UI state set")
 
-        # Initialize default passes settings
+        # Initialize default passes UI
+        _debug("19. Loading default passes UI...")
         self._load_default_passes_ui()
+        _debug("20. Default passes UI loaded")
+
+        # Setup colorful tab icons
+        _debug("21. Setting up tab icons...")
+        self._setup_tab_icons()
+        _debug("22. Tab icons done")
+
+        # Restore saved tab order
+        _debug("22a. Restoring tab order...")
+        self._restore_tab_order()
+        _debug("22b. Tab order restored")
+
+        # Setup button icons
+        _debug("23. Setting up button icons...")
+        self._setup_button_icons()
+        _debug("24. Button icons done")
+
+        # Initialize ComfyUI tab
+        _debug("25. Initializing ComfyUI tab...")
+        self._init_comfyui_tab()
+        _debug("26. ComfyUI tab done - __init__ complete!")
 
     def showEvent(self, event):
         """Override showEvent to position spinner after window is laid out."""
@@ -336,6 +415,17 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.ResetPassesButton.clicked.connect(self.on_reset_passes_clicked)
         self.ui.SaveSettingsButton.clicked.connect(self.on_save_settings_clicked)
 
+        # Global settings
+        self.ui.BrowseGlobalSettingsPath.clicked.connect(self.on_browse_global_settings_path)
+        self.ui.BrowseComfyUIPath.clicked.connect(self.on_browse_comfyui_path)
+        self.ui.BrowseComfyUIPython.clicked.connect(self.on_browse_comfyui_python)
+        self.ui.ComfyUIModeCombo.currentIndexChanged.connect(self.on_comfyui_mode_changed)
+        self.ui.SaveGlobalSettings.clicked.connect(self.on_save_global_settings)
+        self._load_global_settings_ui()
+
+        # Tab reordering persistence
+        self.ui.tabWidget.tabBar().tabMoved.connect(self.on_tab_moved)
+
     @QtCore.Slot(int)
     def set_progress_val(self, val):
         """Update progress bar value."""
@@ -488,6 +578,188 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Show confirmation
         self.animator.pulse_button(self.ui.SaveSettingsButton)
+
+    def on_tab_moved(self, from_index, to_index):
+        """Save tab order when user reorders tabs."""
+        from settings_manager import save_tab_order
+
+        tab_names = []
+        for i in range(self.ui.tabWidget.count()):
+            widget = self.ui.tabWidget.widget(i)
+            tab_names.append(widget.objectName())
+
+        save_tab_order(tab_names)
+        print(f"Tab order saved: {tab_names}")
+
+    def _restore_tab_order(self):
+        """Restore saved tab order on startup."""
+        from settings_manager import get_tab_order
+
+        saved_order = get_tab_order()
+        if not saved_order:
+            return
+
+        # Build a map of tab name to widget
+        tab_widgets = {}
+        for i in range(self.ui.tabWidget.count()):
+            widget = self.ui.tabWidget.widget(i)
+            tab_widgets[widget.objectName()] = widget
+
+        # Reorder tabs based on saved order
+        for target_index, tab_name in enumerate(saved_order):
+            if tab_name not in tab_widgets:
+                continue
+
+            # Find current index of this tab
+            widget = tab_widgets[tab_name]
+            current_index = self.ui.tabWidget.indexOf(widget)
+
+            if current_index != -1 and current_index != target_index:
+                # Move tab to target position
+                self.ui.tabWidget.tabBar().moveTab(current_index, target_index)
+
+        print(f"Restored tab order: {saved_order}")
+
+    def _load_global_settings_ui(self):
+        """Load global settings into the settings UI."""
+        # Global settings path
+        global_path = get_global_settings_path()
+        self.ui.GlobalSettingsPathEdit.setText(global_path)
+        self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
+
+        # ComfyUI mode
+        mode = get_comfyui_mode()
+        self.ui.ComfyUIModeCombo.setCurrentIndex(0 if mode == "embedded" else 1)
+
+        # ComfyUI path
+        comfyui_path = get_comfyui_path()
+        self.ui.ComfyUIPathEdit.setText(comfyui_path)
+
+        # ComfyUI Python path
+        python_path = get_comfyui_python_path()
+        self.ui.ComfyUIPythonEdit.setText(python_path)
+
+        # Update Python path field visibility based on mode
+        self._update_comfyui_python_visibility()
+
+        # Update current path display
+        self._update_comfyui_current_path_display()
+
+    def _update_comfyui_python_visibility(self):
+        """Show/hide Python path field based on selected mode."""
+        is_standalone = self.ui.ComfyUIModeCombo.currentIndex() == 1
+        self.ui.ComfyUIPythonEdit.setEnabled(is_standalone)
+        self.ui.BrowseComfyUIPython.setEnabled(is_standalone)
+        if not is_standalone:
+            self.ui.ComfyUIPythonEdit.setPlaceholderText("(Uses embedded Python)")
+        else:
+            self.ui.ComfyUIPythonEdit.setPlaceholderText("Path to Python executable (venv or system)...")
+
+    def _update_comfyui_current_path_display(self):
+        """Update the current path display label."""
+        mode = "Embedded" if self.ui.ComfyUIModeCombo.currentIndex() == 0 else "Standalone"
+        comfyui_path = self.ui.ComfyUIPathEdit.text() or get_comfyui_path()
+        python_path = self.ui.ComfyUIPythonEdit.text() or get_comfyui_python_path()
+
+        if mode == "Embedded":
+            self.ui.comfyuiCurrentPath.setText(f"Mode: {mode} | Path: {comfyui_path}")
+        else:
+            self.ui.comfyuiCurrentPath.setText(f"Mode: {mode} | Path: {comfyui_path} | Python: {python_path}")
+
+    def on_comfyui_mode_changed(self, index):
+        """Handle ComfyUI mode combo change."""
+        self._update_comfyui_python_visibility()
+        self._update_comfyui_current_path_display()
+
+    def on_browse_global_settings_path(self):
+        """Browse for global settings directory."""
+        current_path = self.ui.GlobalSettingsPathEdit.text() or get_global_settings_path()
+        if not current_path:
+            current_path = get_last_browse_directory("global_settings")
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select Global Settings Directory",
+            current_path
+        )
+        if directory:
+            self.ui.GlobalSettingsPathEdit.setText(directory)
+            set_last_browse_directory("global_settings", directory)
+
+    def on_browse_comfyui_path(self):
+        """Browse for ComfyUI installation directory."""
+        current_path = self.ui.ComfyUIPathEdit.text() or get_comfyui_path()
+        if not current_path:
+            current_path = get_last_browse_directory("comfyui_path")
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select ComfyUI Installation Directory",
+            current_path
+        )
+        if directory:
+            self.ui.ComfyUIPathEdit.setText(directory)
+            self._update_comfyui_current_path_display()
+            set_last_browse_directory("comfyui_path", directory)
+
+    def on_browse_comfyui_python(self):
+        """Browse for Python executable."""
+        current_path = self.ui.ComfyUIPythonEdit.text() or ""
+        if not current_path:
+            current_path = get_last_browse_directory("comfyui_python")
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select Python Executable",
+            current_path,
+            "Executable (*.exe);;All Files (*)"
+        )
+        if file_path:
+            self.ui.ComfyUIPythonEdit.setText(file_path)
+            self._update_comfyui_current_path_display()
+            set_last_browse_directory("comfyui_python", os.path.dirname(file_path))
+
+    def on_save_global_settings(self):
+        """Save all global settings."""
+        # Save global settings path
+        new_global_path = self.ui.GlobalSettingsPathEdit.text().strip()
+        if new_global_path:
+            # Validate that the path exists or can be created
+            if not os.path.exists(new_global_path):
+                reply = QMessageBox.question(
+                    self,
+                    "Create Directory",
+                    f"The directory '{new_global_path}' does not exist. Create it?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    try:
+                        os.makedirs(new_global_path)
+                        print(f"Created directory: {new_global_path}")
+                    except Exception as e:
+                        self.animator.show_error(f"Failed to create directory: {e}")
+                        return
+                else:
+                    return
+
+            set_global_settings_path(new_global_path)
+            self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
+
+        # Save ComfyUI mode
+        mode = "embedded" if self.ui.ComfyUIModeCombo.currentIndex() == 0 else "standalone"
+        set_comfyui_mode(mode)
+
+        # Save ComfyUI path
+        new_comfyui_path = self.ui.ComfyUIPathEdit.text().strip()
+        if new_comfyui_path:
+            set_comfyui_path(new_comfyui_path)
+
+        # Save ComfyUI Python path (for standalone mode)
+        new_python_path = self.ui.ComfyUIPythonEdit.text().strip()
+        set_comfyui_python_path(new_python_path)
+
+        self._update_comfyui_current_path_display()
+        self.animator.show_success("Global settings saved")
+
+        # Refresh workflow presets since they may come from a new location
+        self._refresh_workflow_preset_combo()
 
     # ========================================================================
     # RENDER TAB HANDLERS
@@ -762,8 +1034,10 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_mp4_browse_custom_path_clicked(self):
         """Browse for custom directory containing image sequences."""
-        # Default to user's Videos folder
-        default_dir = os.path.join(os.path.expanduser("~"), "Videos")
+        # Use last browsed directory or default to user's Videos folder
+        default_dir = get_last_browse_directory("mp4_custom")
+        if not default_dir:
+            default_dir = os.path.join(os.path.expanduser("~"), "Videos")
 
         # Open directory dialog
         custom_dir = QFileDialog.getExistingDirectory(
@@ -778,6 +1052,7 @@ class LumaShotTools(QtWidgets.QWidget):
             self.ui.MP4CustomPathLabel.setText(f"Custom path: {app_state.mp4_custom_path}")
             self.ui.MP4CustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
             print(f"MP4 Maker: Custom path set to: {app_state.mp4_custom_path}")
+            set_last_browse_directory("mp4_custom", custom_dir)
 
             # Trigger scan
             self.on_mp4_scan_renders_clicked()
@@ -902,11 +1177,16 @@ class LumaShotTools(QtWidgets.QWidget):
             render_name = filename.split(".")[0]
             default_filename = get_output_filename(render_name, app_state.shot)
 
-        # Open file dialog with default location in user's Videos folder
+        # Use last browsed directory or default to user's Videos folder
+        last_dir = get_last_browse_directory("mp4_output")
+        if not last_dir:
+            last_dir = os.path.join(os.path.expanduser("~"), "Videos")
+
+        # Open file dialog with default location
         output_file, _ = QFileDialog.getSaveFileName(
             None,
             "Save MP4 As",
-            os.path.join(os.path.expanduser("~"), "Videos", default_filename),
+            os.path.join(last_dir, default_filename),
             "MP4 Video (*.mp4)"
         )
 
@@ -914,6 +1194,7 @@ class LumaShotTools(QtWidgets.QWidget):
             app_state.mp4_output_path = output_file
             self.ui.MP4OutputPath.setText(app_state.mp4_output_path)
             self.ui.MP4OutputPath.setStyleSheet("color: white; font-size: 9pt;")
+            set_last_browse_directory("mp4_output", os.path.dirname(output_file))
 
             # Enable generate button if render is selected
             if self.ui.MP4RendersList.currentRow() >= 0:
@@ -1045,10 +1326,12 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def on_republish_browse_custom_path_clicked(self):
         """Handle custom path browse button click for rePublish."""
-        # Default to user's Videos folder
-        default_path = os.path.join(os.path.expanduser("~"), "Videos")
-        if not os.path.exists(default_path):
-            default_path = os.path.expanduser("~")
+        # Use last browsed directory or default to user's Videos folder
+        default_path = get_last_browse_directory("republish_custom")
+        if not default_path:
+            default_path = os.path.join(os.path.expanduser("~"), "Videos")
+            if not os.path.exists(default_path):
+                default_path = os.path.expanduser("~")
 
         # Open directory dialog
         custom_dir = QFileDialog.getExistingDirectory(
@@ -1063,6 +1346,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # Update label to show selected path
             self.ui.RePublishCustomPathLabel.setText(f"Custom path: {custom_dir}")
             self.ui.RePublishCustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
+            set_last_browse_directory("republish_custom", custom_dir)
 
             # Trigger scan
             self.on_republish_scan_renders_clicked()
@@ -1398,6 +1682,587 @@ class LumaShotTools(QtWidgets.QWidget):
                 matching_items = self.ui.RendersClean.findItems(render_name, Qt.MatchContains)
                 for item in matching_items:
                     item.setSelected(False)
+
+    def _init_comfyui_tab(self):
+        """Initialize ComfyUI tab state."""
+        self._comfyui_dynamic_widgets = {}
+
+        # Connect workflow preset signals
+        self.ui.ComfyUIPresetCombo.currentTextChanged.connect(self.on_comfyui_preset_selected)
+        self.ui.ComfyUIAddPreset.clicked.connect(self.on_comfyui_add_preset)
+        self.ui.ComfyUIDeletePreset.clicked.connect(self.on_comfyui_delete_preset)
+        self.ui.ComfyUIBrowseOutputDir.clicked.connect(self.on_comfyui_browse_output_dir)
+        self.ui.ComfyUIOutputDir.textChanged.connect(self.on_comfyui_validate_inputs)
+        self.ui.ComfyUISubmit.clicked.connect(self.on_comfyui_submit)
+        self.ui.ComfyUIGenerationCount.valueChanged.connect(self._on_comfyui_generation_count_changed)
+        self.ui.ComfyUISeed.valueChanged.connect(self._on_comfyui_seed_changed)
+        self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_comfyui_randomize_seed)
+        self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", TAB_COLORS["comfyui"], 16))
+        self.ui.ComfyUIServerMode.stateChanged.connect(self._on_comfyui_server_mode_changed)
+
+        # Load workflow presets
+        self._refresh_workflow_preset_combo()
+
+        # Restore saved state (after presets are loaded)
+        self._restore_comfyui_state()
+
+        # Initial validation
+        self.on_comfyui_validate_inputs()
+
+    def _on_comfyui_generation_count_changed(self, value):
+        """Handle generation count change."""
+        self.on_comfyui_validate_inputs()
+        self._save_comfyui_state()
+
+    def _on_comfyui_seed_changed(self, value):
+        """Handle seed value change."""
+        self._save_comfyui_state()
+
+    def _on_comfyui_randomize_seed(self):
+        """Generate a new random seed."""
+        import random
+        new_seed = random.randint(0, 2147483647)
+        self.ui.ComfyUISeed.setValue(new_seed)
+
+    def _on_comfyui_server_mode_changed(self, state):
+        """Handle server mode checkbox change."""
+        self._save_comfyui_state()
+
+    def _save_comfyui_state(self):
+        """Save the current ComfyUI tab state to user settings."""
+        state = {
+            "workflow_preset": self.ui.ComfyUIPresetCombo.currentText(),
+            "output_directory": self.ui.ComfyUIOutputDir.text(),
+            "generation_count": self.ui.ComfyUIGenerationCount.value(),
+            "seed": self.ui.ComfyUISeed.value(),
+            "server_mode": self.ui.ComfyUIServerMode.isChecked(),
+        }
+
+        # Save editable node values
+        editable_values = {}
+        for node_id, container in self._comfyui_dynamic_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            if input_widget:
+                if hasattr(input_widget, 'toPlainText'):
+                    # Text widget
+                    editable_values[str(node_id)] = input_widget.toPlainText()
+                elif hasattr(input_widget, 'text'):
+                    # Line edit
+                    editable_values[str(node_id)] = input_widget.text()
+                # Note: Don't save image selections as they're typically session-specific
+
+        state["editable_values"] = editable_values
+
+        save_comfyui_tab_state(state)
+
+    def _restore_comfyui_state(self):
+        """Restore the ComfyUI tab state from user settings."""
+        state = get_comfyui_tab_state()
+        if not state:
+            # No saved state - use defaults
+            if app_state.shotpath:
+                default_output = os.path.join(app_state.shotpath, "comfyui_output")
+                self.ui.ComfyUIOutputDir.setText(default_output)
+            return
+
+        # Restore workflow preset selection
+        preset_name = state.get("workflow_preset", "")
+        if preset_name and preset_name != "-- Select Preset --":
+            index = self.ui.ComfyUIPresetCombo.findText(preset_name)
+            if index >= 0:
+                self.ui.ComfyUIPresetCombo.setCurrentIndex(index)
+                # This will trigger on_comfyui_preset_selected and load the workflow
+
+        # Restore output directory
+        output_dir = state.get("output_directory", "")
+        if output_dir:
+            self.ui.ComfyUIOutputDir.setText(output_dir)
+        elif app_state.shotpath:
+            default_output = os.path.join(app_state.shotpath, "comfyui_output")
+            self.ui.ComfyUIOutputDir.setText(default_output)
+
+        # Restore generation count
+        gen_count = state.get("generation_count", 1)
+        self.ui.ComfyUIGenerationCount.setValue(gen_count)
+
+        # Restore seed (generate random if not saved)
+        import random
+        seed = state.get("seed", random.randint(0, 2147483647))
+        self.ui.ComfyUISeed.setValue(seed)
+
+        # Restore server mode
+        server_mode = state.get("server_mode", False)
+        self.ui.ComfyUIServerMode.setChecked(server_mode)
+
+        # Store editable values to apply after widgets are created
+        self._pending_editable_values = state.get("editable_values", {})
+
+    def _setup_tab_icons(self):
+        """Setup colorful icons for each tab."""
+        try:
+            tab_config = {
+                "pass_builder": ("layers", TAB_COLORS["pass_builder"]),
+                "mp4_maker": ("video", TAB_COLORS["mp4_maker"]),
+                "republish": ("upload", TAB_COLORS["republish"]),
+                "shot_cleaner": ("trash", TAB_COLORS["shot_cleaner"]),
+                "comfyui": ("sparkles", TAB_COLORS["comfyui"]),
+                "settings": ("settings", TAB_COLORS["settings"]),
+            }
+            for i in range(self.ui.tabWidget.count()):
+                widget = self.ui.tabWidget.widget(i)
+                if widget:
+                    name = widget.objectName()
+                    if name in tab_config:
+                        icon_name, color = tab_config[name]
+                        icon = IconManager.get_icon(icon_name, color, 18)
+                        self.ui.tabWidget.setTabIcon(i, icon)
+        except Exception as e:
+            print(f"Warning: Could not setup tab icons: {e}")
+
+    def _setup_button_icons(self):
+        """Setup icons for primary action buttons."""
+        try:
+            icon_map = {
+                "BuildPasses": ("play", "#000000"),
+                "MP4Generate": ("video", "#ffffff"),
+                "RePublishPublish": ("upload", "#000000"),
+                "ComfyUISubmit": ("sparkles", "#ffffff")
+            }
+            for btn_name, (icon_name, color) in icon_map.items():
+                btn = getattr(self.ui, btn_name, None)
+                if btn:
+                    icon = IconManager.get_icon(icon_name, color, 16)
+                    btn.setIcon(icon)
+        except Exception as e:
+            print(f"Warning: Could not setup button icons: {e}")
+
+    def _restore_tab_order(self):
+        """Restore the saved order of tabs."""
+        pass # To be implemented with settings_manager
+
+    def _refresh_workflow_preset_combo(self):
+        """Refresh the workflow preset combo box with saved presets."""
+        combo = self.ui.ComfyUIPresetCombo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("-- Select Preset --")
+
+        presets = get_comfyui_workflow_presets()
+        for name in sorted(presets.keys()):
+            combo.addItem(name)
+
+        combo.blockSignals(False)
+
+    def on_comfyui_preset_selected(self, text):
+        """Handle workflow preset selection from combo box."""
+        if text == "-- Select Preset --":
+            app_state.comfyui_workflow_path = None
+            self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
+            self._refresh_comfyui_editable_nodes()
+            self.on_comfyui_validate_inputs()
+            return
+
+        workflow_path = get_comfyui_workflow_preset_path(text)
+        if workflow_path and os.path.exists(workflow_path):
+            self.ui.ComfyUIWorkflowPath.setText(workflow_path)
+            app_state.comfyui_workflow_path = workflow_path
+            self._refresh_comfyui_editable_nodes()
+            self.on_comfyui_validate_inputs()
+            self._save_comfyui_state()
+        else:
+            self.animator.show_error(f"Workflow file not found: {workflow_path}")
+            self.ui.ComfyUIWorkflowPath.setText("Workflow file not found")
+            app_state.comfyui_workflow_path = None
+            self.on_comfyui_validate_inputs()
+
+    def on_comfyui_add_preset(self):
+        """Add a new workflow preset."""
+        # Use last browsed directory for workflows
+        last_dir = get_last_browse_directory("comfyui_workflow")
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select ComfyUI Workflow", last_dir, "ComfyUI JSON (*.json)"
+        )
+        if not file_path:
+            return
+        set_last_browse_directory("comfyui_workflow", os.path.dirname(file_path))
+
+        # Then ask for a preset name
+        name, ok = QInputDialog.getText(
+            self, "Add Workflow Preset",
+            "Enter a name for this workflow preset:"
+        )
+        if not ok or not name:
+            return
+
+        name = name.strip()
+        if not name:
+            self.animator.show_error("Preset name cannot be empty")
+            return
+
+        # Check if preset already exists
+        presets = get_comfyui_workflow_presets()
+        if name in presets:
+            reply = QMessageBox.question(
+                self, "Overwrite Preset",
+                f"Preset '{name}' already exists. Overwrite?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        # Save the preset
+        save_comfyui_workflow_preset(name, file_path)
+        self._refresh_workflow_preset_combo()
+        self.ui.ComfyUIPresetCombo.setCurrentText(name)
+        self.animator.show_success(f"Workflow preset '{name}' saved")
+
+    def on_comfyui_delete_preset(self):
+        """Delete the currently selected workflow preset."""
+        current = self.ui.ComfyUIPresetCombo.currentText()
+        if current == "-- Select Preset --":
+            self.animator.show_error("No preset selected")
+            return
+
+        reply = QMessageBox.question(
+            self, "Delete Preset",
+            f"Delete workflow preset '{current}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            delete_comfyui_workflow_preset(current)
+            self._refresh_workflow_preset_combo()
+            self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
+            app_state.comfyui_workflow_path = None
+            self._refresh_comfyui_editable_nodes()
+            self.on_comfyui_validate_inputs()
+            self.animator.show_info(f"Preset '{current}' deleted")
+
+    def _refresh_comfyui_editable_nodes(self):
+        """Refresh dynamic UI widgets based on editable nodes in the workflow."""
+        # Clear layout
+        layout = self.ui.comfyuiEditableNodesLayout
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._comfyui_dynamic_widgets = {}
+
+        if not app_state.comfyui_workflow_path:
+            return
+
+        editable_nodes = extract_editable_nodes(app_state.comfyui_workflow_path)
+        for node in editable_nodes:
+            widget = self._create_editable_node_widget(node)
+            if widget:
+                layout.addWidget(widget)
+                self._comfyui_dynamic_widgets[node.node_id] = widget
+
+        # Apply any pending editable values from restored state
+        self._apply_pending_editable_values()
+
+    def _apply_pending_editable_values(self):
+        """Apply pending editable values that were saved from a previous session."""
+        if not hasattr(self, '_pending_editable_values') or not self._pending_editable_values:
+            return
+
+        for node_id_str, value in self._pending_editable_values.items():
+            try:
+                node_id = int(node_id_str)
+                if node_id in self._comfyui_dynamic_widgets:
+                    container = self._comfyui_dynamic_widgets[node_id]
+                    input_widget = getattr(container, 'input_widget', None)
+                    if input_widget:
+                        if hasattr(input_widget, 'setPlainText'):
+                            input_widget.setPlainText(value)
+                        elif hasattr(input_widget, 'setText'):
+                            input_widget.setText(value)
+            except (ValueError, AttributeError) as e:
+                print(f"Could not restore value for node {node_id_str}: {e}")
+
+        # Clear pending values after applying
+        self._pending_editable_values = {}
+
+    def _create_editable_node_widget(self, node):
+        """Create a widget for an editable node."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        label = QLabel(f"{node.display_name}:")
+        layout.addWidget(label)
+
+        if node.widget_type == 'text':
+            # Add preset row
+            preset_row = QHBoxLayout()
+            preset_combo = QComboBox()
+            preset_combo.setMinimumWidth(150)
+            self._refresh_preset_combo(preset_combo)
+            preset_row.addWidget(QLabel("Preset:"))
+            preset_row.addWidget(preset_combo, 1)
+
+            save_btn = QPushButton("Save")
+            save_btn.setFixedWidth(100)
+            delete_btn = QPushButton("Delete")
+            delete_btn.setFixedWidth(100)
+            preset_row.addWidget(save_btn)
+            preset_row.addWidget(delete_btn)
+            layout.addLayout(preset_row)
+
+            # Text input with spell checking
+            input_widget = SpellCheckTextEdit()
+            input_widget.setMinimumHeight(60)
+            if node.current_value:
+                input_widget.setPlainText(str(node.current_value))
+            layout.addWidget(input_widget)
+            container.input_widget = input_widget
+            container.preset_combo = preset_combo
+
+            # Connect preset signals
+            preset_combo.currentTextChanged.connect(
+                lambda text, w=input_widget, c=preset_combo: self._on_preset_selected(text, w, c)
+            )
+            save_btn.clicked.connect(
+                lambda checked=False, w=input_widget, c=preset_combo: self._on_save_preset(w, c)
+            )
+            delete_btn.clicked.connect(
+                lambda checked=False, c=preset_combo: self._on_delete_preset(c)
+            )
+            # Save state when text changes (with delay to avoid too many saves)
+            input_widget.textChanged.connect(self._on_comfyui_text_changed)
+
+        elif node.widget_type == 'image':
+            input_widget = BatchImageSelector()
+            # Set last browse directory for image selector
+            last_dir = get_last_browse_directory("comfyui_images")
+            if last_dir:
+                input_widget.set_last_browse_dir(last_dir)
+            # Save directory when images are added
+            input_widget.images_changed.connect(self._on_comfyui_images_changed)
+            layout.addWidget(input_widget)
+            container.input_widget = input_widget
+        else:
+            input_widget = QLineEdit()
+            if node.current_value:
+                input_widget.setText(str(node.current_value))
+            input_widget.textChanged.connect(self._on_comfyui_text_changed)
+            layout.addWidget(input_widget)
+            container.input_widget = input_widget
+
+        return container
+
+    def _refresh_preset_combo(self, combo):
+        """Refresh preset combo box with saved presets."""
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("-- Select Preset --")
+        presets = get_comfyui_text_presets()
+        for name in sorted(presets.keys()):
+            combo.addItem(name)
+        combo.blockSignals(False)
+
+    def _on_preset_selected(self, text, text_widget, combo):
+        """Handle preset selection from combo box."""
+        if text == "-- Select Preset --":
+            return
+        presets = get_comfyui_text_presets()
+        if text in presets:
+            text_widget.setPlainText(presets[text])
+
+    def _on_save_preset(self, text_widget, combo):
+        """Save current text as a new preset."""
+        print(f"_on_save_preset called with text_widget={text_widget}, combo={combo}")
+        current_text = text_widget.toPlainText().strip()
+        if not current_text:
+            self.animator.show_error("Cannot save empty preset")
+            return
+
+        # Create and show dialog explicitly to ensure it appears
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Save Preset")
+        dialog.setLabelText("Preset name:")
+        dialog.setTextValue("")
+        dialog.setWindowModality(Qt.WindowModal)
+
+        if dialog.exec_() == QInputDialog.Accepted:
+            name = dialog.textValue().strip()
+            if not name:
+                self.animator.show_error("Preset name cannot be empty")
+                return
+            save_comfyui_text_preset(name, current_text)
+            self._refresh_preset_combo(combo)
+            combo.setCurrentText(name)
+            self.animator.show_success(f"Preset '{name}' saved")
+
+    def _on_delete_preset(self, combo):
+        """Delete the currently selected preset."""
+        print(f"_on_delete_preset called with combo={combo}")
+        current = combo.currentText()
+        if current == "-- Select Preset --":
+            self.animator.show_error("No preset selected")
+            return
+
+        reply = QMessageBox.question(
+            self, "Delete Preset",
+            f"Delete preset '{current}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            delete_comfyui_text_preset(current)
+            self._refresh_preset_combo(combo)
+            self.animator.show_info(f"Preset '{current}' deleted")
+
+    def _on_comfyui_text_changed(self):
+        """Handle text change in editable nodes - save state with debounce."""
+        # Use a timer to debounce saves (avoid saving on every keystroke)
+        if not hasattr(self, '_comfyui_save_timer'):
+            self._comfyui_save_timer = QTimer(self)
+            self._comfyui_save_timer.setSingleShot(True)
+            self._comfyui_save_timer.timeout.connect(self._save_comfyui_state)
+        # Restart timer on each change (500ms debounce)
+        self._comfyui_save_timer.start(500)
+
+    def _on_comfyui_images_changed(self, images):
+        """Handle image selection changes - save the last browse directory."""
+        if images:
+            # Save the directory from the first image
+            last_dir = os.path.dirname(images[0])
+            set_last_browse_directory("comfyui_images", last_dir)
+
+    def on_comfyui_browse_output_dir(self):
+        """Browse for ComfyUI output directory."""
+        current_path = self.ui.ComfyUIOutputDir.text()
+        if not current_path:
+            current_path = get_last_browse_directory("comfyui_output")
+        if not current_path and app_state.shotpath:
+            current_path = app_state.shotpath
+
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory",
+            current_path or ""
+        )
+        if directory:
+            self.ui.ComfyUIOutputDir.setText(directory)
+            set_last_browse_directory("comfyui_output", directory)
+            self._save_comfyui_state()
+
+    def on_comfyui_validate_inputs(self):
+        """Validate inputs and enable/disable submit button."""
+        workflow_ok = bool(app_state.comfyui_workflow_path)
+        output_ok = bool(self.ui.ComfyUIOutputDir.text().strip())
+        self.ui.ComfyUISubmit.setEnabled(workflow_ok and output_ok)
+
+    def on_comfyui_submit(self):
+        """Submit the workflow to ComfyUI/Deadline."""
+        # Validate workflow
+        if not app_state.comfyui_workflow_path:
+            self.animator.show_error("No workflow selected")
+            return
+
+        # Validate output directory
+        output_dir = self.ui.ComfyUIOutputDir.text().strip()
+        if not output_dir:
+            self.animator.show_error("No output directory selected")
+            return
+
+        # Get generation count from UI
+        generation_count = self.ui.ComfyUIGenerationCount.value()
+
+        # Collect editable values from dynamic widgets
+        editable_values = {}
+        editable_nodes = extract_editable_nodes(app_state.comfyui_workflow_path)
+
+        for node in editable_nodes:
+            node_id = node.node_id
+            if node_id in self._comfyui_dynamic_widgets:
+                container = self._comfyui_dynamic_widgets[node_id]
+                input_widget = getattr(container, 'input_widget', None)
+                if input_widget:
+                    if node.widget_type == 'text':
+                        value = input_widget.toPlainText().strip()
+                    elif node.widget_type == 'image':
+                        # BatchImageSelector stores files in selected_files
+                        value = getattr(input_widget, 'selected_files', [])
+                    else:
+                        value = input_widget.text().strip() if hasattr(input_widget, 'text') else str(node.current_value)
+
+                    editable_values[node_id] = {'node': node, 'value': value}
+
+        # Build job name from shot/project
+        job_name = f"{app_state.shot}_comfyui" if app_state.shot else "comfyui_job"
+
+        # Show loading overlay
+        self.animator.show_loading(
+            "Submitting to ComfyUI",
+            f"Preparing {generation_count} generation(s)...",
+            show_progress=True
+        )
+        self.animator.animate_button_click(self.ui.ComfyUISubmit)
+
+        def on_result(result):
+            """Called when submission completes."""
+            self.animator.hide_loading()
+            job_ids, error_msg = result
+
+            if job_ids:
+                job_count = len(job_ids)
+                total_gens = job_count * generation_count
+                self.animator.show_success(f"Submitted {job_count} job(s), {total_gens} generations")
+                self.animator.update_status_animated(
+                    f"ComfyUI: {job_count} job(s) submitted",
+                    StatusColors.SUCCESS
+                )
+                print(f"ComfyUI submission complete: {job_ids}")
+            else:
+                self.animator.show_error(f"Submission failed: {error_msg}")
+                self.animator.update_status_animated(
+                    f"ComfyUI failed: {error_msg}",
+                    StatusColors.ERROR
+                )
+
+        def on_error(error_msg, traceback_str):
+            """Called when submission fails."""
+            self.animator.hide_loading()
+            self.animator.show_error(f"Submission error: {error_msg}")
+            self.animator.update_status_animated(
+                f"ComfyUI error: {error_msg}",
+                StatusColors.ERROR
+            )
+            print(f"ComfyUI submission error: {error_msg}")
+            print(traceback_str)
+
+        def on_progress(progress, message):
+            """Called for progress updates."""
+            self.animator.update_loading_message(message)
+            self.animator.update_loading_progress(progress)
+
+        # Get server mode setting
+        use_server_mode = self.ui.ComfyUIServerMode.isChecked()
+
+        # Get seed value
+        base_seed = self.ui.ComfyUISeed.value()
+
+        # Create worker and run submission on background thread
+        worker = Worker(
+            submit_comfyui_job,
+            workflow_path=app_state.comfyui_workflow_path,
+            input_image=None,  # Using editable_values instead
+            prompt=None,  # Using editable_values instead
+            output_dir=output_dir,
+            generation_count=generation_count,
+            job_name=job_name,
+            editable_values=editable_values,
+            use_server_mode=use_server_mode,
+            base_seed=base_seed,
+        )
+        worker.signals.result.connect(on_result)
+        worker.signals.error.connect(on_error)
+        worker.signals.progress.connect(on_progress)
+        QThreadPool.globalInstance().start(worker)
+
+    def on_clear_log(self):
+        """Clear the terminal log output."""
+        self.ui.LogOutput.clear()
+        self.animator.show_info("Log cleared")
 
 
 # ============================================================================

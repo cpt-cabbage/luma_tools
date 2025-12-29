@@ -1,6 +1,7 @@
 import os
 import math
 import traceback
+from PySide2 import QtCore, QtGui, QtWidgets
 from PySide2.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize,
     QRectF, Signal, QObject, QRect, QSequentialAnimationGroup,
@@ -9,7 +10,8 @@ from PySide2.QtCore import (
 )
 from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
-    QApplication
+    QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton, 
+    QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit
 )
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 
@@ -267,6 +269,351 @@ class LoadingStyles:
                 background: transparent;
             }}
         """
+
+
+# ============================================================================
+# PREMIUM UI COMPONENTS
+# ============================================================================
+
+class StatusColors:
+    """Standard color palette for UI status elements."""
+    SUCCESS = "#2ecc71"
+    WARNING = "#f39c12"
+    ERROR = "#e74c3c"
+    INFO = "#3498db"
+    NEUTRAL = "#95a5a6"
+    ACCENT = "#3b82f6"
+
+
+class ToastNotification(QWidget):
+    """
+    Floating toast notification that appears at the top/bottom of the window.
+    """
+    def __init__(self, message, type="info", parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.layout = QVBoxLayout(self)
+        self.label = QLabel(message)
+        self.label.setWordWrap(True)
+        self.layout.addWidget(self.label)
+        
+        # Color based on type
+        color_map = {
+            "success": "#2ecc71",
+            "error": "#e74c3c",
+            "warning": "#f39c12",
+            "info": "#3498db"
+        }
+        self.color = color_map.get(type, "#3498db")
+        
+        self.setObjectName("ToastNotification")
+        self.setProperty("type", type)
+        
+        # Animations
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.opacity_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        
+        # Auto-hide timer
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide_toast)
+
+    def show_toast(self, duration=3000):
+        if not self.parent(): return
+        
+        # Position at top center
+        parent_rect = self.parent().geometry()
+        self.adjustSize()
+        x = parent_rect.x() + (parent_rect.width() - self.width()) // 2
+        y = parent_rect.y() + 40
+        self.move(x, y)
+        
+        self.show()
+        self.opacity_anim.setDuration(300)
+        self.opacity_anim.setStartValue(0)
+        self.opacity_anim.setEndValue(1)
+        self.opacity_anim.start()
+        
+        self.timer.start(duration)
+
+    def hide_toast(self):
+        self.opacity_anim.setDuration(500)
+        self.opacity_anim.setStartValue(1)
+        self.opacity_anim.setEndValue(0)
+        self.opacity_anim.finished.connect(self.deleteLater)
+        self.opacity_anim.start()
+
+
+class ComfyUIStatusBanner(QWidget):
+    """
+    Enhanced status banner with pulsing animations and clear indicators.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.label = QLabel("Ready to submit")
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("font-weight: bold; color: white;")
+        self.layout.addWidget(self.label)
+        
+        self.setFixedHeight(40)
+        self.setStyleSheet("background-color: #2c3e50; border-radius: 4px;")
+
+    def set_status(self, message, color="#34495e"):
+        self.label.setText(message)
+        self.setStyleSheet(f"background-color: {color}; border-radius: 4px;")
+
+
+class BatchImageSelector(QWidget):
+    """
+    Custom widget for selecting multiple images with preview thumbnails.
+    """
+    images_changed = Signal(list)
+
+    # Thumbnail size for list items
+    THUMBNAIL_SIZE = 48
+
+    def __init__(self, supported_extensions=None, parent=None):
+        super().__init__(parent)
+        self.supported_extensions = supported_extensions or ['.png', '.jpg', '.jpeg', '.exr']
+        self.selected_files = []
+        self._last_browse_dir = ""
+        self._thumbnail_cache = {}
+
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Toolbar
+        self.toolbar = QWidget()
+        self.toolbar_layout = QHBoxLayout(self.toolbar)
+        self.toolbar_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.add_btn = QtWidgets.QPushButton("Add Images...")
+        self.add_btn.clicked.connect(self.browse_images)
+        self.toolbar_layout.addWidget(self.add_btn)
+
+        self.clear_btn = QtWidgets.QPushButton("Clear All")
+        self.clear_btn.clicked.connect(self.clear_images)
+        self.toolbar_layout.addWidget(self.clear_btn)
+
+        self.count_label = QLabel("No images selected")
+        self.toolbar_layout.addWidget(self.count_label)
+        self.toolbar_layout.addStretch()
+
+        self.main_layout.addWidget(self.toolbar)
+
+        # List area with icon view mode for thumbnails
+        self.list_widget = QtWidgets.QListWidget()
+        self.list_widget.setMinimumHeight(150)
+        self.list_widget.setAcceptDrops(True)
+        self.list_widget.setDragEnabled(True)
+        self.list_widget.setIconSize(QSize(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE))
+        self.list_widget.setSpacing(2)
+        self.main_layout.addWidget(self.list_widget)
+
+    def set_last_browse_dir(self, directory):
+        """Set the last browse directory (called from main app)."""
+        self._last_browse_dir = directory
+
+    def get_last_browse_dir(self):
+        """Get the last browse directory."""
+        return self._last_browse_dir
+
+    def browse_images(self):
+        start_dir = self._last_browse_dir or ""
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Select Images", start_dir, "Images (*.png *.jpg *.jpeg *.exr)"
+        )
+        if files:
+            # Remember the directory
+            self._last_browse_dir = os.path.dirname(files[0])
+            self.add_images(files)
+
+    def add_images(self, paths):
+        for path in paths:
+            if path not in self.selected_files:
+                self.selected_files.append(path)
+                self._add_list_item_with_thumbnail(path)
+
+        self._update_ui()
+        self.images_changed.emit(self.selected_files)
+
+    def _add_list_item_with_thumbnail(self, path):
+        """Add a list item with a thumbnail preview."""
+        item = QtWidgets.QListWidgetItem(os.path.basename(path))
+        item.setToolTip(path)
+
+        # Generate thumbnail
+        thumbnail = self._get_thumbnail(path)
+        if thumbnail:
+            item.setIcon(QtGui.QIcon(thumbnail))
+
+        self.list_widget.addItem(item)
+
+    def _get_thumbnail(self, path):
+        """Get or generate thumbnail for an image file."""
+        if path in self._thumbnail_cache:
+            return self._thumbnail_cache[path]
+
+        try:
+            ext = os.path.splitext(path)[1].lower()
+
+            if ext == '.exr':
+                # For EXR files, create a placeholder thumbnail
+                pixmap = self._create_placeholder_thumbnail("EXR")
+            else:
+                # For standard image formats, load and scale
+                pixmap = QPixmap(path)
+                if not pixmap.isNull():
+                    pixmap = pixmap.scaled(
+                        self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE,
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                else:
+                    pixmap = self._create_placeholder_thumbnail("?")
+
+            self._thumbnail_cache[path] = pixmap
+            return pixmap
+
+        except Exception as e:
+            print(f"Error generating thumbnail for {path}: {e}")
+            return self._create_placeholder_thumbnail("!")
+
+    def _create_placeholder_thumbnail(self, text):
+        """Create a placeholder thumbnail with text."""
+        pixmap = QPixmap(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE)
+        pixmap.fill(QColor("#3c414b"))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw text
+        painter.setPen(QColor("#888888"))
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+
+        painter.end()
+        return pixmap
+
+    def clear_images(self):
+        self.selected_files = []
+        self.list_widget.clear()
+        self._thumbnail_cache.clear()
+        self._update_ui()
+        self.images_changed.emit([])
+
+    def _update_ui(self):
+        count = len(self.selected_files)
+        self.count_label.setText(f"{count} image(s) selected" if count > 0 else "No images selected")
+
+
+class CollapsibleSection(QWidget):
+    """
+    A collapsible UI section for organizing complex forms.
+    """
+    def __init__(self, title="", parent=None):
+        super().__init__(parent)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+        
+        self.toggle_btn = QtWidgets.QPushButton(title)
+        self.toggle_btn.setCheckable(True)
+        self.toggle_btn.setChecked(True)
+        self.toggle_btn.toggled.connect(self.on_toggled)
+        self.main_layout.addWidget(self.toggle_btn)
+        
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.main_layout.addWidget(self.content)
+
+    def on_toggled(self, is_checked):
+        self.content.setVisible(is_checked)
+
+
+class StepGroupBox(QtWidgets.QGroupBox):
+    """GroupBox with step number badge for wizard-style layouts."""
+    def __init__(self, step_number, title, parent=None):
+        super().__init__(f"Step {step_number}: {title}", parent)
+        self.setObjectName(f"Step{step_number}GroupBox")
+
+
+class StepProgressIndicator(QWidget):
+    """Horizontal progress indicator with step circles."""
+    def __init__(self, steps, parent=None):
+        super().__init__(parent)
+        self.steps = steps
+        self.current_step = 0
+        self.setFixedHeight(50)
+
+
+class EmptyStateWidget(QWidget):
+    """Visual placeholder when lists are empty."""
+    def __init__(self, text, icon=None, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.label = QLabel(text)
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+
+
+class ThumbnailRenderList(QtWidgets.QListWidget):
+    """List widget specifically for renders with thumbnails."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSpacing(5)
+
+
+class RenderListItem(QtWidgets.QListWidgetItem):
+    """Item for ThumbnailRenderList."""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+
+
+# ============================================================================
+# MODERN UI ENHANCEMENTS & ANIMATIONS
+# ============================================================================
+
+def enhance_ui(window):
+    """
+    Initialize modern UI enhancements and animations.
+    """
+    class Animator(QObject):
+        def __init__(self, target):
+            super().__init__()
+            self.target = target
+            self.redirect_to_splash = False
+            self.splash_screen = None
+            
+        def show_success(self, message):
+            print(f"SUCCESS: {message}")
+            toast = ToastNotification(message, "success", self.target)
+            toast.show_toast()
+            
+        def show_error(self, message):
+            print(f"ERROR: {message}")
+            toast = ToastNotification(message, "error", self.target)
+            toast.show_toast()
+            
+        def show_warning(self, message):
+            print(f"WARNING: {message}")
+            toast = ToastNotification(message, "warning", self.target)
+            toast.show_toast()
+
+        def show_info(self, message):
+            print(f"INFO: {message}")
+            toast = ToastNotification(message, "info", self.target)
+            toast.show_toast()
+
+    return Animator(window)
 
 
 # ============================================================================

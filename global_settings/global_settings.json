@@ -1,0 +1,11 @@
+{
+  "comfyui_workflow_presets": {
+    "Image Edit": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2509.json",
+      "description": ""
+    }
+  },
+  "comfyui_path": "C:\\ComfyUi\\ComfyUi\\resources\\ComfyUI",
+  "comfyui_mode": "standalone",
+  "comfyui_python_path": "C:\\ComfyUi\\Comfy_Ui_Data\\.venv\\Scripts\\python.exe"
+}
