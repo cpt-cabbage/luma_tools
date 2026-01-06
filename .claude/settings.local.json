@@ -14,7 +14,8 @@
       "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe\" list:*)",
       "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\":*)",
       "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m pip install pyenchant)",
-      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile:*)"
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile:*)",
+      "Bash(copy \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\la_shottools_ui.ui\" \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\la_shottools_ui_backup.ui\")"
     ],
     "deny": [],
     "ask": []

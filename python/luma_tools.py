@@ -164,130 +164,157 @@ class LumaShotTools(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(LumaShotTools, self).__init__()
 
-        # Debug logging to file (writes before stdout redirect)
-        import tempfile
-        debug_log = os.path.join(tempfile.gettempdir(), "luma_tools_debug.log")
-        def _debug(msg):
-            with open(debug_log, "a") as f:
-                f.write(f"{msg}\n")
-                f.flush()
-        _debug("=== LumaShotTools.__init__ started ===")
-
         # Set window flags for frameless, rounded style (same as splash screen)
         # self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        _debug("1. setAttribute done")
 
-        # Load UI
-        _debug("2. Loading UI file...")
-        self.ui = QtUiTools.QUiLoader().load(UI_FILE_PATH, parentWidget=self)
-        _debug("3. UI loaded successfully")
+        # Load UI (modular tab system)
+        self.ui = self._load_modular_ui()
         self.parent = parent
         self.change_val[int].connect(self.set_progress_val)
+
         # Set window title based on mode
         if app_state.standalone_mode:
             self.setWindowTitle(f"{APP_TITLE} - Standalone Mode")
         else:
             self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
-        _debug("4. Window title and icon set")
 
         # Setup log redirection
         self.log_stream = LogStream()
         self.log_stream.message_written.connect(self.append_log)
         sys.stdout = self.log_stream
         sys.stderr = self.log_stream
-        _debug("5. Log stream redirected")
 
         # Check admin status
-        _debug("5a. Checking admin status...")
         self._check_admin_status()
-        _debug("5b. Admin status checked")
 
         # Set window size from UI file and make it non-resizable
         self.setFixedSize(self.ui.size())
-        _debug("6. Window size set")
 
         # Setup animations
-        _debug("7. Setting up animations...")
         self.animator = enhance_ui(self)
         self.animator.redirect_to_splash = False  # Flag for splash screen redirection
         self.animator.splash_screen = None
-        _debug("8. Animations done")
         print("UI animations enabled")
 
         # Create inline spinner for pass detection
-        _debug("9. Creating InlineSpinner...")
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
-        _debug("10. InlineSpinner created")
         # Position will be set in showEvent when widget is fully laid out
         print("Inline spinner created for pass detection")
 
         # Initialize scanner
-        _debug("11. Creating DirectoryScanner...")
         self.scanner = DirectoryScanner(app_state, self.ui, self.animator)
-        _debug("12. DirectoryScanner created")
 
         # Connect scanner signals for thread-safe GUI updates
-        _debug("13. Connecting scanner signals...")
         self._connect_scanner_signals()
-        _debug("14. Scanner signals connected")
 
         # Connect UI signals
-        _debug("15. Connecting UI signals...")
         self._connect_signals()
-        _debug("16. UI signals connected")
 
         # Initialize UI state
-        _debug("17. Setting initial UI state...")
         self.ui.OverrideHou.setChecked(True)
         self.ui.BuildPasses.setEnabled(False)
-        _debug("18. Initial UI state set")
 
         # Initialize default passes UI
-        _debug("19. Loading default passes UI...")
         self._load_default_passes_ui()
-        _debug("20. Default passes UI loaded")
 
         # Setup colorful tab icons
-        _debug("21. Setting up tab icons...")
         self._setup_tab_icons()
-        _debug("22. Tab icons done")
 
         # Restore saved tab order
-        _debug("22a. Restoring tab order...")
         self._restore_tab_order()
-        _debug("22b. Tab order restored")
 
         # Hide restricted tabs for non-admin users
-        _debug("22c. Hiding restricted tabs...")
         self._hide_restricted_tabs()
-        _debug("22d. Restricted tabs hidden")
 
         # Hide tabs that require shot context in standalone mode
-        _debug("22e. Checking standalone mode...")
         self._hide_standalone_incompatible_tabs()
-        _debug("22f. Standalone mode tab check done")
 
         # Setup button icons
-        _debug("23. Setting up button icons...")
         self._setup_button_icons()
-        _debug("24. Button icons done")
 
         # Disable scroll wheel on combo boxes and spin boxes
-        _debug("24a. Disabling scroll wheel on dropdowns...")
         self._disable_scroll_wheel_on_inputs()
-        _debug("24b. Scroll wheel disabled")
 
         # Initialize ComfyUI tab
-        _debug("25. Initializing ComfyUI tab...")
         self._init_comfyui_tab()
-        _debug("26. ComfyUI tab done")
 
         # Initialize ComfyUI Gallery tab
-        _debug("27. Initializing ComfyUI Gallery tab...")
         self._init_comfyui_gallery_tab()
-        _debug("28. ComfyUI Gallery tab done - __init__ complete!")
+
+    def _load_modular_ui(self):
+        """
+        Load UI using the modular tab system.
+
+        Loads main_window.ui (shell with empty QTabWidget), then loads each
+        tab's .ui file separately and adds it to the tab widget.
+
+        For backward compatibility, all widget references are copied to the
+        main UI object so existing code (self.ui.WidgetName) continues to work.
+        """
+        from config import UI_FILE_PATH, UI_TABS_DIR
+
+        loader = QtUiTools.QUiLoader()
+
+        # Load main window shell
+        main_ui = loader.load(UI_FILE_PATH, parentWidget=self)
+        if main_ui is None:
+            raise RuntimeError(f"Failed to load main window UI from {UI_FILE_PATH}")
+
+        # Tab configuration: (ui_filename, tab_name, object_name)
+        tabs_config = [
+            ("pass_builder.ui", "Pass Builder", "passbuilder"),
+            ("mp4_maker.ui", "MP4 Maker", "mp4maker"),
+            ("republish.ui", "rePublish", "republish"),
+            ("shot_cleaner.ui", "Shot Cleaner", "shotcleaner"),
+            ("logs.ui", "Logs", "logs"),
+            ("comfyui.ui", "ComfyUI", "comfyui"),
+            ("comfyui_gallery.ui", "ComfyUI Gallery", "comfyui_gallery"),
+            ("settings.ui", "Settings", "settings"),
+        ]
+
+        # Store tab widgets for reference
+        self.tab_widgets = {}
+
+        # Load each tab and add to tabWidget
+        for ui_file, tab_name, object_name in tabs_config:
+            ui_path = os.path.join(UI_TABS_DIR, ui_file)
+            if os.path.exists(ui_path):
+                tab_widget = loader.load(ui_path)
+                if tab_widget is None:
+                    print(f"WARNING: Failed to load {ui_file}")
+                    continue
+                tab_widget.setObjectName(object_name)
+                main_ui.tabWidget.addTab(tab_widget, tab_name)
+                self.tab_widgets[object_name] = tab_widget
+
+                # Copy all child widget references to main_ui for backward compatibility
+                # This allows self.ui.WidgetName to work regardless of which tab the widget is in
+                self._copy_widget_refs(tab_widget, main_ui)
+            else:
+                print(f"WARNING: Tab file not found: {ui_path}")
+
+        return main_ui
+
+    def _copy_widget_refs(self, source_widget, target_ui):
+        """
+        Recursively copy widget references from source to target UI object.
+
+        This enables backward compatibility so self.ui.WidgetName works
+        for widgets in any tab, not just the main window.
+        """
+        # Copy QWidget children
+        for child in source_widget.findChildren(QtWidgets.QWidget):
+            name = child.objectName()
+            if name and not name.startswith("qt_") and not hasattr(target_ui, name):
+                setattr(target_ui, name, child)
+
+        # Copy QLayout children (layouts are not QWidgets)
+        for child in source_widget.findChildren(QtWidgets.QLayout):
+            name = child.objectName()
+            if name and not name.startswith("qt_") and not hasattr(target_ui, name):
+                setattr(target_ui, name, child)
 
     def showEvent(self, event):
         """Override showEvent to position spinner after window is laid out."""
@@ -1829,7 +1856,8 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.ComfyUISeed.valueChanged.connect(self._on_comfyui_seed_changed)
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_comfyui_randomize_seed)
         self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", TAB_COLORS["comfyui"], 16))
-        self.ui.ComfyUIServerMode.stateChanged.connect(self._on_comfyui_server_mode_changed)
+        if hasattr(self.ui, 'ComfyUIServerMode'):
+            self.ui.ComfyUIServerMode.stateChanged.connect(self._on_comfyui_server_mode_changed)
 
         # Connect iterate mode signals
         self.ui.ComfyUIChooseMode.clicked.connect(self._on_choose_mode_clicked)

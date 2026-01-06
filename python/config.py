@@ -116,7 +116,11 @@ else:
 DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR) if _DEADLINE_DIR else shutil.which("deadlinecommand")
 
 # UI paths (relative to luma_tools root directory)
-UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
+# Legacy monolithic UI file (kept as backup)
+UI_FILE_PATH_LEGACY = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
+# New modular UI files
+UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "main_window.ui")
+UI_TABS_DIR = os.path.join(_ROOT_DIR, "resources", "ui", "tabs")
 QDARKSTYLE_PATH = os.path.join(_CONFIG_DIR, "venv", "Lib", "site-packages", "qdarkstyle", "dark", "darkstyle.qss")
 CUSTOM_STYLE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shot_tools_styles.qss")
 ICON_PATH = os.path.join(_ROOT_DIR, "resources", "logo_White_small_filled.png")

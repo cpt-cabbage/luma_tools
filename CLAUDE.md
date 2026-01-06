@@ -19,6 +19,7 @@ Luma Tools is a VFX shot management application for the Luma Animation pipeline.
 luma_tools.bat
 
 # Direct Python (ensure venv is activated)
+python\venv\Scripts\activate.bat
 python python/luma_tools.py
 ```
 
@@ -38,6 +39,24 @@ The application accepts 6 positional arguments for shot context: `jobname`, `sho
 | `config.py` | Configuration with dynamic path resolution from environment variables |
 | `settings_manager.py` | User settings (~/.luma_tools/) and global settings persistence |
 | `utils.py` | Utilities: `get_trailing_number`, `remove_after`, `update_path_version`, `scan_exr_sequences`, `normalize_path` |
+
+### Modular Tab System (python/tabs/)
+
+Each tab is a self-contained module inheriting from `BaseTab`:
+
+| Module | Purpose |
+|--------|---------|
+| `base_tab.py` | Abstract base class with `TabSignals` for cross-tab communication |
+| `pass_builder_tab.py` | Render scanning and pass building |
+| `mp4_maker_tab.py` | MP4 generation from EXR sequences |
+| `republish_tab.py` | Re-publishing renders to AYON |
+| `shot_cleaner_tab.py` | Cleanup for renders/USD/HIP files |
+| `comfyui_tab.py` | ComfyUI workflow execution |
+| `comfyui_gallery_tab.py` | Gallery view for ComfyUI outputs |
+| `settings_tab.py` | User and global settings |
+| `logs_tab.py` | Log output viewer |
+
+Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 
 ### Service Layer
 
@@ -68,7 +87,9 @@ The application accepts 6 positional arguments for shot context: `jobname`, `sho
 | `ui_components.py` | Worker class, animations, inline spinners, status colors, loading overlay |
 | `splash_screen.py` | Animated loading splash screen |
 | `icons.py` | `IconManager` for SVG icons, `TAB_COLORS` theme constants |
-| `la_shottools_ui.ui` | Qt Designer UI file |
+| `main_window.ui` | Qt Designer main window UI file |
+| `tabs/*.ui` | Individual tab UI files (e.g., `pass_builder.ui`) |
+| `la_shottools_ui.ui` | Legacy monolithic UI file (backup) |
 | `la_shot_tools_styles.qss` | Custom Qt stylesheet |
 
 ### Additional Python Modules (python/)
@@ -78,6 +99,40 @@ The application accepts 6 positional arguments for shot context: `jobname`, `sho
 | `spell_checker.py` | PyEnchant-based `SpellCheckTextEdit` widget, `is_spell_check_available()` |
 
 ## Architecture Patterns
+
+### Modular Tab Architecture
+
+Tabs follow a base class pattern defined in `python/tabs/base_tab.py`:
+
+```python
+class MyTab(BaseTab):
+    @property
+    def ui_file(self) -> str:
+        return "my_tab.ui"  # Located in resources/ui/tabs/
+
+    @property
+    def tab_name(self) -> str:
+        return "My Tab"
+
+    def connect_signals(self):
+        """Wire up UI signals after load."""
+        self.ui.myButton.clicked.connect(self._on_button_clicked)
+
+    def initialize(self):
+        """Post-load setup."""
+        pass
+```
+
+**Key BaseTab features:**
+- `TabSignals` for cross-tab communication (`log_message`, `status_update`, `show_loading`, `hide_loading`)
+- `load_ui()` loads from `resources/ui/tabs/{ui_file}`
+- Lifecycle hooks: `on_tab_activated()`, `on_tab_deactivated()`
+- Helper methods: `log()`, `set_status()`, `show_loading()`, `hide_loading()`, `get_widget()`
+
+**Adding a new tab:**
+1. Create `python/tabs/my_tab.py` inheriting from `BaseTab`
+2. Create `resources/ui/tabs/my_tab.ui` in Qt Designer
+3. Register in `python/tabs/__init__.py` by adding to `TAB_CONFIG`
 
 ### Threading Model (Critical)
 
@@ -175,17 +230,7 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 
 ## Development
 
-### Environment Setup
-
-```bash
-# Activate venv manually (Windows)
-python\venv\Scripts\activate.bat
-
-# Venv location
-python/venv/
-```
-
-No build process - runs directly from source.
+No build process - runs directly from source. Venv location: `python/venv/`
 
 ### Debugging
 
@@ -196,18 +241,22 @@ No build process - runs directly from source.
 
 ### Modifying UI
 
-1. Edit `resources/ui/la_shottools_ui.ui` in Qt Designer
-2. Update styles in `resources/ui/la_shot_tools_styles.qss`
-3. Connect signals in `LumaShotTools._connect_signals()`
+**For modular tabs (preferred):**
+1. Edit `resources/ui/tabs/{tab_name}.ui` in Qt Designer
+2. Update tab logic in `python/tabs/{tab_name}_tab.py`
+3. Styles in `resources/ui/la_shot_tools_styles.qss`
+
+**For main window:**
+1. Edit `resources/ui/main_window.ui`
+2. Connect signals in `LumaShotTools._connect_signals()`
 
 ### Adding New Features
 
 1. Create service module in `python/` if needed
 2. Add configuration to `config.py`
-3. Add UI elements to `.ui` file
-4. Connect signals in `_connect_signals()`
-5. For long operations: Wrap in Worker, submit to QThreadPool
-6. Use `animator.show_loading()` for loading overlay
+3. For new tab: Follow "Adding a new tab" steps in Architecture section
+4. For long operations: Wrap in Worker, submit to QThreadPool
+5. Use `show_loading()` for loading overlay
 
 **Thread Safety Checklist:**
 - Access `app_state` properties (thread-safe via RLock)

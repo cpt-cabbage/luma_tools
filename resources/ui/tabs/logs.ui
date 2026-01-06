@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LogsTab</class>
+ <widget class="QWidget" name="LogsTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1400</width>
+    <height>850</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="logsMainLayout">
+   <property name="spacing">
+    <number>24</number>
+   </property>
+   <property name="leftMargin">
+    <number>24</number>
+   </property>
+   <property name="topMargin">
+    <number>24</number>
+   </property>
+   <property name="rightMargin">
+    <number>24</number>
+   </property>
+   <property name="bottomMargin">
+    <number>24</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="logOutputGroupBox">
+     <property name="title">
+      <string>Terminal Log Output</string>
+     </property>
+     <layout class="QVBoxLayout" name="logOutputLayout">
+      <item>
+       <layout class="QHBoxLayout" name="logToolbarLayout">
+        <item>
+         <spacer name="logHorizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="ClearLogButton">
+          <property name="minimumSize">
+           <size>
+            <width>100</width>
+            <height>32</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Clear Log</string>
+          </property>
+          <property name="toolTip">
+           <string>Clear all log messages</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTextEdit" name="LogOutput">
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+        <property name="lineWrapMode">
+         <enum>QTextEdit::NoWrap</enum>
+        </property>
+        <property name="font">
+         <font>
+          <family>Consolas</family>
+          <pointsize>9</pointsize>
+         </font>
+        </property>
+        <property name="placeholderText">
+         <string>Terminal output will appear here...</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
