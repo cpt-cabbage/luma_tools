@@ -144,7 +144,8 @@ def get_comfyui_mode():
     Get the ComfyUI installation mode.
 
     Returns:
-        str: 'embedded' for portable install, 'standalone' for system install
+        str: 'embedded' for python_embeded install, 'portable' for venv-based install
+             (e.g., comfy-cli), 'standalone' for system install
     """
     settings = load_global_settings()
     return settings.get("comfyui_mode", "embedded")
@@ -155,10 +156,11 @@ def set_comfyui_mode(mode):
     Set the ComfyUI installation mode.
 
     Args:
-        mode: 'embedded' for portable install, 'standalone' for system install
+        mode: 'embedded' for python_embeded install, 'portable' for venv-based install
+              (e.g., comfy-cli), 'standalone' for system install
     """
-    if mode not in ("embedded", "standalone"):
-        raise ValueError(f"Invalid ComfyUI mode: {mode}. Must be 'embedded' or 'standalone'")
+    if mode not in ("embedded", "portable", "standalone"):
+        raise ValueError(f"Invalid ComfyUI mode: {mode}. Must be 'embedded', 'portable', or 'standalone'")
     settings = load_global_settings()
     settings["comfyui_mode"] = mode
     save_global_settings(settings)
@@ -293,7 +295,8 @@ def load_global_settings():
         dict: Global settings dictionary
     """
     default_settings = {
-        "comfyui_workflow_presets": {}
+        "comfyui_workflow_presets": {},
+        "admin_users": ["christophe.leyder"]  # Default admin user
     }
 
     settings_file = _get_global_settings_file()
@@ -493,3 +496,75 @@ def save_tab_order(tab_names):
     settings = load_user_settings()
     settings["tab_order"] = tab_names
     save_user_settings(settings)
+
+
+# ============================================================================
+# ADMIN USER MANAGEMENT
+# ============================================================================
+
+def get_admin_users():
+    """
+    Get the list of admin users from global settings.
+
+    Returns:
+        list: List of admin usernames
+    """
+    settings = load_global_settings()
+    return settings.get("admin_users", [])
+
+
+def is_admin_user(username):
+    """
+    Check if a username is in the admin list.
+
+    Args:
+        username: Username to check
+
+    Returns:
+        bool: True if user is an admin (case-insensitive)
+    """
+    if not username:
+        return False
+    admin_users = get_admin_users()
+    return username.lower() in [u.lower() for u in admin_users]
+
+
+def add_admin_user(username):
+    """
+    Add a user to the admin list.
+
+    Args:
+        username: Username to add
+    """
+    if not username:
+        return
+
+    settings = load_global_settings()
+    if "admin_users" not in settings:
+        settings["admin_users"] = []
+
+    # Avoid duplicates (case-insensitive)
+    existing_lower = [u.lower() for u in settings["admin_users"]]
+    if username.lower() not in existing_lower:
+        settings["admin_users"].append(username)
+        save_global_settings(settings)
+        print(f"Added admin user: {username}")
+
+
+def remove_admin_user(username):
+    """
+    Remove a user from the admin list.
+
+    Args:
+        username: Username to remove
+    """
+    settings = load_global_settings()
+    if "admin_users" not in settings:
+        return
+
+    original_list = settings["admin_users"]
+    settings["admin_users"] = [u for u in original_list if u.lower() != username.lower()]
+
+    if len(settings["admin_users"]) < len(original_list):
+        save_global_settings(settings)
+        print(f"Removed admin user: {username}")

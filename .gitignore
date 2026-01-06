@@ -4,5 +4,4 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Claude settings
-.claude/settings.local.json
+

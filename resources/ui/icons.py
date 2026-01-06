@@ -19,6 +19,7 @@ TAB_COLORS = {
     "mp4_maker": "#bf5af2",     # Vibrant Purple
     "republish": "#32d74b",     # Pulse Green
     "shot_cleaner": "#ff9f0a",  # Radiant Amber
+    "logs": "#64d2ff",          # Sky Blue
     "comfyui": "#ff375f",       # Neon Pink
     "settings": "#8e8e93",      # Pro Slate
 }
@@ -214,6 +215,7 @@ class IconManager:
             "mp4_maker": "video",
             "republish": "upload",
             "shot_cleaner": "trash",
+            "logs": "terminal",
             "comfyui": "sparkles",
             "settings": "settings",
         }

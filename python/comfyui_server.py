@@ -245,7 +245,8 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         comfyui_path: Path to ComfyUI installation
         port: Port for ComfyUI server
         extra_args: Additional command line arguments
-        mode: 'embedded' for portable install, 'standalone' for system install
+        mode: 'embedded' for portable install, 'portable' for venv-based install
+              (e.g., comfy-cli), 'standalone' for system install
         python_path: Path to Python executable (required for standalone mode)
         skip_dep_check: Skip dependency check (useful for embedded mode)
     """
@@ -253,6 +254,33 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         # Embedded/portable mode: python_embeded folder alongside ComfyUI
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
         main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
+    elif mode == "portable":
+        # Portable mode: venv-based install from various installers
+        # Check for different venv and main.py locations used by different installers
+        venv_locations = [
+            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),  # comfy-cli
+            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),  # some installers use .venv
+        ]
+        main_py_locations = [
+            os.path.join(comfyui_path, "ComfyUI", "main.py"),  # comfy-cli structure
+        ]
+
+        python_exe = None
+        for venv_path in venv_locations:
+            if os.path.exists(venv_path):
+                python_exe = venv_path
+                break
+        if not python_exe:
+            # Default to venv if none found (will error later with helpful message)
+            python_exe = venv_locations[0]
+
+        main_py = None
+        for main_path in main_py_locations:
+            if os.path.exists(main_path):
+                main_py = main_path
+                break
+        if not main_py:
+            main_py = main_py_locations[0]
     else:
         # Standalone mode: use provided Python path
         if not python_path:
@@ -283,7 +311,12 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     if extra_args:
         cmd.extend(extra_args)
 
+    # Set working directory to where main.py is located
+    # This ensures custom_nodes are found correctly
+    working_dir = os.path.dirname(main_py)
+
     print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
+    print(f"Working directory: {working_dir}")
 
     process = subprocess.Popen(
         cmd,
@@ -291,7 +324,7 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        cwd=comfyui_path,
+        cwd=working_dir,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     )
 
@@ -460,8 +493,8 @@ Examples:
                         help='Enable low VRAM mode')
     parser.add_argument('--gpu-only', action='store_true',
                         help='Run everything on GPU')
-    parser.add_argument('--mode', choices=['embedded', 'standalone'], default='embedded',
-                        help='ComfyUI installation mode: embedded (portable) or standalone')
+    parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
+                        help='ComfyUI installation mode: embedded (python_embeded), portable (venv), or standalone')
     parser.add_argument('--python-path', default=None,
                         help='Path to Python executable (required for standalone mode)')
     parser.add_argument('--skip-dep-check', action='store_true',

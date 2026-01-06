@@ -88,6 +88,9 @@ from settings_manager import (
     set_last_browse_directory,
     get_comfyui_tab_state,
     save_comfyui_tab_state,
+    get_admin_users,
+    add_admin_user,
+    remove_admin_user,
 )
 
 
@@ -171,6 +174,11 @@ class LumaShotTools(QtWidgets.QWidget):
         sys.stderr = self.log_stream
         _debug("5. Log stream redirected")
 
+        # Check admin status
+        _debug("5a. Checking admin status...")
+        self._check_admin_status()
+        _debug("5b. Admin status checked")
+
         # Set window size from UI file and make it non-resizable
         self.setFixedSize(self.ui.size())
         _debug("6. Window size set")
@@ -226,10 +234,20 @@ class LumaShotTools(QtWidgets.QWidget):
         self._restore_tab_order()
         _debug("22b. Tab order restored")
 
+        # Hide restricted tabs for non-admin users
+        _debug("22c. Hiding restricted tabs...")
+        self._hide_restricted_tabs()
+        _debug("22d. Restricted tabs hidden")
+
         # Setup button icons
         _debug("23. Setting up button icons...")
         self._setup_button_icons()
         _debug("24. Button icons done")
+
+        # Disable scroll wheel on combo boxes and spin boxes
+        _debug("24a. Disabling scroll wheel on dropdowns...")
+        self._disable_scroll_wheel_on_inputs()
+        _debug("24b. Scroll wheel disabled")
 
         # Initialize ComfyUI tab
         _debug("25. Initializing ComfyUI tab...")
@@ -422,6 +440,13 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.ComfyUIModeCombo.currentIndexChanged.connect(self.on_comfyui_mode_changed)
         self.ui.SaveGlobalSettings.clicked.connect(self.on_save_global_settings)
         self._load_global_settings_ui()
+
+        # Admin user management (only available if admin and widgets exist)
+        if hasattr(self.ui, 'AddAdminUserButton'):
+            self.ui.AddAdminUserButton.clicked.connect(self.on_add_admin_user)
+        if hasattr(self.ui, 'RemoveAdminUserButton'):
+            self.ui.RemoveAdminUserButton.clicked.connect(self.on_remove_admin_user)
+        self._load_admin_users_ui()
 
         # Tab reordering persistence
         self.ui.tabWidget.tabBar().tabMoved.connect(self.on_tab_moved)
@@ -627,9 +652,10 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.GlobalSettingsPathEdit.setText(global_path)
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
-        # ComfyUI mode
+        # ComfyUI mode (0=embedded, 1=portable, 2=standalone)
         mode = get_comfyui_mode()
-        self.ui.ComfyUIModeCombo.setCurrentIndex(0 if mode == "embedded" else 1)
+        mode_index = {"embedded": 0, "portable": 1, "standalone": 2}.get(mode, 0)
+        self.ui.ComfyUIModeCombo.setCurrentIndex(mode_index)
 
         # ComfyUI path
         comfyui_path = get_comfyui_path()
@@ -647,24 +673,30 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _update_comfyui_python_visibility(self):
         """Show/hide Python path field based on selected mode."""
-        is_standalone = self.ui.ComfyUIModeCombo.currentIndex() == 1
+        # 0=embedded, 1=portable, 2=standalone - only standalone needs custom Python path
+        is_standalone = self.ui.ComfyUIModeCombo.currentIndex() == 2
         self.ui.ComfyUIPythonEdit.setEnabled(is_standalone)
         self.ui.BrowseComfyUIPython.setEnabled(is_standalone)
-        if not is_standalone:
-            self.ui.ComfyUIPythonEdit.setPlaceholderText("(Uses embedded Python)")
+        mode_index = self.ui.ComfyUIModeCombo.currentIndex()
+        if mode_index == 0:
+            self.ui.ComfyUIPythonEdit.setPlaceholderText("(Uses python_embeded/python.exe)")
+        elif mode_index == 1:
+            self.ui.ComfyUIPythonEdit.setPlaceholderText("(Uses venv/Scripts/python.exe)")
         else:
-            self.ui.ComfyUIPythonEdit.setPlaceholderText("Path to Python executable (venv or system)...")
+            self.ui.ComfyUIPythonEdit.setPlaceholderText("Path to Python executable...")
 
     def _update_comfyui_current_path_display(self):
         """Update the current path display label."""
-        mode = "Embedded" if self.ui.ComfyUIModeCombo.currentIndex() == 0 else "Standalone"
+        mode_index = self.ui.ComfyUIModeCombo.currentIndex()
+        mode_names = {0: "Embedded", 1: "Portable", 2: "Standalone"}
+        mode = mode_names.get(mode_index, "Embedded")
         comfyui_path = self.ui.ComfyUIPathEdit.text() or get_comfyui_path()
         python_path = self.ui.ComfyUIPythonEdit.text() or get_comfyui_python_path()
 
-        if mode == "Embedded":
-            self.ui.comfyuiCurrentPath.setText(f"Mode: {mode} | Path: {comfyui_path}")
-        else:
+        if mode_index == 2:  # Standalone needs custom Python path
             self.ui.comfyuiCurrentPath.setText(f"Mode: {mode} | Path: {comfyui_path} | Python: {python_path}")
+        else:
+            self.ui.comfyuiCurrentPath.setText(f"Mode: {mode} | Path: {comfyui_path}")
 
     def on_comfyui_mode_changed(self, index):
         """Handle ComfyUI mode combo change."""
@@ -742,8 +774,9 @@ class LumaShotTools(QtWidgets.QWidget):
             set_global_settings_path(new_global_path)
             self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
 
-        # Save ComfyUI mode
-        mode = "embedded" if self.ui.ComfyUIModeCombo.currentIndex() == 0 else "standalone"
+        # Save ComfyUI mode (0=embedded, 1=portable, 2=standalone)
+        mode_map = {0: "embedded", 1: "portable", 2: "standalone"}
+        mode = mode_map.get(self.ui.ComfyUIModeCombo.currentIndex(), "embedded")
         set_comfyui_mode(mode)
 
         # Save ComfyUI path
@@ -1686,9 +1719,10 @@ class LumaShotTools(QtWidgets.QWidget):
     def _init_comfyui_tab(self):
         """Initialize ComfyUI tab state."""
         self._comfyui_dynamic_widgets = {}
+        self._current_preset_name = None
 
         # Connect workflow preset signals
-        self.ui.ComfyUIPresetCombo.currentTextChanged.connect(self.on_comfyui_preset_selected)
+        self.ui.ComfyUIChoosePreset.clicked.connect(self._on_choose_preset_clicked)
         self.ui.ComfyUIAddPreset.clicked.connect(self.on_comfyui_add_preset)
         self.ui.ComfyUIDeletePreset.clicked.connect(self.on_comfyui_delete_preset)
         self.ui.ComfyUIBrowseOutputDir.clicked.connect(self.on_comfyui_browse_output_dir)
@@ -1700,10 +1734,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", TAB_COLORS["comfyui"], 16))
         self.ui.ComfyUIServerMode.stateChanged.connect(self._on_comfyui_server_mode_changed)
 
-        # Load workflow presets
-        self._refresh_workflow_preset_combo()
-
-        # Restore saved state (after presets are loaded)
+        # Restore saved state
         self._restore_comfyui_state()
 
         # Initial validation
@@ -1731,7 +1762,7 @@ class LumaShotTools(QtWidgets.QWidget):
     def _save_comfyui_state(self):
         """Save the current ComfyUI tab state to user settings."""
         state = {
-            "workflow_preset": self.ui.ComfyUIPresetCombo.currentText(),
+            "workflow_preset": self._current_preset_name or "",
             "output_directory": self.ui.ComfyUIOutputDir.text(),
             "generation_count": self.ui.ComfyUIGenerationCount.value(),
             "seed": self.ui.ComfyUISeed.value(),
@@ -1767,11 +1798,11 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Restore workflow preset selection
         preset_name = state.get("workflow_preset", "")
-        if preset_name and preset_name != "-- Select Preset --":
-            index = self.ui.ComfyUIPresetCombo.findText(preset_name)
-            if index >= 0:
-                self.ui.ComfyUIPresetCombo.setCurrentIndex(index)
-                # This will trigger on_comfyui_preset_selected and load the workflow
+        if preset_name:
+            # Check if preset still exists
+            presets = get_comfyui_workflow_presets()
+            if preset_name in presets:
+                self._select_preset(preset_name)
 
         # Restore output directory
         output_dir = state.get("output_directory", "")
@@ -1799,71 +1830,157 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _setup_tab_icons(self):
         """Setup colorful icons for each tab."""
-        try:
-            tab_config = {
-                "pass_builder": ("layers", TAB_COLORS["pass_builder"]),
-                "mp4_maker": ("video", TAB_COLORS["mp4_maker"]),
-                "republish": ("upload", TAB_COLORS["republish"]),
-                "shot_cleaner": ("trash", TAB_COLORS["shot_cleaner"]),
-                "comfyui": ("sparkles", TAB_COLORS["comfyui"]),
-                "settings": ("settings", TAB_COLORS["settings"]),
-            }
-            for i in range(self.ui.tabWidget.count()):
-                widget = self.ui.tabWidget.widget(i)
-                if widget:
-                    name = widget.objectName()
-                    if name in tab_config:
-                        icon_name, color = tab_config[name]
-                        icon = IconManager.get_icon(icon_name, color, 18)
-                        self.ui.tabWidget.setTabIcon(i, icon)
-        except Exception as e:
-            print(f"Warning: Could not setup tab icons: {e}")
+        # Tab icons disabled
+        pass
 
     def _setup_button_icons(self):
-        """Setup icons for primary action buttons."""
-        try:
-            icon_map = {
-                "BuildPasses": ("play", "#000000"),
-                "MP4Generate": ("video", "#ffffff"),
-                "RePublishPublish": ("upload", "#000000"),
-                "ComfyUISubmit": ("sparkles", "#ffffff")
-            }
-            for btn_name, (icon_name, color) in icon_map.items():
-                btn = getattr(self.ui, btn_name, None)
-                if btn:
-                    icon = IconManager.get_icon(icon_name, color, 16)
-                    btn.setIcon(icon)
-        except Exception as e:
-            print(f"Warning: Could not setup button icons: {e}")
+        """Setup icons for icon-only buttons."""
+        # Icons removed from text buttons (BuildPasses, MP4Generate, RePublishPublish, ComfyUISubmit)
+        # Only icon-only buttons retain their icons (e.g., ComfyUIRandomizeSeed)
+        pass
+
+    def _disable_scroll_wheel_on_inputs(self):
+        """Disable scroll wheel on combo boxes and spin boxes to prevent accidental changes."""
+        # Find all combo boxes and spin boxes in the UI
+        for combo in self.ui.findChildren(QtWidgets.QComboBox):
+            combo.setFocusPolicy(Qt.StrongFocus)
+            combo.wheelEvent = lambda event: event.ignore()
+
+        for spinbox in self.ui.findChildren(QtWidgets.QSpinBox):
+            spinbox.setFocusPolicy(Qt.StrongFocus)
+            spinbox.wheelEvent = lambda event: event.ignore()
+
+        for spinbox in self.ui.findChildren(QtWidgets.QDoubleSpinBox):
+            spinbox.setFocusPolicy(Qt.StrongFocus)
+            spinbox.wheelEvent = lambda event: event.ignore()
 
     def _restore_tab_order(self):
         """Restore the saved order of tabs."""
         pass # To be implemented with settings_manager
 
-    def _refresh_workflow_preset_combo(self):
-        """Refresh the workflow preset combo box with saved presets."""
-        combo = self.ui.ComfyUIPresetCombo
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("-- Select Preset --")
+    def _check_admin_status(self):
+        """Check if current user is an admin and cache the result."""
+        self._is_admin = app_state.is_admin
+        if self._is_admin:
+            print(f"User '{app_state.user}' has admin privileges")
+        else:
+            print(f"User '{app_state.user}' is a regular user (restricted tabs hidden)")
 
-        presets = get_comfyui_workflow_presets()
-        for name in sorted(presets.keys()):
-            combo.addItem(name)
+    def _hide_restricted_tabs(self):
+        """Hide admin-only tabs for non-admin users."""
+        if self._is_admin:
+            return  # Admin sees all tabs
 
-        combo.blockSignals(False)
+        tabs_to_hide = ["comfyui", "settings"]
+        indices_to_remove = []
 
-    def on_comfyui_preset_selected(self, text):
-        """Handle workflow preset selection from combo box."""
-        if text == "-- Select Preset --":
-            app_state.comfyui_workflow_path = None
-            self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
-            self._refresh_comfyui_editable_nodes()
-            self.on_comfyui_validate_inputs()
+        for i in range(self.ui.tabWidget.count()):
+            widget = self.ui.tabWidget.widget(i)
+            if widget and widget.objectName() in tabs_to_hide:
+                indices_to_remove.append(i)
+
+        # Remove tabs from highest index to lowest to preserve indices
+        for i in sorted(indices_to_remove, reverse=True):
+            tab_name = self.ui.tabWidget.widget(i).objectName()
+            self.ui.tabWidget.removeTab(i)
+            print(f"Hid restricted tab: {tab_name}")
+
+    def _load_admin_users_ui(self):
+        """Load admin users into the settings list widget."""
+        if not hasattr(self.ui, 'AdminUsersList'):
             return
 
-        workflow_path = get_comfyui_workflow_preset_path(text)
+        self.ui.AdminUsersList.clear()
+        admin_users = get_admin_users()
+
+        for username in sorted(admin_users):
+            item = QtWidgets.QListWidgetItem(username)
+            # Highlight current user
+            if username.lower() == app_state.user.lower():
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setToolTip("(You)")
+            self.ui.AdminUsersList.addItem(item)
+
+        print(f"Loaded {len(admin_users)} admin users")
+
+    def on_add_admin_user(self):
+        """Add a user to the admin list via input dialog."""
+        username, ok = QInputDialog.getText(
+            self,
+            "Add Admin User",
+            "Enter username to add as admin:"
+        )
+
+        if ok and username:
+            username = username.strip()
+            if not username:
+                self.animator.show_error("Username cannot be empty")
+                return
+
+            add_admin_user(username)
+            self._load_admin_users_ui()
+            self.animator.show_success(f"Added admin user: {username}")
+
+    def on_remove_admin_user(self):
+        """Remove selected user from the admin list."""
+        selected_items = self.ui.AdminUsersList.selectedItems()
+
+        if not selected_items:
+            self.animator.show_error("Select a user to remove")
+            return
+
+        username = selected_items[0].text()
+
+        # Warn if removing self
+        if username.lower() == app_state.user.lower():
+            reply = QMessageBox.warning(
+                self,
+                "Remove Yourself?",
+                "You are about to remove yourself from the admin list.\n"
+                "You will lose access to admin features after restarting.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        remove_admin_user(username)
+        self._load_admin_users_ui()
+        self.animator.show_success(f"Removed admin user: {username}")
+
+    def _on_choose_preset_clicked(self):
+        """Show popup menu with available workflow presets."""
+        menu = QMenu(self)
+
+        presets = get_comfyui_workflow_presets()
+        if not presets:
+            action = menu.addAction("No presets available")
+            action.setEnabled(False)
+        else:
+            for name in sorted(presets.keys()):
+                action = menu.addAction(name)
+                action.setData(name)
+                # Mark current preset with a checkmark
+                if name == self._current_preset_name:
+                    action.setCheckable(True)
+                    action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.ComfyUIChoosePreset.mapToGlobal(
+            self.ui.ComfyUIChoosePreset.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._select_preset(action.data())
+
+    def _select_preset(self, preset_name):
+        """Select a workflow preset by name."""
+        workflow_path = get_comfyui_workflow_preset_path(preset_name)
         if workflow_path and os.path.exists(workflow_path):
+            self._current_preset_name = preset_name
+            self.ui.ComfyUICurrentPreset.setText(preset_name)
             self.ui.ComfyUIWorkflowPath.setText(workflow_path)
             app_state.comfyui_workflow_path = workflow_path
             self._refresh_comfyui_editable_nodes()
@@ -1872,6 +1989,8 @@ class LumaShotTools(QtWidgets.QWidget):
         else:
             self.animator.show_error(f"Workflow file not found: {workflow_path}")
             self.ui.ComfyUIWorkflowPath.setText("Workflow file not found")
+            self.ui.ComfyUICurrentPreset.setText("No preset selected")
+            self._current_preset_name = None
             app_state.comfyui_workflow_path = None
             self.on_comfyui_validate_inputs()
 
@@ -1910,32 +2029,32 @@ class LumaShotTools(QtWidgets.QWidget):
             if reply != QMessageBox.Yes:
                 return
 
-        # Save the preset
+        # Save the preset and select it
         save_comfyui_workflow_preset(name, file_path)
-        self._refresh_workflow_preset_combo()
-        self.ui.ComfyUIPresetCombo.setCurrentText(name)
+        self._select_preset(name)
         self.animator.show_success(f"Workflow preset '{name}' saved")
 
     def on_comfyui_delete_preset(self):
         """Delete the currently selected workflow preset."""
-        current = self.ui.ComfyUIPresetCombo.currentText()
-        if current == "-- Select Preset --":
+        if not self._current_preset_name:
             self.animator.show_error("No preset selected")
             return
 
         reply = QMessageBox.question(
             self, "Delete Preset",
-            f"Delete workflow preset '{current}'?",
+            f"Delete workflow preset '{self._current_preset_name}'?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            delete_comfyui_workflow_preset(current)
-            self._refresh_workflow_preset_combo()
+            deleted_name = self._current_preset_name
+            delete_comfyui_workflow_preset(self._current_preset_name)
+            self._current_preset_name = None
+            self.ui.ComfyUICurrentPreset.setText("No preset selected")
             self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
             app_state.comfyui_workflow_path = None
             self._refresh_comfyui_editable_nodes()
             self.on_comfyui_validate_inputs()
-            self.animator.show_info(f"Preset '{current}' deleted")
+            self.animator.show_info(f"Preset '{deleted_name}' deleted")
 
     def _refresh_comfyui_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""

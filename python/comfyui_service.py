@@ -55,12 +55,14 @@ EDITABLE_NODE_CONFIGS = {
     'LoadImage': [(0, 'image', 'image')],
     'TextEncodeQwenImageEditPlus': [(0, 'prompt', 'text')],
     'CLIPTextEncode': [(0, 'text', 'text')],
+    'HYMotionEncodeText': [(0, 'text', 'text')],  # HY-Motion text prompt
     'KSampler': [
         (0, 'seed', 'int'),
         (2, 'steps', 'int'),
         (3, 'cfg', 'float'),
     ],
     'SaveImage': [(0, 'filename_prefix', 'string')],
+    'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],  # output_dir auto-set to use main output
 }
 
 
@@ -188,7 +190,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         'MarkdownNote', 'CR Text', 'ShowText', 'ShowTextForGPT',
         'Note+', 'NoteNode', 'CommentNode',
         # Preview/display nodes that don't affect output
-        'PreviewImage', 'PreviewBridge',
+        'PreviewImage', 'PreviewBridge', 'Preview3D',
     ]
     for node in nodes:
         node_id = node.get('id')
@@ -307,6 +309,17 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             'CropImage': ['width', 'height', 'x', 'y'],
             # Note/display nodes (no widgets needed in API)
             'MarkdownNote': [],
+            # Image scaling nodes
+            'ImageScaleToTotalPixels': ['upscale_method', 'megapixels', 'resolution_steps'],
+            # Flux Kontext nodes
+            'FluxKontextMultiReferenceLatentMethod': ['reference_latents_method'],
+            # HYMotion nodes
+            'HYMotionLoadNetwork': ['model_name'],
+            'HYMotionLoadLLMGGUF': ['gguf_file'],
+            'HYMotionGenerate': ['duration', 'seed', 'control_after_generate', 'cfg_scale', 'num_samples'],
+            'HYMotionPreview': ['sample_index', 'frame_step', 'image_size'],
+            'HYMotionEncodeText': ['text'],
+            'HYMotionExportFBX': ['output_dir', 'filename_prefix'],
         }
 
         # Get widget names for this node type
@@ -474,6 +487,12 @@ def modify_workflow_api_format(
             inputs['filename_prefix'] = output_prefix
             print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
 
+        # HYMotionExportFBX nodes - clear output_dir so files go to main output, set prefix
+        elif class_type == 'HYMotionExportFBX':
+            inputs['output_dir'] = ''  # Empty = use ComfyUI's output directory directly
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
+
         # KSampler nodes - set seed
         elif class_type == 'KSampler':
             inputs['seed'] = seed
@@ -483,6 +502,11 @@ def modify_workflow_api_format(
         elif class_type == 'RandomNoise':
             inputs['noise_seed'] = seed
             print(f"Set RandomNoise node {node_id} seed to: {seed}")
+
+        # HYMotionGenerate nodes - set seed
+        elif class_type == 'HYMotionGenerate':
+            inputs['seed'] = seed
+            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
 
     # Summary
     print(f"\n=== Workflow Modification Summary ===")
@@ -590,7 +614,7 @@ def submit_comfyui_to_deadline_server_mode(
     Args:
         workflow_path: Path to workflow JSON file
         seeds_file: Path to JSON file containing seeds for each frame
-        output_dir: Output directory for generated images
+        output_dir: Output directory for generated outputs
         batch_name: BatchName for Deadline job grouping
         render_name: Name for the job display
         generation_count: Number of generations (frames)
@@ -611,9 +635,20 @@ def submit_comfyui_to_deadline_server_mode(
 
     import shutil
 
-    # Get ComfyUI portable paths from settings
+    # Get ComfyUI paths and mode from settings
     comfyui_path = get_comfyui_path()
-    python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
+    comfyui_mode = get_comfyui_mode()
+    comfyui_python = get_comfyui_python_path()
+
+    # Determine Python executable based on mode
+    if comfyui_mode == "embedded":
+        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
+    elif comfyui_mode == "portable":
+        # Portable mode (comfy-cli install): venv folder with ComfyUI subfolder
+        python_exe = os.path.join(comfyui_path, "venv", "Scripts", "python.exe")
+    else:
+        # Standalone mode - use configured Python path
+        python_exe = comfyui_python if comfyui_python else "python"
 
     # Get the client script path
     client_script_source = os.path.join(os.path.dirname(__file__), "comfyui_client.py")
@@ -714,7 +749,7 @@ def submit_comfyui_to_deadline(
     Args:
         workflow_path: Path to workflow JSON file
         seeds_file: Path to JSON file containing seeds for each frame
-        output_dir: Output directory for generated images (also used as input directory)
+        output_dir: Output directory for generated outputs (also used as ComfyUI input directory)
         batch_name: BatchName for Deadline job grouping
         render_name: Name for the job display
         generation_count: Number of generations (frames)
@@ -744,6 +779,9 @@ def submit_comfyui_to_deadline(
     # Determine Python executable based on mode
     if comfyui_mode == "embedded":
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
+    elif comfyui_mode == "portable":
+        # Portable mode (comfy-cli install): venv folder with ComfyUI subfolder
+        python_exe = os.path.join(comfyui_path, "venv", "Scripts", "python.exe")
     else:
         # Standalone mode - use configured Python path
         python_exe = comfyui_python if comfyui_python else "python"
@@ -771,9 +809,11 @@ def submit_comfyui_to_deadline(
     # Build arguments for the runner script
     # Use --frame <F> to process specific frame/seed from the seeds file
     # Deadline will substitute <F> with frame number (1-based)
+    # Strip trailing slashes to avoid escaping issues with quotes on Windows
+    comfyui_path_clean = comfyui_path.rstrip('/\\')
     runner_args = (
         f'"{runner_script}" '
-        f'--comfyui-path "{comfyui_path}" '
+        f'--comfyui-path "{comfyui_path_clean}" '
         f'--workflow "{workflow_path}" '
         f'--seeds-file "{seeds_file}" '
         f'--input-directory "{input_dir}" '
@@ -895,7 +935,7 @@ def submit_comfyui_job(
         workflow_path: Path to original workflow JSON file
         input_image: Path to input image (legacy, can be None if using editable_values)
         prompt: Edit prompt text (legacy, can be None if using editable_values)
-        output_dir: Output directory for generated images
+        output_dir: Output directory for generated outputs
         generation_count: Number of generations (frames) per image
         job_name: Base name for the job
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
@@ -962,7 +1002,7 @@ def submit_comfyui_job(
         os.makedirs(current_output_dir, exist_ok=True)
 
         if progress_callback:
-            msg = f"Processing image {img_idx + 1}/{total_images}"
+            msg = f"Submitting {img_idx + 1}/{total_images}"
             if current_image:
                 msg += f": {image_basename}"
             progress_callback(base_progress, msg)

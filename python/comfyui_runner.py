@@ -152,6 +152,17 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             inputs['filename_prefix'] = output_prefix
             print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
 
+        # HYMotionExportFBX nodes - clear output_dir so files go to main output, set prefix
+        elif class_type == 'HYMotionExportFBX':
+            inputs['output_dir'] = ''  # Empty = use ComfyUI's output directory directly
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
+
+        # HYMotionGenerate nodes - set seed
+        elif class_type == 'HYMotionGenerate':
+            inputs['seed'] = seed
+            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
+
     return modified
 
 
@@ -375,13 +386,40 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         input_dir: Input directory for images
         output_dir: Output directory for generated images
         port: Port for ComfyUI server
-        mode: 'embedded' for portable install, 'standalone' for system install
+        mode: 'embedded' for portable install, 'portable' for venv-based install
+              (e.g., comfy-cli), 'standalone' for system install
         python_path: Path to Python executable (required for standalone mode)
     """
     if mode == "embedded":
         # Embedded/portable mode: python_embeded folder alongside ComfyUI
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
         main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
+    elif mode == "portable":
+        # Portable mode: venv-based install from various installers
+        # Check for different venv and main.py locations
+        venv_locations = [
+            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),  # comfy-cli
+            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),  # some installers
+        ]
+        main_py_locations = [
+            os.path.join(comfyui_path, "ComfyUI", "main.py"),  # comfy-cli structure
+        ]
+
+        python_exe = None
+        for venv_path in venv_locations:
+            if os.path.exists(venv_path):
+                python_exe = venv_path
+                break
+        if not python_exe:
+            python_exe = venv_locations[0]
+
+        main_py = None
+        for main_path in main_py_locations:
+            if os.path.exists(main_path):
+                main_py = main_path
+                break
+        if not main_py:
+            main_py = main_py_locations[0]
     else:
         # Standalone mode: use provided Python path, ComfyUI path points directly to main.py location
         if not python_path:
@@ -399,7 +437,12 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         '--disable-auto-launch'
     ]
 
+    # Set working directory to where main.py is located
+    # This ensures custom_nodes are found correctly
+    working_dir = os.path.dirname(main_py)
+
     print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
+    print(f"Working directory: {working_dir}")
 
     process = subprocess.Popen(
         cmd,
@@ -407,6 +450,7 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        cwd=working_dir,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     )
 
@@ -447,8 +491,8 @@ def main():
     parser.add_argument('--output-prefix', default='comfyui_output', help='Base output filename prefix')
     parser.add_argument('--batch', action='store_true', help='Process all generations in a single session')
     parser.add_argument('--persistent', action='store_true', help='Keep server running between jobs (check workflow changes)')
-    parser.add_argument('--mode', choices=['embedded', 'standalone'], default='embedded',
-                       help='ComfyUI installation mode: embedded (portable) or standalone')
+    parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
+                       help='ComfyUI installation mode: embedded (python_embeded), portable (venv), or standalone')
     parser.add_argument('--python-path', help='Path to Python executable (required for standalone mode)')
 
     args = parser.parse_args()
@@ -457,6 +501,31 @@ def main():
     if args.mode == "embedded":
         python_exe = os.path.join(args.comfyui_path, "python_embeded", "python.exe")
         main_py = os.path.join(args.comfyui_path, "ComfyUI", "main.py")
+    elif args.mode == "portable":
+        # Portable mode: venv-based install from various installers
+        venv_locations = [
+            os.path.join(args.comfyui_path, "venv", "Scripts", "python.exe"),  # comfy-cli
+            os.path.join(args.comfyui_path, ".venv", "Scripts", "python.exe"),  # some installers
+        ]
+        main_py_locations = [
+            os.path.join(args.comfyui_path, "ComfyUI", "main.py"),  # comfy-cli structure
+        ]
+
+        python_exe = None
+        for venv_path in venv_locations:
+            if os.path.exists(venv_path):
+                python_exe = venv_path
+                break
+        if not python_exe:
+            python_exe = venv_locations[0]
+
+        main_py = None
+        for main_path in main_py_locations:
+            if os.path.exists(main_path):
+                main_py = main_path
+                break
+        if not main_py:
+            main_py = main_py_locations[0]
     else:
         # Standalone mode
         if not args.python_path:

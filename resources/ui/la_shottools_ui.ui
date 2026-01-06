@@ -1256,6 +1256,89 @@
       </item>
      </layout>
     </widget>
+    <widget class="QWidget" name="logs">
+     <attribute name="title">
+      <string>Logs</string>
+     </attribute>
+     <layout class="QVBoxLayout" name="logsMainLayout">
+      <property name="spacing">
+       <number>24</number>
+      </property>
+      <property name="leftMargin">
+       <number>24</number>
+      </property>
+      <property name="topMargin">
+       <number>24</number>
+      </property>
+      <property name="rightMargin">
+       <number>24</number>
+      </property>
+      <property name="bottomMargin">
+       <number>24</number>
+      </property>
+      <item>
+       <widget class="QGroupBox" name="logOutputGroupBox">
+        <property name="title">
+         <string>Terminal Log Output</string>
+        </property>
+        <layout class="QVBoxLayout" name="logOutputLayout">
+         <item>
+          <layout class="QHBoxLayout" name="logToolbarLayout">
+           <item>
+            <spacer name="logHorizontalSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="ClearLogButton">
+             <property name="minimumSize">
+              <size>
+               <width>100</width>
+               <height>32</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>Clear Log</string>
+             </property>
+             <property name="toolTip">
+              <string>Clear all log messages</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QTextEdit" name="LogOutput">
+           <property name="readOnly">
+            <bool>true</bool>
+           </property>
+           <property name="lineWrapMode">
+            <enum>QTextEdit::NoWrap</enum>
+           </property>
+           <property name="font">
+            <font>
+             <family>Consolas</family>
+             <pointsize>9</pointsize>
+            </font>
+           </property>
+           <property name="placeholderText">
+            <string>Terminal output will appear here...</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
     <widget class="QWidget" name="comfyui">
      <attribute name="title">
       <string>ComfyUI</string>
@@ -1280,22 +1363,22 @@
                <item>
                 <layout class="QHBoxLayout" name="comfyuiPresetLayout">
                  <item>
-                  <widget class="QLabel" name="ComfyUIPresetLabel">
+                  <widget class="QPushButton" name="ComfyUIChoosePreset">
                    <property name="text">
-                    <string>Preset:</string>
+                    <string>Choose Preset</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Select a workflow preset</string>
                    </property>
                   </widget>
                  </item>
                  <item>
-                  <widget class="QComboBox" name="ComfyUIPresetCombo">
-                   <property name="minimumSize">
-                    <size>
-                     <width>200</width>
-                     <height>0</height>
-                    </size>
+                  <widget class="QLabel" name="ComfyUICurrentPreset">
+                   <property name="text">
+                    <string>No preset selected</string>
                    </property>
-                   <property name="toolTip">
-                    <string>Select a workflow preset</string>
+                   <property name="styleSheet">
+                    <string>font-weight: bold;</string>
                    </property>
                   </widget>
                  </item>
@@ -1384,7 +1467,7 @@
                     <string>Select output directory...</string>
                    </property>
                    <property name="toolTip">
-                    <string>Directory where generated images will be saved</string>
+                    <string>Directory where generated outputs will be saved</string>
                    </property>
                   </widget>
                  </item>
@@ -1690,67 +1773,6 @@
         </widget>
        </item>
        <item>
-        <widget class="QGroupBox" name="logOutputGroupBox">
-         <property name="title">
-          <string>Terminal Log Output</string>
-         </property>
-         <layout class="QVBoxLayout" name="logOutputLayout">
-          <item>
-           <layout class="QHBoxLayout" name="logToolbarLayout">
-            <item>
-             <spacer name="logHorizontalSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>40</width>
-                <height>20</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ClearLogButton">
-              <property name="minimumSize">
-               <size>
-                <width>100</width>
-                <height>32</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>Clear Log</string>
-              </property>
-              <property name="toolTip">
-               <string>Clear all log messages</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <widget class="QTextEdit" name="LogOutput">
-            <property name="readOnly">
-             <bool>true</bool>
-            </property>
-            <property name="lineWrapMode">
-             <enum>QTextEdit::NoWrap</enum>
-            </property>
-            <property name="font">
-             <font>
-              <family>Consolas</family>
-              <pointsize>9</pointsize>
-             </font>
-            </property>
-            <property name="placeholderText">
-             <string>Terminal output will appear here...</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
         <widget class="QGroupBox" name="buildSettingsGroupBox">
          <property name="title">
           <string>Build Settings</string>
@@ -1968,7 +1990,12 @@
                  </property>
                  <item>
                   <property name="text">
-                   <string>Embedded (Portable)</string>
+                   <string>Embedded (python_embeded)</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Portable (venv)</string>
                   </property>
                  </item>
                  <item>
@@ -2077,6 +2104,94 @@
                 <string>Save all global settings</string>
                </property>
               </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="adminUsersGroupBox">
+            <property name="title">
+             <string>Admin Users</string>
+            </property>
+            <property name="toolTip">
+             <string>Manage users who have access to admin features (ComfyUI and Settings tabs)</string>
+            </property>
+            <layout class="QVBoxLayout" name="adminUsersLayout">
+             <item>
+              <widget class="QLabel" name="adminUsersLabel">
+               <property name="text">
+                <string>Users in this list have access to ComfyUI and Settings tabs:</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="adminUsersContentLayout">
+               <item>
+                <widget class="QListWidget" name="AdminUsersList">
+                 <property name="toolTip">
+                  <string>List of admin users</string>
+                 </property>
+                 <property name="selectionMode">
+                  <enum>QAbstractItemView::SingleSelection</enum>
+                 </property>
+                 <property name="minimumHeight">
+                  <number>120</number>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <layout class="QVBoxLayout" name="adminUsersButtonsLayout">
+                 <item>
+                  <widget class="QPushButton" name="AddAdminUserButton">
+                   <property name="minimumSize">
+                    <size>
+                     <width>120</width>
+                     <height>32</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>Add User</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Add a user to the admin list</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="RemoveAdminUserButton">
+                   <property name="minimumSize">
+                    <size>
+                     <width>120</width>
+                     <height>32</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>Remove User</string>
+                   </property>
+                   <property name="toolTip">
+                    <string>Remove selected user from the admin list</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="adminUsersButtonsSpacer">
+                   <property name="orientation">
+                    <enum>Qt::Vertical</enum>
+                   </property>
+                   <property name="sizeHint" stdset="0">
+                    <size>
+                     <width>20</width>
+                     <height>40</height>
+                    </size>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </item>
+              </layout>
              </item>
             </layout>
            </widget>

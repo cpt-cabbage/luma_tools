@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m json.tool:*)",
+      "Bash(dir /s \"L:\\tools\\_studio_tools\\AYON\\_dev\\christophe\\la_shot_tools\\luma_tools\")",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(nul)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe\" install pyenchant)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -c \"import enchant; print\\(''PyEnchant available. Languages:'', enchant.list_languages\\(\\)\\)\")",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe\" show pyenchant)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe\" list:*)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m pip install pyenchant)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

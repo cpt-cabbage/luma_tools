@@ -53,6 +53,9 @@ class ApplicationState:
         # ComfyUI state
         self._comfyui_workflow_path = ""
 
+        # Admin status (cached)
+        self._is_admin = None
+
     # Thread-safe property accessors
     @property
     def jobname(self):
@@ -343,6 +346,26 @@ class ApplicationState:
     def comfyui_workflow_path(self, value):
         with self._lock:
             self._comfyui_workflow_path = value
+
+    @property
+    def is_admin(self):
+        """
+        Check if the current user is an admin.
+        Thread-safe with caching to avoid repeated file reads.
+
+        Returns:
+            bool: True if current user is an admin
+        """
+        with self._lock:
+            if self._is_admin is None:
+                from settings_manager import is_admin_user
+                self._is_admin = is_admin_user(self._user)
+            return self._is_admin
+
+    def refresh_admin_status(self):
+        """Force refresh of admin status (call after admin list changes)."""
+        with self._lock:
+            self._is_admin = None
 
     def initialize_from_args(self, args):
         """
