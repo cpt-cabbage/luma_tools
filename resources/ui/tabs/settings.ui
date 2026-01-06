@@ -329,16 +329,6 @@ Move: Move files to user folder, delete from network (saves space)</string>
              </widget>
             </item>
             <item>
-             <widget class="QCheckBox" name="ComfyUIServerMode">
-              <property name="text">
-               <string>ComfyUI Server Mode (Persistent)</string>
-              </property>
-              <property name="toolTip">
-               <string>Keep ComfyUI server running between jobs. Models stay loaded in GPU memory for faster subsequent generations.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
              <spacer name="userTransferOptionsSpacer">
               <property name="orientation">
                <enum>Qt::Horizontal</enum>

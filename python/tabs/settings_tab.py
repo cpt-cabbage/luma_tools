@@ -54,6 +54,7 @@ class SettingsTab(BaseTab):
         self._load_default_passes_ui()
         self._load_global_settings_ui()
         self._load_admin_users_ui()
+        self._load_restricted_tabs_ui()
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -304,6 +305,9 @@ class SettingsTab(BaseTab):
         set_comfyui_fast_mode(self.ui.ComfyUIFastMode.isChecked())
         set_comfyui_fp16_accumulation(self.ui.ComfyUIFP16Accumulation.isChecked())
 
+        # Save restricted tabs configuration
+        self._save_restricted_tabs_settings()
+
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.show_success("Global settings saved")
 
@@ -324,6 +328,7 @@ class SettingsTab(BaseTab):
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
         from settings_manager import remove_admin_user
+        from PySide2.QtWidgets import QMessageBox
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
@@ -331,6 +336,71 @@ class SettingsTab(BaseTab):
             return
 
         username = selected_items[0].text()
+
+        # Warn if removing self
+        if username.lower() == self.app_state.user.lower():
+            reply = QMessageBox.warning(
+                self.main_window,
+                "Remove Yourself?",
+                "You are about to remove yourself from the admin list.\n"
+                "You will lose access to admin features after restarting.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
         remove_admin_user(username)
         self._load_admin_users_ui()
-        self.log(f"Removed admin user: {username}")
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_success(f"Removed admin user: {username}")
+
+    # =========================================================================
+    # RESTRICTED TABS
+    # =========================================================================
+
+    def _load_restricted_tabs_ui(self):
+        """Load restricted tabs settings into the checkboxes."""
+        from settings_manager import get_restricted_tabs
+
+        restricted = get_restricted_tabs()
+
+        # Map tab names to checkboxes
+        checkbox_map = {
+            "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
+            "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
+            "settings": getattr(self.ui, 'RestrictSettings', None),
+            "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
+            "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
+            "republish": getattr(self.ui, 'RestrictRePublish', None),
+            "shotcleaner": getattr(self.ui, 'RestrictShotCleaner', None),
+        }
+
+        for tab_name, checkbox in checkbox_map.items():
+            if checkbox:
+                checkbox.setChecked(tab_name in restricted)
+
+        self.log(f"Loaded restricted tabs settings: {restricted}")
+
+    def _save_restricted_tabs_settings(self):
+        """Save restricted tabs settings from the checkboxes."""
+        from settings_manager import set_restricted_tabs
+
+        restricted = []
+
+        # Map checkboxes to tab names
+        checkbox_map = {
+            "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
+            "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
+            "settings": getattr(self.ui, 'RestrictSettings', None),
+            "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
+            "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
+            "republish": getattr(self.ui, 'RestrictRePublish', None),
+            "shotcleaner": getattr(self.ui, 'RestrictShotCleaner', None),
+        }
+
+        for tab_name, checkbox in checkbox_map.items():
+            if checkbox and checkbox.isChecked():
+                restricted.append(tab_name)
+
+        set_restricted_tabs(restricted)

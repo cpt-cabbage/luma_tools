@@ -18,6 +18,10 @@ class LogsTab(BaseTab):
     def tab_name(self) -> str:
         return "Logs"
 
+    @property
+    def tab_id(self) -> str:
+        return "logs"
+
     def connect_signals(self):
         """Connect log tab signals."""
         self.ui.ClearLogButton.clicked.connect(self._on_clear_log_clicked)
@@ -34,7 +38,13 @@ class LogsTab(BaseTab):
         Args:
             message: The message to append
         """
-        self.ui.LogOutput.append(message.rstrip())
-        # Auto-scroll to bottom
-        scrollbar = self.ui.LogOutput.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        if self.ui is None:
+            return
+        try:
+            self.ui.LogOutput.append(message.rstrip())
+            # Auto-scroll to bottom
+            scrollbar = self.ui.LogOutput.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+        except (RuntimeError, AttributeError):
+            # Widget may not be fully initialized or may have been deleted
+            pass

@@ -932,16 +932,18 @@ def submit_comfyui_job(
     generation_count: int,
     job_name: str,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
-    use_server_mode: bool = False,
     base_seed: Optional[int] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     network_output_dir: Optional[str] = None,
+    use_server_mode: bool = True,  # Deprecated, always True - kept for compatibility
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch image processing.
 
     If multiple images are selected, submits a separate job for each image.
     Each job runs generation_count generations with different seeds.
+
+    Server mode (persistent ComfyUI) is always enabled for faster execution.
 
     Args:
         workflow_path: Path to original workflow JSON file
@@ -952,8 +954,6 @@ def submit_comfyui_job(
         job_name: Base name for the job
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
                          Image values can be a list of paths for batch processing
-        use_server_mode: If True, keep ComfyUI server running between jobs
-                         (models stay loaded, restarts only if workflow changes)
         base_seed: Optional starting seed. If provided, seeds will be sequential
                    (base_seed, base_seed+1, ...). If None, random seeds are used.
         progress_callback: Optional callback for progress updates
@@ -961,6 +961,7 @@ def submit_comfyui_job(
                            If provided, ComfyUI outputs here and files are moved
                            to output_dir after completion. If None, outputs directly
                            to output_dir.
+        use_server_mode: Deprecated - server mode is always enabled.
 
     Returns:
         Tuple of (job_ids, error_message)
@@ -1093,6 +1094,7 @@ def submit_comfyui_job(
                 print(f"Copied input image to: {image_dest}")
 
         # Submit job for this image with working directory as output
+        # Server mode is always enabled (persistent ComfyUI)
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,
             seeds_file=seeds_file,
@@ -1100,7 +1102,7 @@ def submit_comfyui_job(
             batch_name=job_name,  # Keep same batch name for grouping
             render_name=current_job_name,
             generation_count=generation_count,
-            use_server_mode=use_server_mode,
+            use_server_mode=True,
         )
 
         if job_id:
