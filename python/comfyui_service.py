@@ -19,8 +19,12 @@ from config import (
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
     COMFYUI_SUPPORTED_EXTENSIONS,
+    COMFYUI_OUTPUT_EXTENSIONS,
 )
-from settings_manager import get_comfyui_path, get_comfyui_mode, get_comfyui_python_path
+from settings_manager import (
+    get_comfyui_path, get_comfyui_mode, get_comfyui_python_path,
+    get_comfyui_fast_mode, get_comfyui_fp16_accumulation
+)
 
 
 def load_workflow(workflow_path: str) -> Dict[str, Any]:
@@ -833,6 +837,12 @@ def submit_comfyui_to_deadline(
     if use_server_mode:
         runner_args += ' --persistent'
 
+    # Add performance flags from settings
+    if get_comfyui_fast_mode():
+        runner_args += ' --fast'
+    if get_comfyui_fp16_accumulation():
+        runner_args += ' --fp16-accumulation'
+
     # Build Deadline submission command following existing conventions
     # Submit as multiframe job - each frame is a different seed
     # Matches OIIO COMBINE naming pattern: "COMFYUI - {render_name}"
@@ -849,6 +859,7 @@ def submit_comfyui_to_deadline(
         '-prop', f'Department={DEADLINE_DEPARTMENT}',
         '-prop', f'BatchName={batch_name}',
         '-prop', f'OutputDirectory0={output_dir}',
+        '-prop', 'OnJobComplete=Delete',
         '-name', f'COMFYUI - {render_name}',
     ]
 
@@ -923,7 +934,8 @@ def submit_comfyui_job(
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
     use_server_mode: bool = False,
     base_seed: Optional[int] = None,
-    progress_callback: Optional[Callable[[int, str], None]] = None
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    network_output_dir: Optional[str] = None,
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch image processing.
@@ -935,7 +947,7 @@ def submit_comfyui_job(
         workflow_path: Path to original workflow JSON file
         input_image: Path to input image (legacy, can be None if using editable_values)
         prompt: Edit prompt text (legacy, can be None if using editable_values)
-        output_dir: Output directory for generated outputs
+        output_dir: User's output directory (where files will be moved after completion)
         generation_count: Number of generations (frames) per image
         job_name: Base name for the job
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
@@ -945,6 +957,10 @@ def submit_comfyui_job(
         base_seed: Optional starting seed. If provided, seeds will be sequential
                    (base_seed, base_seed+1, ...). If None, random seeds are used.
         progress_callback: Optional callback for progress updates
+        network_output_dir: Network path where ComfyUI writes outputs (optional).
+                           If provided, ComfyUI outputs here and files are moved
+                           to output_dir after completion. If None, outputs directly
+                           to output_dir.
 
     Returns:
         Tuple of (job_ids, error_message)
@@ -977,8 +993,23 @@ def submit_comfyui_job(
     if progress_callback:
         progress_callback(10, f"Processing {total_images} image(s)...")
 
-    # Ensure output directory exists
+    # Determine working output directory (network if provided, else user's dir)
+    # ComfyUI writes to working_output_dir, files later moved to output_dir
+    working_base_dir = network_output_dir if network_output_dir else output_dir
+
+    # Debug: Log which output path is being used
+    print(f"[ComfyUI Submit] network_output_dir param: {network_output_dir!r}")
+    print(f"[ComfyUI Submit] user output_dir: {output_dir}")
+    print(f"[ComfyUI Submit] working_base_dir (for runner): {working_base_dir}")
+
+    # Ensure output directories exist
     os.makedirs(output_dir, exist_ok=True)
+    if network_output_dir:
+        os.makedirs(network_output_dir, exist_ok=True)
+        print(f"Using network output: {network_output_dir}")
+        print(f"Files will be moved to: {output_dir}")
+    else:
+        print(f"No network path configured - using user output directly: {output_dir}")
 
     all_job_ids = []
     errors = []
@@ -992,14 +1023,14 @@ def submit_comfyui_job(
             image_name = os.path.splitext(image_basename)[0]
             current_job_name = f"{job_name}_{image_name}" if total_images > 1 else job_name
             # Create subfolder for this image's generations
-            current_output_dir = os.path.join(output_dir, image_name) if total_images > 1 else output_dir
+            current_working_dir = os.path.join(working_base_dir, image_name) if total_images > 1 else working_base_dir
         else:
             image_basename = None
             current_job_name = job_name
-            current_output_dir = output_dir
+            current_working_dir = working_base_dir
 
-        # Ensure the image's output subfolder exists
-        os.makedirs(current_output_dir, exist_ok=True)
+        # Ensure the working output subfolder exists
+        os.makedirs(current_working_dir, exist_ok=True)
 
         if progress_callback:
             msg = f"Submitting {img_idx + 1}/{total_images}"
@@ -1035,8 +1066,8 @@ def submit_comfyui_job(
             print(f"ERROR: {error_msg}")
             return [], error_msg
 
-        # Save modified workflow to the image's subfolder
-        workflow_file = save_workflow(modified, current_output_dir, suffix="")
+        # Save modified workflow to the working directory
+        workflow_file = save_workflow(modified, current_working_dir, suffix="")
 
         # Generate seeds for each generation
         # If base_seed is provided, use sequential seeds; otherwise random
@@ -1048,24 +1079,24 @@ def submit_comfyui_job(
             print("Using random seeds")
         seeds_data = {"seeds": seeds, "count": generation_count}
 
-        # Save seeds file to the image's subfolder
-        seeds_file = os.path.join(current_output_dir, "comfyui_seeds.json")
+        # Save seeds file to the working directory
+        seeds_file = os.path.join(current_working_dir, "comfyui_seeds.json")
         with open(seeds_file, 'w', encoding='utf-8') as f:
             json.dump(seeds_data, f, indent=2)
         print(f"Saved seeds file with {generation_count} seeds to: {seeds_file}")
 
-        # Copy current input image to the image's subfolder
+        # Copy current input image to the working directory
         if current_image:
-            image_dest = os.path.join(current_output_dir, image_basename)
+            image_dest = os.path.join(current_working_dir, image_basename)
             if not os.path.exists(image_dest) or os.path.getmtime(current_image) > os.path.getmtime(image_dest):
                 shutil.copy2(current_image, image_dest)
                 print(f"Copied input image to: {image_dest}")
 
-        # Submit job for this image with its own output subfolder
+        # Submit job for this image with working directory as output
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,
             seeds_file=seeds_file,
-            output_dir=current_output_dir,
+            output_dir=current_working_dir,
             batch_name=job_name,  # Keep same batch name for grouping
             render_name=current_job_name,
             generation_count=generation_count,
@@ -1152,3 +1183,293 @@ def validate_comfyui_path(path: str) -> Tuple[bool, str]:
         return False, "ComfyUI path is not configured"
 
     return True, ""
+
+
+def poll_deadline_job_status(job_id: str) -> Dict[str, Any]:
+    """
+    Query Deadline for a job's current status.
+
+    Args:
+        job_id: The Deadline job ID to query
+
+    Returns:
+        Dict with keys:
+        - status: str - "Active", "Completed", "Failed", "Suspended", "Pending", "Unknown"
+        - progress: int - Percentage complete (0-100)
+        - completed_tasks: int - Number of completed tasks
+        - total_tasks: int - Total number of tasks
+        - error_message: str - Error message if failed
+    """
+    try:
+        # DEADLINE_PATH is the full path to the executable (from shutil.which)
+        if not DEADLINE_PATH:
+            return {"status": "Unknown", "progress": 0, "error_message": "Deadline not available"}
+
+        result = subprocess.run(
+            [DEADLINE_PATH, "GetJob", job_id],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+
+        # Job not found - likely deleted after completion (OnJobComplete=Delete)
+        if result.returncode != 0:
+            stderr = result.stderr.lower()
+            if "not found" in stderr or "does not exist" in stderr or not result.stderr.strip():
+                # Job was deleted - assume it completed successfully
+                return {
+                    "status": "Completed",
+                    "progress": 100,
+                    "completed_tasks": 1,
+                    "total_tasks": 1,
+                    "error_message": ""
+                }
+            return {"status": "Unknown", "progress": 0, "error_message": result.stderr}
+
+        # Parse the output
+        output = result.stdout
+        status = "Unknown"
+        completed_tasks = 0
+        total_tasks = 1
+        error_message = ""
+
+        for line in output.split('\n'):
+            line = line.strip()
+            if line.startswith("Status="):
+                status = line.split('=', 1)[1]
+            elif line.startswith("CompletedTasks="):
+                completed_tasks = int(line.split('=', 1)[1])
+            elif line.startswith("TaskCount="):
+                total_tasks = int(line.split('=', 1)[1])
+            elif line.startswith("ErrorReports=") and line != "ErrorReports=0":
+                error_message = f"Job has {line.split('=', 1)[1]} error(s)"
+
+        progress = int((completed_tasks / max(total_tasks, 1)) * 100)
+
+        return {
+            "status": status,
+            "progress": progress,
+            "completed_tasks": completed_tasks,
+            "total_tasks": total_tasks,
+            "error_message": error_message
+        }
+
+    except Exception as e:
+        return {"status": "Unknown", "progress": 0, "error_message": str(e)}
+
+
+def get_job_output_files(output_dir: str) -> List[str]:
+    """
+    Get the output files from a job's output directory.
+
+    Scans for all supported ComfyUI output types including images, 3D models,
+    video, audio, and data files.
+
+    Args:
+        output_dir: The output directory to scan
+
+    Returns:
+        List of output file paths, sorted by modification time (newest first)
+    """
+    if not output_dir or not os.path.isdir(output_dir):
+        return []
+
+    # Use centralized output extensions from config
+    supported_extensions = set(COMFYUI_OUTPUT_EXTENSIONS)
+    files = []
+
+    for filename in os.listdir(output_dir):
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in supported_extensions:
+            full_path = os.path.join(output_dir, filename)
+            mtime = os.path.getmtime(full_path)
+            files.append((full_path, mtime))
+
+    # Sort by modification time, newest first
+    files.sort(key=lambda x: x[1], reverse=True)
+    return [f[0] for f in files]
+
+
+def transfer_outputs_to_user_folder(
+    network_path: str,
+    user_path: str,
+    transfer_mode: str = "copy",
+    progress_callback: Optional[Callable[[int, str], None]] = None
+) -> List[str]:
+    """
+    Transfer (copy or move) generated files from network path to user folder.
+
+    Transfers all supported ComfyUI output types including images, 3D models,
+    video, audio, and data files.
+
+    Args:
+        network_path: Network output directory where ComfyUI wrote outputs
+        user_path: User's local/preferred output directory
+        transfer_mode: "copy" to copy files (keeps original), "move" to move files
+        progress_callback: Optional callback for progress updates
+
+    Returns:
+        List of final file paths in user folder
+    """
+    import shutil
+    import glob
+
+    if not network_path or not os.path.exists(network_path):
+        print(f"Network path does not exist: {network_path}")
+        return []
+
+    if not user_path:
+        print("User path not specified")
+        return []
+
+    # Validate transfer mode
+    if transfer_mode not in ("copy", "move"):
+        print(f"Invalid transfer mode '{transfer_mode}', defaulting to 'copy'")
+        transfer_mode = "copy"
+
+    # Ensure user folder exists
+    os.makedirs(user_path, exist_ok=True)
+
+    # Find all output files in network path using centralized extensions
+    files_to_transfer = []
+
+    for ext in COMFYUI_OUTPUT_EXTENSIONS:
+        # Convert extension to glob pattern (e.g., ".png" -> "*.png")
+        pattern = os.path.join(network_path, '**', f'*{ext}')
+        files_to_transfer.extend(glob.glob(pattern, recursive=True))
+
+    if not files_to_transfer:
+        print(f"No output files found in: {network_path}")
+        return []
+
+    transferred_files = []
+    total = len(files_to_transfer)
+    action_verb = "Copying" if transfer_mode == "copy" else "Moving"
+    action_past = "Copied" if transfer_mode == "copy" else "Moved"
+
+    for idx, src_path in enumerate(files_to_transfer):
+        if progress_callback:
+            progress_callback(int((idx / total) * 100), f"{action_verb} {idx + 1}/{total}...")
+
+        # Preserve relative path structure
+        rel_path = os.path.relpath(src_path, network_path)
+        dest_path = os.path.join(user_path, rel_path)
+
+        # Ensure destination directory exists
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+        try:
+            if transfer_mode == "copy":
+                shutil.copy2(src_path, dest_path)
+            else:
+                shutil.move(src_path, dest_path)
+            transferred_files.append(dest_path)
+            print(f"{action_past}: {src_path} -> {dest_path}")
+        except Exception as e:
+            print(f"Failed to {transfer_mode} {src_path}: {e}")
+
+    print(f"{action_past} {len(transferred_files)}/{total} files to user folder")
+    return transferred_files
+
+
+def move_outputs_to_user_folder(
+    network_path: str,
+    user_path: str,
+    progress_callback: Optional[Callable[[int, str], None]] = None
+) -> List[str]:
+    """
+    Move generated files from network path to user folder.
+
+    Deprecated: Use transfer_outputs_to_user_folder with transfer_mode="move" instead.
+
+    Args:
+        network_path: Network output directory where ComfyUI wrote outputs
+        user_path: User's local/preferred output directory
+        progress_callback: Optional callback for progress updates
+
+    Returns:
+        List of final file paths in user folder
+    """
+    return transfer_outputs_to_user_folder(network_path, user_path, "move", progress_callback)
+
+
+def cleanup_job_temp_files(output_dir: str) -> int:
+    """
+    Clean up temporary job files from the output directory.
+
+    Removes workflow JSON, seeds JSON, and runner script files that were
+    copied to the output directory for the job.
+
+    Args:
+        output_dir: The output directory to clean
+
+    Returns:
+        Number of files deleted
+    """
+    import glob
+
+    if not output_dir or not os.path.exists(output_dir):
+        return 0
+
+    temp_patterns = [
+        "comfyui_workflow*.json",
+        "comfyui_seeds.json",
+        "comfyui_runner.py",
+        "comfyui_client.py",
+    ]
+
+    deleted_count = 0
+
+    for pattern in temp_patterns:
+        for file_path in glob.glob(os.path.join(output_dir, pattern)):
+            try:
+                os.remove(file_path)
+                print(f"Cleaned up temp file: {file_path}")
+                deleted_count += 1
+            except Exception as e:
+                print(f"Failed to delete temp file {file_path}: {e}")
+
+    return deleted_count
+
+
+def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
+    """
+    Scan directory for generated ComfyUI output files.
+
+    Scans for all supported ComfyUI output types including images, 3D models,
+    video, audio, and data files.
+
+    Args:
+        output_dir: Directory to scan
+
+    Returns:
+        List of file info dicts with keys: path, filename, created, size, extension
+    """
+    import glob
+    from datetime import datetime
+
+    if not output_dir or not os.path.exists(output_dir):
+        return []
+
+    # Use centralized output extensions from config
+    output_files = []
+
+    for ext in COMFYUI_OUTPUT_EXTENSIONS:
+        # Convert extension to glob pattern (e.g., ".png" -> "*.png")
+        pattern = os.path.join(output_dir, '**', f'*{ext}')
+        for path in glob.glob(pattern, recursive=True):
+            try:
+                stat = os.stat(path)
+                output_files.append({
+                    'path': path,
+                    'filename': os.path.basename(path),
+                    'created': datetime.fromtimestamp(stat.st_ctime),
+                    'size': stat.st_size,
+                    'extension': ext,
+                })
+            except Exception as e:
+                print(f"Error scanning {path}: {e}")
+
+    # Sort by creation time, newest first
+    output_files.sort(key=lambda x: x['created'], reverse=True)
+    return output_files

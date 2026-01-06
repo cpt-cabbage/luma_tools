@@ -52,9 +52,15 @@ class ApplicationState:
 
         # ComfyUI state
         self._comfyui_workflow_path = ""
+        self._comfyui_iterate_mode = False
+        self._comfyui_current_job_id = ""
+        self._comfyui_last_generated_image = ""
 
         # Admin status (cached)
         self._is_admin = None
+
+        # Standalone mode (running outside AYON context)
+        self._standalone_mode = False
 
     # Thread-safe property accessors
     @property
@@ -348,6 +354,36 @@ class ApplicationState:
             self._comfyui_workflow_path = value
 
     @property
+    def comfyui_iterate_mode(self):
+        with self._lock:
+            return self._comfyui_iterate_mode
+
+    @comfyui_iterate_mode.setter
+    def comfyui_iterate_mode(self, value):
+        with self._lock:
+            self._comfyui_iterate_mode = value
+
+    @property
+    def comfyui_current_job_id(self):
+        with self._lock:
+            return self._comfyui_current_job_id
+
+    @comfyui_current_job_id.setter
+    def comfyui_current_job_id(self, value):
+        with self._lock:
+            self._comfyui_current_job_id = value
+
+    @property
+    def comfyui_last_generated_image(self):
+        with self._lock:
+            return self._comfyui_last_generated_image
+
+    @comfyui_last_generated_image.setter
+    def comfyui_last_generated_image(self, value):
+        with self._lock:
+            self._comfyui_last_generated_image = value
+
+    @property
     def is_admin(self):
         """
         Check if the current user is an admin.
@@ -367,12 +403,31 @@ class ApplicationState:
         with self._lock:
             self._is_admin = None
 
+    @property
+    def standalone_mode(self):
+        """Check if running in standalone mode (without AYON context)."""
+        with self._lock:
+            return self._standalone_mode
+
+    @standalone_mode.setter
+    def standalone_mode(self, value):
+        with self._lock:
+            self._standalone_mode = value
+
+    def has_shot_context(self):
+        """Check if shot context is available (job, shot, shotpath)."""
+        with self._lock:
+            return bool(self._jobname and self._shot and self._shotpath)
+
     def initialize_from_args(self, args):
         """
         Initialize state from command line arguments.
 
         Args:
             args: List of command line arguments (sys.argv)
+
+        If insufficient arguments are provided, enters standalone mode
+        with current user from environment.
         """
         if len(args) >= 7:
             self.jobname = args[1]
@@ -381,6 +436,7 @@ class ApplicationState:
             self.shotpath = args[4]
             self.user = args[5]
             self.output_subdirectory = args[6]
+            self.standalone_mode = False
 
             print("Full command: " + str(args))
             print(f"jobname = {self.jobname}")
@@ -389,6 +445,15 @@ class ApplicationState:
             print(f"shotpath = {self.shotpath}")
             print(f"user = {self.user}")
             print(f"output_subdirectory = {self.output_subdirectory}")
+        else:
+            # Standalone mode - no shot context
+            self.standalone_mode = True
+            import os
+            self.user = os.environ.get("USERNAME", os.environ.get("USER", "unknown"))
+            print("=" * 50)
+            print("STANDALONE MODE - No shot context provided")
+            print(f"user = {self.user}")
+            print("=" * 50)
 
 
 # Global application state instance

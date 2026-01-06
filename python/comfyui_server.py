@@ -493,6 +493,10 @@ Examples:
                         help='Enable low VRAM mode')
     parser.add_argument('--gpu-only', action='store_true',
                         help='Run everything on GPU')
+    parser.add_argument('--fast', action='store_true',
+                        help='Enable --fast flag for faster execution (may reduce quality)')
+    parser.add_argument('--fp16-accumulation', action='store_true',
+                        help='Enable --fp16-accumulation for faster FP16 math')
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
                         help='ComfyUI installation mode: embedded (python_embeded), portable (venv), or standalone')
     parser.add_argument('--python-path', default=None,
@@ -537,6 +541,46 @@ Examples:
         extra_args.append('--lowvram')
     if args.gpu_only:
         extra_args.append('--gpu-only')
+
+    # Check fast mode: CLI flag overrides, otherwise check global settings
+    use_fast_mode = args.fast
+    use_fp16_accumulation = getattr(args, 'fp16_accumulation', False)
+
+    if not use_fast_mode or not use_fp16_accumulation:
+        # Try to read from global settings
+        try:
+            from settings_manager import get_comfyui_fast_mode, get_comfyui_fp16_accumulation
+            if not use_fast_mode:
+                use_fast_mode = get_comfyui_fast_mode()
+            if not use_fp16_accumulation:
+                use_fp16_accumulation = get_comfyui_fp16_accumulation()
+        except Exception:
+            # settings_manager may fail if AYON env vars aren't set (config.py dependency)
+            # Try reading global settings JSON directly as fallback
+            try:
+                import json
+                settings_paths = [
+                    os.path.join(os.path.dirname(__file__), "..", "global_settings", "global_settings.json"),
+                    os.path.join(os.path.expanduser("~"), ".luma_tools", "settings.json"),
+                ]
+                for settings_path in settings_paths:
+                    settings_path = os.path.normpath(settings_path)
+                    if os.path.exists(settings_path):
+                        with open(settings_path, 'r') as f:
+                            settings = json.load(f)
+                        if not use_fast_mode:
+                            use_fast_mode = settings.get("comfyui_fast_mode", False)
+                        if not use_fp16_accumulation:
+                            use_fp16_accumulation = settings.get("comfyui_fp16_accumulation", False)
+                        break
+            except Exception as e:
+                print(f"Note: Could not read global settings: {e}")
+
+    if use_fast_mode:
+        extra_args.append('--fast')
+        print("Fast mode enabled (--fast)")
+    # Note: --fp16-accumulation is not a valid ComfyUI flag (removed)
+    # The fp16_accumulation setting is kept for potential future use
 
     # Validate standalone mode requirements
     if args.mode == "standalone" and not args.python_path:

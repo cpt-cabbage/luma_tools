@@ -10,8 +10,9 @@ from PySide2.QtCore import (
 )
 from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
-    QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton, 
-    QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit
+    QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton,
+    QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit,
+    QMenu
 )
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 
@@ -372,6 +373,7 @@ class ComfyUIStatusBanner(QWidget):
 class BatchImageSelector(QWidget):
     """
     Custom widget for selecting multiple images with preview thumbnails.
+    Supports drag and drop of image files.
     """
     images_changed = Signal(list)
 
@@ -407,14 +409,41 @@ class BatchImageSelector(QWidget):
 
         self.main_layout.addWidget(self.toolbar)
 
+        # Drop zone frame with visual feedback
+        self.drop_frame = QFrame()
+        self.drop_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Sunken)
+        self.drop_frame.setStyleSheet("""
+            QFrame {
+                border: 2px dashed #555555;
+                border-radius: 5px;
+                background-color: #2a2d32;
+            }
+            QFrame[drag_active="true"] {
+                border: 2px dashed #4a9eff;
+                background-color: #2a3a4a;
+            }
+        """)
+        self.drop_frame_layout = QVBoxLayout(self.drop_frame)
+        self.drop_frame_layout.setContentsMargins(0, 0, 0, 0)
+
         # List area with icon view mode for thumbnails
         self.list_widget = QtWidgets.QListWidget()
-        self.list_widget.setMinimumHeight(150)
-        self.list_widget.setAcceptDrops(True)
-        self.list_widget.setDragEnabled(True)
+        self.list_widget.setMinimumHeight(120)
         self.list_widget.setIconSize(QSize(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE))
         self.list_widget.setSpacing(2)
-        self.main_layout.addWidget(self.list_widget)
+        self.list_widget.setStyleSheet("QListWidget { background-color: transparent; border: none; }")
+        self.drop_frame_layout.addWidget(self.list_widget)
+
+        # Drop hint label (shown when empty)
+        self.drop_hint = QLabel("Drop images here or click 'Add Images...'")
+        self.drop_hint.setAlignment(Qt.AlignCenter)
+        self.drop_hint.setStyleSheet("color: #888888; font-style: italic; padding: 20px;")
+        self.drop_frame_layout.addWidget(self.drop_hint)
+
+        self.main_layout.addWidget(self.drop_frame)
+
+        # Enable drag and drop on the widget itself
+        self.setAcceptDrops(True)
 
     def set_last_browse_dir(self, directory):
         """Set the last browse directory (called from main app)."""
@@ -513,6 +542,53 @@ class BatchImageSelector(QWidget):
     def _update_ui(self):
         count = len(self.selected_files)
         self.count_label.setText(f"{count} image(s) selected" if count > 0 else "No images selected")
+        # Show/hide drop hint based on whether images are selected
+        self.drop_hint.setVisible(count == 0)
+        self.list_widget.setVisible(count > 0)
+
+    def dragEnterEvent(self, event):
+        """Handle drag enter - accept if contains files."""
+        if event.mimeData().hasUrls():
+            # Check if any URL is a supported image file
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    ext = os.path.splitext(url.toLocalFile())[1].lower()
+                    if ext in self.supported_extensions:
+                        event.acceptProposedAction()
+                        # Visual feedback
+                        self.drop_frame.setProperty("drag_active", True)
+                        self.drop_frame.style().unpolish(self.drop_frame)
+                        self.drop_frame.style().polish(self.drop_frame)
+                        return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Handle drag leave - reset visual feedback."""
+        self.drop_frame.setProperty("drag_active", False)
+        self.drop_frame.style().unpolish(self.drop_frame)
+        self.drop_frame.style().polish(self.drop_frame)
+
+    def dropEvent(self, event):
+        """Handle drop - add dropped image files."""
+        self.drop_frame.setProperty("drag_active", False)
+        self.drop_frame.style().unpolish(self.drop_frame)
+        self.drop_frame.style().polish(self.drop_frame)
+
+        if event.mimeData().hasUrls():
+            valid_files = []
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    ext = os.path.splitext(file_path)[1].lower()
+                    if ext in self.supported_extensions and os.path.exists(file_path):
+                        valid_files.append(file_path)
+
+            if valid_files:
+                self.add_images(valid_files)
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
 
 class CollapsibleSection(QWidget):
@@ -576,44 +652,6 @@ class RenderListItem(QtWidgets.QListWidgetItem):
     """Item for ThumbnailRenderList."""
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
-
-
-# ============================================================================
-# MODERN UI ENHANCEMENTS & ANIMATIONS
-# ============================================================================
-
-def enhance_ui(window):
-    """
-    Initialize modern UI enhancements and animations.
-    """
-    class Animator(QObject):
-        def __init__(self, target):
-            super().__init__()
-            self.target = target
-            self.redirect_to_splash = False
-            self.splash_screen = None
-            
-        def show_success(self, message):
-            print(f"SUCCESS: {message}")
-            toast = ToastNotification(message, "success", self.target)
-            toast.show_toast()
-            
-        def show_error(self, message):
-            print(f"ERROR: {message}")
-            toast = ToastNotification(message, "error", self.target)
-            toast.show_toast()
-            
-        def show_warning(self, message):
-            print(f"WARNING: {message}")
-            toast = ToastNotification(message, "warning", self.target)
-            toast.show_toast()
-
-        def show_info(self, message):
-            print(f"INFO: {message}")
-            toast = ToastNotification(message, "info", self.target)
-            toast.show_toast()
-
-    return Animator(window)
 
 
 # ============================================================================
@@ -1350,6 +1388,31 @@ class UIAnimations:
         elif self.loading:
             self.loading.update_progress(value)
 
+    # Toast notification methods
+    def show_success(self, message):
+        """Show a success toast notification."""
+        print(f"SUCCESS: {message}")
+        toast = ToastNotification(message, "success", self.parent)
+        toast.show_toast()
+
+    def show_error(self, message):
+        """Show an error toast notification."""
+        print(f"ERROR: {message}")
+        toast = ToastNotification(message, "error", self.parent)
+        toast.show_toast()
+
+    def show_warning(self, message):
+        """Show a warning toast notification."""
+        print(f"WARNING: {message}")
+        toast = ToastNotification(message, "warning", self.parent)
+        toast.show_toast()
+
+    def show_info(self, message):
+        """Show an info toast notification."""
+        print(f"INFO: {message}")
+        toast = ToastNotification(message, "info", self.parent)
+        toast.show_toast()
+
 
 class StatusColors:
     """Predefined colors for status messages - AYON Theme Palette."""
@@ -1358,6 +1421,261 @@ class StatusColors:
     WARNING = "#f59e0b"  # Modern orange
     INFO = "#4a9eff"     # AYON blue
     SCANNING = "#8b5cf6" # Modern purple
+
+
+# ============================================================================
+# GALLERY WIDGETS
+# ============================================================================
+
+class FlowLayout(QtWidgets.QLayout):
+    """
+    A flow layout that arranges widgets in a row, wrapping to the next row when space runs out.
+    Similar to CSS flexbox with flex-wrap: wrap.
+    """
+
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self._item_list = []
+        self._h_spacing = spacing
+        self._v_spacing = spacing
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self._item_list.append(item)
+
+    def horizontalSpacing(self):
+        if self._h_spacing >= 0:
+            return self._h_spacing
+        return self._smart_spacing(QtWidgets.QStyle.PM_LayoutHorizontalSpacing)
+
+    def verticalSpacing(self):
+        if self._v_spacing >= 0:
+            return self._v_spacing
+        return self._smart_spacing(QtWidgets.QStyle.PM_LayoutVerticalSpacing)
+
+    def _smart_spacing(self, pm):
+        parent = self.parent()
+        if parent is None:
+            return -1
+        elif parent.isWidgetType():
+            return parent.style().pixelMetric(pm, None, parent)
+        else:
+            return parent.spacing()
+
+    def count(self):
+        return len(self._item_list)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self._do_layout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._item_list:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        left, top, right, bottom = self.getContentsMargins()
+        effective_rect = rect.adjusted(+left, +top, -right, -bottom)
+        x = effective_rect.x()
+        y = effective_rect.y()
+        line_height = 0
+
+        for item in self._item_list:
+            wid = item.widget()
+            space_x = self.horizontalSpacing()
+            if space_x == -1:
+                space_x = wid.style().layoutSpacing(
+                    QtWidgets.QSizePolicy.PushButton, QtWidgets.QSizePolicy.PushButton, Qt.Horizontal
+                )
+            space_y = self.verticalSpacing()
+            if space_y == -1:
+                space_y = wid.style().layoutSpacing(
+                    QtWidgets.QSizePolicy.PushButton, QtWidgets.QSizePolicy.PushButton, Qt.Vertical
+                )
+
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > effective_rect.right() and line_height > 0:
+                x = effective_rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y() + bottom
+
+
+class GalleryThumbnailWidget(QWidget):
+    """
+    A thumbnail widget for the gallery that displays an image preview with filename.
+    Supports click to open, right-click context menu.
+    """
+    clicked = Signal(str)  # Emits the image path when clicked
+    THUMBNAIL_SIZE = (150, 150)
+
+    def __init__(self, image_path, parent=None):
+        super().__init__(parent)
+        self.image_path = image_path
+        self._setup_ui()
+        self._load_thumbnail()
+
+    def _setup_ui(self):
+        """Set up the widget UI."""
+        self.setFixedSize(self.THUMBNAIL_SIZE[0] + 10, self.THUMBNAIL_SIZE[1] + 30)
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+
+        # Thumbnail label
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
+        self.thumbnail_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_label.setStyleSheet("""
+            QLabel {
+                background-color: #2c313a;
+                border: 1px solid #3c414b;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.thumbnail_label)
+
+        # Filename label
+        self.filename_label = QLabel(os.path.basename(self.image_path))
+        self.filename_label.setAlignment(Qt.AlignCenter)
+        self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.filename_label.setWordWrap(True)
+        self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
+        layout.addWidget(self.filename_label)
+
+        # Context menu
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _load_thumbnail(self):
+        """Load the thumbnail image."""
+        try:
+            ext = os.path.splitext(self.image_path)[1].lower()
+
+            if ext == '.exr':
+                # For EXR, show a placeholder
+                pixmap = self._create_placeholder("EXR")
+            else:
+                pixmap = QPixmap(self.image_path)
+                if not pixmap.isNull():
+                    pixmap = pixmap.scaled(
+                        *self.THUMBNAIL_SIZE,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                else:
+                    pixmap = self._create_placeholder("?")
+
+            self.thumbnail_label.setPixmap(pixmap)
+
+        except Exception as e:
+            print(f"Error loading thumbnail for {self.image_path}: {e}")
+            self.thumbnail_label.setPixmap(self._create_placeholder("!"))
+
+    def _create_placeholder(self, text):
+        """Create a placeholder pixmap with text."""
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(QColor("#3c414b"))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#888888"))
+        font = painter.font()
+        font.setPointSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+        painter.end()
+
+        return pixmap
+
+    def mousePressEvent(self, event):
+        """Handle mouse press to emit clicked signal."""
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.image_path)
+        super().mousePressEvent(event)
+
+    def _show_context_menu(self, pos):
+        """Show context menu for the thumbnail."""
+        menu = QMenu(self)
+
+        open_action = menu.addAction("Open in Viewer")
+        open_action.triggered.connect(lambda: self._open_image())
+
+        open_folder_action = menu.addAction("Open Containing Folder")
+        open_folder_action.triggered.connect(lambda: self._open_folder())
+
+        menu.addSeparator()
+
+        copy_path_action = menu.addAction("Copy Path")
+        copy_path_action.triggered.connect(lambda: self._copy_path())
+
+        menu.exec_(self.mapToGlobal(pos))
+
+    def _open_image(self):
+        """Open the image with the default viewer."""
+        import subprocess
+        try:
+            os.startfile(self.image_path)
+        except Exception as e:
+            print(f"Error opening image: {e}")
+
+    def _open_folder(self):
+        """Open the containing folder in file explorer."""
+        import subprocess
+        folder = os.path.dirname(self.image_path)
+        try:
+            subprocess.Popen(f'explorer /select,"{self.image_path}"')
+        except Exception as e:
+            print(f"Error opening folder: {e}")
+
+    def _copy_path(self):
+        """Copy the image path to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.image_path)
 
 
 def enhance_ui(parent_widget):

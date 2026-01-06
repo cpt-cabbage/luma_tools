@@ -2,6 +2,7 @@
 Configuration settings for Luma Tools.
 
 All tool paths, defaults, and constants in one place.
+Supports standalone mode when AYON environment is not available.
 """
 
 import os
@@ -17,37 +18,102 @@ _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 # Get the root directory of luma_tools (parent of python/)
 _ROOT_DIR = os.path.dirname(_CONFIG_DIR)
 
-# GET ENV VARS
-_AYON_DIR = os.environ.get("AYON_LAUNCHER_LOCAL_DIR")
-_DEADLINE_DIR = os.environ.get("DEADLINE_PATH") 
+# ============================================================================
+# DEFAULT PATHS (used when environment variables are not set)
+# ============================================================================
+
+def _get_default_ayon_dir():
+    """Get default AYON launcher directory based on OS."""
+    # Windows: C:\Users\<username>\AppData\Local\Ynput\AYON
+    # Linux: ~/.local/share/Ynput/AYON
+    # macOS: ~/Library/Application Support/Ynput/AYON
+    if os.name == 'nt':  # Windows
+        local_app_data = os.environ.get("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
+        return os.path.join(local_app_data, "Ynput", "AYON")
+    elif os.name == 'posix':
+        if os.path.exists("/Library"):  # macOS
+            return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "Ynput", "AYON")
+        else:  # Linux
+            return os.path.join(os.path.expanduser("~"), ".local", "share", "Ynput", "AYON")
+    return None
+
+def _get_default_deadline_dir():
+    """Get default Deadline directory based on OS."""
+    # Windows: C:\Program Files\Thinkbox\Deadline10\bin
+    # Linux/macOS: /opt/Thinkbox/Deadline10/bin
+    if os.name == 'nt':
+        return r"C:\Program Files\Thinkbox\Deadline10\bin"
+    else:
+        return "/opt/Thinkbox/Deadline10/bin"
+
+# GET ENV VARS with fallback to defaults
+_AYON_DIR_ENV = os.environ.get("AYON_LAUNCHER_LOCAL_DIR")
+_AYON_DIR_DEFAULT = _get_default_ayon_dir()
+_AYON_DIR = _AYON_DIR_ENV if _AYON_DIR_ENV else (_AYON_DIR_DEFAULT if _AYON_DIR_DEFAULT and os.path.exists(_AYON_DIR_DEFAULT) else None)
+
+_DEADLINE_DIR_ENV = os.environ.get("DEADLINE_PATH")
+_DEADLINE_DIR_DEFAULT = _get_default_deadline_dir()
+_DEADLINE_DIR = _DEADLINE_DIR_ENV if _DEADLINE_DIR_ENV else (_DEADLINE_DIR_DEFAULT if os.path.exists(_DEADLINE_DIR_DEFAULT) else None)
+
+# Flag to indicate if AYON environment is available (from env var or default path)
+AYON_ENV_AVAILABLE = _AYON_DIR is not None
+
 
 def get_ocio_config():
     """Get OCIO config path from environment."""
-    OCIO_SEARCHPATH = os.path.join(os.environ.get("BUILTIN_OCIO_ROOT"), "aces_2.0","*.ocio")
-    OIIO = glob.glob(OCIO_SEARCHPATH)[0]
-    return OIIO
+    ocio_root = os.environ.get("BUILTIN_OCIO_ROOT")
+    if not ocio_root:
+        return None
+    OCIO_SEARCHPATH = os.path.join(ocio_root, "aces_2.0", "*.ocio")
+    matches = glob.glob(OCIO_SEARCHPATH)
+    return matches[0] if matches else None
+
 
 def get_ayon_bundle():
     """Get AYON bundle name from environment."""
     return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "production")
 
+
+def _safe_glob(pattern):
+    """Safely glob a pattern, returning None if no matches or pattern is invalid."""
+    if pattern is None:
+        return None
+    try:
+        matches = glob.glob(pattern)
+        return matches[0] if matches else None
+    except Exception:
+        return None
+
+
 # ============================================================================
-# TOOL PATHS
+# TOOL PATHS (may be None in standalone mode)
 # ============================================================================
 
-OIIO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
-OIIO_PATH = glob.glob(OIIO_ROOT)[0]
+if _AYON_DIR:
+    OIIO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
+    OIIO_PATH = _safe_glob(OIIO_ROOT)
 
-OIIO_INFO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "iinfo*")
-OIIO_INFO_PATH = glob.glob(OIIO_INFO_ROOT)[0]
+    OIIO_INFO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "iinfo*")
+    OIIO_INFO_PATH = _safe_glob(OIIO_INFO_ROOT)
 
-FFMPEG_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
-FFMPEG_PATH = glob.glob(FFMPEG_ROOT)[0]
+    FFMPEG_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
+    FFMPEG_PATH = _safe_glob(FFMPEG_ROOT)
 
-DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR)
+    AYON_CONSOLE_ROOT = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
+    AYON_CONSOLE = _safe_glob(AYON_CONSOLE_ROOT)
+else:
+    # Standalone mode - try to find tools via PATH or common locations
+    OIIO_ROOT = None
+    OIIO_PATH = shutil.which("oiiotool")
+    OIIO_INFO_ROOT = None
+    OIIO_INFO_PATH = shutil.which("iinfo")
+    FFMPEG_ROOT = None
+    FFMPEG_PATH = shutil.which("ffmpeg")
+    AYON_CONSOLE_ROOT = None
+    AYON_CONSOLE = None
 
-AYON_CONSOLE_ROOT = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
-AYON_CONSOLE = glob.glob(AYON_CONSOLE_ROOT)[0]
+# Deadline - try both AYON path and system PATH
+DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR) if _DEADLINE_DIR else shutil.which("deadlinecommand")
 
 # UI paths (relative to luma_tools root directory)
 UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shottools_ui.ui")
@@ -110,6 +176,19 @@ COMP_EXTENSIONS = [".nk", ".comp"]
 HIP_EXTENSION = ".hip"
 EXR_EXTENSION = ".exr"
 COMFYUI_SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr"]
+# Output file extensions that ComfyUI workflows can generate (images, models, etc.)
+COMFYUI_OUTPUT_EXTENSIONS = [
+    # Images
+    ".png", ".jpg", ".jpeg", ".webp", ".exr", ".tiff", ".tif", ".bmp", ".gif",
+    # 3D/Motion files
+    ".fbx", ".obj", ".gltf", ".glb", ".usd", ".usda", ".usdc", ".usdz",
+    # Video/Animation
+    ".mp4", ".mov", ".avi", ".webm",
+    # Audio
+    ".wav", ".mp3", ".flac", ".ogg",
+    # Other data formats
+    ".npy", ".npz", ".safetensors", ".pt", ".pth", ".ckpt", ".bin",
+]
 
 # File naming patterns
 DENOISED_SUBDIRECTORY = "denoised"

@@ -191,6 +191,54 @@ def set_comfyui_python_path(path):
     print(f"Set ComfyUI Python path to: {path}")
 
 
+def get_comfyui_fast_mode():
+    """
+    Get whether ComfyUI --fast flag is enabled.
+
+    Returns:
+        bool: True if fast mode is enabled
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_fast_mode", False)
+
+
+def set_comfyui_fast_mode(enabled):
+    """
+    Set whether ComfyUI --fast flag is enabled.
+
+    Args:
+        enabled: True to enable --fast flag
+    """
+    settings = load_global_settings()
+    settings["comfyui_fast_mode"] = enabled
+    save_global_settings(settings)
+    print(f"Set ComfyUI fast mode to: {enabled}")
+
+
+def get_comfyui_fp16_accumulation():
+    """
+    Get whether ComfyUI --fp16-accumulation flag is enabled.
+
+    Returns:
+        bool: True if fp16 accumulation is enabled
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_fp16_accumulation", False)
+
+
+def set_comfyui_fp16_accumulation(enabled):
+    """
+    Set whether ComfyUI --fp16-accumulation flag is enabled.
+
+    Args:
+        enabled: True to enable --fp16-accumulation flag
+    """
+    settings = load_global_settings()
+    settings["comfyui_fp16_accumulation"] = enabled
+    save_global_settings(settings)
+    print(f"Set ComfyUI fp16 accumulation to: {enabled}")
+
+
 def get_comfyui_text_presets():
     """
     Get saved ComfyUI text presets.
@@ -341,13 +389,17 @@ def get_comfyui_workflow_presets():
     Get saved ComfyUI workflow presets from global settings.
 
     Returns:
-        dict: Dictionary of preset_name -> {"path": workflow_path, "description": optional_description}
+        dict: Dictionary of preset_name -> {
+            "path": workflow_path,
+            "description": optional_description,
+            "iteratable": bool (whether iterate mode is available)
+        }
     """
     settings = load_global_settings()
     return settings.get("comfyui_workflow_presets", {})
 
 
-def save_comfyui_workflow_preset(name, workflow_path, description=""):
+def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False):
     """
     Save a ComfyUI workflow preset to global settings.
 
@@ -355,6 +407,7 @@ def save_comfyui_workflow_preset(name, workflow_path, description=""):
         name: Preset display name
         workflow_path: Path to the workflow JSON file
         description: Optional description for the preset
+        iteratable: Whether this workflow supports iterate mode
     """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
@@ -362,10 +415,67 @@ def save_comfyui_workflow_preset(name, workflow_path, description=""):
 
     settings["comfyui_workflow_presets"][name] = {
         "path": workflow_path,
-        "description": description
+        "description": description,
+        "iteratable": iteratable
     }
     save_global_settings(settings)
-    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path}")
+    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable})")
+
+
+def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None):
+    """
+    Update an existing ComfyUI workflow preset.
+
+    Args:
+        name: Preset name to update
+        workflow_path: New path (None to keep existing)
+        description: New description (None to keep existing)
+        iteratable: New iteratable flag (None to keep existing)
+
+    Returns:
+        bool: True if updated, False if preset not found
+    """
+    settings = load_global_settings()
+    presets = settings.get("comfyui_workflow_presets", {})
+
+    if name not in presets:
+        return False
+
+    preset = presets[name]
+    # Handle legacy format
+    if isinstance(preset, str):
+        preset = {"path": preset, "description": "", "iteratable": False}
+
+    if workflow_path is not None:
+        preset["path"] = workflow_path
+    if description is not None:
+        preset["description"] = description
+    if iteratable is not None:
+        preset["iteratable"] = iteratable
+
+    presets[name] = preset
+    settings["comfyui_workflow_presets"] = presets
+    save_global_settings(settings)
+    print(f"Updated ComfyUI workflow preset: {name}")
+    return True
+
+
+def is_workflow_preset_iteratable(name):
+    """
+    Check if a workflow preset supports iterate mode.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        bool: True if iteratable, False otherwise
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict):
+            return preset.get("iteratable", False)
+    return False
 
 
 def delete_comfyui_workflow_preset(name):
@@ -400,6 +510,243 @@ def get_comfyui_workflow_preset_path(name):
         # Legacy format: just the path string
         return preset
     return None
+
+
+# ============================================================================
+# COMFYUI NETWORK OUTPUT PATH (Global)
+# ============================================================================
+
+def get_comfyui_network_output_path():
+    """
+    Get the network output path for ComfyUI from global settings.
+
+    This is the shared network path where ComfyUI writes outputs,
+    accessible by farm workers and LoadImage nodes.
+
+    Returns:
+        str: Network output path, or empty string if not configured
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_network_output_path", "")
+
+
+def set_comfyui_network_output_path(path):
+    """
+    Set the network output path for ComfyUI in global settings.
+
+    Args:
+        path: Network path for ComfyUI output
+    """
+    settings = load_global_settings()
+    settings["comfyui_network_output_path"] = path
+    save_global_settings(settings)
+    print(f"Set ComfyUI network output path to: {path}")
+
+
+def get_comfyui_transfer_mode():
+    """
+    Get the file transfer mode for moving ComfyUI outputs from network to user folder.
+
+    Returns:
+        str: "copy" or "move" (default: "copy")
+    """
+    settings = load_user_settings()
+    return settings.get("comfyui_transfer_mode", "copy")
+
+
+def set_comfyui_transfer_mode(mode):
+    """
+    Set the file transfer mode for ComfyUI outputs.
+
+    Args:
+        mode: "copy" to copy files (keeps original), "move" to move files (deletes original)
+    """
+    if mode not in ("copy", "move"):
+        raise ValueError(f"Invalid transfer mode: {mode}. Must be 'copy' or 'move'")
+    settings = load_user_settings()
+    settings["comfyui_transfer_mode"] = mode
+    save_user_settings(settings)
+    print(f"Set ComfyUI transfer mode to: {mode}")
+
+
+def get_comfyui_use_user_subfolder():
+    """
+    Get whether to create user-specific subfolders in network output path.
+
+    This is a GLOBAL setting - applies to all users for consistent file organization.
+
+    Returns:
+        bool: True to create user subfolders (default: True)
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_use_user_subfolder", True)
+
+
+def set_comfyui_use_user_subfolder(enabled):
+    """
+    Set whether to create user-specific subfolders in network output path.
+
+    This is a GLOBAL setting - applies to all users for consistent file organization.
+
+    Args:
+        enabled: True to create user subfolders
+    """
+    settings = load_global_settings()
+    settings["comfyui_use_user_subfolder"] = enabled
+    save_global_settings(settings)
+    print(f"Set ComfyUI user subfolder: {enabled}")
+
+
+def get_comfyui_transfer_to_user_folder():
+    """
+    Get whether to transfer files to user folder after job completion.
+
+    Returns:
+        bool: True to transfer files to user folder (default: True)
+    """
+    settings = load_user_settings()
+    return settings.get("comfyui_transfer_to_user_folder", True)
+
+
+def set_comfyui_transfer_to_user_folder(enabled):
+    """
+    Set whether to transfer files to user folder after job completion.
+
+    Args:
+        enabled: True to transfer files to user folder
+    """
+    settings = load_user_settings()
+    settings["comfyui_transfer_to_user_folder"] = enabled
+    save_user_settings(settings)
+    print(f"Set ComfyUI transfer to user folder: {enabled}")
+
+
+# ============================================================================
+# COMFYUI PROMPT PRESETS (Per-Workflow, User Settings)
+# ============================================================================
+
+def get_comfyui_prompt_presets_for_workflow(workflow_name):
+    """
+    Get prompt presets for a specific workflow.
+
+    Args:
+        workflow_name: Name of the workflow preset
+
+    Returns:
+        dict: Dictionary of preset_name -> preset_text
+    """
+    settings = load_user_settings()
+    all_presets = settings.get("comfyui_prompt_presets", {})
+    return all_presets.get(workflow_name, {})
+
+
+def save_comfyui_prompt_preset_for_workflow(workflow_name, preset_name, text):
+    """
+    Save a prompt preset for a specific workflow.
+
+    Args:
+        workflow_name: Name of the workflow preset
+        preset_name: Name for the prompt preset
+        text: The prompt text to save
+    """
+    settings = load_user_settings()
+    if "comfyui_prompt_presets" not in settings:
+        settings["comfyui_prompt_presets"] = {}
+    if workflow_name not in settings["comfyui_prompt_presets"]:
+        settings["comfyui_prompt_presets"][workflow_name] = {}
+
+    settings["comfyui_prompt_presets"][workflow_name][preset_name] = text
+    save_user_settings(settings)
+    print(f"Saved prompt preset '{preset_name}' for workflow '{workflow_name}'")
+
+
+def delete_comfyui_prompt_preset_for_workflow(workflow_name, preset_name):
+    """
+    Delete a prompt preset from a specific workflow.
+
+    Args:
+        workflow_name: Name of the workflow preset
+        preset_name: Name of the prompt preset to delete
+    """
+    settings = load_user_settings()
+    all_presets = settings.get("comfyui_prompt_presets", {})
+
+    if workflow_name in all_presets and preset_name in all_presets[workflow_name]:
+        del all_presets[workflow_name][preset_name]
+        # Clean up empty workflow entry
+        if not all_presets[workflow_name]:
+            del all_presets[workflow_name]
+        settings["comfyui_prompt_presets"] = all_presets
+        save_user_settings(settings)
+        print(f"Deleted prompt preset '{preset_name}' from workflow '{workflow_name}'")
+
+
+def get_all_comfyui_prompt_presets():
+    """
+    Get all prompt presets for all workflows.
+
+    Returns:
+        dict: Dictionary of workflow_name -> {preset_name -> preset_text}
+    """
+    settings = load_user_settings()
+    return settings.get("comfyui_prompt_presets", {})
+
+
+# ============================================================================
+# RESTRICTED TABS CONFIGURATION (Global)
+# ============================================================================
+
+# Default restricted tabs (legacy behavior)
+DEFAULT_RESTRICTED_TABS = ["comfyui", "comfyui_gallery", "settings"]
+
+# Tab name to checkbox mapping
+TAB_RESTRICTION_MAP = {
+    "comfyui": "RestrictComfyUI",
+    "comfyui_gallery": "RestrictComfyUIGallery",
+    "settings": "RestrictSettings",
+    "passbuilder": "RestrictPassBuilder",
+    "mp4maker": "RestrictMP4Maker",
+    "republish": "RestrictRePublish",
+    "shotcleaner": "RestrictShotCleaner"
+}
+
+
+def get_restricted_tabs():
+    """
+    Get the list of tabs that are restricted to admin users.
+
+    Returns:
+        list: List of tab object names that should be hidden for non-admin users
+    """
+    settings = load_global_settings()
+    return settings.get("restricted_tabs", DEFAULT_RESTRICTED_TABS)
+
+
+def set_restricted_tabs(tabs):
+    """
+    Set the list of tabs that are restricted to admin users.
+
+    Args:
+        tabs: List of tab object names to restrict
+    """
+    settings = load_global_settings()
+    settings["restricted_tabs"] = tabs
+    save_global_settings(settings)
+    print(f"Updated restricted tabs: {tabs}")
+
+
+def is_tab_restricted(tab_name):
+    """
+    Check if a specific tab is restricted to admin users.
+
+    Args:
+        tab_name: The object name of the tab
+
+    Returns:
+        bool: True if tab is restricted, False otherwise
+    """
+    restricted = get_restricted_tabs()
+    return tab_name in restricted
 
 
 # ============================================================================

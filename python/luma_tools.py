@@ -57,7 +57,7 @@ from ui_components import (
     enhance_ui, StatusColors, InlineSpinner, apply_stylesheet, LoadingStyles, Worker,
     BatchImageSelector, ComfyUIStatusBanner, CollapsibleSection, StepGroupBox,
     ToastNotification, StepProgressIndicator, EmptyStateWidget, ThumbnailRenderList,
-    RenderListItem
+    RenderListItem, FlowLayout, GalleryThumbnailWidget
 )
 from splash_screen import SplashScreen
 from icons import IconManager, TAB_COLORS
@@ -66,16 +66,19 @@ from icons import IconManager, TAB_COLORS
 from state_manager import app_state
 from scan_service import DirectoryScanner
 from thumbnail_service import ThumbnailService
-from comfyui_service import extract_editable_nodes, EditableNode, submit_comfyui_job
+from comfyui_service import (
+    extract_editable_nodes, EditableNode, submit_comfyui_job,
+    poll_deadline_job_status, get_job_output_files, transfer_outputs_to_user_folder,
+    cleanup_job_temp_files
+)
 from spell_checker import SpellCheckTextEdit, is_spell_check_available
 from settings_manager import (
-    get_comfyui_text_presets,
-    save_comfyui_text_preset,
-    delete_comfyui_text_preset,
     get_comfyui_workflow_presets,
     save_comfyui_workflow_preset,
+    update_comfyui_workflow_preset,
     delete_comfyui_workflow_preset,
     get_comfyui_workflow_preset_path,
+    is_workflow_preset_iteratable,
     get_global_settings_path,
     set_global_settings_path,
     get_comfyui_path,
@@ -84,6 +87,10 @@ from settings_manager import (
     set_comfyui_mode,
     get_comfyui_python_path,
     set_comfyui_python_path,
+    get_comfyui_fast_mode,
+    set_comfyui_fast_mode,
+    get_comfyui_fp16_accumulation,
+    set_comfyui_fp16_accumulation,
     get_last_browse_directory,
     set_last_browse_directory,
     get_comfyui_tab_state,
@@ -91,6 +98,20 @@ from settings_manager import (
     get_admin_users,
     add_admin_user,
     remove_admin_user,
+    get_comfyui_network_output_path,
+    set_comfyui_network_output_path,
+    get_comfyui_transfer_mode,
+    set_comfyui_transfer_mode,
+    get_comfyui_use_user_subfolder,
+    set_comfyui_use_user_subfolder,
+    get_comfyui_transfer_to_user_folder,
+    set_comfyui_transfer_to_user_folder,
+    get_comfyui_prompt_presets_for_workflow,
+    save_comfyui_prompt_preset_for_workflow,
+    delete_comfyui_prompt_preset_for_workflow,
+    get_restricted_tabs,
+    set_restricted_tabs,
+    TAB_RESTRICTION_MAP,
 )
 
 
@@ -163,7 +184,11 @@ class LumaShotTools(QtWidgets.QWidget):
         _debug("3. UI loaded successfully")
         self.parent = parent
         self.change_val[int].connect(self.set_progress_val)
-        self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
+        # Set window title based on mode
+        if app_state.standalone_mode:
+            self.setWindowTitle(f"{APP_TITLE} - Standalone Mode")
+        else:
+            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
         self.setWindowIcon(QIcon(ICON_PATH))
         _debug("4. Window title and icon set")
 
@@ -239,6 +264,11 @@ class LumaShotTools(QtWidgets.QWidget):
         self._hide_restricted_tabs()
         _debug("22d. Restricted tabs hidden")
 
+        # Hide tabs that require shot context in standalone mode
+        _debug("22e. Checking standalone mode...")
+        self._hide_standalone_incompatible_tabs()
+        _debug("22f. Standalone mode tab check done")
+
         # Setup button icons
         _debug("23. Setting up button icons...")
         self._setup_button_icons()
@@ -252,7 +282,12 @@ class LumaShotTools(QtWidgets.QWidget):
         # Initialize ComfyUI tab
         _debug("25. Initializing ComfyUI tab...")
         self._init_comfyui_tab()
-        _debug("26. ComfyUI tab done - __init__ complete!")
+        _debug("26. ComfyUI tab done")
+
+        # Initialize ComfyUI Gallery tab
+        _debug("27. Initializing ComfyUI Gallery tab...")
+        self._init_comfyui_gallery_tab()
+        _debug("28. ComfyUI Gallery tab done - __init__ complete!")
 
     def showEvent(self, event):
         """Override showEvent to position spinner after window is laid out."""
@@ -437,6 +472,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.BrowseGlobalSettingsPath.clicked.connect(self.on_browse_global_settings_path)
         self.ui.BrowseComfyUIPath.clicked.connect(self.on_browse_comfyui_path)
         self.ui.BrowseComfyUIPython.clicked.connect(self.on_browse_comfyui_python)
+        self.ui.BrowseComfyUINetworkOutput.clicked.connect(self.on_browse_comfyui_network_output)
         self.ui.ComfyUIModeCombo.currentIndexChanged.connect(self.on_comfyui_mode_changed)
         self.ui.SaveGlobalSettings.clicked.connect(self.on_save_global_settings)
         self._load_global_settings_ui()
@@ -447,6 +483,7 @@ class LumaShotTools(QtWidgets.QWidget):
         if hasattr(self.ui, 'RemoveAdminUserButton'):
             self.ui.RemoveAdminUserButton.clicked.connect(self.on_remove_admin_user)
         self._load_admin_users_ui()
+        self._load_restricted_tabs_ui()
 
         # Tab reordering persistence
         self.ui.tabWidget.tabBar().tabMoved.connect(self.on_tab_moved)
@@ -579,9 +616,13 @@ class LumaShotTools(QtWidgets.QWidget):
             self._load_default_passes_ui()
 
     def on_save_settings_clicked(self):
-        """Save the current default passes settings."""
+        """Save user settings (local to this machine)."""
         from config import REQUIRED_PASSES
-        from settings_manager import set_default_passes
+        from settings_manager import (
+            set_default_passes,
+            set_comfyui_transfer_mode,
+            set_comfyui_transfer_to_user_folder,
+        )
 
         # Collect selected passes (excluding required passes as they're always included)
         selected_passes = []
@@ -597,12 +638,18 @@ class LumaShotTools(QtWidgets.QWidget):
             if item.isSelected():
                 selected_passes.append(pass_name)
 
-        # Save settings
+        # Save default passes
         set_default_passes(selected_passes)
         print(f"Saved default passes: {selected_passes}")
 
+        # Save ComfyUI user settings (transfer mode and auto-transfer)
+        transfer_mode = "copy" if self.ui.ComfyUITransferModeCombo.currentIndex() == 0 else "move"
+        set_comfyui_transfer_mode(transfer_mode)
+        set_comfyui_transfer_to_user_folder(self.ui.ComfyUITransferToUserFolder.isChecked())
+
         # Show confirmation
         self.animator.pulse_button(self.ui.SaveSettingsButton)
+        self.animator.show_success("User settings saved")
 
     def on_tab_moved(self, from_index, to_index):
         """Save tab order when user reorders tabs."""
@@ -622,6 +669,8 @@ class LumaShotTools(QtWidgets.QWidget):
 
         saved_order = get_tab_order()
         if not saved_order:
+            # No saved order - just ensure first tab is active
+            self.ui.tabWidget.setCurrentIndex(0)
             return
 
         # Build a map of tab name to widget
@@ -642,6 +691,9 @@ class LumaShotTools(QtWidgets.QWidget):
             if current_index != -1 and current_index != target_index:
                 # Move tab to target position
                 self.ui.tabWidget.tabBar().moveTab(current_index, target_index)
+
+        # Set the leftmost (first) tab as active after reordering
+        self.ui.tabWidget.setCurrentIndex(0)
 
         print(f"Restored tab order: {saved_order}")
 
@@ -664,6 +716,22 @@ class LumaShotTools(QtWidgets.QWidget):
         # ComfyUI Python path
         python_path = get_comfyui_python_path()
         self.ui.ComfyUIPythonEdit.setText(python_path)
+
+        # ComfyUI network output path
+        network_output_path = get_comfyui_network_output_path()
+        self.ui.ComfyUINetworkOutputEdit.setText(network_output_path)
+
+        # ComfyUI transfer mode (copy vs move)
+        transfer_mode = get_comfyui_transfer_mode()
+        self.ui.ComfyUITransferModeCombo.setCurrentIndex(0 if transfer_mode == "copy" else 1)
+
+        # ComfyUI user subfolder and transfer settings
+        self.ui.ComfyUIUseUserSubfolder.setChecked(get_comfyui_use_user_subfolder())
+        self.ui.ComfyUITransferToUserFolder.setChecked(get_comfyui_transfer_to_user_folder())
+
+        # ComfyUI performance flags
+        self.ui.ComfyUIFastMode.setChecked(get_comfyui_fast_mode())
+        self.ui.ComfyUIFP16Accumulation.setChecked(get_comfyui_fp16_accumulation())
 
         # Update Python path field visibility based on mode
         self._update_comfyui_python_visibility()
@@ -748,6 +816,20 @@ class LumaShotTools(QtWidgets.QWidget):
             self._update_comfyui_current_path_display()
             set_last_browse_directory("comfyui_python", os.path.dirname(file_path))
 
+    def on_browse_comfyui_network_output(self):
+        """Browse for ComfyUI network output directory."""
+        current_path = self.ui.ComfyUINetworkOutputEdit.text() or ""
+        if not current_path:
+            current_path = get_last_browse_directory("comfyui_network_output")
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select Network Output Directory",
+            current_path
+        )
+        if directory:
+            self.ui.ComfyUINetworkOutputEdit.setText(directory)
+            set_last_browse_directory("comfyui_network_output", directory)
+
     def on_save_global_settings(self):
         """Save all global settings."""
         # Save global settings path
@@ -788,11 +870,25 @@ class LumaShotTools(QtWidgets.QWidget):
         new_python_path = self.ui.ComfyUIPythonEdit.text().strip()
         set_comfyui_python_path(new_python_path)
 
+        # Save ComfyUI network output path
+        new_network_output = self.ui.ComfyUINetworkOutputEdit.text().strip()
+        set_comfyui_network_output_path(new_network_output)
+
+        # Save ComfyUI user subfolder setting (global setting)
+        set_comfyui_use_user_subfolder(self.ui.ComfyUIUseUserSubfolder.isChecked())
+
+        # Save ComfyUI performance flags
+        set_comfyui_fast_mode(self.ui.ComfyUIFastMode.isChecked())
+        set_comfyui_fp16_accumulation(self.ui.ComfyUIFP16Accumulation.isChecked())
+
+        # Save restricted tabs configuration
+        self._save_restricted_tabs_settings()
+
+        # Update network path display in ComfyUI tab
+        self._update_comfyui_network_path_display()
+
         self._update_comfyui_current_path_display()
         self.animator.show_success("Global settings saved")
-
-        # Refresh workflow presets since they may come from a new location
-        self._refresh_workflow_preset_combo()
 
     # ========================================================================
     # RENDER TAB HANDLERS
@@ -1724,6 +1820,7 @@ class LumaShotTools(QtWidgets.QWidget):
         # Connect workflow preset signals
         self.ui.ComfyUIChoosePreset.clicked.connect(self._on_choose_preset_clicked)
         self.ui.ComfyUIAddPreset.clicked.connect(self.on_comfyui_add_preset)
+        self.ui.ComfyUIEditPreset.clicked.connect(self.on_comfyui_edit_preset)
         self.ui.ComfyUIDeletePreset.clicked.connect(self.on_comfyui_delete_preset)
         self.ui.ComfyUIBrowseOutputDir.clicked.connect(self.on_comfyui_browse_output_dir)
         self.ui.ComfyUIOutputDir.textChanged.connect(self.on_comfyui_validate_inputs)
@@ -1734,11 +1831,36 @@ class LumaShotTools(QtWidgets.QWidget):
         self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", TAB_COLORS["comfyui"], 16))
         self.ui.ComfyUIServerMode.stateChanged.connect(self._on_comfyui_server_mode_changed)
 
+        # Connect iterate mode signals
+        self.ui.ComfyUIChooseMode.clicked.connect(self._on_choose_mode_clicked)
+        self.ui.ComfyUIUseAsInput.clicked.connect(self._on_use_generated_as_input)
+
+        # Initialize iterate mode state
+        self._iterate_poll_timer = None
+        self._iterate_network_output_dir = ""
+        self._iterate_user_output_dir = ""
+
+        # Hide iterate mode controls by default (shown when iteratable workflow selected)
+        self._update_iterate_mode_visibility(False)
+
+        # Display network path from global settings
+        self._update_comfyui_network_path_display()
+
         # Restore saved state
         self._restore_comfyui_state()
 
         # Initial validation
         self.on_comfyui_validate_inputs()
+
+    def _update_comfyui_network_path_display(self):
+        """Update the network path display label in ComfyUI tab."""
+        network_path = get_comfyui_network_output_path()
+        if network_path:
+            self.ui.ComfyUINetworkPathDisplay.setText(network_path)
+            self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #aaaaaa;")
+        else:
+            self.ui.ComfyUINetworkPathDisplay.setText("(Not configured - set in Settings tab)")
+            self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #888888; font-style: italic;")
 
     def _on_comfyui_generation_count_changed(self, value):
         """Handle generation count change."""
@@ -1758,6 +1880,401 @@ class LumaShotTools(QtWidgets.QWidget):
     def _on_comfyui_server_mode_changed(self, state):
         """Handle server mode checkbox change."""
         self._save_comfyui_state()
+
+    def _on_choose_mode_clicked(self):
+        """Show popup menu with available modes (Batch/Iterate)."""
+        menu = QMenu(self)
+
+        modes = [
+            ("Batch", "Submit all images at once"),
+            ("Iterate", "Submit one, review result, refine prompt")
+        ]
+
+        current_mode = self.ui.ComfyUICurrentMode.text()
+
+        for mode_name, description in modes:
+            action = menu.addAction(f"{mode_name} - {description}")
+            action.setData(mode_name)
+            if mode_name == current_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.ComfyUIChooseMode.mapToGlobal(
+            self.ui.ComfyUIChooseMode.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._select_mode(action.data())
+
+    def _select_mode(self, mode_name):
+        """Select a mode by name."""
+        self.ui.ComfyUICurrentMode.setText(mode_name)
+
+        is_iterate = mode_name == "Iterate"
+        app_state.comfyui_iterate_mode = is_iterate
+        print(f"[ComfyUI] Mode changed to: {mode_name} (comfyui_iterate_mode={app_state.comfyui_iterate_mode})")
+
+        # Show/hide iterate frame
+        self.ui.comfyuiIterateFrame.setVisible(is_iterate)
+
+        # In iterate mode, force generation count to 1
+        if is_iterate:
+            self.ui.ComfyUIGenerationCount.setValue(1)
+            self.ui.ComfyUIGenerationCount.setEnabled(False)
+        else:
+            self.ui.ComfyUIGenerationCount.setEnabled(True)
+
+        self._save_comfyui_state()
+
+    def _start_iterate_polling(self, job_id, network_output_dir, user_output_dir=None):
+        """Start polling for iterate mode job completion.
+
+        Args:
+            job_id: Deadline job ID to poll
+            network_output_dir: Network path where ComfyUI writes outputs
+            user_output_dir: User's local output path (where files may be moved after completion)
+        """
+        app_state.comfyui_current_job_id = job_id
+        self._iterate_network_output_dir = network_output_dir
+        self._iterate_user_output_dir = user_output_dir or network_output_dir
+        self._iterate_poll_count = 0
+
+        print(f"[Iterate] Starting polling for job {job_id}")
+        print(f"[Iterate] Network output dir: {network_output_dir}")
+        print(f"[Iterate] User output dir: {user_output_dir}")
+
+        # Update UI
+        self.ui.ComfyUIIterateStatus.setText("Job submitted, waiting for Deadline...")
+        self.ui.ComfyUIIterateProgress.setValue(0)
+        self.ui.ComfyUIUseAsInput.setEnabled(False)
+
+        # Update main status bar
+        self.animator.update_status_animated(
+            "Deadline: Job submitted, waiting...",
+            StatusColors.INFO
+        )
+
+        # Start poll timer
+        if self._iterate_poll_timer is None:
+            self._iterate_poll_timer = QTimer(self)
+            self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
+
+        self._iterate_poll_timer.start(5000)  # Poll every 5 seconds
+
+        # Also do an immediate first poll
+        self._poll_iterate_job()
+
+    def _poll_iterate_job(self):
+        """Poll the iterate job status."""
+        job_id = app_state.comfyui_current_job_id
+        if not job_id:
+            self._stop_iterate_polling()
+            return
+
+        # Poll on worker thread
+        worker = Worker(poll_deadline_job_status, job_id)
+        worker.signals.result.connect(self._on_iterate_poll_result)
+        worker.signals.error.connect(lambda msg, tb: print(f"Poll error: {msg}"))
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_iterate_poll_result(self, result):
+        """Handle iterate poll result."""
+        status = result.get("status", "Unknown")
+        progress = result.get("progress", 0)
+        completed_tasks = result.get("completed_tasks", 0)
+        total_tasks = result.get("total_tasks", 1)
+        error_message = result.get("error_message", "")
+
+        print(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{total_tasks}")
+
+        self.ui.ComfyUIIterateProgress.setValue(progress)
+        self._iterate_poll_count = getattr(self, '_iterate_poll_count', 0) + 1
+
+        if status == "Completed":
+            self._stop_iterate_polling()
+            self._on_iterate_job_completed()
+        elif status == "Failed":
+            self._stop_iterate_polling()
+            self.ui.ComfyUIIterateStatus.setText(f"Job failed: {error_message}")
+            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+            self.animator.update_status_animated(
+                f"Deadline: Job failed - {error_message}",
+                StatusColors.ERROR
+            )
+        else:
+            # Still running - show detailed status with task counts
+            # Add animated dots to show activity
+            dots = "." * ((self._iterate_poll_count % 3) + 1)
+
+            if status == "Active" or status == "Rendering":
+                status_text = f"Rendering {completed_tasks}/{total_tasks} tasks{dots}"
+                main_status = f"Deadline: Rendering ({completed_tasks}/{total_tasks})"
+            elif status == "Pending" or status == "Queued":
+                status_text = f"Queued, waiting for worker{dots}"
+                main_status = f"Deadline: Queued, waiting for worker{dots}"
+            else:
+                status_text = f"{status}: {progress}%{dots}"
+                main_status = f"Deadline: {status} ({progress}%)"
+
+            self.ui.ComfyUIIterateStatus.setText(status_text)
+            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
+
+            # Update main status bar with real-time feedback
+            self.animator.update_status_animated(main_status, StatusColors.INFO)
+
+    def _stop_iterate_polling(self):
+        """Stop the iterate poll timer."""
+        if self._iterate_poll_timer:
+            self._iterate_poll_timer.stop()
+
+    # =========================================================================
+    # BATCH MODE POLLING
+    # =========================================================================
+
+    def _start_batch_polling(self, job_ids, network_output_dir, user_output_dir):
+        """Start polling for batch job completion.
+
+        Args:
+            job_ids: List of Deadline job IDs to poll
+            network_output_dir: Network path where ComfyUI writes outputs
+            user_output_dir: User's local output path
+        """
+        self._batch_job_ids = list(job_ids)
+        self._batch_pending_jobs = set(job_ids)
+        self._batch_network_output_dir = network_output_dir
+        self._batch_user_output_dir = user_output_dir
+        self._batch_poll_count = 0
+
+        print(f"[Batch] Starting polling for {len(job_ids)} job(s)")
+
+        # Show initial status
+        self.animator.update_status_animated(
+            f"ComfyUI Batch: Monitoring {len(job_ids)} job(s)...",
+            StatusColors.INFO
+        )
+
+        # Create batch poll timer if needed
+        if not hasattr(self, '_batch_poll_timer') or self._batch_poll_timer is None:
+            self._batch_poll_timer = QTimer(self)
+            self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
+
+        self._batch_poll_timer.start(10000)  # Poll every 10 seconds (less frequent than iterate)
+
+        # Do an immediate first poll
+        self._poll_batch_jobs()
+
+    def _poll_batch_jobs(self):
+        """Poll all pending batch jobs."""
+        if not self._batch_pending_jobs:
+            self._stop_batch_polling()
+            return
+
+        # Poll each pending job
+        for job_id in list(self._batch_pending_jobs):
+            worker = Worker(poll_deadline_job_status, job_id)
+            worker.signals.result.connect(lambda result, jid=job_id: self._on_batch_poll_result(jid, result))
+            worker.signals.error.connect(lambda msg, tb, jid=job_id: print(f"[Batch] Poll error for {jid}: {msg}"))
+            QThreadPool.globalInstance().start(worker)
+
+    def _on_batch_poll_result(self, job_id, result):
+        """Handle batch poll result for a single job."""
+        status = result.get("status", "Unknown")
+        progress = result.get("progress", 0)
+        completed_tasks = result.get("completed_tasks", 0)
+        total_tasks = result.get("total_tasks", 1)
+
+        self._batch_poll_count = getattr(self, '_batch_poll_count', 0) + 1
+        total_jobs = len(self._batch_job_ids)
+        completed_jobs = total_jobs - len(self._batch_pending_jobs)
+
+        print(f"[Batch Poll] Job {job_id}: {status} ({progress}%), Tasks: {completed_tasks}/{total_tasks}")
+
+        if status == "Completed":
+            self._batch_pending_jobs.discard(job_id)
+            completed_jobs = total_jobs - len(self._batch_pending_jobs)
+            print(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
+
+            # Update status bar with completion progress
+            self.animator.update_status_animated(
+                f"ComfyUI Batch: {completed_jobs}/{total_jobs} jobs completed",
+                StatusColors.SUCCESS if not self._batch_pending_jobs else StatusColors.INFO
+            )
+
+            # Check if all jobs are done
+            if not self._batch_pending_jobs:
+                self._on_batch_jobs_completed()
+        elif status == "Failed":
+            self._batch_pending_jobs.discard(job_id)
+            completed_jobs = total_jobs - len(self._batch_pending_jobs)
+            print(f"[Batch] Job {job_id} failed, {len(self._batch_pending_jobs)} remaining")
+
+            # Update status bar with failure info
+            self.animator.update_status_animated(
+                f"ComfyUI Batch: Job failed ({completed_jobs}/{total_jobs} done)",
+                StatusColors.WARNING
+            )
+
+            if not self._batch_pending_jobs:
+                self._on_batch_jobs_completed()
+        else:
+            # Still running - show status with animated dots
+            dots = "." * ((self._batch_poll_count % 3) + 1)
+            pending_count = len(self._batch_pending_jobs)
+
+            if status == "Active" or status == "Rendering":
+                main_status = f"ComfyUI Batch: Rendering {completed_jobs}/{total_jobs} jobs{dots}"
+            elif status == "Pending" or status == "Queued":
+                main_status = f"ComfyUI Batch: {pending_count} jobs queued{dots}"
+            else:
+                main_status = f"ComfyUI Batch: {status} ({completed_jobs}/{total_jobs}){dots}"
+
+            self.animator.update_status_animated(main_status, StatusColors.INFO)
+
+    def _stop_batch_polling(self):
+        """Stop the batch poll timer."""
+        if hasattr(self, '_batch_poll_timer') and self._batch_poll_timer:
+            self._batch_poll_timer.stop()
+
+    def _on_batch_jobs_completed(self):
+        """Handle batch jobs completion - cleanup and refresh gallery."""
+        self._stop_batch_polling()
+
+        network_dir = getattr(self, '_batch_network_output_dir', None)
+        user_dir = getattr(self, '_batch_user_output_dir', None)
+
+        print(f"[Batch] All jobs completed!")
+        print(f"[Batch] Network dir: {network_dir}")
+        print(f"[Batch] User dir: {user_dir}")
+
+        # Clean up temp files from network directory
+        if network_dir:
+            deleted = cleanup_job_temp_files(network_dir)
+            if deleted:
+                print(f"[Batch] Cleaned up {deleted} temp files from network dir")
+
+        # Transfer files if enabled
+        if network_dir and user_dir and user_dir != network_dir and get_comfyui_transfer_to_user_folder():
+            transfer_mode = get_comfyui_transfer_mode()
+            print(f"[Batch] Transferring files to user folder (mode: {transfer_mode})")
+
+            transferred_files = transfer_outputs_to_user_folder(
+                network_dir, user_dir, transfer_mode
+            )
+            if transferred_files:
+                print(f"[Batch] Transferred {len(transferred_files)} files to user folder")
+
+        # Update status
+        self.animator.show_success("All ComfyUI jobs completed!")
+        self.animator.update_status_animated(
+            "ComfyUI: All jobs completed",
+            StatusColors.SUCCESS
+        )
+
+        # Refresh gallery tab if it exists
+        if hasattr(self, '_refresh_gallery'):
+            self._refresh_gallery()
+
+    def _on_iterate_job_completed(self):
+        """Handle iterate job completion - show the generated image."""
+        self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
+        self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
+
+        # Update main status bar
+        self.animator.update_status_animated(
+            "Deadline: Job completed!",
+            StatusColors.SUCCESS
+        )
+
+        # Find the most recent output file - check both network and user directories
+        output_files = []
+        network_dir = getattr(self, '_iterate_network_output_dir', None)
+        user_dir = getattr(self, '_iterate_user_output_dir', None)
+
+        print(f"[Iterate] Looking for output files...")
+        print(f"[Iterate] Network dir: {network_dir}")
+        print(f"[Iterate] User dir: {user_dir}")
+
+        # Clean up temp files from network directory
+        if network_dir:
+            deleted = cleanup_job_temp_files(network_dir)
+            if deleted:
+                print(f"[Iterate] Cleaned up {deleted} temp files from network dir")
+
+        # Check network directory first (where ComfyUI writes)
+        if network_dir:
+            output_files = get_job_output_files(network_dir)
+            if output_files:
+                print(f"[Iterate] Found {len(output_files)} files in network dir")
+
+                # Transfer files from network to user folder if different and enabled
+                if user_dir and user_dir != network_dir and get_comfyui_transfer_to_user_folder():
+                    transfer_mode = get_comfyui_transfer_mode()
+                    print(f"[Iterate] Transferring files to user folder (mode: {transfer_mode})")
+                    self.ui.ComfyUIIterateStatus.setText(f"{'Copying' if transfer_mode == 'copy' else 'Moving'} files to user folder...")
+
+                    transferred_files = transfer_outputs_to_user_folder(
+                        network_dir, user_dir, transfer_mode
+                    )
+                    if transferred_files:
+                        print(f"[Iterate] Transferred {len(transferred_files)} files to user folder")
+                        # Use the transferred files as output
+                        output_files = transferred_files
+
+        # If not found in network, check user directory (in case files were already there)
+        if not output_files and user_dir and user_dir != network_dir:
+            output_files = get_job_output_files(user_dir)
+            if output_files:
+                print(f"[Iterate] Found {len(output_files)} files in user dir")
+
+        if output_files:
+            latest_image = output_files[0]
+            app_state.comfyui_last_generated_image = latest_image
+            print(f"[Iterate] Latest output: {latest_image}")
+
+            self.ui.ComfyUIIterateStatus.setText("Completed!")
+
+            # Display thumbnail in preview
+            pixmap = QPixmap(latest_image)
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(
+                    self.ui.ComfyUIIteratePreview.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.ui.ComfyUIIteratePreview.setPixmap(scaled)
+
+            # Enable "Use as Input" button
+            self.ui.ComfyUIUseAsInput.setEnabled(True)
+
+            self.animator.show_success("Image generated! Click 'Use as Input' to iterate.")
+        else:
+            print(f"[Iterate] No output files found in either directory")
+            self.ui.ComfyUIIterateStatus.setText("No output files found")
+            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
+            self.animator.update_status_animated(
+                "Deadline: Completed but no output files found",
+                StatusColors.WARNING
+            )
+
+    def _on_use_generated_as_input(self):
+        """Copy the generated image path to the input image field."""
+        last_image = app_state.comfyui_last_generated_image
+        if not last_image or not os.path.exists(last_image):
+            self.animator.show_error("No generated image available")
+            return
+
+        # Find the image input widget and set the path
+        for node_id, container in self._comfyui_dynamic_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            if input_widget and hasattr(input_widget, 'add_images'):
+                # This is a BatchImageSelector
+                input_widget.clear_images()
+                input_widget.add_images([last_image])
+                self.animator.show_success("Image set as input for next iteration")
+                return
+
+        self.animator.show_warning("No image input field found in current workflow")
 
     def _save_comfyui_state(self):
         """Save the current ComfyUI tab state to user settings."""
@@ -1854,9 +2371,132 @@ class LumaShotTools(QtWidgets.QWidget):
             spinbox.setFocusPolicy(Qt.StrongFocus)
             spinbox.wheelEvent = lambda event: event.ignore()
 
-    def _restore_tab_order(self):
-        """Restore the saved order of tabs."""
-        pass # To be implemented with settings_manager
+    def _init_comfyui_gallery_tab(self):
+        """Initialize the ComfyUI Gallery tab."""
+        # Connect gallery signals
+        self.ui.GalleryBrowse.clicked.connect(self._on_gallery_browse)
+        self.ui.GalleryRefresh.clicked.connect(self._on_gallery_refresh)
+        # Connect output dir change to auto-start watcher
+        self.ui.GalleryOutputDir.textChanged.connect(self._on_gallery_output_dir_changed)
+
+        # Setup flow layout for thumbnails
+        self._gallery_flow_layout = FlowLayout(margin=10, spacing=10)
+        self.ui.galleryThumbnailContainer.setLayout(self._gallery_flow_layout)
+
+        # File system watcher for auto-refresh (always enabled)
+        self._gallery_watcher = None
+
+        # Set initial output dir from ComfyUI tab
+        if hasattr(self.ui, 'ComfyUIOutputDir'):
+            output_dir = self.ui.ComfyUIOutputDir.text()
+            if output_dir:
+                self.ui.GalleryOutputDir.setText(output_dir)
+                # Start watching immediately
+                self._start_gallery_watcher(output_dir)
+
+    def _on_gallery_browse(self):
+        """Browse for gallery output directory."""
+        current_path = self.ui.GalleryOutputDir.text()
+        if not current_path:
+            current_path = get_last_browse_directory("comfyui_output")
+
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory",
+            current_path or ""
+        )
+        if directory:
+            self.ui.GalleryOutputDir.setText(directory)
+            self._on_gallery_refresh()
+
+    def _on_gallery_refresh(self):
+        """Refresh the gallery with images from the output directory."""
+        output_dir = self.ui.GalleryOutputDir.text()
+        if not output_dir or not os.path.isdir(output_dir):
+            self.ui.GalleryStatus.setText("Invalid directory")
+            return
+
+        # Run scan on worker thread
+        worker = Worker(self._scan_gallery_directory, output_dir)
+        worker.signals.result.connect(self._populate_gallery)
+        worker.signals.error.connect(lambda msg, tb: print(f"Gallery scan error: {msg}"))
+        QThreadPool.globalInstance().start(worker)
+
+        self.ui.GalleryStatus.setText("Scanning...")
+
+    def _scan_gallery_directory(self, output_dir):
+        """Scan directory for image files (runs on worker thread)."""
+        images = []
+        supported_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
+
+        for filename in os.listdir(output_dir):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in supported_extensions:
+                full_path = os.path.join(output_dir, filename)
+                mtime = os.path.getmtime(full_path)
+                images.append((full_path, mtime))
+
+        # Sort by modification time, newest first
+        images.sort(key=lambda x: x[1], reverse=True)
+        return [img[0] for img in images]
+
+    def _populate_gallery(self, image_paths):
+        """Populate the gallery with thumbnail widgets."""
+        # Clear existing thumbnails
+        while self._gallery_flow_layout.count():
+            item = self._gallery_flow_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Add new thumbnails
+        for path in image_paths:
+            thumbnail = GalleryThumbnailWidget(path, self.ui.galleryThumbnailContainer)
+            thumbnail.clicked.connect(self._on_gallery_thumbnail_clicked)
+            self._gallery_flow_layout.addWidget(thumbnail)
+
+        # Update status
+        count = len(image_paths)
+        if count == 0:
+            self.ui.GalleryStatus.setText("No images found")
+        elif count == 1:
+            self.ui.GalleryStatus.setText("1 image found")
+        else:
+            self.ui.GalleryStatus.setText(f"{count} images found")
+
+    def _on_gallery_thumbnail_clicked(self, image_path):
+        """Handle thumbnail click - open the image."""
+        try:
+            os.startfile(image_path)
+        except Exception as e:
+            print(f"Error opening image: {e}")
+
+    def _on_gallery_output_dir_changed(self, output_dir):
+        """Handle gallery output directory change - restart watcher."""
+        self._start_gallery_watcher(output_dir)
+
+    def _start_gallery_watcher(self, output_dir):
+        """Start or restart the file system watcher for auto-refresh."""
+        # Stop existing watcher
+        if self._gallery_watcher:
+            self._gallery_watcher.deleteLater()
+            self._gallery_watcher = None
+
+        # Start new watcher if directory is valid
+        if output_dir and os.path.isdir(output_dir):
+            from PySide2.QtCore import QFileSystemWatcher
+            self._gallery_watcher = QFileSystemWatcher([output_dir], self)
+            self._gallery_watcher.directoryChanged.connect(self._on_gallery_directory_changed)
+            print(f"Started watching gallery directory: {output_dir}")
+
+    def _on_gallery_directory_changed(self, path):
+        """Handle directory change notification."""
+        # Debounce rapid changes with a short delay
+        if not hasattr(self, '_gallery_refresh_timer'):
+            self._gallery_refresh_timer = QTimer(self)
+            self._gallery_refresh_timer.setSingleShot(True)
+            self._gallery_refresh_timer.timeout.connect(self._on_gallery_refresh)
+
+        self._gallery_refresh_timer.start(500)  # 500ms debounce
 
     def _check_admin_status(self):
         """Check if current user is an admin and cache the result."""
@@ -1867,11 +2507,12 @@ class LumaShotTools(QtWidgets.QWidget):
             print(f"User '{app_state.user}' is a regular user (restricted tabs hidden)")
 
     def _hide_restricted_tabs(self):
-        """Hide admin-only tabs for non-admin users."""
+        """Hide admin-only tabs for non-admin users based on global settings."""
         if self._is_admin:
             return  # Admin sees all tabs
 
-        tabs_to_hide = ["comfyui", "settings"]
+        # Get restricted tabs from global settings
+        tabs_to_hide = get_restricted_tabs()
         indices_to_remove = []
 
         for i in range(self.ui.tabWidget.count()):
@@ -1884,6 +2525,26 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_name = self.ui.tabWidget.widget(i).objectName()
             self.ui.tabWidget.removeTab(i)
             print(f"Hid restricted tab: {tab_name}")
+
+    def _hide_standalone_incompatible_tabs(self):
+        """Hide tabs that require shot context when in standalone mode."""
+        if not app_state.standalone_mode:
+            return
+
+        # These tabs require shot context (shotpath, AYON integration)
+        tabs_to_hide = ["passbuilder", "mp4maker", "republish", "shotcleaner"]
+        indices_to_remove = []
+
+        for i in range(self.ui.tabWidget.count()):
+            widget = self.ui.tabWidget.widget(i)
+            if widget and widget.objectName() in tabs_to_hide:
+                indices_to_remove.append(i)
+
+        # Remove tabs from highest index to lowest to preserve indices
+        for i in sorted(indices_to_remove, reverse=True):
+            tab_name = self.ui.tabWidget.widget(i).objectName()
+            self.ui.tabWidget.removeTab(i)
+            print(f"Hid tab (standalone mode): {tab_name}")
 
     def _load_admin_users_ui(self):
         """Load admin users into the settings list widget."""
@@ -1904,6 +2565,48 @@ class LumaShotTools(QtWidgets.QWidget):
             self.ui.AdminUsersList.addItem(item)
 
         print(f"Loaded {len(admin_users)} admin users")
+
+    def _load_restricted_tabs_ui(self):
+        """Load restricted tabs settings into the checkboxes."""
+        restricted = get_restricted_tabs()
+
+        # Map tab names to checkboxes
+        checkbox_map = {
+            "comfyui": self.ui.RestrictComfyUI if hasattr(self.ui, 'RestrictComfyUI') else None,
+            "comfyui_gallery": self.ui.RestrictComfyUIGallery if hasattr(self.ui, 'RestrictComfyUIGallery') else None,
+            "settings": self.ui.RestrictSettings if hasattr(self.ui, 'RestrictSettings') else None,
+            "passbuilder": self.ui.RestrictPassBuilder if hasattr(self.ui, 'RestrictPassBuilder') else None,
+            "mp4maker": self.ui.RestrictMP4Maker if hasattr(self.ui, 'RestrictMP4Maker') else None,
+            "republish": self.ui.RestrictRePublish if hasattr(self.ui, 'RestrictRePublish') else None,
+            "shotcleaner": self.ui.RestrictShotCleaner if hasattr(self.ui, 'RestrictShotCleaner') else None,
+        }
+
+        for tab_name, checkbox in checkbox_map.items():
+            if checkbox:
+                checkbox.setChecked(tab_name in restricted)
+
+        print(f"Loaded restricted tabs settings: {restricted}")
+
+    def _save_restricted_tabs_settings(self):
+        """Save restricted tabs settings from the checkboxes."""
+        restricted = []
+
+        # Map checkboxes to tab names
+        checkbox_map = {
+            "comfyui": self.ui.RestrictComfyUI if hasattr(self.ui, 'RestrictComfyUI') else None,
+            "comfyui_gallery": self.ui.RestrictComfyUIGallery if hasattr(self.ui, 'RestrictComfyUIGallery') else None,
+            "settings": self.ui.RestrictSettings if hasattr(self.ui, 'RestrictSettings') else None,
+            "passbuilder": self.ui.RestrictPassBuilder if hasattr(self.ui, 'RestrictPassBuilder') else None,
+            "mp4maker": self.ui.RestrictMP4Maker if hasattr(self.ui, 'RestrictMP4Maker') else None,
+            "republish": self.ui.RestrictRePublish if hasattr(self.ui, 'RestrictRePublish') else None,
+            "shotcleaner": self.ui.RestrictShotCleaner if hasattr(self.ui, 'RestrictShotCleaner') else None,
+        }
+
+        for tab_name, checkbox in checkbox_map.items():
+            if checkbox and checkbox.isChecked():
+                restricted.append(tab_name)
+
+        set_restricted_tabs(restricted)
 
     def on_add_admin_user(self):
         """Add a user to the admin list via input dialog."""
@@ -1986,6 +2689,10 @@ class LumaShotTools(QtWidgets.QWidget):
             self._refresh_comfyui_editable_nodes()
             self.on_comfyui_validate_inputs()
             self._save_comfyui_state()
+
+            # Show/hide iterate mode based on workflow's iteratable flag
+            is_iteratable = is_workflow_preset_iteratable(preset_name)
+            self._update_iterate_mode_visibility(is_iteratable)
         else:
             self.animator.show_error(f"Workflow file not found: {workflow_path}")
             self.ui.ComfyUIWorkflowPath.setText("Workflow file not found")
@@ -1993,6 +2700,21 @@ class LumaShotTools(QtWidgets.QWidget):
             self._current_preset_name = None
             app_state.comfyui_workflow_path = None
             self.on_comfyui_validate_inputs()
+            # Hide iterate mode when no preset selected
+            self._update_iterate_mode_visibility(False)
+
+    def _update_iterate_mode_visibility(self, show):
+        """Show or hide the iterate mode controls based on workflow capability."""
+        self.ui.comfyuiModeLabel.setVisible(show)
+        self.ui.ComfyUIChooseMode.setVisible(show)
+        self.ui.ComfyUICurrentMode.setVisible(show)
+
+        if not show:
+            # Reset to batch mode when hiding
+            self.ui.ComfyUICurrentMode.setText("Batch")
+            self.ui.comfyuiIterateFrame.setVisible(False)
+            self.ui.ComfyUIGenerationCount.setEnabled(True)
+            app_state.comfyui_iterate_mode = False
 
     def on_comfyui_add_preset(self):
         """Add a new workflow preset."""
@@ -2029,10 +2751,123 @@ class LumaShotTools(QtWidgets.QWidget):
             if reply != QMessageBox.Yes:
                 return
 
+        # Ask if workflow supports iterate mode
+        iteratable = QMessageBox.question(
+            self, "Iterate Mode",
+            "Does this workflow support Iterate mode?\n\n"
+            "Iterate mode allows submitting one image, reviewing the result,\n"
+            "and refining the prompt before the next generation.",
+            QMessageBox.Yes | QMessageBox.No
+        ) == QMessageBox.Yes
+
         # Save the preset and select it
-        save_comfyui_workflow_preset(name, file_path)
+        save_comfyui_workflow_preset(name, file_path, iteratable=iteratable)
         self._select_preset(name)
         self.animator.show_success(f"Workflow preset '{name}' saved")
+
+    def on_comfyui_edit_preset(self):
+        """Edit the currently selected workflow preset."""
+        if not self._current_preset_name:
+            self.animator.show_error("No preset selected")
+            return
+
+        presets = get_comfyui_workflow_presets()
+        preset = presets.get(self._current_preset_name, {})
+        if isinstance(preset, str):
+            preset = {"path": preset, "description": "", "iteratable": False}
+
+        current_name = self._current_preset_name
+        current_path = preset.get("path", "")
+        current_iteratable = preset.get("iteratable", False)
+
+        # Create edit dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit Preset: {current_name}")
+        dialog.setMinimumWidth(500)
+
+        layout = QVBoxLayout(dialog)
+
+        # Preset name
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Preset Name:")
+        name_edit = QLineEdit(current_name)
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(name_edit)
+        layout.addLayout(name_layout)
+
+        # Workflow path
+        path_layout = QHBoxLayout()
+        path_label = QLabel("Workflow File:")
+        path_edit = QLineEdit(current_path)
+        browse_btn = QPushButton("Browse...")
+        path_layout.addWidget(path_label)
+        path_layout.addWidget(path_edit)
+        path_layout.addWidget(browse_btn)
+        layout.addLayout(path_layout)
+
+        def browse_workflow():
+            last_dir = os.path.dirname(current_path) if current_path else ""
+            file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                dialog, "Select ComfyUI Workflow", last_dir, "ComfyUI JSON (*.json)"
+            )
+            if file_path:
+                path_edit.setText(file_path)
+
+        browse_btn.clicked.connect(browse_workflow)
+
+        # Iteratable checkbox
+        iteratable_check = QtWidgets.QCheckBox("Enable Iterate Mode for this workflow")
+        iteratable_check.setChecked(current_iteratable)
+        iteratable_check.setToolTip(
+            "Iterate mode allows submitting one image, reviewing the result,\n"
+            "and refining the prompt before the next generation."
+        )
+        layout.addWidget(iteratable_check)
+
+        # Buttons
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec_() == QDialog.Accepted:
+            new_name = name_edit.text().strip()
+            new_path = path_edit.text().strip()
+            new_iteratable = iteratable_check.isChecked()
+
+            if not new_name:
+                self.animator.show_error("Preset name cannot be empty")
+                return
+
+            if not new_path:
+                self.animator.show_error("Workflow path cannot be empty")
+                return
+
+            # Check if name changed and new name already exists
+            if new_name != current_name:
+                if new_name in presets:
+                    self.animator.show_error(f"A preset named '{new_name}' already exists")
+                    return
+
+                # Delete old preset and create new one with new name
+                delete_comfyui_workflow_preset(current_name)
+                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable)
+                self._current_preset_name = new_name
+                self.ui.ComfyUICurrentPreset.setText(new_name)
+                self.animator.show_success(f"Preset renamed to '{new_name}'")
+            else:
+                # Just update the existing preset
+                update_comfyui_workflow_preset(
+                    current_name,
+                    workflow_path=new_path,
+                    iteratable=new_iteratable
+                )
+                self.animator.show_success(f"Preset '{current_name}' updated")
+
+            # Refresh the UI with the (possibly new) preset name
+            self._select_preset(self._current_preset_name)
 
     def on_comfyui_delete_preset(self):
         """Delete the currently selected workflow preset."""
@@ -2110,20 +2945,12 @@ class LumaShotTools(QtWidgets.QWidget):
         layout.addWidget(label)
 
         if node.widget_type == 'text':
-            # Add preset row
+            # Add preset row with button (not dropdown)
             preset_row = QHBoxLayout()
-            preset_combo = QComboBox()
-            preset_combo.setMinimumWidth(150)
-            self._refresh_preset_combo(preset_combo)
-            preset_row.addWidget(QLabel("Preset:"))
-            preset_row.addWidget(preset_combo, 1)
-
-            save_btn = QPushButton("Save")
-            save_btn.setFixedWidth(100)
-            delete_btn = QPushButton("Delete")
-            delete_btn.setFixedWidth(100)
-            preset_row.addWidget(save_btn)
-            preset_row.addWidget(delete_btn)
+            preset_btn = QPushButton("Presets")
+            preset_btn.setFixedWidth(100)
+            preset_row.addWidget(preset_btn)
+            preset_row.addStretch()
             layout.addLayout(preset_row)
 
             # Text input with spell checking
@@ -2133,17 +2960,10 @@ class LumaShotTools(QtWidgets.QWidget):
                 input_widget.setPlainText(str(node.current_value))
             layout.addWidget(input_widget)
             container.input_widget = input_widget
-            container.preset_combo = preset_combo
 
-            # Connect preset signals
-            preset_combo.currentTextChanged.connect(
-                lambda text, w=input_widget, c=preset_combo: self._on_preset_selected(text, w, c)
-            )
-            save_btn.clicked.connect(
-                lambda checked=False, w=input_widget, c=preset_combo: self._on_save_preset(w, c)
-            )
-            delete_btn.clicked.connect(
-                lambda checked=False, c=preset_combo: self._on_delete_preset(c)
+            # Connect preset button to show popup menu
+            preset_btn.clicked.connect(
+                lambda checked=False, w=input_widget, btn=preset_btn: self._on_prompt_preset_clicked(w, btn)
             )
             # Save state when text changes (with delay to avoid too many saves)
             input_widget.textChanged.connect(self._on_comfyui_text_changed)
@@ -2168,36 +2988,71 @@ class LumaShotTools(QtWidgets.QWidget):
 
         return container
 
-    def _refresh_preset_combo(self, combo):
-        """Refresh preset combo box with saved presets."""
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("-- Select Preset --")
-        presets = get_comfyui_text_presets()
-        for name in sorted(presets.keys()):
-            combo.addItem(name)
-        combo.blockSignals(False)
+    def _on_prompt_preset_clicked(self, text_widget, button):
+        """Show popup menu for prompt presets (per-workflow)."""
+        menu = QMenu(self)
 
-    def _on_preset_selected(self, text, text_widget, combo):
-        """Handle preset selection from combo box."""
-        if text == "-- Select Preset --":
+        # Get current workflow name
+        workflow_name = self._current_preset_name or ""
+        if not workflow_name:
+            menu.addAction("No workflow selected").setEnabled(False)
+            menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
             return
-        presets = get_comfyui_text_presets()
-        if text in presets:
-            text_widget.setPlainText(presets[text])
 
-    def _on_save_preset(self, text_widget, combo):
-        """Save current text as a new preset."""
-        print(f"_on_save_preset called with text_widget={text_widget}, combo={combo}")
+        # Get presets for this workflow
+        presets = get_comfyui_prompt_presets_for_workflow(workflow_name)
+
+        # Add preset items
+        if presets:
+            for name in sorted(presets.keys()):
+                action = menu.addAction(name)
+                action.triggered.connect(
+                    lambda checked=False, n=name, w=text_widget: self._apply_prompt_preset(n, w)
+                )
+            menu.addSeparator()
+        else:
+            no_presets = menu.addAction("No presets saved")
+            no_presets.setEnabled(False)
+            menu.addSeparator()
+
+        # Add save/delete options
+        save_action = menu.addAction("Save Current...")
+        save_action.triggered.connect(
+            lambda checked=False, w=text_widget: self._save_prompt_preset(w)
+        )
+
+        if presets:
+            delete_menu = menu.addMenu("Delete...")
+            for name in sorted(presets.keys()):
+                delete_action = delete_menu.addAction(name)
+                delete_action.triggered.connect(
+                    lambda checked=False, n=name: self._delete_prompt_preset(n)
+                )
+
+        menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _apply_prompt_preset(self, preset_name, text_widget):
+        """Apply a prompt preset to the text widget."""
+        workflow_name = self._current_preset_name or ""
+        presets = get_comfyui_prompt_presets_for_workflow(workflow_name)
+        if preset_name in presets:
+            text_widget.setPlainText(presets[preset_name])
+
+    def _save_prompt_preset(self, text_widget):
+        """Save current text as a new prompt preset for the current workflow."""
+        workflow_name = self._current_preset_name or ""
+        if not workflow_name:
+            self.animator.show_error("No workflow selected")
+            return
+
         current_text = text_widget.toPlainText().strip()
         if not current_text:
             self.animator.show_error("Cannot save empty preset")
             return
 
-        # Create and show dialog explicitly to ensure it appears
         dialog = QInputDialog(self)
-        dialog.setWindowTitle("Save Preset")
-        dialog.setLabelText("Preset name:")
+        dialog.setWindowTitle("Save Prompt Preset")
+        dialog.setLabelText(f"Preset name (for '{workflow_name}'):")
         dialog.setTextValue("")
         dialog.setWindowModality(Qt.WindowModal)
 
@@ -2206,28 +3061,23 @@ class LumaShotTools(QtWidgets.QWidget):
             if not name:
                 self.animator.show_error("Preset name cannot be empty")
                 return
-            save_comfyui_text_preset(name, current_text)
-            self._refresh_preset_combo(combo)
-            combo.setCurrentText(name)
+            save_comfyui_prompt_preset_for_workflow(workflow_name, name, current_text)
             self.animator.show_success(f"Preset '{name}' saved")
 
-    def _on_delete_preset(self, combo):
-        """Delete the currently selected preset."""
-        print(f"_on_delete_preset called with combo={combo}")
-        current = combo.currentText()
-        if current == "-- Select Preset --":
-            self.animator.show_error("No preset selected")
+    def _delete_prompt_preset(self, preset_name):
+        """Delete a prompt preset from the current workflow."""
+        workflow_name = self._current_preset_name or ""
+        if not workflow_name:
             return
 
         reply = QMessageBox.question(
             self, "Delete Preset",
-            f"Delete preset '{current}'?",
+            f"Delete prompt preset '{preset_name}' from '{workflow_name}'?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            delete_comfyui_text_preset(current)
-            self._refresh_preset_combo(combo)
-            self.animator.show_info(f"Preset '{current}' deleted")
+            delete_comfyui_prompt_preset_for_workflow(workflow_name, preset_name)
+            self.animator.show_info(f"Preset '{preset_name}' deleted")
 
     def _on_comfyui_text_changed(self):
         """Handle text change in editable nodes - save state with debounce."""
@@ -2331,6 +3181,20 @@ class LumaShotTools(QtWidgets.QWidget):
                     StatusColors.SUCCESS
                 )
                 print(f"ComfyUI submission complete: {job_ids}")
+
+                # Start polling for job completion
+                print(f"[ComfyUI] Iterate mode: {app_state.comfyui_iterate_mode}, job_ids count: {len(job_ids)}")
+                # Use network output dir if configured, else user output dir
+                poll_output_dir = network_output_dir if network_output_dir else output_dir
+
+                if app_state.comfyui_iterate_mode and len(job_ids) == 1:
+                    # Iterate mode - single job polling with UI updates
+                    print(f"[ComfyUI] Starting iterate polling with poll_output_dir: {poll_output_dir}, output_dir: {output_dir}")
+                    self._start_iterate_polling(job_ids[0], poll_output_dir, output_dir)
+                else:
+                    # Batch mode - poll all jobs for completion to update gallery and cleanup
+                    print(f"[ComfyUI] Starting batch polling for {len(job_ids)} job(s)")
+                    self._start_batch_polling(job_ids, poll_output_dir, output_dir)
             else:
                 self.animator.show_error(f"Submission failed: {error_msg}")
                 self.animator.update_status_animated(
@@ -2360,6 +3224,17 @@ class LumaShotTools(QtWidgets.QWidget):
         # Get seed value
         base_seed = self.ui.ComfyUISeed.value()
 
+        # Get network output path from global settings (optional)
+        network_output_dir = get_comfyui_network_output_path()
+
+        # Add user subfolder if enabled
+        if network_output_dir and get_comfyui_use_user_subfolder():
+            network_output_dir = os.path.join(network_output_dir, app_state.user)
+            print(f"[ComfyUI UI] Using user subfolder: {network_output_dir}")
+
+        print(f"[ComfyUI UI] Network output path from settings: {network_output_dir!r}")
+        print(f"[ComfyUI UI] User output path: {output_dir}")
+
         # Create worker and run submission on background thread
         worker = Worker(
             submit_comfyui_job,
@@ -2372,6 +3247,7 @@ class LumaShotTools(QtWidgets.QWidget):
             editable_values=editable_values,
             use_server_mode=use_server_mode,
             base_seed=base_seed,
+            network_output_dir=network_output_dir if network_output_dir else None,
         )
         worker.signals.result.connect(on_result)
         worker.signals.error.connect(on_error)

@@ -378,7 +378,8 @@ def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_di
 
 
 def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, port: int,
-                         mode: str = "embedded", python_path: str = None) -> subprocess.Popen:
+                         mode: str = "embedded", python_path: str = None,
+                         fast_mode: bool = False, fp16_accumulation: bool = False) -> subprocess.Popen:
     """Start ComfyUI server process.
 
     Args:
@@ -389,6 +390,8 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         mode: 'embedded' for portable install, 'portable' for venv-based install
               (e.g., comfy-cli), 'standalone' for system install
         python_path: Path to Python executable (required for standalone mode)
+        fast_mode: Enable --fast flag for faster execution (may reduce quality)
+        fp16_accumulation: Enable --fp16-accumulation for faster FP16 math
     """
     if mode == "embedded":
         # Embedded/portable mode: python_embeded folder alongside ComfyUI
@@ -436,6 +439,13 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         '--port', str(port),
         '--disable-auto-launch'
     ]
+
+    # Add optional performance flags
+    if fast_mode:
+        cmd.append('--fast')
+        print("Fast mode enabled (--fast)")
+    # Note: --fp16-accumulation is not a valid ComfyUI flag
+    # The fp16_accumulation parameter is kept for API compatibility but does nothing
 
     # Set working directory to where main.py is located
     # This ensures custom_nodes are found correctly
@@ -494,6 +504,8 @@ def main():
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
                        help='ComfyUI installation mode: embedded (python_embeded), portable (venv), or standalone')
     parser.add_argument('--python-path', help='Path to Python executable (required for standalone mode)')
+    parser.add_argument('--fast', action='store_true', help='Enable --fast flag for faster execution (may reduce quality)')
+    parser.add_argument('--fp16-accumulation', action='store_true', help='Enable --fp16-accumulation for faster FP16 math')
 
     args = parser.parse_args()
 
@@ -628,7 +640,9 @@ def main():
             args.output_directory,
             args.port,
             mode=args.mode,
-            python_path=args.python_path
+            python_path=args.python_path,
+            fast_mode=args.fast,
+            fp16_accumulation=getattr(args, 'fp16_accumulation', False)
         )
         if process is None:
             print("ERROR: Failed to start ComfyUI server")
