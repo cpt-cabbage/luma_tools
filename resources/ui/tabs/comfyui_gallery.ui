@@ -29,27 +29,39 @@
    <item>
     <layout class="QHBoxLayout" name="galleryHeaderLayout">
      <item>
-      <widget class="QLabel" name="galleryDirLabel">
+      <widget class="QPushButton" name="GallerySourceToggle">
        <property name="text">
-        <string>Output Directory:</string>
+        <string>Network Folder</string>
        </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLineEdit" name="GalleryOutputDir">
-       <property name="placeholderText">
-        <string>Select a directory to view generated images</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="GalleryBrowse">
-       <property name="text">
-        <string>Browse</string>
+       <property name="toolTip">
+        <string>Click to switch between network folder and custom folder</string>
        </property>
        <property name="minimumSize">
         <size>
-         <width>80</width>
+         <width>120</width>
+         <height>0</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="galleryHeaderSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GalleryOpenExplorer">
+       <property name="text">
+        <string>Open in Explorer</string>
+       </property>
+       <property name="toolTip">
+        <string>Open the gallery folder in Windows Explorer</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
          <height>0</height>
         </size>
        </property>

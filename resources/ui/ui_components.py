@@ -1424,6 +1424,226 @@ class StatusColors:
 
 
 # ============================================================================
+# TAB GLOW EFFECT
+# ============================================================================
+
+class TabGlowEffect(QObject):
+    """
+    Creates a pulsing glow effect on a tab bar to draw user attention.
+
+    Usage:
+        glow = TabGlowEffect(tab_widget, tab_index, color="#ec4899")
+        glow.start()
+        # Later, when user clicks the tab:
+        glow.stop()
+    """
+
+    def __init__(self, tab_widget, tab_index, color="#ec4899", parent=None):
+        """
+        Initialize the tab glow effect.
+
+        Args:
+            tab_widget: The QTabWidget containing the tabs
+            tab_index: The index of the tab to glow
+            color: Hex color for the glow (default: pink for gallery)
+            parent: Parent QObject
+        """
+        super().__init__(parent)
+        self.tab_widget = tab_widget
+        self.tab_index = tab_index
+        self.color = QColor(color)
+        self.base_color = QColor(color)
+
+        # Animation state
+        self._intensity = 0.0
+        self._direction = 1  # 1 = brightening, -1 = dimming
+        self._is_running = False
+
+        # Timer for animation
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._animation_interval = 50  # 20 FPS
+        self._intensity_step = 0.08  # How much to change per frame
+
+        # Store original stylesheet
+        self._original_style = None
+
+    def start(self, pulse_count=0):
+        """
+        Start the pulsing glow animation.
+
+        Args:
+            pulse_count: Number of pulses (0 = infinite until stopped)
+        """
+        if self._is_running:
+            return
+
+        self._is_running = True
+        self._intensity = 0.0
+        self._direction = 1
+        self._pulse_count = pulse_count
+        self._current_pulses = 0
+
+        # Store original tab bar style if not already stored
+        if self._original_style is None:
+            self._original_style = self.tab_widget.tabBar().styleSheet()
+
+        self._timer.start(self._animation_interval)
+
+    def stop(self):
+        """Stop the glow animation and restore original appearance."""
+        self._is_running = False
+        self._timer.stop()
+
+        # Restore original style
+        if self._original_style is not None:
+            self._update_tab_style(0.0)
+
+    def _animate(self):
+        """Update the glow intensity for animation."""
+        # Update intensity
+        self._intensity += self._intensity_step * self._direction
+
+        # Clamp and reverse direction at bounds
+        if self._intensity >= 1.0:
+            self._intensity = 1.0
+            self._direction = -1
+        elif self._intensity <= 0.0:
+            self._intensity = 0.0
+            self._direction = 1
+            self._current_pulses += 1
+
+            # Check if we've completed the requested pulses
+            if self._pulse_count > 0 and self._current_pulses >= self._pulse_count:
+                self.stop()
+                return
+
+        # Apply the glow effect
+        self._update_tab_style(self._intensity)
+
+    def _update_tab_style(self, intensity):
+        """
+        Update the tab bar stylesheet to show the glow effect.
+
+        Args:
+            intensity: Glow intensity from 0.0 to 1.0
+        """
+        tab_bar = self.tab_widget.tabBar()
+
+        if intensity <= 0.01:
+            # Reset to original
+            tab_bar.setStyleSheet(self._original_style or "")
+            return
+
+        # Create glow color with varying alpha
+        glow_alpha = int(180 * intensity)
+        shadow_spread = int(15 * intensity)
+
+        # Build stylesheet targeting the specific tab
+        # Use nth-child or specific index styling
+        glow_style = f"""
+            QTabBar::tab:nth({self.tab_index}) {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha}),
+                    stop:0.5 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha // 2}),
+                    stop:1 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha})
+                );
+            }}
+        """
+
+        # Since nth() selector may not work in Qt, use a different approach:
+        # Apply a custom property and use that in styling
+        # For now, we'll use tab text color change as a simpler approach
+
+        # Alternative: directly modify tab icon with glow overlay
+        # For best results, we'll use setTabTextColor which is more reliable
+
+        # Calculate glowing text color
+        glow_r = int(255 * intensity + self.base_color.red() * (1 - intensity))
+        glow_g = int(255 * intensity + self.base_color.green() * (1 - intensity))
+        glow_b = int(255 * intensity + self.base_color.blue() * (1 - intensity))
+
+        text_color = QColor(glow_r, glow_g, glow_b)
+        tab_bar.setTabTextColor(self.tab_index, text_color)
+
+
+class TabGlowManager(QObject):
+    """
+    Manages pulsing glow effects for multiple tabs.
+    Handles starting/stopping glows and auto-stopping when tab is activated.
+    """
+
+    def __init__(self, tab_widget, parent=None):
+        """
+        Initialize the glow manager.
+
+        Args:
+            tab_widget: The QTabWidget to manage glows for
+            parent: Parent QObject
+        """
+        super().__init__(parent)
+        self.tab_widget = tab_widget
+        self._active_glows = {}  # tab_index -> TabGlowEffect
+
+        # Connect to tab change signal to auto-stop glow
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
+    def start_glow(self, tab_index, color="#ec4899"):
+        """
+        Start a pulsing glow on the specified tab.
+
+        Args:
+            tab_index: Index of the tab to glow
+            color: Hex color for the glow
+        """
+        print(f"[TabGlowManager] start_glow called for tab_index={tab_index}, color={color}")
+        print(f"[TabGlowManager] Current tab index: {self.tab_widget.currentIndex()}")
+
+        # Don't glow if this tab is currently active
+        if self.tab_widget.currentIndex() == tab_index:
+            print(f"[TabGlowManager] Skipping glow - tab is currently active")
+            return
+
+        # Stop existing glow on this tab if any
+        if tab_index in self._active_glows:
+            print(f"[TabGlowManager] Stopping existing glow on tab {tab_index}")
+            self._active_glows[tab_index].stop()
+
+        # Create and start new glow
+        print(f"[TabGlowManager] Creating and starting new glow effect")
+        glow = TabGlowEffect(self.tab_widget, tab_index, color, self)
+        self._active_glows[tab_index] = glow
+        glow.start()
+        print(f"[TabGlowManager] Glow started successfully")
+
+    def stop_glow(self, tab_index):
+        """
+        Stop the glow on the specified tab.
+
+        Args:
+            tab_index: Index of the tab to stop glowing
+        """
+        if tab_index in self._active_glows:
+            self._active_glows[tab_index].stop()
+            del self._active_glows[tab_index]
+
+            # Reset tab text color to default
+            tab_bar = self.tab_widget.tabBar()
+            tab_bar.setTabTextColor(tab_index, QColor())  # Reset to default
+
+    def stop_all_glows(self):
+        """Stop all active glows."""
+        for tab_index in list(self._active_glows.keys()):
+            self.stop_glow(tab_index)
+
+    def _on_tab_changed(self, index):
+        """Auto-stop glow when user navigates to the glowing tab."""
+        if index in self._active_glows:
+            self.stop_glow(index)
+
+
+# ============================================================================
 # GALLERY WIDGETS
 # ============================================================================
 

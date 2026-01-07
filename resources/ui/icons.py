@@ -21,6 +21,7 @@ TAB_COLORS = {
     "shot_cleaner": "#ff9f0a",  # Radiant Amber
     "logs": "#64d2ff",          # Sky Blue
     "comfyui": "#ff375f",       # Neon Pink
+    "comfyui_gallery": "#ec4899",  # Hot Pink
     "settings": "#8e8e93",      # Pro Slate
 }
 
@@ -217,13 +218,13 @@ class IconManager:
             "shot_cleaner": "trash",
             "logs": "terminal",
             "comfyui": "sparkles",
+            "comfyui_gallery": "image",
             "settings": "settings",
         }
 
         icon_name = tab_icons.get(tab_name, "circle")
-        color = TAB_COLORS.get(tab_name, DEFAULT_ICON_COLOR)
 
-        return cls.get_icon(icon_name, color, size)
+        return cls.get_icon(icon_name, DEFAULT_ICON_COLOR, size)
 
     @classmethod
     def get_action_icon(cls, action: str, color: str = None, size: int = 18) -> QIcon:
@@ -287,9 +288,8 @@ class IconManager:
         }
 
         icon_name = status_icons.get(status, "circle")
-        color = STATUS_COLORS.get(status, DEFAULT_ICON_COLOR)
 
-        return cls.get_icon(icon_name, color, size)
+        return cls.get_icon(icon_name, DEFAULT_ICON_COLOR, size)
 
 
 # Convenience functions for common use cases

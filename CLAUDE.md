@@ -23,7 +23,7 @@ python\venv\Scripts\activate.bat
 python python/luma_tools.py
 ```
 
-The batch file activates the venv and launches with `start /B` to run in background.
+The batch file activates the venv and launches with `start /B` to run in background. The console window is hidden by the Python code itself using Windows API (`ctypes.windll`).
 
 **Command Line Arguments:**
 The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
@@ -158,7 +158,7 @@ QThreadPool.globalInstance().start(worker)
 
 **Additional Threading Utilities:**
 - `ThreadedOperation` - Wrapper class for cleaner worker management
-- `LogStream` - Custom QObject that redirects stdout/stderr to the Log tab via signals
+- `LogStream` - Custom QObject in `luma_tools.py` that redirects stdout/stderr to the Log tab via signals (all `print()` output appears in Log tab)
 
 ### Strategy Pattern for Publishing
 
@@ -213,7 +213,7 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 5. Submit to Deadline - each frame is a different seed
 6. `comfyui_runner.py` executes on farm workers
 
-**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `KSampler`, `SaveImage`.
+**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`. See `EDITABLE_NODE_CONFIGS` in `comfyui_service.py` for widget mappings.
 
 ### Pass Building
 

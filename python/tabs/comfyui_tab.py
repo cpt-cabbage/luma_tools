@@ -6,6 +6,7 @@ Handles ComfyUI workflow submission and AI image generation.
 
 import os
 import random
+import time
 
 from PySide2 import QtWidgets, QtCore
 from PySide2.QtCore import Qt, QTimer, QThreadPool
@@ -35,20 +36,17 @@ class ComfyUITab(BaseTab):
 
     def connect_signals(self):
         """Connect ComfyUI tab signals."""
-        from icons import IconManager, TAB_COLORS
+        from icons import IconManager, DEFAULT_ICON_COLOR
 
         # Workflow preset signals
         self.ui.ComfyUIChoosePreset.clicked.connect(self._on_choose_preset_clicked)
         self.ui.ComfyUIAddPreset.clicked.connect(self._on_add_preset_clicked)
         self.ui.ComfyUIEditPreset.clicked.connect(self._on_edit_preset_clicked)
-        self.ui.ComfyUIDeletePreset.clicked.connect(self._on_delete_preset_clicked)
-        self.ui.ComfyUIBrowseOutputDir.clicked.connect(self._on_browse_output_dir)
-        self.ui.ComfyUIOutputDir.textChanged.connect(self._validate_inputs)
         self.ui.ComfyUISubmit.clicked.connect(self._on_submit_clicked)
         self.ui.ComfyUIGenerationCount.valueChanged.connect(self._on_generation_count_changed)
         self.ui.ComfyUISeed.valueChanged.connect(self._on_seed_changed)
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_randomize_seed)
-        self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", TAB_COLORS["comfyui"], 16))
+        self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 16))
 
 
         # Iterate mode signals
@@ -65,16 +63,23 @@ class ComfyUITab(BaseTab):
         # Iterate mode state
         self._iterate_poll_timer = None
         self._iterate_network_output_dir = ""
-        self._iterate_user_output_dir = ""
         self._iterate_poll_count = 0
+        self._iterate_completed_tasks = 0  # Track completed tasks for incremental updates
+        self._iterate_total_tasks = 1  # Total tasks expected
+        self._iterate_start_time = None  # For ETA calculation
 
         # Batch mode state
         self._batch_poll_timer = None
         self._batch_job_ids = []
         self._batch_pending_jobs = set()
+        self._batch_failed_jobs = set()  # Track which jobs failed
+        self._batch_completed_tasks = {}  # Track completed tasks per job for incremental updates
+        self._batch_total_tasks = {}  # Total tasks per job
+        self._batch_job_statuses = {}  # Current status per job (Queued, Rendering, etc.)
         self._batch_network_output_dir = ""
-        self._batch_user_output_dir = ""
         self._batch_poll_count = 0
+        self._batch_start_time = None  # For ETA calculation
+        self._batch_generation_count = 1  # Frames per job
 
         # Hide iterate mode controls by default
         self._update_iterate_mode_visibility(False)
@@ -372,15 +377,54 @@ class ComfyUITab(BaseTab):
         )
         layout.addWidget(iteratable_check)
 
-        # Buttons
+        # Buttons layout with Delete on the left, OK/Cancel on the right
+        buttons_layout = QHBoxLayout()
+
+        # Delete button (left side, styled red)
+        delete_btn = QPushButton("Delete Model")
+        delete_btn.setStyleSheet("QPushButton { color: #ef4444; }")
+        delete_btn.setToolTip("Permanently delete this workflow preset")
+
+        def on_delete():
+            reply = QMessageBox.question(
+                dialog, "Delete Model",
+                f"Are you sure you want to delete '{current_name}'?\n\nThis cannot be undone.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                dialog.done(2)  # Custom return code for delete
+
+        delete_btn.clicked.connect(on_delete)
+        buttons_layout.addWidget(delete_btn)
+
+        buttons_layout.addStretch()
+
+        # OK/Cancel buttons (right side)
         button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
-        layout.addWidget(button_box)
+        buttons_layout.addWidget(button_box)
 
-        if dialog.exec_() == QDialog.Accepted:
+        layout.addLayout(buttons_layout)
+
+        result = dialog.exec_()
+
+        # Handle delete (custom return code 2)
+        if result == 2:
+            delete_comfyui_workflow_preset(current_name)
+            self._current_preset_name = None
+            self.ui.ComfyUICurrentPreset.setText("No model selected")
+            self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
+            self.app_state.comfyui_workflow_path = None
+            self._refresh_editable_nodes()
+            self._validate_inputs()
+            self.main_window.animator.show_info(f"Model '{current_name}' deleted")
+            return
+
+        if result == QDialog.Accepted:
             new_name = name_edit.text().strip()
             new_path = path_edit.text().strip()
             new_iteratable = iteratable_check.isChecked()
@@ -416,30 +460,6 @@ class ComfyUITab(BaseTab):
 
             # Refresh the UI with the (possibly new) preset name
             self._select_preset(self._current_preset_name)
-
-    def _on_delete_preset_clicked(self):
-        """Delete the currently selected workflow preset."""
-        from settings_manager import delete_comfyui_workflow_preset
-
-        if not self._current_preset_name:
-            self.main_window.animator.show_error("No preset selected")
-            return
-
-        reply = QMessageBox.question(
-            self.main_window, "Delete Preset",
-            f"Delete workflow preset '{self._current_preset_name}'?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            deleted_name = self._current_preset_name
-            delete_comfyui_workflow_preset(self._current_preset_name)
-            self._current_preset_name = None
-            self.ui.ComfyUICurrentPreset.setText("No preset selected")
-            self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
-            self.app_state.comfyui_workflow_path = None
-            self._refresh_editable_nodes()
-            self._validate_inputs()
-            self.main_window.animator.show_info(f"Preset '{deleted_name}' deleted")
 
     # =========================================================================
     # EDITABLE NODES
@@ -673,38 +693,16 @@ class ComfyUITab(BaseTab):
             set_last_browse_directory("comfyui_images", last_dir)
 
     # =========================================================================
-    # OUTPUT DIRECTORY
-    # =========================================================================
-
-    def _on_browse_output_dir(self):
-        """Browse for ComfyUI output directory."""
-        from settings_manager import get_last_browse_directory, set_last_browse_directory
-
-        current_path = self.ui.ComfyUIOutputDir.text()
-        if not current_path:
-            current_path = get_last_browse_directory("comfyui_output")
-        if not current_path and self.app_state.shotpath:
-            current_path = self.app_state.shotpath
-
-        directory = QFileDialog.getExistingDirectory(
-            self.main_window,
-            "Select Output Directory",
-            current_path or ""
-        )
-        if directory:
-            self.ui.ComfyUIOutputDir.setText(directory)
-            set_last_browse_directory("comfyui_output", directory)
-            self._save_state()
-
-    # =========================================================================
     # VALIDATION
     # =========================================================================
 
     def _validate_inputs(self):
         """Validate inputs and enable/disable submit button."""
+        from settings_manager import get_comfyui_network_output_path
+
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
-        output_ok = bool(self.ui.ComfyUIOutputDir.text().strip())
-        self.ui.ComfyUISubmit.setEnabled(workflow_ok and output_ok)
+        network_path_ok = bool(get_comfyui_network_output_path())
+        self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
 
     # =========================================================================
     # SUBMISSION
@@ -714,21 +712,21 @@ class ComfyUITab(BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui_service import extract_editable_nodes, submit_comfyui_job
-        from settings_manager import (
-            get_comfyui_network_output_path,
-            get_comfyui_use_user_subfolder
-        )
+        from settings_manager import get_comfyui_network_output_path
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
             self.main_window.animator.show_error("No workflow selected")
             return
 
-        # Validate output directory
-        output_dir = self.ui.ComfyUIOutputDir.text().strip()
-        if not output_dir:
-            self.main_window.animator.show_error("No output directory selected")
+        # Get network output path - always use user subfolder
+        network_output_dir = get_comfyui_network_output_path()
+        if not network_output_dir:
+            self.main_window.animator.show_error("Network output path not configured in Settings")
             return
+
+        network_output_dir = os.path.join(network_output_dir, self.app_state.user)
+        self.log(f"[ComfyUI] Using user subfolder: {network_output_dir}")
 
         # Get generation count from UI
         generation_count = self.ui.ComfyUIGenerationCount.value()
@@ -753,7 +751,7 @@ class ComfyUITab(BaseTab):
                     editable_values[node_id] = {'node': node, 'value': value}
 
         # Build job name from shot/project
-        job_name = f"{self.app_state.shot}_comfyui" if self.app_state.shot else "comfyui_job"
+        job_name = f"{self.app_state.shot}_luma_tools" if self.app_state.shot else "luma_tools_job"
 
         # Show loading overlay
         self.main_window.animator.show_loading(
@@ -769,16 +767,7 @@ class ComfyUITab(BaseTab):
         # Get seed value
         base_seed = self.ui.ComfyUISeed.value()
 
-        # Get network output path from global settings (optional)
-        network_output_dir = get_comfyui_network_output_path()
-
-        # Add user subfolder if enabled
-        if network_output_dir and get_comfyui_use_user_subfolder():
-            network_output_dir = os.path.join(network_output_dir, self.app_state.user)
-            self.log(f"[ComfyUI] Using user subfolder: {network_output_dir}")
-
-        self.log(f"[ComfyUI UI] Network output path: {network_output_dir!r}")
-        self.log(f"[ComfyUI UI] User output path: {output_dir}")
+        self.log(f"[ComfyUI] Network output path: {network_output_dir}")
 
         def on_result(result):
             """Called when submission completes."""
@@ -796,12 +785,10 @@ class ComfyUITab(BaseTab):
                 self.log(f"ComfyUI submission complete: {job_ids}")
 
                 # Start polling for job completion
-                poll_output_dir = network_output_dir if network_output_dir else output_dir
-
                 if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
-                    self._start_iterate_polling(job_ids[0], poll_output_dir, output_dir)
+                    self._start_iterate_polling(job_ids[0], network_output_dir)
                 else:
-                    self._start_batch_polling(job_ids, poll_output_dir, output_dir)
+                    self._start_batch_polling(job_ids, network_output_dir)
             else:
                 self.main_window.animator.show_error(f"Submission failed: {error_msg}")
                 self.main_window.animator.update_status_animated(
@@ -831,13 +818,13 @@ class ComfyUITab(BaseTab):
             workflow_path=self.app_state.comfyui_workflow_path,
             input_image=None,
             prompt=None,
-            output_dir=output_dir,
+            output_dir=network_output_dir,
             generation_count=generation_count,
             job_name=job_name,
             editable_values=editable_values,
             use_server_mode=use_server_mode,
             base_seed=base_seed,
-            network_output_dir=network_output_dir if network_output_dir else None,
+            network_output_dir=network_output_dir,
         )
         worker.signals.result.connect(on_result)
         worker.signals.error.connect(on_error)
@@ -845,30 +832,61 @@ class ComfyUITab(BaseTab):
         QThreadPool.globalInstance().start(worker)
 
     # =========================================================================
+    # PROGRESS FORMATTING HELPERS
+    # =========================================================================
+
+    def _format_elapsed_time(self, seconds):
+        """Format elapsed time in a human-readable way."""
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{mins}m {secs}s"
+        else:
+            hours = int(seconds // 3600)
+            mins = int((seconds % 3600) // 60)
+            return f"{hours}h {mins}m"
+
+    def _estimate_remaining_time(self, completed, total, elapsed_seconds):
+        """Estimate remaining time based on progress."""
+        if completed <= 0 or elapsed_seconds <= 0:
+            return None
+        rate = completed / elapsed_seconds  # tasks per second
+        remaining_tasks = total - completed
+        if rate > 0:
+            remaining_seconds = remaining_tasks / rate
+            return self._format_elapsed_time(remaining_seconds)
+        return None
+
+    # =========================================================================
     # ITERATE MODE POLLING
     # =========================================================================
 
-    def _start_iterate_polling(self, job_id, network_output_dir, user_output_dir=None):
+    def _start_iterate_polling(self, job_id, network_output_dir):
         """Start polling for iterate mode job completion."""
         from ui_components import StatusColors
 
         self.app_state.comfyui_current_job_id = job_id
         self._iterate_network_output_dir = network_output_dir
-        self._iterate_user_output_dir = user_output_dir or network_output_dir
         self._iterate_poll_count = 0
+        self._iterate_completed_tasks = 0  # Reset task tracking
+        self._iterate_total_tasks = self.ui.ComfyUIGenerationCount.value()
+        self._iterate_start_time = time.time()
 
         self.log(f"[Iterate] Starting polling for job {job_id}")
         self.log(f"[Iterate] Network output dir: {network_output_dir}")
-        self.log(f"[Iterate] User output dir: {user_output_dir}")
+        self.log(f"[Iterate] Expected frames: {self._iterate_total_tasks}")
 
         # Update UI
         self.ui.ComfyUIIterateStatus.setText("Job submitted, waiting for Deadline...")
         self.ui.ComfyUIIterateProgress.setValue(0)
         self.ui.ComfyUIUseAsInput.setEnabled(False)
 
-        # Update main status bar
+        # Update main status bar with more detail
+        gen_count = self._iterate_total_tasks
         self.main_window.animator.update_status_animated(
-            "Deadline: Job submitted, waiting...",
+            f"🎨 ComfyUI: Submitted {gen_count} frame(s) • Waiting for worker...",
             StatusColors.INFO
         )
 
@@ -892,8 +910,9 @@ class ComfyUITab(BaseTab):
             self._stop_iterate_polling()
             return
 
-        # Poll on worker thread
-        worker = Worker(poll_deadline_job_status, job_id)
+        # Poll on worker thread, passing output_dir to verify success via output files
+        output_dir = self._iterate_network_output_dir
+        worker = Worker(poll_deadline_job_status, job_id, output_dir)
         worker.signals.result.connect(self._on_iterate_poll_result)
         worker.signals.error.connect(lambda msg, tb: self.log(f"Poll error: {msg}"))
         QThreadPool.globalInstance().start(worker)
@@ -908,7 +927,28 @@ class ComfyUITab(BaseTab):
         total_tasks = result.get("total_tasks", 1)
         error_message = result.get("error_message", "")
 
-        self.log(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{total_tasks}")
+        # Use our tracked total if Deadline reports 1 (single job with multiple frames)
+        display_total = max(total_tasks, self._iterate_total_tasks)
+
+        self.log(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{display_total}")
+
+        # Calculate elapsed time
+        elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
+        elapsed_str = self._format_elapsed_time(elapsed)
+
+        # Check if new tasks completed since last poll (new frames rendered)
+        if completed_tasks > self._iterate_completed_tasks:
+            new_frames = completed_tasks - self._iterate_completed_tasks
+            self.log(f"[Iterate] {new_frames} new frame(s) rendered! ({completed_tasks}/{display_total})")
+            self._iterate_completed_tasks = completed_tasks
+
+            # Refresh gallery and request attention directly
+            gallery_tab = self.main_window.get_tab("comfyui_gallery")
+            if gallery_tab:
+                self.log(f"[Iterate] Triggering gallery refresh and attention for new frames")
+                gallery_tab._on_refresh()
+                # Emit attention signal directly since we know new images were generated
+                gallery_tab.signals.request_attention.emit()
 
         self.ui.ComfyUIIterateProgress.setValue(progress)
         self._iterate_poll_count += 1
@@ -921,22 +961,28 @@ class ComfyUITab(BaseTab):
             self.ui.ComfyUIIterateStatus.setText(f"Job failed: {error_message}")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
             self.main_window.animator.update_status_animated(
-                f"Deadline: Job failed - {error_message}",
+                f"❌ ComfyUI Failed: {error_message}",
                 StatusColors.ERROR
             )
         else:
-            # Still running - show detailed status
-            dots = "." * ((self._iterate_poll_count % 3) + 1)
+            # Still running - build detailed status message
+            eta_str = self._estimate_remaining_time(completed_tasks, display_total, elapsed)
 
             if status in ("Active", "Rendering"):
-                status_text = f"Rendering {completed_tasks}/{total_tasks} tasks{dots}"
-                main_status = f"Deadline: Rendering ({completed_tasks}/{total_tasks})"
+                # Show progress with frame count and timing
+                status_text = f"Rendering frame {completed_tasks + 1}/{display_total}"
+                if completed_tasks > 0:
+                    main_status = f"🎨 ComfyUI: Frame {completed_tasks}/{display_total} • {elapsed_str} elapsed"
+                    if eta_str:
+                        main_status += f" • ~{eta_str} remaining"
+                else:
+                    main_status = f"🎨 ComfyUI: Starting render • {display_total} frame(s)"
             elif status in ("Pending", "Queued"):
-                status_text = f"Queued, waiting for worker{dots}"
-                main_status = f"Deadline: Queued, waiting for worker{dots}"
+                status_text = f"Queued, waiting for worker..."
+                main_status = f"⏳ ComfyUI: Queued • Waiting for available worker..."
             else:
-                status_text = f"{status}: {progress}%{dots}"
-                main_status = f"Deadline: {status} ({progress}%)"
+                status_text = f"{status}: {progress}%"
+                main_status = f"🎨 ComfyUI: {status} ({progress}%)"
 
             self.ui.ComfyUIIterateStatus.setText(status_text)
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
@@ -950,32 +996,27 @@ class ComfyUITab(BaseTab):
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
         from ui_components import StatusColors
-        from comfyui_service import (
-            get_job_output_files,
-            transfer_outputs_to_user_folder,
-            cleanup_job_temp_files
-        )
-        from settings_manager import (
-            get_comfyui_transfer_to_user_folder,
-            get_comfyui_transfer_mode
-        )
+        from comfyui_service import get_job_output_files, cleanup_job_temp_files
+
+        # Calculate total time
+        elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
+        elapsed_str = self._format_elapsed_time(elapsed)
+        frames = self._iterate_total_tasks
 
         self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
         self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
 
         self.main_window.animator.update_status_animated(
-            "Deadline: Job completed!",
+            f"✅ ComfyUI Complete: {frames} frame(s) in {elapsed_str}",
             StatusColors.SUCCESS
         )
 
-        # Find the most recent output file
+        # Find the most recent output file in network directory (user subfolder)
         output_files = []
         network_dir = self._iterate_network_output_dir
-        user_dir = self._iterate_user_output_dir
 
         self.log(f"[Iterate] Looking for output files...")
         self.log(f"[Iterate] Network dir: {network_dir}")
-        self.log(f"[Iterate] User dir: {user_dir}")
 
         # Clean up temp files from network directory
         if network_dir:
@@ -983,32 +1024,11 @@ class ComfyUITab(BaseTab):
             if deleted:
                 self.log(f"[Iterate] Cleaned up {deleted} temp files from network dir")
 
-        # Check network directory first
+        # Get files from network directory
         if network_dir:
             output_files = get_job_output_files(network_dir)
             if output_files:
                 self.log(f"[Iterate] Found {len(output_files)} files in network dir")
-
-                # Transfer files if different and enabled
-                if user_dir and user_dir != network_dir and get_comfyui_transfer_to_user_folder():
-                    transfer_mode = get_comfyui_transfer_mode()
-                    self.log(f"[Iterate] Transferring files to user folder (mode: {transfer_mode})")
-                    self.ui.ComfyUIIterateStatus.setText(
-                        f"{'Copying' if transfer_mode == 'copy' else 'Moving'} files to user folder..."
-                    )
-
-                    transferred_files = transfer_outputs_to_user_folder(
-                        network_dir, user_dir, transfer_mode
-                    )
-                    if transferred_files:
-                        self.log(f"[Iterate] Transferred {len(transferred_files)} files to user folder")
-                        output_files = transferred_files
-
-        # If not found in network, check user directory
-        if not output_files and user_dir and user_dir != network_dir:
-            output_files = get_job_output_files(user_dir)
-            if output_files:
-                self.log(f"[Iterate] Found {len(output_files)} files in user dir")
 
         if output_files:
             latest_image = output_files[0]
@@ -1031,6 +1051,12 @@ class ComfyUITab(BaseTab):
             self.ui.ComfyUIUseAsInput.setEnabled(True)
 
             self.main_window.animator.show_success("Image generated! Click 'Use as Input' to iterate.")
+
+            # Trigger gallery refresh to show new images and flash the tab
+            gallery_tab = self.main_window.get_tab("comfyui_gallery")
+            if gallery_tab:
+                self.log("[Iterate] Triggering gallery refresh...")
+                gallery_tab._on_refresh()
         else:
             self.log(f"[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
@@ -1063,20 +1089,28 @@ class ComfyUITab(BaseTab):
     # BATCH MODE POLLING
     # =========================================================================
 
-    def _start_batch_polling(self, job_ids, network_output_dir, user_output_dir):
+    def _start_batch_polling(self, job_ids, network_output_dir):
         """Start polling for batch job completion."""
         from ui_components import StatusColors
 
         self._batch_job_ids = list(job_ids)
         self._batch_pending_jobs = set(job_ids)
+        self._batch_failed_jobs = set()  # Reset failure tracking
+        self._batch_completed_tasks = {job_id: 0 for job_id in job_ids}  # Track tasks per job
+        self._batch_total_tasks = {job_id: self.ui.ComfyUIGenerationCount.value() for job_id in job_ids}
+        self._batch_job_statuses = {job_id: "Pending" for job_id in job_ids}
         self._batch_network_output_dir = network_output_dir
-        self._batch_user_output_dir = user_output_dir
         self._batch_poll_count = 0
+        self._batch_start_time = time.time()
+        self._batch_generation_count = self.ui.ComfyUIGenerationCount.value()
 
-        self.log(f"[Batch] Starting polling for {len(job_ids)} job(s)")
+        total_jobs = len(job_ids)
+        total_frames = total_jobs * self._batch_generation_count
+
+        self.log(f"[Batch] Starting polling for {total_jobs} job(s), {total_frames} total frame(s)")
 
         self.main_window.animator.update_status_animated(
-            f"ComfyUI Batch: Monitoring {len(job_ids)} job(s)...",
+            f"🎨 ComfyUI Batch: {total_jobs} job(s), {total_frames} frame(s) • Waiting for workers...",
             StatusColors.INFO
         )
 
@@ -1099,9 +1133,10 @@ class ComfyUITab(BaseTab):
             self._stop_batch_polling()
             return
 
-        # Poll each pending job
+        # Poll each pending job, passing output_dir to verify success via output files
+        output_dir = self._batch_network_output_dir
         for job_id in list(self._batch_pending_jobs):
-            worker = Worker(poll_deadline_job_status, job_id)
+            worker = Worker(poll_deadline_job_status, job_id, output_dir)
             worker.signals.result.connect(lambda result, jid=job_id: self._on_batch_poll_result(jid, result))
             worker.signals.error.connect(lambda msg, tb, jid=job_id: self.log(f"[Batch] Poll error for {jid}: {msg}"))
             QThreadPool.globalInstance().start(worker)
@@ -1115,47 +1150,101 @@ class ComfyUITab(BaseTab):
         completed_tasks = result.get("completed_tasks", 0)
         total_tasks = result.get("total_tasks", 1)
 
+        # Update job status tracking
+        self._batch_job_statuses[job_id] = status
+        if total_tasks > 1:
+            self._batch_total_tasks[job_id] = total_tasks
+
         self._batch_poll_count += 1
         total_jobs = len(self._batch_job_ids)
         completed_jobs = total_jobs - len(self._batch_pending_jobs)
+
+        # Calculate total frames across all jobs
+        total_frames_all = sum(self._batch_total_tasks.values())
+        completed_frames_all = sum(self._batch_completed_tasks.values())
+
+        # Calculate elapsed time
+        elapsed = time.time() - self._batch_start_time if self._batch_start_time else 0
+        elapsed_str = self._format_elapsed_time(elapsed)
+
+        # Check if new tasks completed since last poll (new frames rendered)
+        prev_completed = self._batch_completed_tasks.get(job_id, 0)
+        if completed_tasks > prev_completed:
+            new_frames = completed_tasks - prev_completed
+            self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
+            self._batch_completed_tasks[job_id] = completed_tasks
+            completed_frames_all = sum(self._batch_completed_tasks.values())
+
+            # Refresh gallery and request attention directly
+            gallery_tab = self.main_window.get_tab("comfyui_gallery")
+            if gallery_tab:
+                self.log(f"[Batch] Triggering gallery refresh and attention for new frames")
+                gallery_tab._on_refresh()
+                # Emit attention signal directly since we know new images were generated
+                gallery_tab.signals.request_attention.emit()
 
         self.log(f"[Batch Poll] Job {job_id}: {status} ({progress}%), Tasks: {completed_tasks}/{total_tasks}")
 
         if status == "Completed":
             self._batch_pending_jobs.discard(job_id)
+            # Update completed tasks to total for this job
+            self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
             completed_jobs = total_jobs - len(self._batch_pending_jobs)
+            completed_frames_all = sum(self._batch_completed_tasks.values())
             self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
 
-            self.main_window.animator.update_status_animated(
-                f"ComfyUI Batch: {completed_jobs}/{total_jobs} jobs completed",
-                StatusColors.SUCCESS if not self._batch_pending_jobs else StatusColors.INFO
-            )
+            # Count active jobs
+            active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
 
-            if not self._batch_pending_jobs:
-                self._on_batch_jobs_completed()
+            if self._batch_pending_jobs:
+                eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
+                main_status = f"🎨 ComfyUI: {completed_frames_all}/{total_frames_all} frames • {completed_jobs}/{total_jobs} jobs done"
+                if eta_str:
+                    main_status += f" • ~{eta_str} left"
+                self.main_window.animator.update_status_animated(main_status, StatusColors.INFO)
+            else:
+                # All done
+                self._on_batch_jobs_completed(had_failures=len(self._batch_failed_jobs) > 0)
+
         elif status == "Failed":
             self._batch_pending_jobs.discard(job_id)
+            self._batch_failed_jobs.add(job_id)  # Track this failure
             completed_jobs = total_jobs - len(self._batch_pending_jobs)
-            self.log(f"[Batch] Job {job_id} failed, {len(self._batch_pending_jobs)} remaining")
+            error_msg = result.get("error_message", "Unknown error")
+            self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
+            self.log(f"[Batch] {len(self._batch_pending_jobs)} job(s) remaining")
 
+            failed_count = len(self._batch_failed_jobs)
             self.main_window.animator.update_status_animated(
-                f"ComfyUI Batch: Job failed ({completed_jobs}/{total_jobs} done)",
+                f"⚠️ ComfyUI: {failed_count} failed • {completed_jobs}/{total_jobs} jobs processed",
                 StatusColors.WARNING
             )
 
             if not self._batch_pending_jobs:
-                self._on_batch_jobs_completed()
+                self._on_batch_jobs_completed(had_failures=True)
         else:
-            # Still running
-            dots = "." * ((self._batch_poll_count % 3) + 1)
+            # Still running - build detailed status
             pending_count = len(self._batch_pending_jobs)
 
+            # Count jobs in different states
+            active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
+            queued_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Pending", "Queued"))
+
             if status in ("Active", "Rendering"):
-                main_status = f"ComfyUI Batch: Rendering {completed_jobs}/{total_jobs} jobs{dots}"
+                eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
+                if completed_frames_all > 0:
+                    main_status = f"🎨 ComfyUI: {completed_frames_all}/{total_frames_all} frames • {active_jobs} rendering"
+                    if queued_jobs > 0:
+                        main_status += f", {queued_jobs} queued"
+                    main_status += f" • {elapsed_str}"
+                    if eta_str:
+                        main_status += f" (~{eta_str} left)"
+                else:
+                    main_status = f"🎨 ComfyUI: Starting {total_frames_all} frames • {active_jobs} active, {queued_jobs} queued"
             elif status in ("Pending", "Queued"):
-                main_status = f"ComfyUI Batch: {pending_count} jobs queued{dots}"
+                main_status = f"⏳ ComfyUI: {queued_jobs} job(s) queued • Waiting for workers..."
             else:
-                main_status = f"ComfyUI Batch: {status} ({completed_jobs}/{total_jobs}){dots}"
+                main_status = f"🎨 ComfyUI: {status} • {completed_jobs}/{total_jobs} jobs"
 
             self.main_window.animator.update_status_animated(main_status, StatusColors.INFO)
 
@@ -1164,26 +1253,30 @@ class ComfyUITab(BaseTab):
         if self._batch_poll_timer:
             self._batch_poll_timer.stop()
 
-    def _on_batch_jobs_completed(self):
-        """Handle batch jobs completion - cleanup and refresh gallery."""
+    def _on_batch_jobs_completed(self, had_failures=False):
+        """Handle batch jobs completion - cleanup and refresh gallery.
+
+        Args:
+            had_failures: True if any jobs failed during the batch
+        """
         from ui_components import StatusColors
-        from comfyui_service import (
-            transfer_outputs_to_user_folder,
-            cleanup_job_temp_files
-        )
-        from settings_manager import (
-            get_comfyui_transfer_to_user_folder,
-            get_comfyui_transfer_mode
-        )
+        from comfyui_service import cleanup_job_temp_files
 
         self._stop_batch_polling()
 
         network_dir = self._batch_network_output_dir
-        user_dir = self._batch_user_output_dir
 
-        self.log(f"[Batch] All jobs completed!")
+        # Calculate total time and frame counts
+        elapsed = time.time() - self._batch_start_time if self._batch_start_time else 0
+        elapsed_str = self._format_elapsed_time(elapsed)
+        total_frames = sum(self._batch_total_tasks.values())
+        completed_frames = sum(self._batch_completed_tasks.values())
+
+        if had_failures:
+            self.log(f"[Batch] Jobs finished with failures!")
+        else:
+            self.log(f"[Batch] All jobs completed successfully!")
         self.log(f"[Batch] Network dir: {network_dir}")
-        self.log(f"[Batch] User dir: {user_dir}")
 
         # Clean up temp files from network directory
         if network_dir:
@@ -1191,23 +1284,33 @@ class ComfyUITab(BaseTab):
             if deleted:
                 self.log(f"[Batch] Cleaned up {deleted} temp files from network dir")
 
-        # Transfer files if enabled
-        if network_dir and user_dir and user_dir != network_dir and get_comfyui_transfer_to_user_folder():
-            transfer_mode = get_comfyui_transfer_mode()
-            self.log(f"[Batch] Transferring files to user folder (mode: {transfer_mode})")
+        # Update status based on success/failure
+        # Get counts before clearing
+        failed_count = len(self._batch_failed_jobs)
+        total_count = len(self._batch_job_ids)
+        success_count = total_count - failed_count
 
-            transferred_files = transfer_outputs_to_user_folder(
-                network_dir, user_dir, transfer_mode
+        if had_failures:
+            self.main_window.animator.show_error(f"ComfyUI: {failed_count}/{total_count} job(s) failed!")
+            self.main_window.animator.update_status_animated(
+                f"❌ ComfyUI: {failed_count} failed, {success_count} succeeded • {completed_frames} frames in {elapsed_str}",
+                StatusColors.ERROR
             )
-            if transferred_files:
-                self.log(f"[Batch] Transferred {len(transferred_files)} files to user folder")
+        else:
+            self.main_window.animator.show_success(f"All {total_count} ComfyUI jobs completed!")
+            self.main_window.animator.update_status_animated(
+                f"✅ ComfyUI Complete: {total_frames} frames in {elapsed_str}",
+                StatusColors.SUCCESS
+            )
 
-        # Update status
-        self.main_window.animator.show_success("All ComfyUI jobs completed!")
-        self.main_window.animator.update_status_animated(
-            "ComfyUI: All jobs completed",
-            StatusColors.SUCCESS
-        )
+        # Reset failure tracking for next batch
+        self._batch_failed_jobs.clear()
+
+        # Trigger gallery refresh to show new images and flash the tab
+        gallery_tab = self.main_window.get_tab("comfyui_gallery")
+        if gallery_tab:
+            self.log("[Batch] Triggering gallery refresh...")
+            gallery_tab._on_refresh()
 
     # =========================================================================
     # STATE PERSISTENCE
@@ -1219,7 +1322,6 @@ class ComfyUITab(BaseTab):
 
         state = {
             "workflow_preset": self._current_preset_name or "",
-            "output_directory": self.ui.ComfyUIOutputDir.text(),
             "generation_count": self.ui.ComfyUIGenerationCount.value(),
             "seed": self.ui.ComfyUISeed.value(),
         }
@@ -1244,10 +1346,6 @@ class ComfyUITab(BaseTab):
 
         state = get_comfyui_tab_state()
         if not state:
-            # No saved state - use defaults
-            if self.app_state.shotpath:
-                default_output = os.path.join(self.app_state.shotpath, "comfyui_output")
-                self.ui.ComfyUIOutputDir.setText(default_output)
             return
 
         # Restore workflow preset selection
@@ -1256,14 +1354,6 @@ class ComfyUITab(BaseTab):
             presets = get_comfyui_workflow_presets()
             if preset_name in presets:
                 self._select_preset(preset_name)
-
-        # Restore output directory
-        output_dir = state.get("output_directory", "")
-        if output_dir:
-            self.ui.ComfyUIOutputDir.setText(output_dir)
-        elif self.app_state.shotpath:
-            default_output = os.path.join(self.app_state.shotpath, "comfyui_output")
-            self.ui.ComfyUIOutputDir.setText(default_output)
 
         # Restore generation count
         gen_count = state.get("generation_count", 1)

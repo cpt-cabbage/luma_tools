@@ -24,15 +24,15 @@
        <item>
         <widget class="QGroupBox" name="comfyuiWorkflowGroupBox">
          <property name="title">
-          <string>Workflow Preset</string>
+          <string>Workflow</string>
          </property>
          <layout class="QVBoxLayout" name="comfyuiWorkflowLayout">
           <item>
-           <layout class="QHBoxLayout" name="comfyuiPresetLayout">
+           <layout class="QHBoxLayout" name="comfyuiPresetButtonsLayout">
             <item>
              <widget class="QPushButton" name="ComfyUIChoosePreset">
               <property name="text">
-               <string>Choose Preset</string>
+               <string>Choose Model</string>
               </property>
               <property name="toolTip">
                <string>Select a workflow preset</string>
@@ -40,9 +40,47 @@
              </widget>
             </item>
             <item>
+             <widget class="QPushButton" name="ComfyUIAddPreset">
+              <property name="text">
+               <string>Add Model...</string>
+              </property>
+              <property name="toolTip">
+               <string>Add a new workflow preset</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="ComfyUIEditPreset">
+              <property name="text">
+               <string>Edit Model...</string>
+              </property>
+              <property name="toolTip">
+               <string>Edit the selected workflow preset</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="comfyuiPresetButtonsSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="comfyuiPresetLayout">
+            <item>
+             <widget class="QLabel" name="ComfyUIModelChosenLabel">
+              <property name="text">
+               <string>Model Chosen: </string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QLabel" name="ComfyUICurrentPreset">
               <property name="text">
-               <string>No preset selected</string>
+               <string>No model selected</string>
               </property>
               <property name="styleSheet">
                <string>font-weight: bold;</string>
@@ -59,50 +97,9 @@
            </layout>
           </item>
           <item>
-           <layout class="QHBoxLayout" name="comfyuiPresetButtonsLayout">
-            <item>
-             <widget class="QPushButton" name="ComfyUIAddPreset">
-              <property name="text">
-               <string>Add Preset...</string>
-              </property>
-              <property name="toolTip">
-               <string>Add a new workflow preset</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ComfyUIEditPreset">
-              <property name="text">
-               <string>Edit Preset...</string>
-              </property>
-              <property name="toolTip">
-               <string>Edit the selected workflow preset</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ComfyUIDeletePreset">
-              <property name="text">
-               <string>Delete Preset</string>
-              </property>
-              <property name="toolTip">
-               <string>Delete the selected workflow preset</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <spacer name="comfyuiPresetButtonsSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-             </spacer>
-            </item>
-           </layout>
-          </item>
-          <item>
            <widget class="QLabel" name="ComfyUIWorkflowPath">
             <property name="text">
-             <string>No workflow selected</string>
+             <string>No model selected</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>
@@ -118,7 +115,7 @@
        <item>
         <widget class="QGroupBox" name="comfyuiEditableNodesGroupBox">
          <property name="title">
-          <string>Workflow Inputs</string>
+          <string>Input</string>
          </property>
          <layout class="QVBoxLayout" name="comfyuiEditableNodesLayout"/>
         </widget>
@@ -134,7 +131,7 @@
             <item>
              <widget class="QLabel" name="label_network_output">
               <property name="text">
-               <string>Network Output:</string>
+               <string>Output:</string>
               </property>
              </widget>
             </item>
@@ -157,37 +154,6 @@
                <enum>Qt::Horizontal</enum>
               </property>
              </spacer>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="outputDirLayout">
-            <item>
-             <widget class="QLabel" name="label_output_dir">
-              <property name="text">
-               <string>User Output Path:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLineEdit" name="ComfyUIOutputDir">
-              <property name="placeholderText">
-               <string>Select your local output directory...</string>
-              </property>
-              <property name="toolTip">
-               <string>Your local folder where finished images will be moved after generation</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ComfyUIBrowseOutputDir">
-              <property name="text">
-               <string>Browse...</string>
-              </property>
-              <property name="toolTip">
-               <string>Browse for your local output directory</string>
-              </property>
-             </widget>
             </item>
            </layout>
           </item>
@@ -291,14 +257,7 @@
          </property>
          <layout class="QVBoxLayout" name="comfyuiSubmitLayout">
           <item>
-           <layout class="QHBoxLayout" name="modeLayout">
-            <item>
-             <widget class="QLabel" name="comfyuiModeLabel">
-              <property name="text">
-               <string>Mode:</string>
-              </property>
-             </widget>
-            </item>
+           <layout class="QHBoxLayout" name="modeButtonLayout">
             <item>
              <widget class="QPushButton" name="ComfyUIChooseMode">
               <property name="text">
@@ -306,6 +265,24 @@
               </property>
               <property name="toolTip">
                <string>Select submission mode</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="modeButtonSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="modeLayout">
+            <item>
+             <widget class="QLabel" name="comfyuiModeLabel">
+              <property name="text">
+               <string>Mode Chosen: </string>
               </property>
              </widget>
             </item>

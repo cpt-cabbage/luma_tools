@@ -29,9 +29,9 @@ class ComfyUIGalleryTab(BaseTab):
 
     def connect_signals(self):
         """Connect gallery tab signals."""
-        self.ui.GalleryBrowse.clicked.connect(self._on_browse)
+        self.ui.GallerySourceToggle.clicked.connect(self._on_source_toggle)
+        self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
         self.ui.GalleryRefresh.clicked.connect(self._on_refresh)
-        self.ui.GalleryOutputDir.textChanged.connect(self._on_output_dir_changed)
 
     def initialize(self):
         """Initialize the gallery tab."""
@@ -45,52 +45,139 @@ class ComfyUIGalleryTab(BaseTab):
         self._watcher = None
         self._refresh_timer = None
 
-        # Try to sync output dir from ComfyUI tab if available
-        self._sync_output_dir_from_comfyui()
+        # Source mode: "network" or "custom"
+        self._source_mode = "network"
+        self._custom_path = ""
+        self._current_path = ""
+
+        # Track known images to detect new additions
+        self._known_images = set()
+        self._initial_scan_done = False
+
+        # Set initial output directory to network path with user subfolder
+        self._update_gallery_path()
+
+        # Do an initial scan to establish baseline for detecting new images
+        # This runs in background so it won't block startup
+        self._on_refresh()
 
     def on_tab_activated(self):
         """Called when tab becomes visible - refresh gallery."""
+        # Don't reset tracking when just switching tabs
+        self._update_gallery_path(reset_tracking=False)
         self._on_refresh()
 
-    def _sync_output_dir_from_comfyui(self):
-        """Try to get output directory from ComfyUI tab."""
-        # This will be called during initialize, before main_window tabs are fully set up
-        # So we defer the sync to when the tab is first activated
-        pass
+    def _get_network_user_path(self):
+        """Get the network path with user subfolder."""
+        from settings_manager import get_comfyui_network_output_path
+
+        network_path = get_comfyui_network_output_path()
+        if network_path:
+            return os.path.join(network_path, self.app_state.user)
+        return ""
+
+    def _update_gallery_path(self, reset_tracking=True):
+        """Update the current gallery path based on source mode.
+
+        Args:
+            reset_tracking: If True, reset known images tracking. Set to False
+                           when just refreshing the path without switching sources.
+        """
+        old_path = self._current_path
+
+        if self._source_mode == "network":
+            self._current_path = self._get_network_user_path()
+            self.ui.GallerySourceToggle.setText("Network Folder")
+        else:
+            self._current_path = self._custom_path
+            self.ui.GallerySourceToggle.setText("Custom Folder")
+
+        # Only reset image tracking when path actually changes
+        if reset_tracking and old_path != self._current_path:
+            self.log(f"[Gallery] Path changed from {old_path} to {self._current_path} - resetting tracking")
+            self._known_images = set()
+            self._initial_scan_done = False
+
+        # Start watcher on new path
+        self._start_watcher(self._current_path)
 
     # =========================================================================
-    # BROWSE / REFRESH
+    # OPEN IN EXPLORER
     # =========================================================================
 
-    def _on_browse(self):
-        """Browse for gallery output directory."""
+    def _on_open_explorer(self):
+        """Open the current gallery folder in Windows Explorer."""
+        # Refresh the path in case settings changed
+        if self._source_mode == "network":
+            self._current_path = self._get_network_user_path()
+
+        if not self._current_path:
+            self.log("No gallery path configured. Please configure the network output path in Settings.")
+            return
+
+        # Create the directory if it doesn't exist
+        if not os.path.isdir(self._current_path):
+            try:
+                os.makedirs(self._current_path, exist_ok=True)
+                self.log(f"Created gallery directory: {self._current_path}")
+            except Exception as e:
+                self.log(f"Could not create gallery directory: {self._current_path} - {e}")
+                return
+
+        try:
+            # Use os.startfile for more reliable Windows Explorer opening
+            os.startfile(self._current_path)
+            self.log(f"Opened: {self._current_path}")
+        except Exception as e:
+            self.log(f"Error opening Explorer: {e}")
+
+    # =========================================================================
+    # SOURCE TOGGLE
+    # =========================================================================
+
+    def _on_source_toggle(self):
+        """Toggle between network folder and custom folder."""
+        if self._source_mode == "network":
+            # Switch to custom - prompt for folder
+            self._browse_custom_folder()
+        else:
+            # Switch back to network
+            self._source_mode = "network"
+            self._update_gallery_path()
+            self._on_refresh()
+
+    def _browse_custom_folder(self):
+        """Browse for a custom gallery folder."""
         from settings_manager import get_last_browse_directory, set_last_browse_directory
 
-        current_path = self.ui.GalleryOutputDir.text()
-        if not current_path:
-            current_path = get_last_browse_directory("comfyui_output")
+        current_path = self._custom_path or get_last_browse_directory("comfyui_gallery")
 
         directory = QtWidgets.QFileDialog.getExistingDirectory(
             self.main_window,
-            "Select Output Directory",
+            "Select Gallery Directory",
             current_path or ""
         )
         if directory:
-            self.ui.GalleryOutputDir.setText(directory)
-            set_last_browse_directory("comfyui_output", directory)
+            self._custom_path = directory
+            self._source_mode = "custom"
+            set_last_browse_directory("comfyui_gallery", directory)
+            self._update_gallery_path()
             self._on_refresh()
 
+    # =========================================================================
+    # REFRESH
+    # =========================================================================
+
     def _on_refresh(self):
-        """Refresh the gallery with images from the output directory."""
+        """Refresh the gallery with images from the current directory."""
         from ui_components import Worker
 
-        output_dir = self.ui.GalleryOutputDir.text()
-        if not output_dir or not os.path.isdir(output_dir):
+        if not self._current_path or not os.path.isdir(self._current_path):
             self.ui.GalleryStatus.setText("Invalid directory")
             return
 
         # Run scan on worker thread
-        worker = Worker(self._scan_directory, output_dir)
+        worker = Worker(self._scan_directory, self._current_path)
         worker.signals.result.connect(self._populate_gallery)
         worker.signals.error.connect(lambda msg, tb: self.log(f"Gallery scan error: {msg}"))
         QThreadPool.globalInstance().start(worker)
@@ -120,6 +207,22 @@ class ComfyUIGalleryTab(BaseTab):
     def _populate_gallery(self, image_paths):
         """Populate the gallery with thumbnail widgets."""
         from ui_components import GalleryThumbnailWidget
+
+        # Check for new images (only after initial scan)
+        current_images = set(image_paths)
+        new_images = current_images - self._known_images
+
+        self.log(f"[Gallery] Populate: {len(image_paths)} images, {len(new_images)} new, initial_scan_done={self._initial_scan_done}")
+
+        if self._initial_scan_done and new_images:
+            # New images detected - request attention
+            self.log(f"[Gallery] New images detected: {len(new_images)} - emitting request_attention signal")
+            self.signals.request_attention.emit()
+            self.log(f"[Gallery] request_attention signal emitted")
+
+        # Update known images
+        self._known_images = current_images
+        self._initial_scan_done = True
 
         # Clear existing thumbnails
         while self._flow_layout.count():
@@ -152,10 +255,6 @@ class ComfyUIGalleryTab(BaseTab):
     # =========================================================================
     # FILE SYSTEM WATCHER
     # =========================================================================
-
-    def _on_output_dir_changed(self, output_dir):
-        """Handle gallery output directory change - restart watcher."""
-        self._start_watcher(output_dir)
 
     def _start_watcher(self, output_dir):
         """Start or restart the file system watcher for auto-refresh."""

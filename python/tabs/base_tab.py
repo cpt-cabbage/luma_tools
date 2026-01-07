@@ -16,6 +16,7 @@ class TabSignals(QtCore.QObject):
     settings_changed = QtCore.Signal()
     show_loading = QtCore.Signal(str)  # message
     hide_loading = QtCore.Signal()
+    request_attention = QtCore.Signal()  # Request pulsing glow on tab
 
 
 class BaseTab(ABC):

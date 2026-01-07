@@ -38,9 +38,9 @@ from PySide2.QtGui import QIcon, QPainter, QColor, QPen
 from PySide2.QtWidgets import QApplication
 
 # Import UI components
-from ui_components import enhance_ui, apply_stylesheet, LoadingStyles
+from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager
 from splash_screen import SplashScreen
-from icons import IconManager, TAB_COLORS
+from icons import IconManager, TAB_COLORS, DEFAULT_ICON_COLOR
 
 # Import state manager
 from state_manager import app_state
@@ -118,6 +118,9 @@ class LumaShotTools(QtWidgets.QWidget):
         self.animator.splash_screen = None
         print("UI animations enabled")
 
+        # Setup tab glow manager for attention notifications
+        self.tab_glow_manager = TabGlowManager(self.tab_widget, self)
+
         # Setup colorful tab icons
         self._setup_tab_icons()
 
@@ -182,6 +185,9 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_instance.signals.log_message.connect(self._append_log)
             tab_instance.signals.show_loading.connect(self._on_tab_show_loading)
             tab_instance.signals.hide_loading.connect(self._on_tab_hide_loading)
+            tab_instance.signals.request_attention.connect(
+                lambda ti=tab_instance: self._on_tab_request_attention(ti)
+            )
 
             # Initialize tab
             tab_instance.initialize()
@@ -231,6 +237,39 @@ class LumaShotTools(QtWidgets.QWidget):
         """Hide loading overlay when requested by a tab."""
         if hasattr(self, 'animator'):
             self.animator.hide_loading()
+
+    def _on_tab_request_attention(self, tab_instance):
+        """Handle tab requesting attention with pulsing glow."""
+        from settings_manager import get_tab_flashing_enabled
+
+        print(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
+
+        # Check if tab flashing is enabled in settings
+        flashing_enabled = get_tab_flashing_enabled()
+        print(f"[TabAttention] Tab flashing enabled: {flashing_enabled}")
+        if not flashing_enabled:
+            print(f"Tab '{tab_instance.tab_name}' requested attention (flashing disabled)")
+            return
+
+        if not hasattr(self, 'tab_glow_manager'):
+            print(f"[TabAttention] ERROR: No tab_glow_manager!")
+            return
+
+        # Find the tab index for this tab instance
+        tab_index = self.tab_widget.indexOf(tab_instance.ui)
+        print(f"[TabAttention] Tab index: {tab_index}, current index: {self.tab_widget.currentIndex()}")
+        if tab_index == -1:
+            print(f"[TabAttention] ERROR: Tab not found in tab_widget!")
+            return
+
+        # Use tab-specific color for glow
+        tab_id = tab_instance.tab_id
+        color = TAB_COLORS.get(tab_id, DEFAULT_ICON_COLOR)
+        print(f"[TabAttention] Starting glow for tab_id={tab_id}, color={color}")
+
+        # Start the glow effect
+        self.tab_glow_manager.start_glow(tab_index, color)
+        print(f"Tab '{tab_instance.tab_name}' is requesting attention")
 
     def _on_tab_changed(self, index):
         """Handle tab change - notify tabs."""
@@ -324,24 +363,24 @@ class LumaShotTools(QtWidgets.QWidget):
                 print(f"Hidden standalone-incompatible tab: {widget.objectName()}")
 
     def _setup_tab_icons(self):
-        """Setup colorful icons for each tab."""
+        """Setup monochromatic icons for each tab."""
         tab_icons = {
-            'passbuilder': ('layers', TAB_COLORS.get('passbuilder', '#4a9eff')),
-            'mp4maker': ('video', TAB_COLORS.get('mp4maker', '#10b981')),
-            'republish': ('upload', TAB_COLORS.get('republish', '#f59e0b')),
-            'shotcleaner': ('trash', TAB_COLORS.get('shotcleaner', '#ef4444')),
-            'logs': ('terminal', TAB_COLORS.get('logs', '#6b7280')),
-            'comfyui': ('wand', TAB_COLORS.get('comfyui', '#8b5cf6')),
-            'comfyui_gallery': ('grid', TAB_COLORS.get('comfyui_gallery', '#ec4899')),
-            'settings': ('settings', TAB_COLORS.get('settings', '#6b7280')),
+            'passbuilder': 'layers',
+            'mp4maker': 'video',
+            'republish': 'upload',
+            'shotcleaner': 'trash',
+            'logs': 'terminal',
+            'comfyui': 'sparkles',
+            'comfyui_gallery': 'image',
+            'settings': 'settings',
         }
 
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
             tab_id = widget.objectName()
             if tab_id in tab_icons:
-                icon_name, color = tab_icons[tab_id]
-                icon = IconManager.get_icon(icon_name, color, 16)
+                icon_name = tab_icons[tab_id]
+                icon = IconManager.get_icon(icon_name, DEFAULT_ICON_COLOR, 16)
                 self.tab_widget.setTabIcon(i, icon)
 
     def _disable_scroll_wheel_on_inputs(self):

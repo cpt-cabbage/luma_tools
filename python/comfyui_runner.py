@@ -664,7 +664,7 @@ def main():
             sys.exit(1)
 
     # Handle cleanup on exit
-    def cleanup(signum=None, frame=None):
+    def cleanup(signum=None, frame=None, exit_code=None):
         # Only kill server if we started it (non-persistent mode)
         if server_started_by_us and process:
             print("Cleaning up - shutting down server...")
@@ -675,7 +675,12 @@ def main():
                 process.kill()
         elif args.persistent:
             print("Persistent mode - server stays running for next job")
-        sys.exit(0 if signum is None else 1)
+
+        # Only exit if called from signal handler or explicit exit_code provided
+        if signum is not None:
+            sys.exit(1)
+        elif exit_code is not None:
+            sys.exit(exit_code)
 
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)
@@ -739,13 +744,13 @@ def main():
         print(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed", flush=True)
         print(f"{'='*60}", flush=True)
 
-        cleanup()
-        sys.exit(0 if failed == 0 else 1)
+        exit_code = 0 if failed == 0 else 1
+        print(f"Exiting with code {exit_code}")
+        cleanup(exit_code=exit_code)
 
     except Exception as e:
         print(f"Error: {e}")
-        cleanup()
-        sys.exit(1)
+        cleanup(exit_code=1)
 
 
 if __name__ == '__main__':

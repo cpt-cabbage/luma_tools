@@ -185,6 +185,19 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="TabFlashingEnabled">
+            <property name="toolTip">
+             <string>Enable tab flashing/glow effect when new content is available (e.g., ComfyUI Gallery when images are generated)</string>
+            </property>
+            <property name="text">
+             <string>Enable Tab Flashing Notifications</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QLabel" name="defaultPassesLabel">
             <property name="text">
              <string>Default Passes (Beauty and Alpha are always included):</string>
@@ -273,67 +286,6 @@
                </spacer>
               </item>
              </layout>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="transferModeLayout">
-            <item>
-             <widget class="QLabel" name="TransferModeLabel">
-              <property name="text">
-               <string>ComfyUI Transfer Mode:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="ComfyUITransferModeCombo">
-              <property name="toolTip">
-               <string>How to transfer files from network path to user folder after job completion.
-Copy: Keep original files on network, copy to user folder (safer)
-Move: Move files to user folder, delete from network (saves space)</string>
-              </property>
-              <item>
-               <property name="text">
-                <string>Copy to user folder</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Move to user folder</string>
-               </property>
-              </item>
-             </widget>
-            </item>
-            <item>
-             <spacer name="transferModeSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-             </spacer>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="userTransferOptionsLayout">
-            <item>
-             <widget class="QCheckBox" name="ComfyUITransferToUserFolder">
-              <property name="text">
-               <string>Auto-transfer to user folder</string>
-              </property>
-              <property name="toolTip">
-               <string>Automatically transfer files from network path to user's output folder when job completes</string>
-              </property>
-              <property name="checked">
-               <bool>true</bool>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <spacer name="userTransferOptionsSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-             </spacer>
             </item>
            </layout>
           </item>
@@ -587,19 +539,6 @@ Move: Move files to user folder, delete from network (saves space)</string>
               </property>
               <property name="toolTip">
                <string>Enable --fp16-accumulation for faster FP16 math operations. Requires compatible GPU.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="ComfyUIUseUserSubfolder">
-              <property name="text">
-               <string>Use user subfolder in network path</string>
-              </property>
-              <property name="toolTip">
-               <string>Create user-specific subfolders in network output path (e.g., network_path/username/)</string>
-              </property>
-              <property name="checked">
-               <bool>true</bool>
               </property>
              </widget>
             </item>

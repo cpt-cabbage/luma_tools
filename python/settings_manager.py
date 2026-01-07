@@ -543,82 +543,6 @@ def set_comfyui_network_output_path(path):
     print(f"Set ComfyUI network output path to: {path}")
 
 
-def get_comfyui_transfer_mode():
-    """
-    Get the file transfer mode for moving ComfyUI outputs from network to user folder.
-
-    Returns:
-        str: "copy" or "move" (default: "copy")
-    """
-    settings = load_user_settings()
-    return settings.get("comfyui_transfer_mode", "copy")
-
-
-def set_comfyui_transfer_mode(mode):
-    """
-    Set the file transfer mode for ComfyUI outputs.
-
-    Args:
-        mode: "copy" to copy files (keeps original), "move" to move files (deletes original)
-    """
-    if mode not in ("copy", "move"):
-        raise ValueError(f"Invalid transfer mode: {mode}. Must be 'copy' or 'move'")
-    settings = load_user_settings()
-    settings["comfyui_transfer_mode"] = mode
-    save_user_settings(settings)
-    print(f"Set ComfyUI transfer mode to: {mode}")
-
-
-def get_comfyui_use_user_subfolder():
-    """
-    Get whether to create user-specific subfolders in network output path.
-
-    This is a GLOBAL setting - applies to all users for consistent file organization.
-
-    Returns:
-        bool: True to create user subfolders (default: True)
-    """
-    settings = load_global_settings()
-    return settings.get("comfyui_use_user_subfolder", True)
-
-
-def set_comfyui_use_user_subfolder(enabled):
-    """
-    Set whether to create user-specific subfolders in network output path.
-
-    This is a GLOBAL setting - applies to all users for consistent file organization.
-
-    Args:
-        enabled: True to create user subfolders
-    """
-    settings = load_global_settings()
-    settings["comfyui_use_user_subfolder"] = enabled
-    save_global_settings(settings)
-    print(f"Set ComfyUI user subfolder: {enabled}")
-
-
-def get_comfyui_transfer_to_user_folder():
-    """
-    Get whether to transfer files to user folder after job completion.
-
-    Returns:
-        bool: True to transfer files to user folder (default: True)
-    """
-    settings = load_user_settings()
-    return settings.get("comfyui_transfer_to_user_folder", True)
-
-
-def set_comfyui_transfer_to_user_folder(enabled):
-    """
-    Set whether to transfer files to user folder after job completion.
-
-    Args:
-        enabled: True to transfer files to user folder
-    """
-    settings = load_user_settings()
-    settings["comfyui_transfer_to_user_folder"] = enabled
-    save_user_settings(settings)
-    print(f"Set ComfyUI transfer to user folder: {enabled}")
 
 
 # ============================================================================
@@ -842,6 +766,29 @@ def save_tab_order(tab_names):
     """
     settings = load_user_settings()
     settings["tab_order"] = tab_names
+    save_user_settings(settings)
+
+
+def get_tab_flashing_enabled():
+    """
+    Get whether tab flashing/glow notifications are enabled.
+
+    Returns:
+        bool: True if tab flashing is enabled (default: True)
+    """
+    settings = load_user_settings()
+    return settings.get("tab_flashing_enabled", True)
+
+
+def set_tab_flashing_enabled(enabled):
+    """
+    Set whether tab flashing/glow notifications are enabled.
+
+    Args:
+        enabled: True to enable tab flashing notifications
+    """
+    settings = load_user_settings()
+    settings["tab_flashing_enabled"] = enabled
     save_user_settings(settings)
 
 

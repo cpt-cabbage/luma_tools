@@ -52,9 +52,18 @@ class SettingsTab(BaseTab):
     def initialize(self):
         """Initialize settings tab."""
         self._load_default_passes_ui()
+        self._load_user_settings_ui()
         self._load_global_settings_ui()
         self._load_admin_users_ui()
         self._load_restricted_tabs_ui()
+
+    def _load_user_settings_ui(self):
+        """Load user settings into the UI."""
+        from settings_manager import get_tab_flashing_enabled
+
+        # Load tab flashing setting
+        if hasattr(self.ui, 'TabFlashingEnabled'):
+            self.ui.TabFlashingEnabled.setChecked(get_tab_flashing_enabled())
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -95,9 +104,7 @@ class SettingsTab(BaseTab):
         from settings_manager import (
             get_global_settings_path, get_comfyui_mode, get_comfyui_path,
             get_comfyui_python_path, get_comfyui_network_output_path,
-            get_comfyui_transfer_mode, get_comfyui_use_user_subfolder,
-            get_comfyui_transfer_to_user_folder, get_comfyui_fast_mode,
-            get_comfyui_fp16_accumulation
+            get_comfyui_fast_mode, get_comfyui_fp16_accumulation
         )
 
         # Global settings path
@@ -115,11 +122,7 @@ class SettingsTab(BaseTab):
         self.ui.ComfyUIPythonEdit.setText(get_comfyui_python_path())
         self.ui.ComfyUINetworkOutputEdit.setText(get_comfyui_network_output_path())
 
-        # ComfyUI settings
-        transfer_mode = get_comfyui_transfer_mode()
-        self.ui.ComfyUITransferModeCombo.setCurrentIndex(0 if transfer_mode == "copy" else 1)
-        self.ui.ComfyUIUseUserSubfolder.setChecked(get_comfyui_use_user_subfolder())
-        self.ui.ComfyUITransferToUserFolder.setChecked(get_comfyui_transfer_to_user_folder())
+        # ComfyUI performance settings
         self.ui.ComfyUIFastMode.setChecked(get_comfyui_fast_mode())
         self.ui.ComfyUIFP16Accumulation.setChecked(get_comfyui_fp16_accumulation())
 
@@ -196,10 +199,7 @@ class SettingsTab(BaseTab):
     def _on_save_settings_clicked(self):
         """Save user settings."""
         from config import REQUIRED_PASSES
-        from settings_manager import (
-            set_default_passes, set_comfyui_transfer_mode,
-            set_comfyui_transfer_to_user_folder
-        )
+        from settings_manager import set_default_passes, set_tab_flashing_enabled
 
         # Collect selected passes
         selected_passes = []
@@ -214,10 +214,10 @@ class SettingsTab(BaseTab):
         set_default_passes(selected_passes)
         self.log(f"Saved default passes: {selected_passes}")
 
-        # Save ComfyUI user settings
-        transfer_mode = "copy" if self.ui.ComfyUITransferModeCombo.currentIndex() == 0 else "move"
-        set_comfyui_transfer_mode(transfer_mode)
-        set_comfyui_transfer_to_user_folder(self.ui.ComfyUITransferToUserFolder.isChecked())
+        # Save tab flashing setting
+        if hasattr(self.ui, 'TabFlashingEnabled'):
+            set_tab_flashing_enabled(self.ui.TabFlashingEnabled.isChecked())
+            self.log(f"Saved tab flashing enabled: {self.ui.TabFlashingEnabled.isChecked()}")
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
@@ -269,8 +269,7 @@ class SettingsTab(BaseTab):
         from settings_manager import (
             set_global_settings_path, set_comfyui_mode, set_comfyui_path,
             set_comfyui_python_path, set_comfyui_network_output_path,
-            set_comfyui_use_user_subfolder, set_comfyui_fast_mode,
-            set_comfyui_fp16_accumulation
+            set_comfyui_fast_mode, set_comfyui_fp16_accumulation
         )
 
         # Save global settings path
@@ -301,7 +300,6 @@ class SettingsTab(BaseTab):
         set_comfyui_path(self.ui.ComfyUIPathEdit.text().strip())
         set_comfyui_python_path(self.ui.ComfyUIPythonEdit.text().strip())
         set_comfyui_network_output_path(self.ui.ComfyUINetworkOutputEdit.text().strip())
-        set_comfyui_use_user_subfolder(self.ui.ComfyUIUseUserSubfolder.isChecked())
         set_comfyui_fast_mode(self.ui.ComfyUIFastMode.isChecked())
         set_comfyui_fp16_accumulation(self.ui.ComfyUIFP16Accumulation.isChecked())
 

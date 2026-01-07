@@ -678,7 +678,7 @@ def submit_comfyui_to_deadline_server_mode(
     )
 
     # Submit as multiframe job - each frame is a different seed
-    # Matches OIIO COMBINE naming pattern: "COMFYUI - {render_name}"
+    # Matches OIIO COMBINE naming pattern: "LUMA TOOLS - {render_name}"
     deadline_command = [
         DEADLINE_PATH,
         '-SubmitCommandLineJob',
@@ -692,10 +692,10 @@ def submit_comfyui_to_deadline_server_mode(
         '-prop', f'Department={DEADLINE_DEPARTMENT}',
         '-prop', f'BatchName={batch_name}',
         '-prop', f'OutputDirectory0={output_dir}',
-        '-name', f'COMFYUI - {render_name}',
+        '-name', f'LUMA TOOLS - {render_name}',
     ]
 
-    print(f"Submitting ComfyUI job (server mode): {render_name}")
+    print(f"Submitting Luma Tools job (server mode): {render_name}")
     print(f"Frames: 1-{generation_count} (each frame = different seed)")
     print(f"Server URL: {server_url}")
     print(f"Deadline command: {' '.join(deadline_command)}")
@@ -843,29 +843,48 @@ def submit_comfyui_to_deadline(
     if get_comfyui_fp16_accumulation():
         runner_args += ' --fp16-accumulation'
 
-    # Build Deadline submission command following existing conventions
+    # Build Deadline submission using job info and plugin info files
+    # This allows us to set plugin-specific properties like ExitCodeTreatedAsFailure
     # Submit as multiframe job - each frame is a different seed
-    # Matches OIIO COMBINE naming pattern: "COMFYUI - {render_name}"
-    deadline_command = [
-        DEADLINE_PATH,
-        '-SubmitCommandLineJob',
-        '-executable', python_exe,
-        '-arguments', runner_args,
-        '-frames', f'1-{generation_count}',
-        '-chunksize', '1',
-        '-pool', pool,
-        '-group', group,
-        '-priority', str(priority),
-        '-prop', f'Department={DEADLINE_DEPARTMENT}',
-        '-prop', f'BatchName={batch_name}',
-        '-prop', f'OutputDirectory0={output_dir}',
-        '-prop', 'OnJobComplete=Delete',
-        '-name', f'COMFYUI - {render_name}',
-    ]
+    # Matches OIIO COMBINE naming pattern: "LUMA TOOLS - {render_name}"
 
-    print(f"Submitting ComfyUI job: {render_name}")
+    # Create job info file
+    job_info_path = os.path.join(output_dir, "comfyui_job_info.txt")
+    job_info_content = f"""Plugin=CommandLine
+Name=LUMA TOOLS - {render_name}
+Department={DEADLINE_DEPARTMENT}
+BatchName={batch_name}
+Pool={pool}
+Group={group}
+Priority={priority}
+Frames=1-{generation_count}
+ChunkSize=1
+OutputDirectory0={output_dir}
+OnJobComplete=Delete
+OverrideTaskFailureDetection=True
+FailureDetectionTaskErrors=1
+"""
+
+    # Create plugin info file
+    plugin_info_path = os.path.join(output_dir, "comfyui_plugin_info.txt")
+    plugin_info_content = f"""Executable={python_exe}
+Arguments={runner_args}
+StartupDirectory={output_dir}
+ExitCodeTreatedAsFailure=1-255
+"""
+
+    # Write the info files
+    with open(job_info_path, 'w') as f:
+        f.write(job_info_content)
+    with open(plugin_info_path, 'w') as f:
+        f.write(plugin_info_content)
+
+    print(f"Submitting Luma Tools job: {render_name}")
     print(f"Frames: 1-{generation_count} (each frame = different seed)")
-    print(f"Deadline command: {' '.join(deadline_command)}")
+    print(f"Job info: {job_info_path}")
+    print(f"Plugin info: {plugin_info_path}")
+
+    deadline_command = [DEADLINE_PATH, job_info_path, plugin_info_path]
 
     try:
         result = subprocess.run(
@@ -1187,12 +1206,15 @@ def validate_comfyui_path(path: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def poll_deadline_job_status(job_id: str) -> Dict[str, Any]:
+def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
     """
     Query Deadline for a job's current status.
 
     Args:
         job_id: The Deadline job ID to query
+        output_dir: Optional output directory to check for actual output files.
+                   When job is deleted (OnJobComplete=Delete), we verify success
+                   by checking if output files exist.
 
     Returns:
         Dict with keys:
@@ -1214,11 +1236,49 @@ def poll_deadline_job_status(job_id: str) -> Dict[str, Any]:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
-        # Job not found - likely deleted after completion (OnJobComplete=Delete)
+        # Check if job was deleted (OnJobComplete=Delete)
+        # This can happen with returncode != 0 OR returncode == 0 but empty/minimal output
+        output = result.stdout.strip()
+        job_deleted = False
+
         if result.returncode != 0:
             stderr = result.stderr.lower()
             if "not found" in stderr or "does not exist" in stderr or not result.stderr.strip():
-                # Job was deleted - assume it completed successfully
+                job_deleted = True
+        elif not output or "Status=" not in output:
+            # Job returned but no valid status - likely deleted
+            print(f"[poll_deadline_job_status] Job {job_id} returned empty/invalid output - likely deleted")
+            job_deleted = True
+
+        if job_deleted:
+            # Job was deleted - check if it actually succeeded by looking for outputs
+            print(f"[poll_deadline_job_status] Job {job_id} appears deleted, checking for output files...")
+            if output_dir:
+                output_files = get_job_output_files(output_dir)
+                if output_files:
+                    # Found output files - job completed successfully
+                    print(f"[poll_deadline_job_status] Found {len(output_files)} output files - marking as Completed")
+                    return {
+                        "status": "Completed",
+                        "progress": 100,
+                        "completed_tasks": 1,
+                        "total_tasks": 1,
+                        "error_message": ""
+                    }
+                else:
+                    # No output files found - job likely failed
+                    print(f"[poll_deadline_job_status] No output files found - marking as Failed")
+                    return {
+                        "status": "Failed",
+                        "progress": 100,
+                        "completed_tasks": 0,
+                        "total_tasks": 1,
+                        "error_message": "Job deleted but no output files found - likely failed"
+                    }
+            else:
+                # No output_dir provided - can't verify, assume completed
+                # (backwards compatibility)
+                print(f"[poll_deadline_job_status] No output_dir to verify - assuming Completed")
                 return {
                     "status": "Completed",
                     "progress": 100,
@@ -1226,27 +1286,57 @@ def poll_deadline_job_status(job_id: str) -> Dict[str, Any]:
                     "total_tasks": 1,
                     "error_message": ""
                 }
+
+        if result.returncode != 0:
             return {"status": "Unknown", "progress": 0, "error_message": result.stderr}
 
-        # Parse the output
-        output = result.stdout
+        # Parse the output (output was already assigned above as result.stdout.strip())
         status = "Unknown"
         completed_tasks = 0
+        failed_tasks = 0
         total_tasks = 1
+        error_reports = 0
         error_message = ""
+
+        # Debug: print raw Deadline output
+        print(f"[poll_deadline_job_status] Raw Deadline output for {job_id}:")
+        for line in output.split('\n')[:20]:  # First 20 lines
+            print(f"  {line}")
 
         for line in output.split('\n'):
             line = line.strip()
             if line.startswith("Status="):
                 status = line.split('=', 1)[1]
-            elif line.startswith("CompletedTasks="):
+                print(f"[poll_deadline_job_status] Parsed Status: '{status}'")
+            elif line.startswith("CompletedTasks=") or line.startswith("CompletedChunks="):
+                # Deadline uses CompletedChunks, not CompletedTasks
                 completed_tasks = int(line.split('=', 1)[1])
-            elif line.startswith("TaskCount="):
+                print(f"[poll_deadline_job_status] Parsed CompletedTasks/Chunks: {completed_tasks}")
+            elif line.startswith("FailedTasks=") or line.startswith("FailedChunks="):
+                failed_tasks = int(line.split('=', 1)[1])
+                print(f"[poll_deadline_job_status] Parsed FailedTasks/Chunks: {failed_tasks}")
+            elif line.startswith("TaskCount=") or line.startswith("ChunkCount="):
                 total_tasks = int(line.split('=', 1)[1])
-            elif line.startswith("ErrorReports=") and line != "ErrorReports=0":
-                error_message = f"Job has {line.split('=', 1)[1]} error(s)"
+                print(f"[poll_deadline_job_status] Parsed TaskCount/ChunkCount: {total_tasks}")
+            elif line.startswith("ErrorReports="):
+                error_reports = int(line.split('=', 1)[1])
+                print(f"[poll_deadline_job_status] Parsed ErrorReports: {error_reports}")
+
+        # Build error message from failure info
+        if failed_tasks > 0:
+            error_message = f"{failed_tasks}/{total_tasks} task(s) failed"
+            if error_reports > 0:
+                error_message += f" ({error_reports} error report(s))"
+        elif error_reports > 0:
+            error_message = f"Job has {error_reports} error report(s)"
 
         progress = int((completed_tasks / max(total_tasks, 1)) * 100)
+
+        # If job shows as Complete/Completed but has failed tasks, treat as Failed
+        # Deadline may report "Complete" even when some tasks failed
+        if status in ("Complete", "Completed") and failed_tasks > 0:
+            print(f"[poll_deadline_job_status] Job marked Complete but has {failed_tasks} failed tasks - treating as Failed")
+            status = "Failed"
 
         return {
             "status": status,
@@ -1292,109 +1382,6 @@ def get_job_output_files(output_dir: str) -> List[str]:
     return [f[0] for f in files]
 
 
-def transfer_outputs_to_user_folder(
-    network_path: str,
-    user_path: str,
-    transfer_mode: str = "copy",
-    progress_callback: Optional[Callable[[int, str], None]] = None
-) -> List[str]:
-    """
-    Transfer (copy or move) generated files from network path to user folder.
-
-    Transfers all supported ComfyUI output types including images, 3D models,
-    video, audio, and data files.
-
-    Args:
-        network_path: Network output directory where ComfyUI wrote outputs
-        user_path: User's local/preferred output directory
-        transfer_mode: "copy" to copy files (keeps original), "move" to move files
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        List of final file paths in user folder
-    """
-    import shutil
-    import glob
-
-    if not network_path or not os.path.exists(network_path):
-        print(f"Network path does not exist: {network_path}")
-        return []
-
-    if not user_path:
-        print("User path not specified")
-        return []
-
-    # Validate transfer mode
-    if transfer_mode not in ("copy", "move"):
-        print(f"Invalid transfer mode '{transfer_mode}', defaulting to 'copy'")
-        transfer_mode = "copy"
-
-    # Ensure user folder exists
-    os.makedirs(user_path, exist_ok=True)
-
-    # Find all output files in network path using centralized extensions
-    files_to_transfer = []
-
-    for ext in COMFYUI_OUTPUT_EXTENSIONS:
-        # Convert extension to glob pattern (e.g., ".png" -> "*.png")
-        pattern = os.path.join(network_path, '**', f'*{ext}')
-        files_to_transfer.extend(glob.glob(pattern, recursive=True))
-
-    if not files_to_transfer:
-        print(f"No output files found in: {network_path}")
-        return []
-
-    transferred_files = []
-    total = len(files_to_transfer)
-    action_verb = "Copying" if transfer_mode == "copy" else "Moving"
-    action_past = "Copied" if transfer_mode == "copy" else "Moved"
-
-    for idx, src_path in enumerate(files_to_transfer):
-        if progress_callback:
-            progress_callback(int((idx / total) * 100), f"{action_verb} {idx + 1}/{total}...")
-
-        # Preserve relative path structure
-        rel_path = os.path.relpath(src_path, network_path)
-        dest_path = os.path.join(user_path, rel_path)
-
-        # Ensure destination directory exists
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-
-        try:
-            if transfer_mode == "copy":
-                shutil.copy2(src_path, dest_path)
-            else:
-                shutil.move(src_path, dest_path)
-            transferred_files.append(dest_path)
-            print(f"{action_past}: {src_path} -> {dest_path}")
-        except Exception as e:
-            print(f"Failed to {transfer_mode} {src_path}: {e}")
-
-    print(f"{action_past} {len(transferred_files)}/{total} files to user folder")
-    return transferred_files
-
-
-def move_outputs_to_user_folder(
-    network_path: str,
-    user_path: str,
-    progress_callback: Optional[Callable[[int, str], None]] = None
-) -> List[str]:
-    """
-    Move generated files from network path to user folder.
-
-    Deprecated: Use transfer_outputs_to_user_folder with transfer_mode="move" instead.
-
-    Args:
-        network_path: Network output directory where ComfyUI wrote outputs
-        user_path: User's local/preferred output directory
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        List of final file paths in user folder
-    """
-    return transfer_outputs_to_user_folder(network_path, user_path, "move", progress_callback)
-
-
 def cleanup_job_temp_files(output_dir: str) -> int:
     """
     Clean up temporary job files from the output directory.
@@ -1418,6 +1405,8 @@ def cleanup_job_temp_files(output_dir: str) -> int:
         "comfyui_seeds.json",
         "comfyui_runner.py",
         "comfyui_client.py",
+        "comfyui_job_info.txt",
+        "comfyui_plugin_info.txt",
     ]
 
     deleted_count = 0
