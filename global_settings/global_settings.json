@@ -1,13 +1,19 @@
 {
   "comfyui_workflow_presets": {
-    "Mo-Cap": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Hy_Motion.json",
-      "description": ""
-    },
     "Qwen Image Edit 2511": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511.json",
       "description": "",
       "iteratable": true
+    },
+    "Trellis 2": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Trellis2.json",
+      "description": "",
+      "iteratable": false
+    },
+    "Hy-Motion": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Hy_Motion.json",
+      "description": "",
+      "iteratable": false
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",

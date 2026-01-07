@@ -67,6 +67,7 @@ EDITABLE_NODE_CONFIGS = {
     ],
     'SaveImage': [(0, 'filename_prefix', 'string')],
     'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],  # output_dir auto-set to use main output
+    'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # TRELLIS2 GLB export
 }
 
 
@@ -324,6 +325,16 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             'HYMotionPreview': ['sample_index', 'frame_step', 'image_size'],
             'HYMotionEncodeText': ['text'],
             'HYMotionExportFBX': ['output_dir', 'filename_prefix'],
+            # TRELLIS2 nodes (3D mesh generation)
+            'LoadTrellis2Models': ['resolution', 'keep_model_loaded', 'attn_backend'],
+            'Trellis2GetConditioning': ['include_1024', 'background_color'],
+            'Trellis2ImageToShape': ['seed', 'control_after_generate', 'ss_guidance_strength', 'ss_sampling_steps', 'shape_guidance_strength', 'shape_sampling_steps'],
+            'Trellis2ShapeToTexturedMesh': ['seed', 'control_after_generate', 'tex_guidance_strength', 'tex_sampling_steps'],
+            'Trellis2ExportGLB': ['decimation_target', 'texture_size', 'remesh', 'filename_prefix'],
+            'Trellis2RemoveBackground': ['low_vram'],
+            # Mask nodes
+            'InvertMask': [],
+            'MaskPreview': [],
         }
 
         # Get widget names for this node type
@@ -496,6 +507,21 @@ def modify_workflow_api_format(
             inputs['output_dir'] = ''  # Empty = use ComfyUI's output directory directly
             inputs['filename_prefix'] = output_prefix
             print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
+
+        # Trellis2ExportGLB nodes - set output prefix
+        elif class_type == 'Trellis2ExportGLB':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
+
+        # Trellis2ImageToShape nodes - set seed
+        elif class_type == 'Trellis2ImageToShape':
+            inputs['seed'] = seed
+            print(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
+
+        # Trellis2ShapeToTexturedMesh nodes - set seed
+        elif class_type == 'Trellis2ShapeToTexturedMesh':
+            inputs['seed'] = seed
+            print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
 
         # KSampler nodes - set seed
         elif class_type == 'KSampler':

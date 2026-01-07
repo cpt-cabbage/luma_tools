@@ -23,6 +23,40 @@ if sys.platform == 'win32':
     user32.ShowWindow(hWnd, SW_HIDE)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
+    # Single instance check using Windows named mutex
+    MUTEX_NAME = "Global\\LumaToolsSingleInstance"
+    ERROR_ALREADY_EXISTS = 183
+
+    mutex_handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    last_error = ctypes.get_last_error()
+
+    if last_error == ERROR_ALREADY_EXISTS:
+        # Another instance is already running - find and focus it
+        WINDOW_TITLE_PREFIX = APP_TITLE
+        EnumWindows = user32.EnumWindows
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+        GetWindowText = user32.GetWindowTextW
+        GetWindowTextLength = user32.GetWindowTextLengthW
+        IsWindowVisible = user32.IsWindowVisible
+        SetForegroundWindow = user32.SetForegroundWindow
+        ShowWindow = user32.ShowWindow
+        SW_RESTORE = 9
+
+        def foreach_window(hwnd, _lParam):
+            if IsWindowVisible(hwnd):
+                length = GetWindowTextLength(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    GetWindowText(hwnd, buff, length + 1)
+                    if buff.value.startswith(WINDOW_TITLE_PREFIX):
+                        ShowWindow(hwnd, SW_RESTORE)
+                        SetForegroundWindow(hwnd)
+                        return False  # Stop enumeration
+            return True
+
+        EnumWindows(EnumWindowsProc(foreach_window), 0)
+        sys.exit(0)
+
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
