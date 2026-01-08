@@ -1773,6 +1773,95 @@ class FlowLayout(QtWidgets.QLayout):
         return y + line_height - rect.y() + bottom
 
 
+
+class ZoomableImageWidget(QtWidgets.QGraphicsView):
+    """
+    A widget that displays an image with support for zooming and panning.
+    """
+    double_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
+        self.setDragMode(QtWidgets.QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QtWidgets.QGraphicsView.AnchorUnderMouse)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.viewport().setCursor(Qt.ArrowCursor)
+        self.setStyleSheet("background: transparent;")
+
+        self._scene = QtWidgets.QGraphicsScene(self)
+        self.setScene(self._scene)
+        self._pixmap_item = QtWidgets.QGraphicsPixmapItem()
+        self._scene.addItem(self._pixmap_item)
+        
+        # Pan state
+        self._is_panning = False
+        self._pan_start_x = 0
+        self._pan_start_y = 0
+        
+    def setPixmap(self, pixmap):
+        self._scene.removeItem(self._pixmap_item)
+        self._pixmap_item = QtWidgets.QGraphicsPixmapItem(pixmap)
+        self._scene.addItem(self._pixmap_item)
+        self.setSceneRect(self._pixmap_item.boundingRect())
+        self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+        
+    def wheelEvent(self, event):
+        zoom_in_factor = 1.15
+        zoom_out_factor = 1 / zoom_in_factor
+
+        # Zoom
+        if event.angleDelta().y() > 0:
+            zoom_factor = zoom_in_factor
+        else:
+            zoom_factor = zoom_out_factor
+            
+        self.scale(zoom_factor, zoom_factor)
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._is_panning = True
+            self._pan_start_x = event.x()
+            self._pan_start_y = event.y()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._is_panning:
+            delta_x = event.x() - self._pan_start_x
+            delta_y = event.y() - self._pan_start_y
+            
+            self._pan_start_x = event.x()
+            self._pan_start_y = event.y()
+            
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta_x)
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta_y)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._is_panning = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.double_clicked.emit()
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+
 class EmbeddedImageViewer(QWidget):
     """
     Embedded image viewer with keyboard navigation for use within the gallery tab.
@@ -1901,13 +1990,21 @@ class EmbeddedImageViewer(QWidget):
         image_layout.addWidget(self.left_btn)
 
         # Image display
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("background-color: #1a1a1a;")
-        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.image_label.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.image_label.customContextMenuRequested.connect(self._show_context_menu)
-        image_layout.addWidget(self.image_label, stretch=1)
+        self.image_stack = QtWidgets.QStackedWidget()
+        image_layout.addWidget(self.image_stack, stretch=1)
+
+        # 1. Zoomable Image View
+        self.image_view = ZoomableImageWidget()
+        self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_view.customContextMenuRequested.connect(self._show_context_menu)
+        self.image_view.double_clicked.connect(self.close)
+        self.image_stack.addWidget(self.image_view)
+
+        # 2. Message Label (for errors/EXR)
+        self.message_label = QLabel()
+        self.message_label.setAlignment(Qt.AlignCenter)
+        self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
+        self.image_stack.addWidget(self.message_label)
 
         # Right nav button
         self.right_btn = QPushButton(">")
@@ -1960,9 +2057,8 @@ class EmbeddedImageViewer(QWidget):
         self.setFocus()
 
     def resizeEvent(self, event):
-        """Reload image on resize."""
+        """Handle resize."""
         super().resizeEvent(event)
-        self._load_current_image()
 
     def _load_current_image(self):
         """Load and display the current image."""
@@ -1975,30 +2071,20 @@ class EmbeddedImageViewer(QWidget):
             ext = os.path.splitext(image_path)[1].lower()
 
             if ext == '.exr':
-                self.image_label.setText("EXR Preview Not Available")
-                self.image_label.setStyleSheet("color: #666666; font-size: 20px; background-color: #1a1a1a;")
+                self.message_label.setText("EXR Preview Not Available")
+                self.image_stack.setCurrentWidget(self.message_label)
             else:
                 pixmap = QPixmap(image_path)
                 if not pixmap.isNull():
-                    # Scale to fit available space
-                    available_width = self.image_label.width() - 20
-                    available_height = self.image_label.height() - 20
-
-                    if available_width > 100 and available_height > 100:
-                        scaled = pixmap.scaled(
-                            available_width, available_height,
-                            Qt.KeepAspectRatio,
-                            Qt.SmoothTransformation
-                        )
-                        self.image_label.setPixmap(scaled)
-                        self.image_label.setStyleSheet("background-color: #1a1a1a;")
+                    self.image_view.setPixmap(pixmap)
+                    self.image_stack.setCurrentWidget(self.image_view)
                 else:
-                    self.image_label.setText("Failed to load image")
-                    self.image_label.setStyleSheet("color: #ff6666; font-size: 16px; background-color: #1a1a1a;")
+                    self.message_label.setText("Failed to load image")
+                    self.image_stack.setCurrentWidget(self.message_label)
 
         except Exception as e:
-            self.image_label.setText(f"Error: {e}")
-            self.image_label.setStyleSheet("color: #ff6666; font-size: 16px; background-color: #1a1a1a;")
+            self.message_label.setText(f"Error: {e}")
+            self.image_stack.setCurrentWidget(self.message_label)
 
         self._update_info()
 
@@ -2110,7 +2196,7 @@ class EmbeddedImageViewer(QWidget):
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
 
-        menu.exec_(self.image_label.mapToGlobal(pos))
+        menu.exec_(self.image_view.mapToGlobal(pos))
 
     def _copy_settings(self):
         """Copy all settings for current image to the ComfyUI tab."""
@@ -2196,13 +2282,25 @@ class FullscreenImageViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Image display label
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("background-color: #1a1a1a;")
-        self.image_label.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.image_label.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.image_label, stretch=1)
+        # Image display
+        self.image_stack = QtWidgets.QStackedWidget()
+        layout.addWidget(self.image_stack, stretch=1)
+
+        # 1. Zoomable Image View
+        self.image_view = ZoomableImageWidget()
+        self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_view.customContextMenuRequested.connect(self._show_context_menu)
+        # Fullscreen double click handling - maybe close or just ignore?
+        # Viewer says "Double-click to close" in mouse events later.
+        # But image_view swallows double clicks unless we connect signal.
+        self.image_view.double_clicked.connect(self.close)
+        self.image_stack.addWidget(self.image_view)
+
+        # 2. Message Label
+        self.message_label = QLabel()
+        self.message_label.setAlignment(Qt.AlignCenter)
+        self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
+        self.image_stack.addWidget(self.message_label)
 
         # Info bar at bottom
         self.info_bar = QWidget()
@@ -2282,10 +2380,9 @@ class FullscreenImageViewer(QWidget):
         self._position_nav_buttons()
 
     def resizeEvent(self, event):
-        """Handle resize to reposition nav buttons and reload image."""
+        """Handle resize to reposition nav buttons."""
         super().resizeEvent(event)
         self._position_nav_buttons()
-        self._load_current_image()
 
     def _position_nav_buttons(self):
         """Position navigation buttons on sides."""
@@ -2312,30 +2409,20 @@ class FullscreenImageViewer(QWidget):
             ext = os.path.splitext(image_path)[1].lower()
 
             if ext == '.exr':
-                # For EXR, show placeholder
-                self.image_label.setText("EXR Preview Not Available")
-                self.image_label.setStyleSheet("color: #666666; font-size: 24px; background-color: #1a1a1a;")
+                self.message_label.setText("EXR Preview Not Available")
+                self.image_stack.setCurrentWidget(self.message_label)
             else:
                 pixmap = QPixmap(image_path)
                 if not pixmap.isNull():
-                    # Scale to fit screen while maintaining aspect ratio
-                    available_height = self.height() - self.info_bar.height() - 40
-                    available_width = self.width() - 160  # Leave room for nav buttons
-
-                    scaled = pixmap.scaled(
-                        available_width, available_height,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                    self.image_label.setPixmap(scaled)
-                    self.image_label.setStyleSheet("background-color: #1a1a1a;")
+                    self.image_view.setPixmap(pixmap)
+                    self.image_stack.setCurrentWidget(self.image_view)
                 else:
-                    self.image_label.setText("Failed to load image")
-                    self.image_label.setStyleSheet("color: #ff6666; font-size: 18px; background-color: #1a1a1a;")
+                    self.message_label.setText("Failed to load image")
+                    self.image_stack.setCurrentWidget(self.message_label)
 
         except Exception as e:
-            self.image_label.setText(f"Error: {e}")
-            self.image_label.setStyleSheet("color: #ff6666; font-size: 18px; background-color: #1a1a1a;")
+            self.message_label.setText(f"Error: {e}")
+            self.image_stack.setCurrentWidget(self.message_label)
 
         # Update info
         self._update_info()
@@ -2463,7 +2550,7 @@ class FullscreenImageViewer(QWidget):
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
 
-        menu.exec_(self.image_label.mapToGlobal(pos))
+        menu.exec_(self.image_view.mapToGlobal(pos))
 
     def _copy_settings(self):
         """Copy all settings for current image to the ComfyUI tab."""
