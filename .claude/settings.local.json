@@ -9,7 +9,8 @@
       "Bash(python -m py_compile:*)",
       "Bash(python:*)",
       "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\":*)",
-      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile:*)"
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile:*)",
+      "Bash(\"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe\" show numpy)"
     ],
     "deny": [],
     "ask": []

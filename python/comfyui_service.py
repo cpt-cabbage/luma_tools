@@ -23,7 +23,7 @@ from config import (
 )
 from settings_manager import (
     get_comfyui_path, get_comfyui_mode, get_comfyui_python_path,
-    get_comfyui_fast_mode, get_comfyui_fp16_accumulation
+    get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout
 )
 
 
@@ -48,9 +48,10 @@ class EditableNode:
     node_type: str
     title: str
     display_name: str  # User-friendly name derived from title
-    widget_type: str   # 'text', 'image', 'int', 'float', 'combo'
+    widget_type: str   # 'text', 'image', 'int', 'float', 'combo', 'toggle', '3d_model'
     current_value: Any = None
     options: List[str] = field(default_factory=list)  # For combo boxes
+    condition_node: Optional[str] = None  # Node name that controls visibility (from @if_<name> syntax)
 
 
 # Mapping of node types to their editable widget configurations
@@ -68,12 +69,68 @@ EDITABLE_NODE_CONFIGS = {
     'SaveImage': [(0, 'filename_prefix', 'string')],
     'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],  # output_dir auto-set to use main output
     'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # TRELLIS2 GLB export
+    # UltraShape nodes
+    'UltraShapeSaveGLB': [(2, 'filename_prefix', 'string')],  # UltraShape GLB/OBJ export
+    # Switch nodes - used as toggle/boolean when they have exactly 2 inputs
+    'easy anythingIndexSwitch': [(0, 'index', 'toggle')],  # Index switch as toggle (0/1)
+    # 3D model loading
+    'Load3D': [(0, 'model_file', '3d_model')],  # Load 3D model for preview/manipulation
 }
+
+
+def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
+    """
+    Parse a node title to check if it's editable and extract condition.
+
+    Supports formats:
+    - "Name_editable" - simple editable node
+    - "Name_editable@if_ConditionNode" - editable node visible only when ConditionNode is true
+
+    Note: Also supports older format with typo "editble" for backwards compatibility.
+
+    Args:
+        title: Node title to parse
+
+    Returns:
+        Tuple of (is_editable, base_title, condition_node_name)
+        - is_editable: True if node is editable
+        - base_title: Title without _editable and @if_ parts
+        - condition_node_name: Name of condition node, or None if unconditional
+    """
+    # Handle both correct spelling and common typo
+    editable_markers = ['_editable', '_editble']
+    is_editable = False
+    condition_node = None
+    base_title = title
+
+    for marker in editable_markers:
+        if marker in title:
+            is_editable = True
+            # Check for conditional syntax: _editable@if_NodeName or _editable&if_NodeName
+            # Split on the marker first
+            parts = title.split(marker)
+            base_title = parts[0]
+
+            # Check for condition after the marker
+            if len(parts) > 1:
+                after_marker = parts[1]
+                # Support both @ and & as separators
+                for sep in ['@if_', '&if_']:
+                    if after_marker.startswith(sep):
+                        condition_node = after_marker[len(sep):]
+                        break
+            break
+
+    return is_editable, base_title, condition_node
 
 
 def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     """
     Extract all nodes with '_editable' suffix in their title from a workflow.
+
+    Supports conditional visibility with syntax: NodeName_editable@if_ConditionNodeName
+    When a condition is specified, the widget should only be visible when the
+    condition node's toggle/switch is true (value != 0).
 
     Args:
         workflow_path: Path to workflow JSON file
@@ -93,9 +150,26 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     nodes = workflow.get('nodes', [])
     editable_nodes = []
 
+    # First pass: build a map of node titles to node IDs (for condition resolution)
+    title_to_node_id = {}
     for node in nodes:
         title = node.get('title', '')
-        if not title.endswith('_editable'):
+        if title:
+            # Store the base name (without _editable suffix) for condition matching
+            is_edit, base, _ = _parse_editable_title(title)
+            if is_edit:
+                # Store both the full title and base name
+                title_to_node_id[title] = node.get('id')
+                title_to_node_id[base] = node.get('id')
+            else:
+                title_to_node_id[title] = node.get('id')
+
+    for node in nodes:
+        title = node.get('title', '')
+
+        # Parse the title for editable marker and condition
+        is_editable, base_title, condition_node_name = _parse_editable_title(title)
+        if not is_editable:
             continue
 
         # Skip muted/bypassed nodes
@@ -107,8 +181,8 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         node_type = node.get('type')
         widgets_values = node.get('widgets_values', [])
 
-        # Create display name from title (remove _editable suffix and clean up)
-        display_name = title.replace('_editable', '').replace('_', ' ').strip()
+        # Create display name from base title (clean up underscores)
+        display_name = base_title.replace('_', ' ').strip()
         # If display name is just the node type, make it more readable
         if not display_name or display_name == node_type:
             display_name = node_type.replace('Plus', '+')
@@ -128,6 +202,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     display_name=f"{display_name} - {widget_name}" if len(config) > 1 else display_name,
                     widget_type=widget_type,
                     current_value=current_value,
+                    condition_node=condition_node_name,
                 ))
         else:
             # Unknown node type - try to create a generic text widget
@@ -140,11 +215,13 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     display_name=display_name,
                     widget_type='text',
                     current_value=str(widgets_values[0]) if widgets_values else '',
+                    condition_node=condition_node_name,
                 ))
 
     print(f"Found {len(editable_nodes)} editable nodes in workflow")
     for node in editable_nodes:
-        print(f"  - {node.display_name} ({node.node_type}): {node.widget_type}")
+        condition_info = f" (visible when {node.condition_node})" if node.condition_node else ""
+        print(f"  - {node.display_name} ({node.node_type}): {node.widget_type}{condition_info}")
 
     return editable_nodes
 
@@ -195,7 +272,8 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         'MarkdownNote', 'CR Text', 'ShowText', 'ShowTextForGPT',
         'Note+', 'NoteNode', 'CommentNode',
         # Preview/display nodes that don't affect output
-        'PreviewImage', 'PreviewBridge', 'Preview3D',
+        # NOTE: Preview3D is NOT skipped - it can trigger execution of 3D pipelines
+        'PreviewImage', 'PreviewBridge',
     ]
     for node in nodes:
         node_id = node.get('id')
@@ -335,6 +413,18 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             # Mask nodes
             'InvertMask': [],
             'MaskPreview': [],
+            # UltraShape nodes
+            'UltraShapeLoadModel': ['checkpoint', 'config', 'dtype', 'low_vram'],
+            'UltraShapeLoadCoarseMesh': ['mesh_path', 'normalize_scale', 'num_sharp_points', 'num_uniform_points', 'num_latents'],
+            'UltraShapeRefine': ['steps', 'guidance_scale', 'octree_resolution', 'num_chunks', 'mc_level', 'box_v', 'seed', 'control_after_generate', 'remove_bg'],
+            'UltraShapeSaveGLB': ['output_dir', 'filename_prefix', 'file_format'],
+            # Switch nodes
+            'easy anythingIndexSwitch': ['index'],
+            # Load3D node - widgets_values has 7 items in this order:
+            # [0]: model_file, [1-3]: button text (upload3dmodel, uploadExtraResources, clear),
+            # [4]: extra, [5]: width, [6]: height
+            # We need to map all positions even for button widgets to get correct offsets
+            'Load3D': ['model_file', None, None, None, None, 'width', 'height'],
         }
 
         # Get widget names for this node type
@@ -343,6 +433,9 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         # For nodes in our mapping, use the defined widget order
         if widgets_values and widget_names is not None:
             for i, widget_name in enumerate(widget_names):
+                # Skip None entries (placeholder for button/UI-only widgets)
+                if widget_name is None:
+                    continue
                 if i < len(widgets_values) and widget_name not in inputs:
                     value = widgets_values[i]
                     # Skip control_after_generate - it's not an actual input
@@ -462,14 +555,22 @@ def modify_workflow_api_format(
             elif widget_type == 'string':
                 inputs['filename_prefix'] = value
                 print(f"  Set string node {node_id} ({node_type}): {value}")
+            elif widget_type == 'toggle':
+                # Toggle/switch value (0 or 1)
+                int_value = 1 if value else 0
+                inputs['index'] = int_value
+                print(f"  Set toggle node {node_id} ({node_type}): {int_value}")
+            elif widget_type == '3d_model':
+                # 3D model file path
+                if value:
+                    inputs['model_file'] = os.path.basename(value)
+                    print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(value)}")
 
-    # Find and modify nodes by class_type (legacy behavior for non-editable nodes)
+    # Find and modify nodes by class_type
+    # Apply special handling for certain node types (seeds, output prefixes, directories)
+    # even if they were already handled by editable_values
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict) or 'class_type' not in node_data:
-            continue
-
-        # Skip nodes that were already modified by editable_values
-        if int(node_id) in editable_by_node_id:
             continue
 
         class_type = node_data.get('class_type')
@@ -477,13 +578,16 @@ def modify_workflow_api_format(
         meta = node_data.get('_meta', {})
         node_title = meta.get('title', '')
 
-        # LoadImage nodes - set input image filename (only if we have a legacy image)
-        if class_type == 'LoadImage' and image_basename:
+        # Check if this node was already modified by editable_values
+        node_already_handled = int(node_id) in editable_by_node_id
+
+        # LoadImage nodes - set input image filename (only if we have a legacy image and not already handled)
+        if class_type == 'LoadImage' and image_basename and not node_already_handled:
             inputs['image'] = image_basename
             print(f"Set LoadImage node {node_id} to: {image_basename}")
 
-        # TextEncodeQwenImageEditPlus nodes - only modify if title ends with "_editable"
-        elif class_type == 'TextEncodeQwenImageEditPlus':
+        # TextEncodeQwenImageEditPlus nodes - only modify if title ends with "_editable" and not already handled
+        elif class_type == 'TextEncodeQwenImageEditPlus' and not node_already_handled:
             if node_title.endswith('_editable'):
                 found_editable_prompt = True
                 if prompt:
@@ -497,43 +601,50 @@ def modify_workflow_api_format(
                 # Non-editable prompt node - log but don't modify
                 print(f"Skipping non-editable prompt node {node_id} (title: '{node_title}' - missing '_editable' suffix)")
 
-        # SaveImage nodes - set output prefix
+        # SaveImage nodes - set output prefix (always apply, even if editable)
         elif class_type == 'SaveImage':
             inputs['filename_prefix'] = output_prefix
             print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
 
-        # HYMotionExportFBX nodes - clear output_dir so files go to main output, set prefix
+        # HYMotionExportFBX nodes - clear output_dir so files go to main output, set prefix (always apply)
         elif class_type == 'HYMotionExportFBX':
             inputs['output_dir'] = ''  # Empty = use ComfyUI's output directory directly
             inputs['filename_prefix'] = output_prefix
             print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
 
-        # Trellis2ExportGLB nodes - set output prefix
+        # Trellis2ExportGLB nodes - set output prefix (always apply)
         elif class_type == 'Trellis2ExportGLB':
             inputs['filename_prefix'] = output_prefix
             print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
 
-        # Trellis2ImageToShape nodes - set seed
+        # UltraShapeSaveGLB nodes - set output prefix (always apply)
+        # NOTE: output_dir cannot be reliably cleared - node writes to subdirectory regardless
+        # The move_output_files function searches recursively to handle this
+        elif class_type == 'UltraShapeSaveGLB':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set UltraShapeSaveGLB node {node_id}: prefix={output_prefix}")
+
+        # Trellis2ImageToShape nodes - set seed (always apply)
         elif class_type == 'Trellis2ImageToShape':
             inputs['seed'] = seed
             print(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
 
-        # Trellis2ShapeToTexturedMesh nodes - set seed
+        # Trellis2ShapeToTexturedMesh nodes - set seed (always apply)
         elif class_type == 'Trellis2ShapeToTexturedMesh':
             inputs['seed'] = seed
             print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
 
-        # KSampler nodes - set seed
+        # KSampler nodes - set seed (always apply)
         elif class_type == 'KSampler':
             inputs['seed'] = seed
             print(f"Set KSampler node {node_id} seed to: {seed}")
 
-        # SamplerCustomAdvanced / RandomNoise nodes - set seed
+        # SamplerCustomAdvanced / RandomNoise nodes - set seed (always apply)
         elif class_type == 'RandomNoise':
             inputs['noise_seed'] = seed
             print(f"Set RandomNoise node {node_id} seed to: {seed}")
 
-        # HYMotionGenerate nodes - set seed
+        # HYMotionGenerate nodes - set seed (always apply)
         elif class_type == 'HYMotionGenerate':
             inputs['seed'] = seed
             print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
@@ -596,22 +707,33 @@ def modify_workflow(
 def save_workflow(
     workflow: Dict[str, Any],
     output_dir: str,
-    suffix: str = ""
+    job_id: Optional[str] = None
 ) -> str:
     """
-    Save modified workflow to a JSON file.
+    Save modified workflow to a JSON file with unique name per job.
 
     Args:
         workflow: Modified workflow dictionary
         output_dir: Directory to save the workflow file
-        suffix: Optional suffix for the filename
+        job_id: Optional unique job identifier. If not provided, generates one
+                using timestamp + random suffix to prevent workflow file conflicts
+                between concurrent jobs.
 
     Returns:
         Path to saved workflow file
     """
+    import uuid
+    from datetime import datetime
+
     os.makedirs(output_dir, exist_ok=True)
 
-    workflow_filename = f"comfyui_workflow{suffix}.json"
+    # Generate unique job ID if not provided
+    if not job_id:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_suffix = uuid.uuid4().hex[:8]
+        job_id = f"{timestamp}_{unique_suffix}"
+
+    workflow_filename = f"comfyui_workflow_{job_id}.json"
     workflow_path = os.path.join(output_dir, workflow_filename)
 
     with open(workflow_path, 'w', encoding='utf-8') as f:
@@ -691,6 +813,7 @@ def submit_comfyui_to_deadline_server_mode(
 
     # Build arguments for the client script
     # Use --frame <STARTFRAME> for multiframe job - Deadline substitutes frame number
+    timeout = get_comfyui_timeout()
     client_args = (
         f'"{client_script}" '
         f'--workflow "{workflow_path}" '
@@ -699,7 +822,7 @@ def submit_comfyui_to_deadline_server_mode(
         f'--server-input-dir "{output_dir}" '
         f'--output-prefix "{render_name}" '
         f'--frame <STARTFRAME> '
-        f'--timeout 600 '
+        f'--timeout {timeout} '
         f'--wait-for-server 30'
     )
 
@@ -841,6 +964,7 @@ def submit_comfyui_to_deadline(
     # Deadline will substitute <F> with frame number (1-based)
     # Strip trailing slashes to avoid escaping issues with quotes on Windows
     comfyui_path_clean = comfyui_path.rstrip('/\\')
+    timeout = get_comfyui_timeout()
     runner_args = (
         f'"{runner_script}" '
         f'--comfyui-path "{comfyui_path_clean}" '
@@ -851,7 +975,7 @@ def submit_comfyui_to_deadline(
         f'--output-prefix "{render_name}" '
         f'--frame <STARTFRAME> '
         f'--port {port} '
-        f'--timeout 600 '
+        f'--timeout {timeout} '
         f'--mode {comfyui_mode}'
     )
 
@@ -868,6 +992,12 @@ def submit_comfyui_to_deadline(
         runner_args += ' --fast'
     if get_comfyui_fp16_accumulation():
         runner_args += ' --fp16-accumulation'
+
+    # Add ComfyUI's default output directory for moving 3D files that can't specify output path
+    # Some nodes like Trellis2ExportGLB and UltraShapeSaveGLB always write to ComfyUI's
+    # default output folder or subdirectories. The runner will check if it exists on the farm worker.
+    comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
+    runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
     # Build Deadline submission using job info and plugin info files
     # This allows us to set plugin-specific properties like ExitCodeTreatedAsFailure
@@ -981,6 +1111,7 @@ def submit_comfyui_job(
     progress_callback: Optional[Callable[[int, str], None]] = None,
     network_output_dir: Optional[str] = None,
     use_server_mode: bool = True,  # Deprecated, always True - kept for compatibility
+    workflow_preset: Optional[str] = None,
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch image processing.
@@ -1007,6 +1138,7 @@ def submit_comfyui_job(
                            to output_dir after completion. If None, outputs directly
                            to output_dir.
         use_server_mode: Deprecated - server mode is always enabled.
+        workflow_preset: Full preset name (e.g. "folder/preset_name") for metadata.
 
     Returns:
         Tuple of (job_ids, error_message)
@@ -1112,8 +1244,8 @@ def submit_comfyui_job(
             print(f"ERROR: {error_msg}")
             return [], error_msg
 
-        # Save modified workflow to the working directory
-        workflow_file = save_workflow(modified, current_working_dir, suffix="")
+        # Save modified workflow to the working directory with unique job ID
+        workflow_file = save_workflow(modified, current_working_dir)
 
         # Generate seeds for each generation
         # If base_seed is provided, use sequential seeds; otherwise random
@@ -1131,12 +1263,41 @@ def submit_comfyui_job(
             json.dump(seeds_data, f, indent=2)
         print(f"Saved seeds file with {generation_count} seeds to: {seeds_file}")
 
+        # Save gallery metadata (prompts, workflow info, editable values, etc.)
+        prompt_text = extract_prompts_from_editable_values(current_editable_values)
+        if prompt_text or current_image or current_editable_values:
+            add_image_metadata(
+                output_dir=current_working_dir,
+                output_prefix=current_job_name,
+                prompt=prompt_text,
+                workflow_name=os.path.basename(workflow_path),
+                input_image=current_image,
+                generation_count=generation_count,
+                base_seed=base_seed,
+                workflow_preset=workflow_preset,
+                editable_values=current_editable_values,
+            )
+            print(f"Saved gallery metadata for prefix: {current_job_name}")
+
         # Copy current input image to the working directory
         if current_image:
             image_dest = os.path.join(current_working_dir, image_basename)
             if not os.path.exists(image_dest) or os.path.getmtime(current_image) > os.path.getmtime(image_dest):
                 shutil.copy2(current_image, image_dest)
                 print(f"Copied input image to: {image_dest}")
+
+        # Copy any 3D model files to the working directory
+        if current_editable_values:
+            for _, data in current_editable_values.items():
+                node_info = data.get('node')
+                value = data.get('value')
+                if node_info and node_info.widget_type == '3d_model' and value:
+                    if os.path.exists(value):
+                        model_basename = os.path.basename(value)
+                        model_dest = os.path.join(current_working_dir, model_basename)
+                        if not os.path.exists(model_dest) or os.path.getmtime(value) > os.path.getmtime(model_dest):
+                            shutil.copy2(value, model_dest)
+                            print(f"Copied 3D model to: {model_dest}")
 
         # Submit job for this image with working directory as output
         # Server mode is always enabled (persistent ComfyUI)
@@ -1321,6 +1482,8 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         completed_tasks = 0
         failed_tasks = 0
         total_tasks = 1
+        queued_tasks = 0
+        rendering_tasks = 0
         error_reports = 0
         error_message = ""
 
@@ -1344,6 +1507,12 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             elif line.startswith("TaskCount=") or line.startswith("ChunkCount="):
                 total_tasks = int(line.split('=', 1)[1])
                 print(f"[poll_deadline_job_status] Parsed TaskCount/ChunkCount: {total_tasks}")
+            elif line.startswith("QueuedTasks=") or line.startswith("QueuedChunks="):
+                queued_tasks = int(line.split('=', 1)[1])
+                print(f"[poll_deadline_job_status] Parsed QueuedTasks/Chunks: {queued_tasks}")
+            elif line.startswith("RenderingTasks=") or line.startswith("RenderingChunks="):
+                rendering_tasks = int(line.split('=', 1)[1])
+                print(f"[poll_deadline_job_status] Parsed RenderingTasks/Chunks: {rendering_tasks}")
             elif line.startswith("ErrorReports="):
                 error_reports = int(line.split('=', 1)[1])
                 print(f"[poll_deadline_job_status] Parsed ErrorReports: {error_reports}")
@@ -1364,11 +1533,23 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             print(f"[poll_deadline_job_status] Job marked Complete but has {failed_tasks} failed tasks - treating as Failed")
             status = "Failed"
 
+        # Refine "Active" status based on task states
+        # Deadline reports "Active" for all non-completed jobs, even if just queued
+        if status == "Active":
+            if rendering_tasks > 0:
+                status = "Rendering"
+                print(f"[poll_deadline_job_status] Refined status to 'Rendering' ({rendering_tasks} rendering)")
+            elif queued_tasks > 0 and completed_tasks == 0:
+                status = "Queued"
+                print(f"[poll_deadline_job_status] Refined status to 'Queued' ({queued_tasks} queued)")
+
         return {
             "status": status,
             "progress": progress,
             "completed_tasks": completed_tasks,
             "total_tasks": total_tasks,
+            "queued_tasks": queued_tasks,
+            "rendering_tasks": rendering_tasks,
             "error_message": error_message
         }
 
@@ -1490,3 +1671,240 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
     # Sort by creation time, newest first
     output_files.sort(key=lambda x: x['created'], reverse=True)
     return output_files
+
+
+# ============================================================================
+# GALLERY METADATA
+# ============================================================================
+
+GALLERY_METADATA_FILE = "comfyui_gallery_metadata.json"
+
+
+def _get_metadata_path(output_dir: str) -> str:
+    """Get the path to the metadata file for a directory."""
+    return os.path.join(output_dir, GALLERY_METADATA_FILE)
+
+
+def load_gallery_metadata(output_dir: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Load gallery metadata from the output directory.
+
+    Args:
+        output_dir: Directory containing the metadata file
+
+    Returns:
+        Dictionary mapping filename -> metadata dict containing:
+        - prompt: The prompt text used to generate the image
+        - seed: The random seed used
+        - workflow: The workflow preset name
+        - timestamp: When the image was generated
+        - input_image: Optional input image filename
+    """
+    metadata_path = _get_metadata_path(output_dir)
+    if not os.path.exists(metadata_path):
+        return {}
+
+    try:
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading gallery metadata: {e}")
+        return {}
+
+
+def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) -> bool:
+    """
+    Save gallery metadata to the output directory.
+
+    Args:
+        output_dir: Directory to save metadata to
+        metadata: Dictionary mapping filename -> metadata dict
+
+    Returns:
+        True if successful, False otherwise
+    """
+    metadata_path = _get_metadata_path(output_dir)
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, default=str)
+        return True
+    except Exception as e:
+        print(f"Error saving gallery metadata: {e}")
+        return False
+
+
+def add_image_metadata(
+    output_dir: str,
+    output_prefix: str,
+    prompt: Optional[str] = None,
+    workflow_name: Optional[str] = None,
+    input_image: Optional[str] = None,
+    generation_count: int = 1,
+    base_seed: Optional[int] = None,
+    workflow_preset: Optional[str] = None,
+    editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> bool:
+    """
+    Add metadata for images that will be generated with a given prefix.
+
+    Since ComfyUI generates files with names like "prefix_00001_.png",
+    we store metadata keyed by the output prefix. When loading metadata
+    for a specific file, we match by prefix.
+
+    Args:
+        output_dir: Directory where images will be saved
+        output_prefix: The filename prefix used for this generation
+        prompt: The prompt text (if any)
+        workflow_name: Name of the workflow preset (file basename)
+        input_image: Path to input image (if any)
+        generation_count: Number of images to be generated
+        base_seed: The starting seed for sequential generation
+        workflow_preset: Full preset name (e.g. "folder/preset_name")
+        editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
+                         Stores all editable widget values for recreation
+
+    Returns:
+        True if successful, False otherwise
+    """
+    from datetime import datetime
+
+    metadata = load_gallery_metadata(output_dir)
+
+    # Serialize editable values for storage (convert EditableNode to dict)
+    serialized_editable = {}
+    if editable_values:
+        for node_id, data in editable_values.items():
+            node_info = data.get('node')
+            value = data.get('value')
+
+            # Skip image values (file paths) as they're transient
+            if node_info and node_info.widget_type == 'image':
+                continue
+
+            serialized_editable[str(node_id)] = {
+                "node_id": node_info.node_id if node_info else node_id,
+                "display_name": node_info.display_name if node_info else "",
+                "node_type": node_info.node_type if node_info else "",
+                "widget_type": node_info.widget_type if node_info else "text",
+                "value": value,
+            }
+
+    # Store metadata keyed by prefix
+    # This allows matching generated files like "prefix_00001_.png" to their metadata
+    entry = {
+        "prompt": prompt,
+        "workflow": workflow_name,
+        "workflow_preset": workflow_preset,
+        "input_image": os.path.basename(input_image) if input_image else None,
+        "timestamp": datetime.now().isoformat(),
+        "generation_count": generation_count,
+        "base_seed": base_seed,
+        "editable_values": serialized_editable if serialized_editable else None,
+    }
+
+    # Store under the prefix key (remove trailing underscore if present)
+    prefix_key = output_prefix.rstrip('_')
+    metadata[f"_prefix_{prefix_key}"] = entry
+
+    return save_gallery_metadata(output_dir, metadata)
+
+
+def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
+    """
+    Get metadata for a specific image file.
+
+    Matches the filename against stored prefix metadata.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: The image filename (not full path)
+
+    Returns:
+        Metadata dict if found, None otherwise
+    """
+    metadata = load_gallery_metadata(output_dir)
+
+    # First check for exact filename match
+    if filename in metadata:
+        return metadata[filename]
+
+    # Try to match against prefix entries
+    # ComfyUI files are typically named like "prefix_00001_.png" or "prefix_gen01.png"
+    basename = os.path.splitext(filename)[0]
+
+    for key, value in metadata.items():
+        if key.startswith("_prefix_"):
+            prefix = key[8:]  # Remove "_prefix_" prefix
+            if basename.startswith(prefix):
+                return value
+
+    return None
+
+
+def extract_prompts_from_editable_values(
+    editable_values: Optional[Dict[int, Dict[str, Any]]]
+) -> str:
+    """
+    Extract prompt text from editable values dictionary.
+
+    Args:
+        editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
+
+    Returns:
+        Combined prompt string from all text nodes, or empty string if none found
+    """
+    if not editable_values:
+        return ""
+
+    prompts = []
+    for data in editable_values.values():
+        node_info = data.get('node')
+        value = data.get('value')
+        if node_info and node_info.widget_type == 'text' and value:
+            prompts.append(str(value).strip())
+
+    return "\n---\n".join(prompts) if prompts else ""
+
+
+def get_model_note(output_dir: str, filename: str) -> str:
+    """
+    Get the user note for a specific model file.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: The model filename (not full path)
+
+    Returns:
+        Note string if found, empty string otherwise
+    """
+    metadata = load_gallery_metadata(output_dir)
+    basename = os.path.splitext(filename)[0]
+    note_key = f"_note_{basename}"
+    return metadata.get(note_key, "")
+
+
+def set_model_note(output_dir: str, filename: str, note: str) -> bool:
+    """
+    Set a user note for a specific model file.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: The model filename (not full path)
+        note: The note text to save (empty string to remove note)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    metadata = load_gallery_metadata(output_dir)
+    basename = os.path.splitext(filename)[0]
+    note_key = f"_note_{basename}"
+
+    if note.strip():
+        metadata[note_key] = note.strip()
+    elif note_key in metadata:
+        # Remove the note if empty
+        del metadata[note_key]
+
+    return save_gallery_metadata(output_dir, metadata)

@@ -226,8 +226,8 @@ USER_SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools")
 USER_SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
 
 # Global settings (shared across all users)
-# Default global settings path - can be overridden by user settings
-DEFAULT_GLOBAL_SETTINGS_PATH = r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\global_settings"
+# Default global settings path - relative to luma_tools root, can be overridden by user settings
+DEFAULT_GLOBAL_SETTINGS_PATH = os.path.join(_ROOT_DIR, "global_settings")
 GLOBAL_SETTINGS_FILENAME = "global_settings.json"
 
 

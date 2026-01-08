@@ -12,7 +12,7 @@ from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
     QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton,
     QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit,
-    QMenu
+    QMenu, QSizePolicy, QDialog, QDialogButtonBox, QPlainTextEdit
 )
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 
@@ -1172,6 +1172,9 @@ class UIAnimations:
         self.status_opacity = QGraphicsOpacityEffect(self.ui.StatusLabel)
         self.ui.StatusLabel.setGraphicsEffect(self.status_opacity)
         self.status_opacity.setOpacity(1.0)
+        # Track last status to avoid animating unchanged messages
+        self._last_status_message = None
+        self._last_status_color = None
 
     def animate_button_click(self, button):
         """
@@ -1232,12 +1235,20 @@ class UIAnimations:
 
     def update_status_animated(self, message, color="#4a9eff"):
         """
-        Update status label with fade animation.
+        Update status label with fade animation (only if message or color changed).
 
         Args:
             message: Status message to display
             color: Color for the status text (hex string)
         """
+        # Skip animation if message and color haven't changed
+        if message == self._last_status_message and color == self._last_status_color:
+            return
+
+        # Update tracking
+        self._last_status_message = message
+        self._last_status_color = color
+
         # Set the message
         self.ui.StatusLabel.setText(message)
 
@@ -1762,19 +1773,756 @@ class FlowLayout(QtWidgets.QLayout):
         return y + line_height - rect.y() + bottom
 
 
+class EmbeddedImageViewer(QWidget):
+    """
+    Embedded image viewer with keyboard navigation for use within the gallery tab.
+
+    Controls:
+    - Left/Right arrows or A/D: Navigate between images
+    - Escape or Backspace: Close viewer and return to gallery
+    - Home/End: Jump to first/last image
+    - C: Copy prompt to clipboard (if available)
+    - S: Copy settings to ComfyUI tab (if available)
+    """
+    closed = Signal()  # Emitted when user wants to close the viewer
+    view_fullscreen = Signal(str, int)  # Emitted when user wants fullscreen (image_path, index)
+    copy_settings_requested = Signal(dict)  # Emits metadata for copying settings to ComfyUI tab
+
+    def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
+        """
+        Initialize the embedded viewer.
+
+        Args:
+            image_paths: List of image file paths
+            start_index: Index of image to show first
+            output_dir: Directory for metadata lookup
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.image_paths = list(image_paths)
+        self.current_index = start_index
+        self.output_dir = output_dir
+
+        self._setup_ui()
+        self._load_current_image()
+
+        # Ensure we can receive keyboard events
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def _setup_ui(self):
+        """Set up the embedded viewer UI."""
+        self.setStyleSheet("background-color: #1a1a1a;")
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Top bar with back button and info
+        self.top_bar = QWidget()
+        self.top_bar.setStyleSheet("background-color: rgba(0, 0, 0, 0.5);")
+        self.top_bar.setFixedHeight(40)
+
+        top_layout = QHBoxLayout(self.top_bar)
+        top_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Back button
+        self.back_btn = QPushButton("< Back to Gallery")
+        self.back_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #4a9eff;
+                border: none;
+                font-size: 12px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                color: #7ab8ff;
+            }
+        """)
+        self.back_btn.setCursor(Qt.PointingHandCursor)
+        self.back_btn.clicked.connect(self._on_back)
+        top_layout.addWidget(self.back_btn)
+
+        top_layout.addStretch()
+
+        # Counter label
+        self.counter_label = QLabel()
+        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        top_layout.addWidget(self.counter_label)
+
+        # Fullscreen button
+        self.fullscreen_btn = QPushButton("Fullscreen")
+        self.fullscreen_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                font-size: 11px;
+                padding: 3px 10px;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+                border-color: #4a9eff;
+            }
+        """)
+        self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_btn.clicked.connect(self._on_fullscreen)
+        top_layout.addWidget(self.fullscreen_btn)
+
+        layout.addWidget(self.top_bar)
+
+        # Image container with navigation
+        image_container = QWidget()
+        image_layout = QHBoxLayout(image_container)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(0)
+
+        # Left nav button
+        self.left_btn = QPushButton("<")
+        self.left_btn.setFixedWidth(50)
+        self.left_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.3);
+                color: white;
+                border: none;
+                font-size: 24px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 158, 255, 0.5);
+            }
+            QPushButton:disabled {
+                color: #333333;
+            }
+        """)
+        self.left_btn.setCursor(Qt.PointingHandCursor)
+        self.left_btn.clicked.connect(self._prev_image)
+        image_layout.addWidget(self.left_btn)
+
+        # Image display
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("background-color: #1a1a1a;")
+        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_label.customContextMenuRequested.connect(self._show_context_menu)
+        image_layout.addWidget(self.image_label, stretch=1)
+
+        # Right nav button
+        self.right_btn = QPushButton(">")
+        self.right_btn.setFixedWidth(50)
+        self.right_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.3);
+                color: white;
+                border: none;
+                font-size: 24px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 158, 255, 0.5);
+            }
+            QPushButton:disabled {
+                color: #333333;
+            }
+        """)
+        self.right_btn.setCursor(Qt.PointingHandCursor)
+        self.right_btn.clicked.connect(self._next_image)
+        image_layout.addWidget(self.right_btn)
+
+        layout.addWidget(image_container, stretch=1)
+
+        # Bottom info bar
+        self.info_bar = QWidget()
+        self.info_bar.setStyleSheet("background-color: rgba(0, 0, 0, 0.5);")
+        self.info_bar.setFixedHeight(35)
+
+        info_layout = QHBoxLayout(self.info_bar)
+        info_layout.setContentsMargins(15, 5, 15, 5)
+
+        # Filename
+        self.filename_label = QLabel()
+        self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        info_layout.addWidget(self.filename_label)
+
+        info_layout.addStretch()
+
+        # Help hint
+        help_label = QLabel("← → Navigate  |  Esc Back  |  C Copy Prompt")
+        help_label.setStyleSheet("color: #555555; font-size: 10px;")
+        info_layout.addWidget(help_label)
+
+        layout.addWidget(self.info_bar)
+
+    def showEvent(self, event):
+        """Grab focus when shown."""
+        super().showEvent(event)
+        self.setFocus()
+
+    def resizeEvent(self, event):
+        """Reload image on resize."""
+        super().resizeEvent(event)
+        self._load_current_image()
+
+    def _load_current_image(self):
+        """Load and display the current image."""
+        if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
+            return
+
+        image_path = self.image_paths[self.current_index]
+
+        try:
+            ext = os.path.splitext(image_path)[1].lower()
+
+            if ext == '.exr':
+                self.image_label.setText("EXR Preview Not Available")
+                self.image_label.setStyleSheet("color: #666666; font-size: 20px; background-color: #1a1a1a;")
+            else:
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    # Scale to fit available space
+                    available_width = self.image_label.width() - 20
+                    available_height = self.image_label.height() - 20
+
+                    if available_width > 100 and available_height > 100:
+                        scaled = pixmap.scaled(
+                            available_width, available_height,
+                            Qt.KeepAspectRatio,
+                            Qt.SmoothTransformation
+                        )
+                        self.image_label.setPixmap(scaled)
+                        self.image_label.setStyleSheet("background-color: #1a1a1a;")
+                else:
+                    self.image_label.setText("Failed to load image")
+                    self.image_label.setStyleSheet("color: #ff6666; font-size: 16px; background-color: #1a1a1a;")
+
+        except Exception as e:
+            self.image_label.setText(f"Error: {e}")
+            self.image_label.setStyleSheet("color: #ff6666; font-size: 16px; background-color: #1a1a1a;")
+
+        self._update_info()
+
+    def _update_info(self):
+        """Update info labels and button states."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+
+        self.filename_label.setText(filename)
+        self.counter_label.setText(f"{self.current_index + 1} / {len(self.image_paths)}")
+
+        # Update nav button states
+        self.left_btn.setEnabled(self.current_index > 0)
+        self.right_btn.setEnabled(self.current_index < len(self.image_paths) - 1)
+
+    def _next_image(self):
+        """Go to next image."""
+        if self.current_index < len(self.image_paths) - 1:
+            self.current_index += 1
+            self._load_current_image()
+
+    def _prev_image(self):
+        """Go to previous image."""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._load_current_image()
+
+    def _on_back(self):
+        """Handle back button - close viewer."""
+        self.closed.emit()
+
+    def _on_fullscreen(self):
+        """Handle fullscreen button."""
+        if self.image_paths:
+            self.view_fullscreen.emit(self.image_paths[self.current_index], self.current_index)
+
+    def _copy_prompt(self):
+        """Copy prompt for current image to clipboard."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+
+        try:
+            from comfyui_service import get_image_metadata
+            metadata = get_image_metadata(output_dir, filename)
+            if metadata and metadata.get('prompt'):
+                clipboard = QApplication.clipboard()
+                clipboard.setText(metadata['prompt'])
+                self.filename_label.setText(f"{filename} - Prompt copied!")
+                QTimer.singleShot(1500, self._update_info)
+            else:
+                self.filename_label.setText(f"{filename} - No prompt available")
+                QTimer.singleShot(1500, self._update_info)
+        except Exception as e:
+            print(f"Error copying prompt: {e}")
+
+    def keyPressEvent(self, event):
+        """Handle keyboard navigation."""
+        key = event.key()
+
+        if key in (Qt.Key_Right, Qt.Key_D):
+            self._next_image()
+        elif key in (Qt.Key_Left, Qt.Key_A):
+            self._prev_image()
+        elif key in (Qt.Key_Escape, Qt.Key_Backspace):
+            self._on_back()
+        elif key == Qt.Key_Home:
+            self.current_index = 0
+            self._load_current_image()
+        elif key == Qt.Key_End:
+            self.current_index = len(self.image_paths) - 1
+            self._load_current_image()
+        elif key == Qt.Key_C:
+            self._copy_prompt()
+        elif key == Qt.Key_S:
+            self._copy_settings()
+        elif key == Qt.Key_F:
+            self._on_fullscreen()
+        else:
+            super().keyPressEvent(event)
+
+    def _show_context_menu(self, pos):
+        """Show context menu for the current image."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        menu = QMenu(self)
+
+        open_folder_action = menu.addAction("Open Containing Folder")
+        open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
+
+        menu.addSeparator()
+
+        # Copy Settings action
+        copy_settings_action = menu.addAction("Copy Settings (S)")
+        copy_settings_action.triggered.connect(self._copy_settings)
+
+        # Copy Prompt action
+        copy_prompt_action = menu.addAction("Copy Prompt (C)")
+        copy_prompt_action.triggered.connect(self._copy_prompt)
+
+        copy_path_action = menu.addAction("Copy Path")
+        copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
+
+        menu.exec_(self.image_label.mapToGlobal(pos))
+
+    def _copy_settings(self):
+        """Copy all settings for current image to the ComfyUI tab."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+
+        try:
+            from comfyui_service import get_image_metadata
+            metadata = get_image_metadata(output_dir, filename)
+            if metadata:
+                self.copy_settings_requested.emit(metadata)
+                self.filename_label.setText(f"{filename} - Settings copied!")
+                QTimer.singleShot(1500, self._update_info)
+            else:
+                self.filename_label.setText(f"{filename} - No settings available")
+                QTimer.singleShot(1500, self._update_info)
+        except Exception as e:
+            print(f"Error copying settings: {e}")
+
+    def _open_folder(self, image_path):
+        """Open the containing folder in file explorer."""
+        import subprocess
+        try:
+            subprocess.Popen(f'explorer /select,"{image_path}"')
+        except Exception as e:
+            print(f"Error opening folder: {e}")
+
+    def _copy_path(self, image_path):
+        """Copy the image path to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(image_path)
+        self.filename_label.setText(f"{os.path.basename(image_path)} - Path copied!")
+        QTimer.singleShot(1500, self._update_info)
+
+
+class FullscreenImageViewer(QWidget):
+    """
+    Fullscreen image viewer (separate window) with keyboard navigation.
+
+    Controls:
+    - Left/Right arrows or A/D: Navigate between images
+    - Escape or Q: Close viewer
+    - Home/End: Jump to first/last image
+    - Space: Toggle filename display
+    - C: Copy prompt to clipboard (if available)
+    - S: Copy settings to ComfyUI tab (if available)
+    """
+    closed = Signal()
+    copy_settings_requested = Signal(dict)  # Emits metadata for copying settings to ComfyUI tab
+
+    def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
+        """
+        Initialize the fullscreen viewer.
+
+        Args:
+            image_paths: List of image file paths
+            start_index: Index of image to show first
+            output_dir: Directory for metadata lookup
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.image_paths = list(image_paths)  # Make a copy
+        self.current_index = start_index
+        self.output_dir = output_dir
+        self._show_info = True
+
+        self._setup_ui()
+        self._load_current_image()
+
+    def _setup_ui(self):
+        """Set up the fullscreen UI."""
+        # Set window flags for fullscreen
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setStyleSheet("background-color: #1a1a1a;")
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Image display label
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("background-color: #1a1a1a;")
+        self.image_label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_label.customContextMenuRequested.connect(self._show_context_menu)
+        layout.addWidget(self.image_label, stretch=1)
+
+        # Info bar at bottom
+        self.info_bar = QWidget()
+        self.info_bar.setStyleSheet("""
+            QWidget {
+                background-color: rgba(0, 0, 0, 0.7);
+                padding: 10px;
+            }
+        """)
+        self.info_bar.setFixedHeight(60)
+
+        info_layout = QHBoxLayout(self.info_bar)
+        info_layout.setContentsMargins(20, 5, 20, 5)
+
+        # Filename label
+        self.filename_label = QLabel()
+        self.filename_label.setStyleSheet("color: #ffffff; font-size: 14px;")
+        info_layout.addWidget(self.filename_label)
+
+        info_layout.addStretch()
+
+        # Counter label
+        self.counter_label = QLabel()
+        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        info_layout.addWidget(self.counter_label)
+
+        # Help hint
+        self.help_label = QLabel("← → Navigate  |  Esc Close  |  Space Toggle Info  |  C Copy Prompt")
+        self.help_label.setStyleSheet("color: #666666; font-size: 10px; margin-left: 20px;")
+        info_layout.addWidget(self.help_label)
+
+        layout.addWidget(self.info_bar)
+
+        # Navigation buttons (semi-transparent, on sides)
+        self._create_nav_buttons()
+
+    def _create_nav_buttons(self):
+        """Create navigation buttons on the sides."""
+        # Left button
+        self.left_btn = QPushButton("<", self)
+        self.left_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.3);
+                color: white;
+                border: none;
+                font-size: 30px;
+                padding: 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 158, 255, 0.5);
+            }
+        """)
+        self.left_btn.setCursor(Qt.PointingHandCursor)
+        self.left_btn.clicked.connect(self._prev_image)
+
+        # Right button
+        self.right_btn = QPushButton(">", self)
+        self.right_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.3);
+                color: white;
+                border: none;
+                font-size: 30px;
+                padding: 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 158, 255, 0.5);
+            }
+        """)
+        self.right_btn.setCursor(Qt.PointingHandCursor)
+        self.right_btn.clicked.connect(self._next_image)
+
+    def showEvent(self, event):
+        """Handle show event - go fullscreen."""
+        super().showEvent(event)
+        self.showFullScreen()
+        self._position_nav_buttons()
+
+    def resizeEvent(self, event):
+        """Handle resize to reposition nav buttons and reload image."""
+        super().resizeEvent(event)
+        self._position_nav_buttons()
+        self._load_current_image()
+
+    def _position_nav_buttons(self):
+        """Position navigation buttons on sides."""
+        btn_width = 60
+        btn_height = 100
+        margin = 20
+        center_y = (self.height() - self.info_bar.height() - btn_height) // 2
+
+        self.left_btn.setGeometry(margin, center_y, btn_width, btn_height)
+        self.right_btn.setGeometry(self.width() - margin - btn_width, center_y, btn_width, btn_height)
+
+        # Update button visibility based on index
+        self.left_btn.setVisible(self.current_index > 0)
+        self.right_btn.setVisible(self.current_index < len(self.image_paths) - 1)
+
+    def _load_current_image(self):
+        """Load and display the current image."""
+        if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
+            return
+
+        image_path = self.image_paths[self.current_index]
+
+        try:
+            ext = os.path.splitext(image_path)[1].lower()
+
+            if ext == '.exr':
+                # For EXR, show placeholder
+                self.image_label.setText("EXR Preview Not Available")
+                self.image_label.setStyleSheet("color: #666666; font-size: 24px; background-color: #1a1a1a;")
+            else:
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    # Scale to fit screen while maintaining aspect ratio
+                    available_height = self.height() - self.info_bar.height() - 40
+                    available_width = self.width() - 160  # Leave room for nav buttons
+
+                    scaled = pixmap.scaled(
+                        available_width, available_height,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self.image_label.setPixmap(scaled)
+                    self.image_label.setStyleSheet("background-color: #1a1a1a;")
+                else:
+                    self.image_label.setText("Failed to load image")
+                    self.image_label.setStyleSheet("color: #ff6666; font-size: 18px; background-color: #1a1a1a;")
+
+        except Exception as e:
+            self.image_label.setText(f"Error: {e}")
+            self.image_label.setStyleSheet("color: #ff6666; font-size: 18px; background-color: #1a1a1a;")
+
+        # Update info
+        self._update_info()
+        self._position_nav_buttons()
+
+    def _update_info(self):
+        """Update the info bar."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+
+        self.filename_label.setText(filename)
+        self.counter_label.setText(f"{self.current_index + 1} / {len(self.image_paths)}")
+
+        # Show/hide info bar
+        self.info_bar.setVisible(self._show_info)
+
+    def _next_image(self):
+        """Go to next image."""
+        if self.current_index < len(self.image_paths) - 1:
+            self.current_index += 1
+            self._load_current_image()
+
+    def _prev_image(self):
+        """Go to previous image."""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._load_current_image()
+
+    def _copy_prompt(self):
+        """Copy prompt for current image to clipboard."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+
+        try:
+            from comfyui_service import get_image_metadata
+            metadata = get_image_metadata(output_dir, filename)
+            if metadata and metadata.get('prompt'):
+                clipboard = QApplication.clipboard()
+                clipboard.setText(metadata['prompt'])
+                # Brief visual feedback
+                self.filename_label.setText(f"{filename} - Prompt copied!")
+                QTimer.singleShot(1500, self._update_info)
+            else:
+                self.filename_label.setText(f"{filename} - No prompt available")
+                QTimer.singleShot(1500, self._update_info)
+        except Exception as e:
+            print(f"Error copying prompt: {e}")
+
+    def keyPressEvent(self, event):
+        """Handle keyboard navigation."""
+        key = event.key()
+
+        if key in (Qt.Key_Right, Qt.Key_D):
+            self._next_image()
+        elif key in (Qt.Key_Left, Qt.Key_A):
+            self._prev_image()
+        elif key in (Qt.Key_Escape, Qt.Key_Q):
+            self.close()
+        elif key == Qt.Key_Home:
+            self.current_index = 0
+            self._load_current_image()
+        elif key == Qt.Key_End:
+            self.current_index = len(self.image_paths) - 1
+            self._load_current_image()
+        elif key == Qt.Key_Space:
+            self._show_info = not self._show_info
+            self._update_info()
+        elif key == Qt.Key_C:
+            self._copy_prompt()
+        elif key == Qt.Key_S:
+            self._copy_settings()
+        else:
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        """Handle mouse clicks - click on image area to close."""
+        # Only close if clicking on the dark background, not on buttons
+        if event.button() == Qt.LeftButton:
+            # Check if click is in the middle area (not on nav buttons)
+            click_x = event.pos().x()
+            margin = 100
+            if margin < click_x < self.width() - margin:
+                # Double-click to close
+                pass
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        """Double-click to close."""
+        if event.button() == Qt.LeftButton:
+            self.close()
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        self.closed.emit()
+        super().closeEvent(event)
+
+    def _show_context_menu(self, pos):
+        """Show context menu for the current image."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        menu = QMenu(self)
+
+        open_folder_action = menu.addAction("Open Containing Folder")
+        open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
+
+        menu.addSeparator()
+
+        # Copy Settings action
+        copy_settings_action = menu.addAction("Copy Settings (S)")
+        copy_settings_action.triggered.connect(self._copy_settings)
+
+        # Copy Prompt action
+        copy_prompt_action = menu.addAction("Copy Prompt (C)")
+        copy_prompt_action.triggered.connect(self._copy_prompt)
+
+        copy_path_action = menu.addAction("Copy Path")
+        copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
+
+        menu.exec_(self.image_label.mapToGlobal(pos))
+
+    def _copy_settings(self):
+        """Copy all settings for current image to the ComfyUI tab."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+
+        try:
+            from comfyui_service import get_image_metadata
+            metadata = get_image_metadata(output_dir, filename)
+            if metadata:
+                self.copy_settings_requested.emit(metadata)
+                self.filename_label.setText(f"{filename} - Settings copied!")
+                QTimer.singleShot(1500, self._update_info)
+            else:
+                self.filename_label.setText(f"{filename} - No settings available")
+                QTimer.singleShot(1500, self._update_info)
+        except Exception as e:
+            print(f"Error copying settings: {e}")
+
+    def _open_folder(self, image_path):
+        """Open the containing folder in file explorer."""
+        import subprocess
+        try:
+            subprocess.Popen(f'explorer /select,"{image_path}"')
+        except Exception as e:
+            print(f"Error opening folder: {e}")
+
+    def _copy_path(self, image_path):
+        """Copy the image path to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(image_path)
+        self.filename_label.setText(f"{os.path.basename(image_path)} - Path copied!")
+        QTimer.singleShot(1500, self._update_info)
+
+
 class GalleryThumbnailWidget(QWidget):
     """
     A thumbnail widget for the gallery that displays an image preview with filename.
-    Supports click to open, right-click context menu.
+    Supports click to open, right-click context menu with "Copy Prompt" and "Copy Settings" options.
+    Loads thumbnails asynchronously to avoid blocking the UI.
     """
     clicked = Signal(str)  # Emits the image path when clicked
+    fullscreen_requested = Signal(str)  # Emits the image path for fullscreen view
+    copy_settings_requested = Signal(dict)  # Emits metadata for copying settings to ComfyUI tab
+    deleted = Signal(str)  # Emits the image path when deleted
     THUMBNAIL_SIZE = (150, 150)
 
-    def __init__(self, image_path, parent=None):
+    def __init__(self, image_path, parent=None, output_dir=None):
         super().__init__(parent)
         self.image_path = image_path
+        self.output_dir = output_dir or os.path.dirname(image_path)
+        self._cached_metadata = None
         self._setup_ui()
-        self._load_thumbnail()
+        self._load_thumbnail_async()
+        self._update_tooltip()
 
     def _setup_ui(self):
         """Set up the widget UI."""
@@ -1785,7 +2533,7 @@ class GalleryThumbnailWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
 
-        # Thumbnail label
+        # Thumbnail label - start with loading placeholder
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
@@ -1796,6 +2544,7 @@ class GalleryThumbnailWidget(QWidget):
                 border-radius: 4px;
             }
         """)
+        self.thumbnail_label.setPixmap(self._create_placeholder("..."))
         layout.addWidget(self.thumbnail_label)
 
         # Filename label
@@ -1806,34 +2555,82 @@ class GalleryThumbnailWidget(QWidget):
         self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
         layout.addWidget(self.filename_label)
 
+        # Note indicator (small icon overlay on thumbnail)
+        self.note_indicator = QLabel(self.thumbnail_label)
+        self.note_indicator.setText("N")
+        self.note_indicator.setAlignment(Qt.AlignCenter)
+        self.note_indicator.setStyleSheet("""
+            QLabel {
+                background-color: rgba(74, 158, 255, 0.9);
+                color: white;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+        self.note_indicator.setFixedSize(18, 18)
+        self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
+        self.note_indicator.hide()
+
         # Context menu
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-    def _load_thumbnail(self):
-        """Load the thumbnail image."""
-        try:
-            ext = os.path.splitext(self.image_path)[1].lower()
+    def _load_thumbnail_async(self):
+        """Load the thumbnail image asynchronously."""
+        ext = os.path.splitext(self.image_path)[1].lower()
 
-            if ext == '.exr':
-                # For EXR, show a placeholder
-                pixmap = self._create_placeholder("EXR")
-            else:
-                pixmap = QPixmap(self.image_path)
-                if not pixmap.isNull():
-                    pixmap = pixmap.scaled(
-                        *self.THUMBNAIL_SIZE,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                else:
-                    pixmap = self._create_placeholder("?")
+        if ext == '.exr':
+            # For EXR, show a placeholder immediately (no async needed)
+            self.thumbnail_label.setPixmap(self._create_placeholder("EXR"))
+            return
 
+        # Load image on worker thread
+        worker = Worker(self._load_image_data, self.image_path)
+        worker.signals.result.connect(self._on_thumbnail_loaded)
+        worker.signals.error.connect(lambda msg, tb: self._on_thumbnail_error())
+        QThreadPool.globalInstance().start(worker)
+
+    @staticmethod
+    def _load_image_data(image_path):
+        """Load and scale image data on worker thread. Returns bytes for QPixmap."""
+        from PySide2.QtGui import QImage
+        from PySide2.QtCore import QBuffer, QIODevice
+
+        image = QImage(image_path)
+        if image.isNull():
+            return None
+
+        # Scale the image
+        scaled = image.scaled(
+            GalleryThumbnailWidget.THUMBNAIL_SIZE[0],
+            GalleryThumbnailWidget.THUMBNAIL_SIZE[1],
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        # Convert to bytes for thread-safe transfer
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        scaled.save(buffer, "PNG")
+        return buffer.data().data()
+
+    def _on_thumbnail_loaded(self, image_data):
+        """Handle thumbnail loaded from worker thread."""
+        if image_data is None:
+            self.thumbnail_label.setPixmap(self._create_placeholder("?"))
+            return
+
+        pixmap = QPixmap()
+        pixmap.loadFromData(image_data)
+        if not pixmap.isNull():
             self.thumbnail_label.setPixmap(pixmap)
+        else:
+            self.thumbnail_label.setPixmap(self._create_placeholder("?"))
 
-        except Exception as e:
-            print(f"Error loading thumbnail for {self.image_path}: {e}")
-            self.thumbnail_label.setPixmap(self._create_placeholder("!"))
+    def _on_thumbnail_error(self):
+        """Handle thumbnail loading error."""
+        self.thumbnail_label.setPixmap(self._create_placeholder("!"))
 
     def _create_placeholder(self, text):
         """Create a placeholder pixmap with text."""
@@ -1858,6 +2655,18 @@ class GalleryThumbnailWidget(QWidget):
             self.clicked.emit(self.image_path)
         super().mousePressEvent(event)
 
+    def _get_metadata(self):
+        """Get metadata for this image (cached)."""
+        if self._cached_metadata is None:
+            try:
+                from comfyui_service import get_image_metadata
+                filename = os.path.basename(self.image_path)
+                self._cached_metadata = get_image_metadata(self.output_dir, filename) or {}
+            except Exception as e:
+                print(f"Error loading metadata for {self.image_path}: {e}")
+                self._cached_metadata = {}
+        return self._cached_metadata
+
     def _show_context_menu(self, pos):
         """Show context menu for the thumbnail."""
         menu = QMenu(self)
@@ -1865,15 +2674,60 @@ class GalleryThumbnailWidget(QWidget):
         open_action = menu.addAction("Open in Viewer")
         open_action.triggered.connect(lambda: self._open_image())
 
+        fullscreen_action = menu.addAction("View Fullscreen")
+        fullscreen_action.triggered.connect(lambda: self.fullscreen_requested.emit(self.image_path))
+
+        edit_action = menu.addAction("Edit Item")
+        edit_action.triggered.connect(self._edit_item)
+
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder())
 
         menu.addSeparator()
 
+        # Copy Settings action (copy all ComfyUI settings from this image)
+        metadata = self._get_metadata()
+        has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
+        copy_settings_action = menu.addAction("Copy Settings")
+        copy_settings_action.triggered.connect(lambda: self._copy_settings())
+        copy_settings_action.setEnabled(has_settings)
+        if not has_settings:
+            copy_settings_action.setText("Copy Settings (none)")
+
+        # Copy Prompt action (only enabled if metadata has prompt)
+        prompt = metadata.get('prompt', '')
+        copy_prompt_action = menu.addAction("Copy Prompt")
+        copy_prompt_action.triggered.connect(lambda: self._copy_prompt())
+        copy_prompt_action.setEnabled(bool(prompt))
+        if not prompt:
+            copy_prompt_action.setText("Copy Prompt (none)")
+
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path())
 
+        menu.addSeparator()
+
+        # Delete action
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self._delete_item)
+
         menu.exec_(self.mapToGlobal(pos))
+
+    def _copy_settings(self):
+        """Copy all ComfyUI settings from this image to the ComfyUI tab."""
+        metadata = self._get_metadata()
+        if metadata:
+            self.copy_settings_requested.emit(metadata)
+            print(f"Copying settings from image: {os.path.basename(self.image_path)}")
+
+    def _copy_prompt(self):
+        """Copy the prompt used to generate this image to clipboard."""
+        metadata = self._get_metadata()
+        prompt = metadata.get('prompt', '')
+        if prompt:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(prompt)
+            print(f"Copied prompt to clipboard: {prompt[:50]}...")
 
     def _open_image(self):
         """Open the image with the default viewer."""
@@ -1896,6 +2750,732 @@ class GalleryThumbnailWidget(QWidget):
         """Copy the image path to clipboard."""
         clipboard = QApplication.clipboard()
         clipboard.setText(self.image_path)
+
+    def _delete_item(self):
+        """Delete this item from disk after confirmation."""
+        from PySide2.QtWidgets import QMessageBox
+
+        filename = os.path.basename(self.image_path)
+
+        # Find the main window safely for dialog parent
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        reply = QMessageBox.question(
+            parent_window,
+            "Delete Item",
+            f"Are you sure you want to delete '{filename}'?\n\nThis will permanently delete the file from disk.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                os.remove(self.image_path)
+                print(f"Deleted file: {self.image_path}")
+                # Emit signal so gallery can refresh
+                self.deleted.emit(self.image_path)
+                # Remove this widget from its parent layout
+                self.setParent(None)
+                self.deleteLater()
+            except Exception as e:
+                print(f"Error deleting file: {e}")
+                QMessageBox.critical(
+                    parent_window,
+                    "Delete Error",
+                    f"Could not delete file:\n{e}"
+                )
+
+    def _edit_item(self):
+        """Open the edit item dialog to add/edit notes."""
+        try:
+            # Find the main window safely
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+
+            dialog = EditItemDialog(self.image_path, self.output_dir, parent_window)
+            if dialog.exec_() == QDialog.Accepted:
+                # Update tooltip to show note
+                self._update_tooltip()
+        except Exception as e:
+            print(f"Error opening edit item dialog: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _update_tooltip(self):
+        """Update the widget tooltip with item info including note."""
+        try:
+            from comfyui_service import get_model_note
+            filename = os.path.basename(self.image_path)
+            note = get_model_note(self.output_dir, filename)
+
+            # Build tooltip
+            tooltip_parts = [filename]
+            if note:
+                tooltip_parts.append(f"\nNote: {note}")
+                self.note_indicator.show()
+            else:
+                self.note_indicator.hide()
+
+            self.setToolTip("\n".join(tooltip_parts))
+        except Exception as e:
+            print(f"Error updating tooltip: {e}")
+            self.note_indicator.hide()
+
+
+class EditItemDialog(QDialog):
+    """
+    Dialog for editing gallery item notes (images).
+
+    Allows users to add or edit notes/descriptions for images.
+    """
+
+    def __init__(self, item_path: str, output_dir: str, parent=None):
+        super().__init__(parent)
+        self.item_path = item_path
+        self.output_dir = output_dir
+        self._setup_ui()
+        self._load_note()
+
+    def _setup_ui(self):
+        """Set up the dialog UI."""
+        filename = os.path.basename(self.item_path)
+        self.setWindowTitle(f"Edit Item - {filename}")
+        self.setMinimumSize(400, 300)
+        self.resize(450, 350)
+        self.setModal(True)
+
+        # Apply dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e22;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 12px;
+            }
+            QPlainTextEdit {
+                background-color: #2c313a;
+                color: #e0e0e0;
+                border: 1px solid #3c414b;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            QPlainTextEdit:focus {
+                border-color: #4a9eff;
+            }
+            QPushButton {
+                background-color: #3c414b;
+                color: #e0e0e0;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #4a5160;
+            }
+            QPushButton:pressed {
+                background-color: #2a2e36;
+            }
+            QPushButton[primary="true"] {
+                background-color: #4a9eff;
+                color: white;
+            }
+            QPushButton[primary="true"]:hover {
+                background-color: #6ab0ff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Item name
+        name_label = QLabel(f"Item: {os.path.basename(self.item_path)}")
+        name_label.setStyleSheet("font-weight: bold; color: #4a9eff;")
+        layout.addWidget(name_label)
+
+        # Note label
+        note_label = QLabel("Note:")
+        layout.addWidget(note_label)
+
+        # Note text edit
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlaceholderText("Add a note or description for this item...")
+        layout.addWidget(self.note_edit)
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setProperty("primary", True)
+        self.save_btn.clicked.connect(self._save_note)
+        button_layout.addWidget(self.save_btn)
+
+        layout.addLayout(button_layout)
+
+    def _load_note(self):
+        """Load existing note for this item."""
+        try:
+            from comfyui_service import get_model_note
+            filename = os.path.basename(self.item_path)
+            note = get_model_note(self.output_dir, filename)
+            self.note_edit.setPlainText(note)
+        except Exception as e:
+            print(f"Error loading item note: {e}")
+
+    def _save_note(self):
+        """Save the note and close the dialog."""
+        try:
+            from comfyui_service import set_model_note
+            filename = os.path.basename(self.item_path)
+            note = self.note_edit.toPlainText()
+            if set_model_note(self.output_dir, filename, note):
+                print(f"Saved note for {filename}")
+                self.accept()
+            else:
+                print(f"Failed to save note for {filename}")
+                self.reject()
+        except Exception as e:
+            print(f"Error saving item note: {e}")
+            self.reject()
+
+    def get_note(self) -> str:
+        """Get the current note text."""
+        return self.note_edit.toPlainText()
+
+
+class EditModelDialog(QDialog):
+    """
+    Dialog for editing model notes.
+
+    Allows users to add or edit notes/descriptions for 3D models.
+    """
+
+    def __init__(self, model_path: str, output_dir: str, parent=None):
+        super().__init__(parent)
+        self.model_path = model_path
+        self.output_dir = output_dir
+        self._setup_ui()
+        self._load_note()
+
+    def _setup_ui(self):
+        """Set up the dialog UI."""
+        filename = os.path.basename(self.model_path)
+        self.setWindowTitle(f"Edit Model - {filename}")
+        self.setMinimumSize(400, 300)
+        self.resize(450, 350)
+        self.setModal(True)
+
+        # Apply dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e22;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 12px;
+            }
+            QPlainTextEdit {
+                background-color: #2c313a;
+                color: #e0e0e0;
+                border: 1px solid #3c414b;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            QPlainTextEdit:focus {
+                border-color: #4a9eff;
+            }
+            QPushButton {
+                background-color: #3c414b;
+                color: #e0e0e0;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #4a5160;
+            }
+            QPushButton:pressed {
+                background-color: #2a2e36;
+            }
+            QPushButton[primary="true"] {
+                background-color: #4a9eff;
+                color: white;
+            }
+            QPushButton[primary="true"]:hover {
+                background-color: #6ab0ff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Model name
+        name_label = QLabel(f"Model: {os.path.basename(self.model_path)}")
+        name_label.setStyleSheet("font-weight: bold; color: #4a9eff;")
+        layout.addWidget(name_label)
+
+        # Note label
+        note_label = QLabel("Note:")
+        layout.addWidget(note_label)
+
+        # Note text edit
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlaceholderText("Add a note or description for this model...")
+        layout.addWidget(self.note_edit)
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setProperty("primary", True)
+        self.save_btn.clicked.connect(self._save_note)
+        button_layout.addWidget(self.save_btn)
+
+        layout.addLayout(button_layout)
+
+    def _load_note(self):
+        """Load existing note for this model."""
+        try:
+            from comfyui_service import get_model_note
+            filename = os.path.basename(self.model_path)
+            note = get_model_note(self.output_dir, filename)
+            self.note_edit.setPlainText(note)
+        except Exception as e:
+            print(f"Error loading model note: {e}")
+
+    def _save_note(self):
+        """Save the note and close the dialog."""
+        try:
+            from comfyui_service import set_model_note
+            filename = os.path.basename(self.model_path)
+            note = self.note_edit.toPlainText()
+            if set_model_note(self.output_dir, filename, note):
+                print(f"Saved note for {filename}")
+                self.accept()
+            else:
+                print(f"Failed to save note for {filename}")
+                self.reject()
+        except Exception as e:
+            print(f"Error saving model note: {e}")
+            self.reject()
+
+    def get_note(self) -> str:
+        """Get the current note text."""
+        return self.note_edit.toPlainText()
+
+
+class GLBThumbnailWidget(QWidget):
+    """
+    A thumbnail widget for GLB/GLTF 3D models in the gallery.
+    Displays a rendered preview with filename. Click to open 3D viewer.
+    """
+    clicked = Signal(str)  # Emits the model path when clicked
+    deleted = Signal(str)  # Emits the model path when deleted
+    THUMBNAIL_SIZE = (150, 150)
+
+    def __init__(self, model_path, parent=None, output_dir=None):
+        super().__init__(parent)
+        self.model_path = model_path
+        self.output_dir = output_dir or os.path.dirname(model_path)
+        self._thumbnail_loading = False
+        self._cached_metadata = None
+        self._setup_ui()
+        self._load_thumbnail()
+        self._update_tooltip()
+
+    def _setup_ui(self):
+        """Set up the widget UI."""
+        self.setFixedSize(self.THUMBNAIL_SIZE[0] + 10, self.THUMBNAIL_SIZE[1] + 30)
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+
+        # Thumbnail label
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
+        self.thumbnail_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_label.setStyleSheet("""
+            QLabel {
+                background-color: #2c313a;
+                border: 2px solid #4a9eff;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.thumbnail_label)
+
+        # Filename label
+        self.filename_label = QLabel(os.path.basename(self.model_path))
+        self.filename_label.setAlignment(Qt.AlignCenter)
+        self.filename_label.setStyleSheet("color: #4a9eff; font-size: 10px;")
+        self.filename_label.setWordWrap(True)
+        self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
+        layout.addWidget(self.filename_label)
+
+        # Note indicator (small icon overlay on thumbnail)
+        self.note_indicator = QLabel(self.thumbnail_label)
+        self.note_indicator.setText("N")
+        self.note_indicator.setAlignment(Qt.AlignCenter)
+        self.note_indicator.setStyleSheet("""
+            QLabel {
+                background-color: rgba(74, 158, 255, 0.9);
+                color: white;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+        self.note_indicator.setFixedSize(18, 18)
+        self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
+        self.note_indicator.hide()
+
+        # Context menu
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _load_thumbnail(self):
+        """Load or generate the thumbnail asynchronously."""
+        # First, try to load from cache (instant)
+        try:
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            service = get_glb_thumbnail_service()
+            cached = service.get_cached_thumbnail(self.model_path)
+            if cached and not cached.isNull():
+                self.thumbnail_label.setPixmap(cached.scaled(
+                    *self.THUMBNAIL_SIZE,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                ))
+                return
+        except Exception as e:
+            print(f"Error loading cached GLB thumbnail: {e}")
+
+        # Show placeholder and start async generation
+        self.thumbnail_label.setPixmap(self._create_placeholder("3D"))
+        self._generate_thumbnail_async()
+
+    def _generate_thumbnail_async(self):
+        """Generate thumbnail on a worker thread using subprocess."""
+        if self._thumbnail_loading:
+            return
+
+        # Check if already pending in service
+        try:
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            service = get_glb_thumbnail_service()
+            if service.is_pending(self.model_path):
+                return
+            service.set_pending(self.model_path, True)
+        except Exception:
+            pass
+
+        self._thumbnail_loading = True
+
+        from PySide2.QtCore import QThreadPool
+
+        try:
+            worker = Worker(self._generate_thumbnail_sync)
+            worker.signals.result.connect(self._on_thumbnail_generated)
+            worker.signals.error.connect(self._on_thumbnail_error)
+            QThreadPool.globalInstance().start(worker)
+        except Exception as e:
+            print(f"Error starting thumbnail worker: {e}")
+            self._thumbnail_loading = False
+            try:
+                service.set_pending(self.model_path, False)
+            except Exception:
+                pass
+
+    def _generate_thumbnail_sync(self):
+        """Generate thumbnail synchronously (runs on worker thread via subprocess)."""
+        from glb_thumbnail_service import get_glb_thumbnail_service
+        service = get_glb_thumbnail_service()
+        # This uses subprocess to render, avoiding OpenGL conflicts with Qt
+        return service.generate_thumbnail_sync(self.model_path)
+
+    def _on_thumbnail_generated(self, pixmap):
+        """Handle generated thumbnail."""
+        self._thumbnail_loading = False
+        # Clear pending state
+        try:
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            service = get_glb_thumbnail_service()
+            service.set_pending(self.model_path, False)
+        except Exception:
+            pass
+
+        if pixmap and not pixmap.isNull():
+            self.thumbnail_label.setPixmap(pixmap.scaled(
+                *self.THUMBNAIL_SIZE,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            ))
+
+    def _on_thumbnail_error(self, error_msg, traceback_str):
+        """Handle thumbnail generation error."""
+        self._thumbnail_loading = False
+        # Clear pending state
+        try:
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            service = get_glb_thumbnail_service()
+            service.set_pending(self.model_path, False)
+        except Exception:
+            pass
+        print(f"GLB thumbnail error: {error_msg}")
+
+    def _create_placeholder(self, text):
+        """Create a placeholder pixmap with text and 3D icon."""
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(QColor("#2a3040"))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw a simple 3D cube icon
+        painter.setPen(QPen(QColor("#4a9eff"), 2))
+        center_x, center_y = 75, 65
+        size = 30
+
+        # Front face
+        painter.drawRect(center_x - size//2, center_y - size//2, size, size)
+
+        # Top face (parallelogram)
+        offset = 12
+        painter.drawLine(center_x - size//2, center_y - size//2,
+                        center_x - size//2 + offset, center_y - size//2 - offset)
+        painter.drawLine(center_x + size//2, center_y - size//2,
+                        center_x + size//2 + offset, center_y - size//2 - offset)
+        painter.drawLine(center_x - size//2 + offset, center_y - size//2 - offset,
+                        center_x + size//2 + offset, center_y - size//2 - offset)
+
+        # Right face (parallelogram)
+        painter.drawLine(center_x + size//2, center_y + size//2,
+                        center_x + size//2 + offset, center_y + size//2 - offset)
+        painter.drawLine(center_x + size//2 + offset, center_y - size//2 - offset,
+                        center_x + size//2 + offset, center_y + size//2 - offset)
+
+        # Draw text
+        painter.setPen(QColor("#888888"))
+        font = painter.font()
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 30, Qt.AlignCenter, text)
+        painter.end()
+
+        return pixmap
+
+    def mousePressEvent(self, event):
+        """Handle mouse press to open 3D viewer."""
+        if event.button() == Qt.LeftButton:
+            self._open_viewer()
+        super().mousePressEvent(event)
+
+    def _get_metadata(self):
+        """Get metadata for this model (cached)."""
+        if self._cached_metadata is None:
+            try:
+                from comfyui_service import get_image_metadata
+                filename = os.path.basename(self.model_path)
+                self._cached_metadata = get_image_metadata(self.output_dir, filename) or {}
+            except Exception as e:
+                print(f"Error loading metadata for {self.model_path}: {e}")
+                self._cached_metadata = {}
+        return self._cached_metadata
+
+    def _show_context_menu(self, pos):
+        """Show context menu for the thumbnail."""
+        menu = QMenu(self)
+
+        open_action = menu.addAction("Open 3D Viewer")
+        open_action.triggered.connect(self._open_viewer)
+
+        edit_action = menu.addAction("Edit Model")
+        edit_action.triggered.connect(self._edit_model)
+
+        open_folder_action = menu.addAction("Open Containing Folder")
+        open_folder_action.triggered.connect(self._open_folder)
+
+        menu.addSeparator()
+
+        # Copy Prompt action (only enabled if metadata has prompt)
+        metadata = self._get_metadata()
+        prompt = metadata.get('prompt', '')
+        copy_prompt_action = menu.addAction("Copy Prompt")
+        copy_prompt_action.triggered.connect(self._copy_prompt)
+        copy_prompt_action.setEnabled(bool(prompt))
+        if not prompt:
+            copy_prompt_action.setText("Copy Prompt (none)")
+
+        copy_path_action = menu.addAction("Copy Path")
+        copy_path_action.triggered.connect(self._copy_path)
+
+        regen_action = menu.addAction("Regenerate Thumbnail")
+        regen_action.triggered.connect(self._regenerate_thumbnail)
+
+        menu.addSeparator()
+
+        # Delete action
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self._delete_model)
+
+        menu.exec_(self.mapToGlobal(pos))
+
+    def _copy_prompt(self):
+        """Copy the prompt used to generate this model to clipboard."""
+        metadata = self._get_metadata()
+        prompt = metadata.get('prompt', '')
+        if prompt:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(prompt)
+            print(f"Copied prompt to clipboard: {prompt[:50]}...")
+
+    def _delete_model(self):
+        """Delete this model from disk after confirmation."""
+        from PySide2.QtWidgets import QMessageBox
+
+        filename = os.path.basename(self.model_path)
+
+        # Find the main window safely for dialog parent
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        reply = QMessageBox.question(
+            parent_window,
+            "Delete Model",
+            f"Are you sure you want to delete '{filename}'?\n\nThis will permanently delete the file from disk.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                os.remove(self.model_path)
+                print(f"Deleted file: {self.model_path}")
+                # Emit signal so gallery can refresh
+                self.deleted.emit(self.model_path)
+                # Remove this widget from its parent layout
+                self.setParent(None)
+                self.deleteLater()
+            except Exception as e:
+                print(f"Error deleting file: {e}")
+                QMessageBox.critical(
+                    parent_window,
+                    "Delete Error",
+                    f"Could not delete file:\n{e}"
+                )
+
+    def _edit_model(self):
+        """Open the edit model dialog to add/edit notes."""
+        try:
+            # Find the main window safely
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+
+            dialog = EditModelDialog(self.model_path, self.output_dir, parent_window)
+            if dialog.exec_() == QDialog.Accepted:
+                # Update tooltip to show note
+                self._update_tooltip()
+        except Exception as e:
+            print(f"Error opening edit model dialog: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _update_tooltip(self):
+        """Update the widget tooltip with model info including note."""
+        try:
+            from comfyui_service import get_model_note
+            filename = os.path.basename(self.model_path)
+            note = get_model_note(self.output_dir, filename)
+
+            # Build tooltip
+            tooltip_parts = [filename]
+            if note:
+                tooltip_parts.append(f"\nNote: {note}")
+                self.note_indicator.show()
+            else:
+                self.note_indicator.hide()
+
+            self.setToolTip("\n".join(tooltip_parts))
+        except Exception as e:
+            print(f"Error updating tooltip: {e}")
+            self.note_indicator.hide()
+
+    def _open_viewer(self):
+        """Open the 3D model viewer dialog."""
+        try:
+            from glb_viewer import GLBViewerDialog
+            from PySide2.QtWidgets import QApplication
+
+            # Find the main window safely
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+
+            dialog = GLBViewerDialog(self.model_path, parent_window)
+            dialog.exec_()
+        except ImportError as e:
+            print(f"GLB viewer not available: {e}")
+        except Exception as e:
+            print(f"Error opening 3D viewer: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _open_folder(self):
+        """Open the containing folder in file explorer."""
+        import subprocess
+        try:
+            subprocess.Popen(f'explorer /select,"{self.model_path}"')
+        except Exception as e:
+            print(f"Error opening folder: {e}")
+
+    def _copy_path(self):
+        """Copy the model path to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.model_path)
+
+    def _regenerate_thumbnail(self):
+        """Clear cache and regenerate thumbnail."""
+        try:
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            service = get_glb_thumbnail_service()
+            service.clear_cache(self.model_path)
+            self.thumbnail_label.setPixmap(self._create_placeholder("3D"))
+            self._generate_thumbnail_async()
+        except Exception as e:
+            print(f"Error regenerating thumbnail: {e}")
 
 
 def enhance_ui(parent_widget):

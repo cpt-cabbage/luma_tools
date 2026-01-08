@@ -1,29 +1,35 @@
 {
   "comfyui_workflow_presets": {
-    "Qwen Image Edit 2511": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511.json",
-      "description": "",
-      "iteratable": true
-    },
-    "Trellis 2": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Trellis2.json",
-      "description": "",
-      "iteratable": false
-    },
     "Hy-Motion": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Hy_Motion.json",
       "description": "",
       "iteratable": false
+    },
+    "Qwen\\Qwen Image Edit 2511 HQ": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511_HQ.json",
+      "description": "",
+      "iteratable": true
+    },
+    "Trellis\\Trellis-Ultramesh": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis-Ultramesh.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Work in progress"
+    },
+    "Qwen/Qwen Image Edit 2511 LQ": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511.json",
+      "description": "",
+      "iteratable": true
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",
   "comfyui_mode": "embedded",
   "comfyui_python_path": "C:\\ComfyUi\\Comfy_Ui_Data\\.venv\\Scripts\\python.exe",
   "admin_users": [
-    "christophe.leyder",
     "neill.vermaak",
     "mark.zimmer",
-    "bruce.mclaren"
+    "bruce.mclaren",
+    "christophe.leyder"
   ],
   "comfyui_network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
   "comfyui_use_user_subfolder": true,

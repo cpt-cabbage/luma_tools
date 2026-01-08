@@ -13,16 +13,16 @@ from PySide2.QtSvg import QSvgRenderer
 ICONS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icons")
 
 
-# Tab accent colors - vibrant & neon premium palette
+# Tab accent colors - monochromatic with blue accent
 TAB_COLORS = {
-    "pass_builder": "#00e5ff",  # Electric Cyan
-    "mp4_maker": "#bf5af2",     # Vibrant Purple
-    "republish": "#32d74b",     # Pulse Green
-    "shot_cleaner": "#ff9f0a",  # Radiant Amber
-    "logs": "#64d2ff",          # Sky Blue
-    "comfyui": "#ff375f",       # Neon Pink
-    "comfyui_gallery": "#ec4899",  # Hot Pink
-    "settings": "#8e8e93",      # Pro Slate
+    "pass_builder": "#4a9eff",  # Blue Accent (primary)
+    "mp4_maker": "#9fa5b0",     # Slate Gray
+    "republish": "#9fa5b0",     # Slate Gray
+    "shot_cleaner": "#9fa5b0",  # Slate Gray
+    "logs": "#9fa5b0",          # Slate Gray
+    "comfyui": "#4a9eff",       # Blue Accent (AI feature)
+    "comfyui_gallery": "#9fa5b0",  # Slate Gray
+    "settings": "#797e89",      # Dim Gray
 }
 
 # Status colors - Apple-style Vibrant

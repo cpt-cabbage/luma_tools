@@ -10,6 +10,8 @@ Two modes of operation:
    - User must manually start ComfyUI on the farm node before submitting jobs
    - Models stay loaded in GPU memory between job submissions
    - Much faster since no model loading overhead per job
+
+Logs are written to ~/.luma_tools/logs/comfyui_runner_<timestamp>.log
 """
 
 import sys
@@ -17,12 +19,117 @@ import os
 import json
 import time
 import copy
+import uuid
 import urllib.request
 import urllib.error
 import subprocess
 import argparse
 import signal
 import threading
+from datetime import datetime
+
+# Try to import websocket for real-time progress
+WEBSOCKET_AVAILABLE = False
+try:
+    import websocket
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    # Try to install websocket-client automatically
+    print("websocket-client not found, attempting to install...", flush=True)
+    try:
+        import subprocess as _sp
+        _result = _sp.run(
+            [sys.executable, '-m', 'pip', 'install', 'websocket-client', '--quiet'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if _result.returncode == 0:
+            import websocket
+            WEBSOCKET_AVAILABLE = True
+            print("Successfully installed websocket-client", flush=True)
+        else:
+            print(f"Failed to install websocket-client: {_result.stderr}", flush=True)
+    except Exception as _e:
+        print(f"Could not auto-install websocket-client: {_e}", flush=True)
+
+
+# ============================================================================
+# LOGGING SETUP - Tee stdout/stderr to log file
+# ============================================================================
+
+class TeeWriter:
+    """
+    Writes to both the original stream and a log file.
+    This captures all print() output without modifying existing code.
+    """
+
+    def __init__(self, original_stream, log_file):
+        self.original_stream = original_stream
+        self.log_file = log_file
+        self.timestamp_next = True
+
+    def write(self, message):
+        # Write to original stream (stdout/stderr for Deadline)
+        self.original_stream.write(message)
+
+        # Write to log file with timestamp for non-empty lines
+        if message.strip():
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.log_file.write(f"{timestamp} | {message}")
+            if not message.endswith('\n'):
+                self.log_file.write('\n')
+        elif message == '\n':
+            self.log_file.write('\n')
+
+        self.log_file.flush()
+
+    def flush(self):
+        self.original_stream.flush()
+        self.log_file.flush()
+
+
+def setup_logging(job_name: str = None) -> str:
+    """
+    Set up file logging by redirecting stdout/stderr to also write to a log file.
+
+    Args:
+        job_name: Optional job name to include in log filename
+
+    Returns:
+        Path to the log file
+    """
+    # Create logs directory in user's .luma_tools folder
+    log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create timestamped log filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if job_name:
+        # Sanitize job name for filename
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)[:50]
+        log_filename = f"comfyui_runner_{safe_name}_{timestamp}.log"
+    else:
+        log_filename = f"comfyui_runner_{timestamp}.log"
+
+    log_path = os.path.join(log_dir, log_filename)
+
+    # Open log file and set up tee writers
+    log_file = open(log_path, 'w', encoding='utf-8')
+
+    # Write header
+    log_file.write(f"{'='*60}\n")
+    log_file.write(f"ComfyUI Runner Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    log_file.write(f"{'='*60}\n\n")
+    log_file.flush()
+
+    # Redirect stdout and stderr to tee writers
+    sys.stdout = TeeWriter(sys.__stdout__, log_file)
+    sys.stderr = TeeWriter(sys.__stderr__, log_file)
+
+    print(f"Log file: {log_path}")
+
+    return log_path
 
 
 def check_server_running(port: int, timeout: int = 5) -> bool:
@@ -272,8 +379,328 @@ def download_image_from_server(filename: str, subfolder: str, image_type: str, p
         return None
 
 
-def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_dir: str = None) -> bool:
-    """Wait for workflow execution to complete.
+def move_output_files(comfyui_output_dir: str, target_dir: str, filename_prefix: str,
+                      extensions: tuple = ('.glb', '.gltf', '.fbx', '.obj'),
+                      recent_minutes: int = 10) -> list:
+    """
+    Move output files from ComfyUI's default output directory to our target directory.
+
+    Some ComfyUI nodes (like Trellis2ExportGLB, UltraShapeSaveGLB) save to the default
+    output folder or subdirectories without an option to specify a custom path. This
+    function finds and moves those files after workflow completion.
+
+    Files are renamed to include the job prefix for better identification.
+
+    Args:
+        comfyui_output_dir: ComfyUI's default output directory
+        target_dir: Our target directory to move files to
+        filename_prefix: Prefix for renamed files (e.g., 'sh0010_luma_tools')
+        extensions: File extensions to look for (default: 3D model formats)
+        recent_minutes: Only move files modified within this many minutes (default: 10)
+
+    Returns:
+        List of moved file paths in target directory
+    """
+    import shutil
+    import glob
+
+    moved_files = []
+
+    if not comfyui_output_dir or not os.path.isdir(comfyui_output_dir):
+        print(f"[move_output_files] Output dir doesn't exist: {comfyui_output_dir}")
+        return moved_files
+
+    if not target_dir:
+        print(f"[move_output_files] No target dir specified")
+        return moved_files
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Calculate cutoff time for "recent" files
+    cutoff_time = time.time() - (recent_minutes * 60)
+
+    print(f"[move_output_files] Searching for {extensions} in {comfyui_output_dir}")
+    print(f"[move_output_files] Target prefix: {filename_prefix}")
+    print(f"[move_output_files] Looking for files modified in last {recent_minutes} minutes")
+
+    # Find ALL files with matching extensions (not just by prefix)
+    # This handles cases where nodes use their own prefixes (like "refined_" or "trellis2_")
+    all_matches = []
+    for ext in extensions:
+        # Top-level search first
+        top_pattern = os.path.join(comfyui_output_dir, f"*{ext}")
+        top_matches = glob.glob(top_pattern)
+        all_matches.extend(top_matches)
+        print(f"[move_output_files] Top-level {ext}: found {len(top_matches)} files")
+
+        # Recursive search in subdirectories
+        recursive_pattern = os.path.join(comfyui_output_dir, "**", f"*{ext}")
+        recursive_matches = glob.glob(recursive_pattern, recursive=True)
+        all_matches.extend(recursive_matches)
+        print(f"[move_output_files] Recursive {ext}: found {len(recursive_matches)} files")
+
+    # Remove duplicates and filter to recent files only
+    all_matches = list(set(all_matches))
+    recent_files = []
+    for file_path in all_matches:
+        try:
+            mtime = os.path.getmtime(file_path)
+            if mtime > cutoff_time:
+                recent_files.append((file_path, mtime))
+        except Exception as e:
+            print(f"[move_output_files] Error checking {file_path}: {e}")
+
+    # Sort by modification time (most recent first)
+    recent_files.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"[move_output_files] Found {len(recent_files)} recent files out of {len(all_matches)} total")
+    for file_path, mtime in recent_files:
+        age = int((time.time() - mtime) / 60)
+        print(f"  - {os.path.basename(file_path)} ({age} min ago)")
+
+    # Move each recent file with a renamed prefix
+    for src_path, mtime in recent_files:
+        original_filename = os.path.basename(src_path)
+        ext = os.path.splitext(original_filename)[1]
+
+        # Create new filename with our prefix
+        # Keep original name parts after the node's prefix for identification
+        # Format: {our_prefix}_{original_filename}
+        new_filename = f"{filename_prefix}_{original_filename}"
+        dest_path = os.path.join(target_dir, new_filename)
+
+        # Handle duplicate filenames by adding a counter
+        counter = 1
+        while os.path.exists(dest_path):
+            base = os.path.splitext(new_filename)[0]
+            new_filename = f"{base}_{counter}{ext}"
+            dest_path = os.path.join(target_dir, new_filename)
+            counter += 1
+
+        try:
+            # Check if file is still being written (wait for stable size)
+            initial_size = os.path.getsize(src_path)
+            time.sleep(0.5)
+            final_size = os.path.getsize(src_path)
+
+            if initial_size != final_size:
+                print(f"[move_output_files] File still being written, waiting: {original_filename}")
+                time.sleep(2)
+
+            shutil.move(src_path, dest_path)
+            print(f"[move_output_files] Moved: {original_filename} -> {new_filename}")
+            moved_files.append(dest_path)
+        except Exception as e:
+            print(f"[move_output_files] Failed to move {original_filename}: {e}")
+
+    return moved_files
+
+
+def check_history_for_completion(prompt_id: str, port: int) -> dict:
+    """Check history endpoint to see if prompt completed.
+
+    Returns:
+        dict with 'status' ('success', 'error', 'pending') and optional 'outputs'
+    """
+    history_url = f"http://127.0.0.1:{port}/history/{prompt_id}"
+    try:
+        response = urllib.request.urlopen(history_url, timeout=5)
+        history = json.loads(response.read().decode('utf-8'))
+
+        if prompt_id in history:
+            prompt_data = history[prompt_id]
+            status_data = prompt_data.get('status', {})
+            outputs = prompt_data.get('outputs', {})
+
+            if status_data.get('status_str') == 'success' or outputs:
+                return {'status': 'success', 'outputs': outputs}
+            elif status_data.get('status_str') == 'error':
+                return {'status': 'error', 'messages': status_data.get('messages', [])}
+
+        return {'status': 'pending'}
+    except Exception:
+        return {'status': 'pending'}
+
+
+def wait_for_completion_websocket(prompt_id: str, port: int, timeout: int = 3600, output_dir: str = None) -> bool:
+    """Wait for workflow execution using WebSocket for progress + HTTP polling for completion.
+
+    Args:
+        prompt_id: The prompt ID to wait for
+        port: ComfyUI server port
+        timeout: Timeout in seconds
+        output_dir: If provided, download output images to this directory
+
+    Returns:
+        True if workflow completed successfully
+    """
+    ws_url = f"ws://127.0.0.1:{port}/ws?clientId={uuid.uuid4()}"
+
+    result = {'success': None, 'error': None, 'outputs': {}}
+    start_time = time.time()
+    current_node = {'id': None}
+    last_progress = {'value': 0, 'max': 0}
+
+    def on_message(ws, message):
+        nonlocal result, current_node, last_progress
+        try:
+            data = json.loads(message)
+            msg_type = data.get('type')
+
+            if msg_type == 'status':
+                status_data = data.get('data', {}).get('status', {})
+                exec_info = status_data.get('exec_info', {})
+                queue_remaining = exec_info.get('queue_remaining', 0)
+                if queue_remaining > 0:
+                    elapsed = int(time.time() - start_time)
+                    print(f"Queue: {queue_remaining} remaining ({elapsed}s)", flush=True)
+
+            elif msg_type == 'execution_start':
+                exec_data = data.get('data', {})
+                recv_prompt_id = exec_data.get('prompt_id')
+                if recv_prompt_id == prompt_id:
+                    print(f"Execution started", flush=True)
+
+            elif msg_type == 'executing':
+                exec_data = data.get('data', {})
+                recv_prompt_id = exec_data.get('prompt_id')
+                node_id = exec_data.get('node')
+                if recv_prompt_id == prompt_id:
+                    if node_id is None:
+                        elapsed = int(time.time() - start_time)
+                        print(f"Execution completed in {elapsed}s", flush=True)
+                        result['success'] = True
+                        ws.close()
+                    else:
+                        current_node['id'] = node_id
+                        elapsed = int(time.time() - start_time)
+                        print(f"Executing node {node_id}... ({elapsed}s)", flush=True)
+                        last_progress = {'value': 0, 'max': 0}
+
+            elif msg_type == 'progress':
+                prog_data = data.get('data', {})
+                value = prog_data.get('value', 0)
+                max_val = prog_data.get('max', 100)
+                if max_val > 0:
+                    pct = int(100 * value / max_val)
+                    last_pct = int(100 * last_progress['value'] / max(last_progress['max'], 1))
+                    if pct >= last_pct + 10 or value == max_val:
+                        elapsed = int(time.time() - start_time)
+                        print(f"  Progress: {pct}% ({value}/{max_val}) ({elapsed}s)", flush=True)
+                        last_progress = {'value': value, 'max': max_val}
+
+            elif msg_type == 'executed':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    node_id = exec_data.get('node')
+                    output = exec_data.get('output', {})
+                    result['outputs'][node_id] = output
+                    if 'images' in output:
+                        for img in output['images']:
+                            print(f"  Output: {img.get('filename', 'unknown')}", flush=True)
+                    if 'gltf' in output or 'glb' in output:
+                        for item in output.get('gltf', []) + output.get('glb', []):
+                            print(f"  Output 3D: {item.get('filename', 'unknown')}", flush=True)
+
+            elif msg_type == 'execution_cached':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    nodes = exec_data.get('nodes', [])
+                    if nodes:
+                        print(f"Cached: {len(nodes)} node(s)", flush=True)
+
+            elif msg_type == 'execution_error':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    error = exec_data.get('exception_message', 'Unknown error')
+                    node_id = exec_data.get('node_id')
+                    node_type = exec_data.get('node_type')
+                    print(f"ERROR in node {node_id} ({node_type}): {error}", flush=True)
+                    result['error'] = error
+                    result['success'] = False
+                    ws.close()
+
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            print(f"WebSocket message error: {e}", flush=True)
+
+    def on_error(ws, error):
+        print(f"WebSocket error: {error}", flush=True)
+
+    def on_close(ws, close_status_code, close_msg):
+        pass  # Don't treat close as error - we also poll HTTP
+
+    def on_open(ws):
+        print(f"Connected to ComfyUI WebSocket", flush=True)
+
+    ws = websocket.WebSocketApp(
+        ws_url,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+
+    ws_thread = threading.Thread(target=lambda: ws.run_forever(ping_interval=30, ping_timeout=10))
+    ws_thread.daemon = True
+    ws_thread.start()
+
+    # Hybrid approach: WebSocket for progress, HTTP polling for completion detection
+    last_poll = 0
+    poll_interval = 2  # Check history every 2 seconds
+
+    while result['success'] is None and result['error'] is None:
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            print(f"Timeout after {int(elapsed)}s", flush=True)
+            ws.close()
+            return False
+
+        # Poll history endpoint periodically to catch completion
+        if time.time() - last_poll >= poll_interval:
+            last_poll = time.time()
+            history_result = check_history_for_completion(prompt_id, port)
+
+            if history_result['status'] == 'success':
+                elapsed_int = int(elapsed)
+                print(f"Workflow completed successfully ({elapsed_int}s)", flush=True)
+                outputs = history_result.get('outputs', {})
+                for node_id, output in outputs.items():
+                    if 'images' in output:
+                        for img in output['images']:
+                            filename = img.get('filename', 'unknown')
+                            print(f"  Output: {filename}", flush=True)
+                            if output_dir:
+                                subfolder = img.get('subfolder', '')
+                                img_type = img.get('type', 'output')
+                                download_image_from_server(filename, subfolder, img_type, port, output_dir)
+                ws.close()
+                return True
+            elif history_result['status'] == 'error':
+                print(f"Workflow failed", flush=True)
+                for msg in history_result.get('messages', []):
+                    print(f"  Error: {msg}", flush=True)
+                ws.close()
+                return False
+
+        time.sleep(0.1)
+
+    # Download images if completed via WebSocket signal
+    if result['success'] and output_dir:
+        for node_id, output in result['outputs'].items():
+            if 'images' in output:
+                for img in output['images']:
+                    filename = img.get('filename', 'unknown')
+                    subfolder = img.get('subfolder', '')
+                    img_type = img.get('type', 'output')
+                    download_image_from_server(filename, subfolder, img_type, port, output_dir)
+
+    return result['success'] == True
+
+
+def wait_for_completion_http(prompt_id: str, port: int, timeout: int = 3600, output_dir: str = None) -> bool:
+    """Wait for workflow execution using HTTP polling (fallback).
 
     Args:
         prompt_id: The prompt ID to wait for
@@ -288,6 +715,7 @@ def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_di
     queue_url = f"http://127.0.0.1:{port}/queue"
     start_time = time.time()
     last_status = ""
+    last_node = ""
     poll_count = 0
     consecutive_errors = 0
 
@@ -296,24 +724,49 @@ def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_di
         elapsed = int(time.time() - start_time)
 
         try:
-            # Check queue status first - faster way to know if still running
             queue_response = urllib.request.urlopen(queue_url, timeout=5)
             queue_data = json.loads(queue_response.read().decode('utf-8'))
 
             running = queue_data.get('queue_running', [])
             pending = queue_data.get('queue_pending', [])
 
-            # Check if our prompt is still in queue
-            our_prompt_running = any(item[1] == prompt_id for item in running)
-            our_prompt_pending = any(item[1] == prompt_id for item in pending)
+            # Find our prompt in the running queue to get current node info
+            our_running_item = None
+            for item in running:
+                if len(item) > 1 and item[1] == prompt_id:
+                    our_running_item = item
+                    break
 
-            if our_prompt_running:
-                # Print status every 10 seconds to show it's still alive
-                if elapsed % 10 == 0 or last_status == "":
-                    print(f"Executing... ({elapsed}s)", flush=True)
-                last_status = f"running_{elapsed}"
+            our_prompt_pending = any(item[1] == prompt_id for item in pending if len(item) > 1)
+
+            if our_running_item:
+                # Extract currently executing node from the running item
+                # Format: [queue_id, prompt_id, workflow_data, extra_data, output_node_ids]
+                # The extra_data (index 3) sometimes contains execution state
+                current_node_info = ""
+                if len(our_running_item) > 3:
+                    extra = our_running_item[3]
+                    if isinstance(extra, dict):
+                        # Check for current node being executed
+                        if 'extra_pnginfo' in extra:
+                            pass  # PNG info doesn't have current node
+                        # Some versions include node info here
+                        current_node = extra.get('current_node')
+                        if current_node:
+                            current_node_info = f" (node {current_node})"
+
+                # Print status with node info if available
+                status_msg = f"Executing{current_node_info}... ({elapsed}s)"
+                if elapsed % 10 == 0 or last_status != status_msg:
+                    print(status_msg, flush=True)
+                    last_status = status_msg
             elif our_prompt_pending:
-                status = f"Queued... ({elapsed}s)"
+                queue_pos = 0
+                for i, item in enumerate(pending):
+                    if len(item) > 1 and item[1] == prompt_id:
+                        queue_pos = i + 1
+                        break
+                status = f"Queued (position {queue_pos})... ({elapsed}s)"
                 if status != last_status:
                     print(status, flush=True)
                     last_status = status
@@ -327,10 +780,8 @@ def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_di
                     status_data = prompt_data.get('status', {})
                     outputs = prompt_data.get('outputs', {})
 
-                    # Check for completion via status
                     if status_data.get('status_str') == 'success' or outputs:
                         print(f"Workflow completed successfully in {elapsed}s", flush=True)
-                        # Print output info and download images if output_dir provided
                         for node_id, output in outputs.items():
                             if 'images' in output:
                                 for img in output['images']:
@@ -338,43 +789,70 @@ def wait_for_completion(prompt_id: str, port: int, timeout: int = 600, output_di
                                     subfolder = img.get('subfolder', '')
                                     img_type = img.get('type', 'output')
                                     print(f"Output image: {filename}", flush=True)
-
-                                    # Download image to our output directory
                                     if output_dir:
-                                        download_image_from_server(
-                                            filename, subfolder, img_type,
-                                            port, output_dir
-                                        )
+                                        download_image_from_server(filename, subfolder, img_type, port, output_dir)
+                            # Check for 3D model outputs
+                            for key in ['gltf', 'glb', 'obj', 'fbx']:
+                                if key in output:
+                                    for item in output[key]:
+                                        print(f"Output 3D ({key}): {item.get('filename', 'unknown')}", flush=True)
                         return True
 
-                    # Check for error
                     if status_data.get('status_str') == 'error':
                         print(f"Workflow failed with error", flush=True)
-                        # Try to get more error details
                         messages = status_data.get('messages', [])
                         for msg in messages:
                             print(f"Error detail: {msg}", flush=True)
                         return False
+                else:
+                    # Not in queue and not in history - might be starting up
+                    if elapsed % 10 == 0 and last_status != "waiting":
+                        print(f"Waiting for execution to start... ({elapsed}s)", flush=True)
+                        last_status = "waiting"
 
-            # Reset error counter on successful connection
             consecutive_errors = 0
 
         except (urllib.error.URLError, urllib.error.HTTPError) as e:
             consecutive_errors += 1
-
             if consecutive_errors >= 10:
                 print(f"ERROR: Lost connection to ComfyUI after {consecutive_errors} consecutive failures")
                 print(f"Last error: {e}")
                 return False
-
-            if poll_count % 10 == 0:  # Only log every 10th error
+            if poll_count % 10 == 0:
                 print(f"Connection check... ({elapsed}s) - {consecutive_errors} consecutive errors", flush=True)
 
-        # Poll faster (0.5s) for quicker completion detection
         time.sleep(0.5)
 
     print(f"Timeout waiting for workflow completion after {timeout}s", flush=True)
     return False
+
+
+def wait_for_completion(prompt_id: str, port: int, timeout: int = 3600, output_dir: str = None) -> bool:
+    """Wait for workflow execution to complete using WebSocket or HTTP polling.
+
+    Args:
+        prompt_id: The prompt ID to wait for
+        port: ComfyUI server port
+        timeout: Timeout in seconds
+        output_dir: If provided, download output images to this directory
+
+    Returns:
+        True if workflow completed successfully
+    """
+    if WEBSOCKET_AVAILABLE:
+        print("Using WebSocket for real-time progress monitoring", flush=True)
+        try:
+            return wait_for_completion_websocket(prompt_id, port, timeout, output_dir)
+        except Exception as e:
+            print(f"WebSocket failed, falling back to HTTP polling: {e}", flush=True)
+            return wait_for_completion_http(prompt_id, port, timeout, output_dir)
+    else:
+        print("=" * 60, flush=True)
+        print("NOTE: Using HTTP polling (limited progress info)", flush=True)
+        print("For node-level progress, install websocket-client:", flush=True)
+        print(f"  {sys.executable} -m pip install websocket-client", flush=True)
+        print("=" * 60, flush=True)
+        return wait_for_completion_http(prompt_id, port, timeout, output_dir)
 
 
 def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, port: int,
@@ -495,7 +973,7 @@ def main():
     parser.add_argument('--input-directory', required=True, help='Input image directory')
     parser.add_argument('--output-directory', required=True, help='Output directory')
     parser.add_argument('--port', type=int, default=8188, help='Port for ComfyUI server')
-    parser.add_argument('--timeout', type=int, default=600, help='Execution timeout in seconds per generation')
+    parser.add_argument('--timeout', type=int, default=3600, help='Execution timeout in seconds per generation')
     parser.add_argument('--frame', type=int, default=1, help='Frame/generation number (1-based) - ignored in batch mode')
     parser.add_argument('--seeds-file', help='Path to JSON file with seeds for each frame')
     parser.add_argument('--output-prefix', default='comfyui_output', help='Base output filename prefix')
@@ -506,8 +984,12 @@ def main():
     parser.add_argument('--python-path', help='Path to Python executable (required for standalone mode)')
     parser.add_argument('--fast', action='store_true', help='Enable --fast flag for faster execution (may reduce quality)')
     parser.add_argument('--fp16-accumulation', action='store_true', help='Enable --fp16-accumulation for faster FP16 math')
+    parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files that cannot specify output path)')
 
     args = parser.parse_args()
+
+    # Set up logging - tee all stdout/stderr to a log file
+    setup_logging(args.output_prefix)
 
     # Determine paths based on mode
     if args.mode == "embedded":
@@ -735,6 +1217,26 @@ def main():
             if success:
                 print(f"Frame {frame_num} completed successfully", flush=True)
                 successful += 1
+
+                # Move 3D output files from ComfyUI's default output to our target directory
+                # This handles nodes like Trellis2ExportGLB that can't specify custom output paths
+                if args.comfyui_output_dir:
+                    print(f"[Runner] Attempting to move 3D files from ComfyUI output")
+                    print(f"[Runner] ComfyUI output dir: {args.comfyui_output_dir}")
+                    print(f"[Runner] Target directory: {args.output_directory}")
+                    print(f"[Runner] Output prefix: {args.output_prefix}")
+                    moved = move_output_files(
+                        args.comfyui_output_dir,
+                        args.output_directory,
+                        args.output_prefix,
+                        recent_minutes=30  # Increase to 30 minutes for longer jobs
+                    )
+                    if moved:
+                        print(f"Moved {len(moved)} output file(s) to target directory")
+                    else:
+                        print(f"[Runner] No 3D files found to move - check if ComfyUI wrote to expected location")
+                else:
+                    print(f"[Runner] No comfyui_output_dir specified - cannot move 3D files")
             else:
                 print(f"Frame {frame_num} failed or timed out", flush=True)
                 failed += 1

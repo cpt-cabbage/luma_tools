@@ -104,7 +104,7 @@ class SettingsTab(BaseTab):
         from settings_manager import (
             get_global_settings_path, get_comfyui_mode, get_comfyui_path,
             get_comfyui_python_path, get_comfyui_network_output_path,
-            get_comfyui_fast_mode, get_comfyui_fp16_accumulation
+            get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout
         )
 
         # Global settings path
@@ -125,6 +125,12 @@ class SettingsTab(BaseTab):
         # ComfyUI performance settings
         self.ui.ComfyUIFastMode.setChecked(get_comfyui_fast_mode())
         self.ui.ComfyUIFP16Accumulation.setChecked(get_comfyui_fp16_accumulation())
+
+        # ComfyUI timeout setting
+        if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
+            timeout_seconds = get_comfyui_timeout()
+            # Convert to minutes for UI display
+            self.ui.ComfyUITimeoutSpinBox.setValue(timeout_seconds // 60)
 
         self._update_comfyui_python_visibility()
 
@@ -269,7 +275,8 @@ class SettingsTab(BaseTab):
         from settings_manager import (
             set_global_settings_path, set_comfyui_mode, set_comfyui_path,
             set_comfyui_python_path, set_comfyui_network_output_path,
-            set_comfyui_fast_mode, set_comfyui_fp16_accumulation
+            set_comfyui_fast_mode, set_comfyui_fp16_accumulation,
+            set_comfyui_timeout
         )
 
         # Save global settings path
@@ -302,6 +309,11 @@ class SettingsTab(BaseTab):
         set_comfyui_network_output_path(self.ui.ComfyUINetworkOutputEdit.text().strip())
         set_comfyui_fast_mode(self.ui.ComfyUIFastMode.isChecked())
         set_comfyui_fp16_accumulation(self.ui.ComfyUIFP16Accumulation.isChecked())
+
+        # Save ComfyUI timeout setting
+        if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
+            timeout_minutes = self.ui.ComfyUITimeoutSpinBox.value()
+            set_comfyui_timeout(timeout_minutes * 60)  # Convert to seconds
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()

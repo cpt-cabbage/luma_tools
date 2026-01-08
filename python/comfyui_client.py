@@ -28,9 +28,37 @@ import json
 import time
 import copy
 import shutil
+import socket
 import argparse
 import urllib.request
 import urllib.error
+import uuid
+import threading
+
+# Try to import websocket for real-time progress
+WEBSOCKET_AVAILABLE = False
+try:
+    import websocket
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    # Try to install websocket-client automatically
+    print("websocket-client not found, attempting to install...", flush=True)
+    try:
+        import subprocess as _sp
+        _result = _sp.run(
+            [sys.executable, '-m', 'pip', 'install', 'websocket-client', '--quiet'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if _result.returncode == 0:
+            import websocket
+            WEBSOCKET_AVAILABLE = True
+            print("Successfully installed websocket-client", flush=True)
+        else:
+            print(f"Failed to install websocket-client: {_result.stderr}", flush=True)
+    except Exception as _e:
+        print(f"Could not auto-install websocket-client: {_e}", flush=True)
 
 
 def check_server_health(server_url: str, timeout: int = 10) -> bool:
@@ -118,19 +146,200 @@ def submit_workflow(workflow: dict, server_url: str) -> str:
         return None
 
 
-def wait_for_completion(prompt_id: str, server_url: str, timeout: int = 600) -> bool:
-    """Wait for workflow execution to complete."""
+def check_history_for_completion(prompt_id: str, server_url: str) -> dict:
+    """Check history endpoint to see if prompt completed.
+
+    Returns:
+        dict with 'status' ('success', 'error', 'pending') and optional 'outputs'
+    """
+    history_url = f"{server_url}/history/{prompt_id}"
+    try:
+        response = urllib.request.urlopen(history_url, timeout=5)
+        history = json.loads(response.read().decode('utf-8'))
+
+        if prompt_id in history:
+            prompt_data = history[prompt_id]
+            status_data = prompt_data.get('status', {})
+            outputs = prompt_data.get('outputs', {})
+
+            if status_data.get('status_str') == 'success' or outputs:
+                return {'status': 'success', 'outputs': outputs}
+            elif status_data.get('status_str') == 'error':
+                return {'status': 'error', 'messages': status_data.get('messages', [])}
+
+        return {'status': 'pending'}
+    except Exception:
+        return {'status': 'pending'}
+
+
+def wait_for_completion_websocket(prompt_id: str, server_url: str, timeout: int = 3600) -> bool:
+    """Wait for workflow execution using WebSocket for progress + HTTP polling for completion."""
+    # Convert http://host:port to ws://host:port
+    ws_url = server_url.replace('http://', 'ws://').replace('https://', 'wss://')
+    client_id = str(uuid.uuid4())
+    ws_url = f"{ws_url}/ws?clientId={client_id}"
+
+    result = {'success': None, 'error': None}
+    start_time = time.time()
+    current_node = {'id': None}
+    last_progress = {'value': 0, 'max': 0}
+
+    def on_message(ws, message):
+        nonlocal result, current_node, last_progress
+        try:
+            data = json.loads(message)
+            msg_type = data.get('type')
+
+            if msg_type == 'status':
+                status_data = data.get('data', {}).get('status', {})
+                exec_info = status_data.get('exec_info', {})
+                queue_remaining = exec_info.get('queue_remaining', 0)
+                if queue_remaining > 0:
+                    elapsed = int(time.time() - start_time)
+                    print(f"Queue: {queue_remaining} remaining ({elapsed}s)", flush=True)
+
+            elif msg_type == 'execution_start':
+                exec_data = data.get('data', {})
+                recv_prompt_id = exec_data.get('prompt_id')
+                if recv_prompt_id == prompt_id:
+                    print(f"Execution started", flush=True)
+
+            elif msg_type == 'executing':
+                exec_data = data.get('data', {})
+                recv_prompt_id = exec_data.get('prompt_id')
+                node_id = exec_data.get('node')
+                if recv_prompt_id == prompt_id:
+                    if node_id is None:
+                        elapsed = int(time.time() - start_time)
+                        print(f"Execution completed in {elapsed}s", flush=True)
+                        result['success'] = True
+                        ws.close()
+                    else:
+                        current_node['id'] = node_id
+                        elapsed = int(time.time() - start_time)
+                        print(f"Executing node {node_id}... ({elapsed}s)", flush=True)
+                        last_progress = {'value': 0, 'max': 0}
+
+            elif msg_type == 'progress':
+                prog_data = data.get('data', {})
+                value = prog_data.get('value', 0)
+                max_val = prog_data.get('max', 100)
+                if max_val > 0:
+                    pct = int(100 * value / max_val)
+                    last_pct = int(100 * last_progress['value'] / max(last_progress['max'], 1))
+                    if pct >= last_pct + 10 or value == max_val:
+                        elapsed = int(time.time() - start_time)
+                        print(f"  Progress: {pct}% ({value}/{max_val}) ({elapsed}s)", flush=True)
+                        last_progress = {'value': value, 'max': max_val}
+
+            elif msg_type == 'executed':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    output = exec_data.get('output', {})
+                    if 'images' in output:
+                        for img in output['images']:
+                            print(f"  Output: {img.get('filename', 'unknown')}", flush=True)
+                    if 'gltf' in output or 'glb' in output:
+                        for item in output.get('gltf', []) + output.get('glb', []):
+                            print(f"  Output 3D: {item.get('filename', 'unknown')}", flush=True)
+
+            elif msg_type == 'execution_cached':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    nodes = exec_data.get('nodes', [])
+                    if nodes:
+                        print(f"Cached: {len(nodes)} node(s)", flush=True)
+
+            elif msg_type == 'execution_error':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    error = exec_data.get('exception_message', 'Unknown error')
+                    node_id = exec_data.get('node_id')
+                    node_type = exec_data.get('node_type')
+                    print(f"ERROR in node {node_id} ({node_type}): {error}", flush=True)
+                    result['error'] = error
+                    result['success'] = False
+                    ws.close()
+
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            print(f"WebSocket message error: {e}", flush=True)
+
+    def on_error(ws, error):
+        print(f"WebSocket error: {error}", flush=True)
+
+    def on_close(ws, close_status_code, close_msg):
+        pass  # Don't treat close as error - we also poll HTTP
+
+    def on_open(ws):
+        print(f"Connected to ComfyUI WebSocket", flush=True)
+
+    ws = websocket.WebSocketApp(
+        ws_url,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+
+    ws_thread = threading.Thread(target=lambda: ws.run_forever(ping_interval=30, ping_timeout=10))
+    ws_thread.daemon = True
+    ws_thread.start()
+
+    # Hybrid approach: WebSocket for progress, HTTP polling for completion detection
+    last_poll = 0
+    poll_interval = 2  # Check history every 2 seconds
+
+    while result['success'] is None and result['error'] is None:
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            print(f"Timeout after {int(elapsed)}s", flush=True)
+            ws.close()
+            return False
+
+        # Poll history endpoint periodically to catch completion
+        if time.time() - last_poll >= poll_interval:
+            last_poll = time.time()
+            history_result = check_history_for_completion(prompt_id, server_url)
+
+            if history_result['status'] == 'success':
+                elapsed_int = int(elapsed)
+                print(f"Workflow completed successfully ({elapsed_int}s)", flush=True)
+                outputs = history_result.get('outputs', {})
+                for node_id, output in outputs.items():
+                    if 'images' in output:
+                        for img in output['images']:
+                            print(f"  Output: {img.get('filename', 'unknown')}", flush=True)
+                ws.close()
+                return True
+            elif history_result['status'] == 'error':
+                print(f"Workflow failed", flush=True)
+                for msg in history_result.get('messages', []):
+                    print(f"  Error: {msg}", flush=True)
+                ws.close()
+                return False
+
+        time.sleep(0.1)
+
+    return result['success'] == True
+
+
+def wait_for_completion_http(prompt_id: str, server_url: str, timeout: int = 3600) -> bool:
+    """Wait for workflow execution using HTTP polling (fallback when WebSocket unavailable)."""
     history_url = f"{server_url}/history/{prompt_id}"
     queue_url = f"{server_url}/queue"
     start_time = time.time()
     last_status = ""
+    last_print_time = 0
+    consecutive_not_found = 0
 
     while time.time() - start_time < timeout:
         elapsed = int(time.time() - start_time)
 
         try:
             # Check queue status
-            queue_response = urllib.request.urlopen(queue_url, timeout=5)
+            queue_response = urllib.request.urlopen(queue_url, timeout=10)
             queue_data = json.loads(queue_response.read().decode('utf-8'))
 
             running = queue_data.get('queue_running', [])
@@ -140,19 +349,23 @@ def wait_for_completion(prompt_id: str, server_url: str, timeout: int = 600) -> 
             our_prompt_pending = any(item[1] == prompt_id for item in pending)
 
             if our_prompt_running:
-                if elapsed % 10 == 0:
+                consecutive_not_found = 0
+                if elapsed - last_print_time >= 10:
                     print(f"Executing... ({elapsed}s)", flush=True)
+                    last_print_time = elapsed
             elif our_prompt_pending:
+                consecutive_not_found = 0
                 status = f"Queued... ({elapsed}s)"
                 if status != last_status:
                     print(status, flush=True)
                     last_status = status
             else:
                 # Check history for completion
-                response = urllib.request.urlopen(history_url, timeout=5)
+                response = urllib.request.urlopen(history_url, timeout=10)
                 history = json.loads(response.read().decode('utf-8'))
 
                 if prompt_id in history:
+                    consecutive_not_found = 0
                     prompt_data = history[prompt_id]
                     status_data = prompt_data.get('status', {})
                     outputs = prompt_data.get('outputs', {})
@@ -170,15 +383,48 @@ def wait_for_completion(prompt_id: str, server_url: str, timeout: int = 600) -> 
                         for msg in status_data.get('messages', []):
                             print(f"Error: {msg}", flush=True)
                         return False
+                else:
+                    # Not in queue and not in history yet - might be processing
+                    consecutive_not_found += 1
+                    if consecutive_not_found > 5 and elapsed - last_print_time >= 10:
+                        print(f"Waiting for result... ({elapsed}s)", flush=True)
+                        last_print_time = elapsed
 
-        except (urllib.error.URLError, urllib.error.HTTPError) as e:
-            if elapsed % 30 == 0:
-                print(f"Connection issue, retrying... ({elapsed}s)", flush=True)
+        except socket.timeout as e:
+            print(f"Socket timeout while checking status ({elapsed}s): {e}", flush=True)
+        except urllib.error.URLError as e:
+            if elapsed - last_print_time >= 30:
+                print(f"Connection issue ({elapsed}s): {e}", flush=True)
+                last_print_time = elapsed
+        except urllib.error.HTTPError as e:
+            if elapsed - last_print_time >= 30:
+                print(f"HTTP error ({elapsed}s): {e.code} {e.reason}", flush=True)
+                last_print_time = elapsed
+        except Exception as e:
+            print(f"Unexpected error ({elapsed}s): {type(e).__name__}: {e}", flush=True)
 
         time.sleep(0.5)
 
     print(f"Timeout after {timeout}s", flush=True)
     return False
+
+
+def wait_for_completion(prompt_id: str, server_url: str, timeout: int = 3600) -> bool:
+    """Wait for workflow execution to complete using WebSocket or HTTP polling."""
+    if WEBSOCKET_AVAILABLE:
+        print("Using WebSocket for real-time progress monitoring", flush=True)
+        try:
+            return wait_for_completion_websocket(prompt_id, server_url, timeout)
+        except Exception as e:
+            print(f"WebSocket failed, falling back to HTTP polling: {e}", flush=True)
+            return wait_for_completion_http(prompt_id, server_url, timeout)
+    else:
+        print("=" * 60, flush=True)
+        print("NOTE: Using HTTP polling (limited progress info)", flush=True)
+        print("For node-level progress, install websocket-client:", flush=True)
+        print(f"  {sys.executable} -m pip install websocket-client", flush=True)
+        print("=" * 60, flush=True)
+        return wait_for_completion_http(prompt_id, server_url, timeout)
 
 
 def copy_inputs_to_server(input_files: list, server_input_dir: str):
@@ -265,8 +511,8 @@ Examples:
                         help='Path to seeds JSON file')
     parser.add_argument('--output-prefix', default='comfyui_output',
                         help='Output filename prefix')
-    parser.add_argument('--timeout', type=int, default=600,
-                        help='Execution timeout in seconds (default: 600)')
+    parser.add_argument('--timeout', type=int, default=3600,
+                        help='Execution timeout in seconds (default: 3600)')
     parser.add_argument('--batch', action='store_true',
                         help='Process all frames from seeds file')
     parser.add_argument('--wait-for-server', type=int, default=60,

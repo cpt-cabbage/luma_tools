@@ -399,7 +399,7 @@ def get_comfyui_workflow_presets():
     return settings.get("comfyui_workflow_presets", {})
 
 
-def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False):
+def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note=""):
     """
     Save a ComfyUI workflow preset to global settings.
 
@@ -408,6 +408,7 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
         workflow_path: Path to the workflow JSON file
         description: Optional description for the preset
         iteratable: Whether this workflow supports iterate mode
+        note: Optional user note for this preset
     """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
@@ -416,13 +417,14 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
     settings["comfyui_workflow_presets"][name] = {
         "path": workflow_path,
         "description": description,
-        "iteratable": iteratable
+        "iteratable": iteratable,
+        "note": note
     }
     save_global_settings(settings)
     print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable})")
 
 
-def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None):
+def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None):
     """
     Update an existing ComfyUI workflow preset.
 
@@ -431,6 +433,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         workflow_path: New path (None to keep existing)
         description: New description (None to keep existing)
         iteratable: New iteratable flag (None to keep existing)
+        note: New note (None to keep existing)
 
     Returns:
         bool: True if updated, False if preset not found
@@ -444,7 +447,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
     preset = presets[name]
     # Handle legacy format
     if isinstance(preset, str):
-        preset = {"path": preset, "description": "", "iteratable": False}
+        preset = {"path": preset, "description": "", "iteratable": False, "note": ""}
 
     if workflow_path is not None:
         preset["path"] = workflow_path
@@ -452,6 +455,8 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         preset["description"] = description
     if iteratable is not None:
         preset["iteratable"] = iteratable
+    if note is not None:
+        preset["note"] = note
 
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets
@@ -543,77 +548,111 @@ def set_comfyui_network_output_path(path):
     print(f"Set ComfyUI network output path to: {path}")
 
 
+# Default timeout in seconds (1 hour)
+DEFAULT_COMFYUI_TIMEOUT = 3600
 
 
-# ============================================================================
-# COMFYUI PROMPT PRESETS (Per-Workflow, User Settings)
-# ============================================================================
-
-def get_comfyui_prompt_presets_for_workflow(workflow_name):
+def get_comfyui_timeout():
     """
-    Get prompt presets for a specific workflow.
+    Get the ComfyUI job timeout in seconds from global settings.
+
+    This is the maximum time a single ComfyUI generation can run before
+    timing out. Useful for complex workflows like Trellis/UltraShape that
+    can take a long time.
+
+    Returns:
+        int: Timeout in seconds (default: 3600 = 1 hour)
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_timeout", DEFAULT_COMFYUI_TIMEOUT)
+
+
+def set_comfyui_timeout(timeout_seconds):
+    """
+    Set the ComfyUI job timeout in seconds in global settings.
 
     Args:
-        workflow_name: Name of the workflow preset
+        timeout_seconds: Timeout in seconds (minimum 60, maximum 86400)
+    """
+    # Clamp to valid range
+    timeout_seconds = max(60, min(86400, int(timeout_seconds)))
+    settings = load_global_settings()
+    settings["comfyui_timeout"] = timeout_seconds
+    save_global_settings(settings)
+    print(f"Set ComfyUI timeout to: {timeout_seconds} seconds")
+
+
+
+
+# ============================================================================
+# COMFYUI PROMPT PRESETS (Per-Node-Type, User Settings)
+# ============================================================================
+
+def get_comfyui_prompt_presets_for_node_type(node_type):
+    """
+    Get prompt presets for a specific node type.
+
+    Args:
+        node_type: The ComfyUI node type (e.g., 'CLIPTextEncode', 'TextEncodeQwenImageEditPlus')
 
     Returns:
         dict: Dictionary of preset_name -> preset_text
     """
     settings = load_user_settings()
-    all_presets = settings.get("comfyui_prompt_presets", {})
-    return all_presets.get(workflow_name, {})
+    all_presets = settings.get("comfyui_prompt_presets_by_node_type", {})
+    return all_presets.get(node_type, {})
 
 
-def save_comfyui_prompt_preset_for_workflow(workflow_name, preset_name, text):
+def save_comfyui_prompt_preset_for_node_type(node_type, preset_name, text):
     """
-    Save a prompt preset for a specific workflow.
+    Save a prompt preset for a specific node type.
 
     Args:
-        workflow_name: Name of the workflow preset
+        node_type: The ComfyUI node type (e.g., 'CLIPTextEncode', 'TextEncodeQwenImageEditPlus')
         preset_name: Name for the prompt preset
         text: The prompt text to save
     """
     settings = load_user_settings()
-    if "comfyui_prompt_presets" not in settings:
-        settings["comfyui_prompt_presets"] = {}
-    if workflow_name not in settings["comfyui_prompt_presets"]:
-        settings["comfyui_prompt_presets"][workflow_name] = {}
+    if "comfyui_prompt_presets_by_node_type" not in settings:
+        settings["comfyui_prompt_presets_by_node_type"] = {}
+    if node_type not in settings["comfyui_prompt_presets_by_node_type"]:
+        settings["comfyui_prompt_presets_by_node_type"][node_type] = {}
 
-    settings["comfyui_prompt_presets"][workflow_name][preset_name] = text
+    settings["comfyui_prompt_presets_by_node_type"][node_type][preset_name] = text
     save_user_settings(settings)
-    print(f"Saved prompt preset '{preset_name}' for workflow '{workflow_name}'")
+    print(f"Saved prompt preset '{preset_name}' for node type '{node_type}'")
 
 
-def delete_comfyui_prompt_preset_for_workflow(workflow_name, preset_name):
+def delete_comfyui_prompt_preset_for_node_type(node_type, preset_name):
     """
-    Delete a prompt preset from a specific workflow.
+    Delete a prompt preset for a specific node type.
 
     Args:
-        workflow_name: Name of the workflow preset
+        node_type: The ComfyUI node type
         preset_name: Name of the prompt preset to delete
     """
     settings = load_user_settings()
-    all_presets = settings.get("comfyui_prompt_presets", {})
+    all_presets = settings.get("comfyui_prompt_presets_by_node_type", {})
 
-    if workflow_name in all_presets and preset_name in all_presets[workflow_name]:
-        del all_presets[workflow_name][preset_name]
-        # Clean up empty workflow entry
-        if not all_presets[workflow_name]:
-            del all_presets[workflow_name]
-        settings["comfyui_prompt_presets"] = all_presets
+    if node_type in all_presets and preset_name in all_presets[node_type]:
+        del all_presets[node_type][preset_name]
+        # Clean up empty node type entry
+        if not all_presets[node_type]:
+            del all_presets[node_type]
+        settings["comfyui_prompt_presets_by_node_type"] = all_presets
         save_user_settings(settings)
-        print(f"Deleted prompt preset '{preset_name}' from workflow '{workflow_name}'")
+        print(f"Deleted prompt preset '{preset_name}' from node type '{node_type}'")
 
 
-def get_all_comfyui_prompt_presets():
+def get_all_comfyui_prompt_presets_by_node_type():
     """
-    Get all prompt presets for all workflows.
+    Get all prompt presets for all node types.
 
     Returns:
-        dict: Dictionary of workflow_name -> {preset_name -> preset_text}
+        dict: Dictionary of node_type -> {preset_name -> preset_text}
     """
     settings = load_user_settings()
-    return settings.get("comfyui_prompt_presets", {})
+    return settings.get("comfyui_prompt_presets_by_node_type", {})
 
 
 # ============================================================================

@@ -552,6 +552,43 @@
            </layout>
           </item>
           <item>
+           <layout class="QHBoxLayout" name="comfyuiTimeoutLayout">
+            <item>
+             <widget class="QLabel" name="comfyuiTimeoutLabel">
+              <property name="text">
+               <string>Job Timeout (minutes):</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="ComfyUITimeoutSpinBox">
+              <property name="toolTip">
+               <string>Maximum time in minutes for ComfyUI workflow execution before timeout</string>
+              </property>
+              <property name="minimum">
+               <number>1</number>
+              </property>
+              <property name="maximum">
+               <number>1440</number>
+              </property>
+              <property name="value">
+               <number>60</number>
+              </property>
+              <property name="suffix">
+               <string> min</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="timeoutSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
            <widget class="QLabel" name="adminUsersHeader">
             <property name="text">
              <string>Admin Users:</string>

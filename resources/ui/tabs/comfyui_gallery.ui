@@ -45,6 +45,29 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="GallerySortLabel">
+       <property name="text">
+        <string>Sort:</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: #888888;</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="GallerySortCombo">
+       <property name="minimumSize">
+        <size>
+         <width>140</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>Sort gallery items</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="galleryHeaderSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>

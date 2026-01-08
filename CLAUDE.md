@@ -16,14 +16,18 @@ Luma Tools is a VFX shot management application for the Luma Animation pipeline.
 
 ```bash
 # From repository root (Windows)
-luma_tools.bat
+luma_tools.bat                  # With shot context args passed through
+luma_tools_standalone.bat       # Without shot context (standalone mode)
 
 # Direct Python (ensure venv is activated)
 python\venv\Scripts\activate.bat
 python python/luma_tools.py
+
+# Deploy to production location
+install.bat                     # Copies files to L:\tools\_studio_tools\luma_tools
 ```
 
-The batch file activates the venv and launches with `start /B` to run in background. The console window is hidden by the Python code itself using Windows API (`ctypes.windll`).
+The batch files activate the venv and launch with `start /B` to run in background. The console window is hidden by the Python code itself using Windows API (`ctypes.windll`).
 
 **Command Line Arguments:**
 The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
@@ -70,6 +74,8 @@ Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 | `cleanup_service.py` | File cleanup for renders/USD/HIP files |
 | `file_operations.py` | File utilities (find renders, normalize paths) |
 | `thumbnail_service.py` | EXR thumbnail generation with OIIO and caching |
+| `glb_thumbnail_service.py` | GLB/GLTF 3D model thumbnail generation with trimesh/pyrender |
+| `glb_viewer.py` | Interactive 3D viewer dialog using QOpenGLWidget |
 
 ### ComfyUI Integration
 
@@ -215,6 +221,8 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 
 **Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`. See `EDITABLE_NODE_CONFIGS` in `comfyui_service.py` for widget mappings.
 
+**Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `config.py` for the full list.
+
 ### Pass Building
 
 1. Scan renders via `find_renders()` from `file_operations.py`
@@ -286,9 +294,11 @@ Use `convert_to_ayon_folder_path()` for path conversion.
 - `app_state` is thread-safe - access properties normally
 - Services should be stateless
 
-**AYON/Deadline Availability:**
-- These flags are False when imports fail (outside production environment)
-- Features gracefully degrade when unavailable
+**Optional Dependencies Pattern:**
+- Many modules use try/except around imports with `*_AVAILABLE` flags
+- Examples: `AYON_AVAILABLE`, `DEADLINE_AVAILABLE`, `OPENGL_AVAILABLE`, `PYOPENGL_AVAILABLE`
+- Always check these flags before using optional features
+- Features gracefully degrade when dependencies are unavailable
 
 **Path Handling:**
 - Windows uses backslashes, AYON uses forward slashes

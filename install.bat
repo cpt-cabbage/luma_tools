@@ -5,6 +5,8 @@ REM Target: L:\tools\_studio_tools\luma_tools
 
 set SOURCE=L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools
 set TARGET=L:\tools\_studio_tools\luma_tools
+set DEV_PATH=L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools
+set PROD_PATH=L:/tools/_studio_tools/luma_tools
 
 echo Installing Luma Tools to %TARGET%...
 echo.
@@ -74,9 +76,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Copy global settings
-echo Copying global settings...
+REM Copy and update global settings (replace dev paths with production paths)
+echo Copying and updating global settings...
 xcopy "%SOURCE%\global_settings\*.json" "%TARGET%\global_settings\" /Y /Q
+
+REM Update paths in global_settings.json (replace dev paths with production paths)
+echo Updating paths in global_settings.json...
+powershell -Command "(Get-Content '%TARGET%\global_settings\global_settings.json') -replace '%DEV_PATH%', '%PROD_PATH%' | Set-Content '%TARGET%\global_settings\global_settings.json'"
+if errorlevel 1 (
+    echo WARNING: Failed to update paths in global_settings.json
+)
 
 echo.
 echo Installation complete!

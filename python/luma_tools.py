@@ -69,10 +69,10 @@ sys.path.append(os.path.join(PROJECT_ROOT, "resources", "ui"))
 from PySide2 import QtCore, QtWidgets
 from PySide2.QtCore import Qt
 from PySide2.QtGui import QIcon, QPainter, QColor, QPen
-from PySide2.QtWidgets import QApplication
+from PySide2.QtWidgets import QApplication, QTabBar
 
 # Import UI components
-from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager
+from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager, InlineSpinner
 from splash_screen import SplashScreen
 from icons import IconManager, TAB_COLORS, DEFAULT_ICON_COLOR
 
@@ -109,6 +109,57 @@ class LogStream(QtCore.QObject):
 
     def flush(self):
         pass
+
+
+class ExpandingTabBar(QTabBar):
+    """Custom tab bar that expands tabs to fill the available width."""
+
+    # Padding on each side of the tab bar
+    HORIZONTAL_PADDING = 10
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Don't use Qt's expanding - we'll handle it ourselves
+        self.setExpanding(False)
+        # Disable scroll buttons so all tabs are always visible
+        self.setUsesScrollButtons(False)
+        # Enable document mode for cleaner look
+        self.setDocumentMode(True)
+
+    def tabSizeHint(self, index):
+        """Calculate tab size to fill the tab bar width evenly."""
+        # Get the default size for height
+        default_size = super().tabSizeHint(index)
+
+        # Get number of tabs
+        tab_count = self.count()
+        if tab_count <= 0:
+            return default_size
+
+        # Get parent tab widget width
+        parent = self.parentWidget()
+        if parent:
+            available_width = parent.width() - (self.HORIZONTAL_PADDING * 2)
+        else:
+            available_width = self.width() - (self.HORIZONTAL_PADDING * 2)
+
+        # If width is too small (during init), use a reasonable default
+        if available_width < 200:
+            return default_size
+
+        # Calculate width per tab - equal distribution
+        tab_width = available_width // tab_count
+
+        # Ensure minimum width
+        tab_width = max(80, tab_width)
+
+        return QtCore.QSize(tab_width, default_size.height())
+
+    def showEvent(self, event):
+        """Force size recalculation when tab bar is shown."""
+        super().showEvent(event)
+        # Defer the update to after the widget is fully shown
+        QtCore.QTimer.singleShot(0, self.updateGeometry)
 
 
 class LumaShotTools(QtWidgets.QWidget):
@@ -187,12 +238,36 @@ class LumaShotTools(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding
         )
+
+        # Use custom expanding tab bar
+        expanding_tab_bar = ExpandingTabBar(self.tab_widget)
+        self.tab_widget.setTabBar(expanding_tab_bar)
+
         layout.addWidget(self.tab_widget, 1)  # stretch factor 1 to expand
 
-        # Create status bar (fixed height, doesn't expand)
+        # Create status bar with left status and right log message
+        status_layout = QtWidgets.QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
+
+        # Status spinner (hidden by default, shown during long operations)
+        self.status_spinner = InlineSpinner(size=16)
+        status_layout.addWidget(self.status_spinner, 0)
+
         self.status_label = QtWidgets.QLabel("Ready")
         self.status_label.setObjectName("StatusLabel")
-        layout.addWidget(self.status_label, 0)  # stretch factor 0
+        status_layout.addWidget(self.status_label, 0)
+
+        status_layout.addStretch(1)
+
+        self.last_log_label = QtWidgets.QLabel("")
+        self.last_log_label.setObjectName("LastLogLabel")
+        self.last_log_label.setStyleSheet("color: #888888; font-size: 11px;")
+        status_layout.addWidget(self.last_log_label, 0)
+
+        status_widget = QtWidgets.QWidget()
+        status_widget.setLayout(status_layout)
+        layout.addWidget(status_widget, 0)  # stretch factor 0
 
         # Instantiate and load each tab
         for tab_config in TAB_CONFIG:
@@ -260,6 +335,13 @@ class LumaShotTools(QtWidgets.QWidget):
         if self.logs_tab:
             self.logs_tab.append_log(message)
 
+        # Update last log label in status bar (truncate if too long)
+        if hasattr(self, 'last_log_label'):
+            clean_msg = message.strip()
+            if len(clean_msg) > 80:
+                clean_msg = clean_msg[:77] + "..."
+            self.last_log_label.setText(clean_msg)
+
     @QtCore.Slot(str)
     def _on_tab_show_loading(self, message):
         """Show loading overlay when requested by a tab."""
@@ -271,6 +353,16 @@ class LumaShotTools(QtWidgets.QWidget):
         """Hide loading overlay when requested by a tab."""
         if hasattr(self, 'animator'):
             self.animator.hide_loading()
+
+    def start_status_spinner(self):
+        """Start the status bar spinner to indicate a background operation."""
+        if hasattr(self, 'status_spinner'):
+            self.status_spinner.start()
+
+    def stop_status_spinner(self):
+        """Stop the status bar spinner."""
+        if hasattr(self, 'status_spinner'):
+            self.status_spinner.stop()
 
     def _on_tab_request_attention(self, tab_instance):
         """Handle tab requesting attention with pulsing glow."""
@@ -443,6 +535,13 @@ class LumaShotTools(QtWidgets.QWidget):
         painter.setPen(QPen(border_color, 2))
         painter.drawRoundedRect(self.rect(), LoadingStyles.BORDER_RADIUS, LoadingStyles.BORDER_RADIUS)
 
+    def resizeEvent(self, event):
+        """Handle window resize to update tab widths."""
+        super().resizeEvent(event)
+        # Force tab bar to recalculate sizes
+        if hasattr(self, 'tab_widget'):
+            self.tab_widget.tabBar().updateGeometry()
+
     def get_tab(self, tab_id):
         """Get a tab instance by ID."""
         return self.tabs.get(tab_id)
@@ -464,12 +563,38 @@ def main():
         # Show splash screen
         splash = SplashScreen()
         splash.show()
+        splash.start_animation()
         app.processEvents()
 
+        # Pre-warm gallery (scan directory, generate thumbnails)
+        splash.update_progress(10, "Preparing", "Pre-warming gallery...")
+        app.processEvents()
+
+        try:
+            from gallery_prewarm import prewarm_gallery, set_prewarm_cache
+
+            def prewarm_progress(pct, msg):
+                # Map 0-100 to 10-50 range
+                overall = 10 + int(pct * 0.4)
+                splash.update_progress(overall, "Preparing", msg)
+                app.processEvents()
+
+            cache = prewarm_gallery(prewarm_progress)
+            set_prewarm_cache(cache)
+        except Exception as e:
+            print(f"Gallery pre-warm failed (non-fatal): {e}")
+
         # Create main window
+        splash.update_progress(55, "Loading", "Creating main window...")
+        app.processEvents()
+
         window = LumaShotTools()
 
+        splash.update_progress(90, "Loading", "Finalizing...")
+        app.processEvents()
+
         # Close splash and show main window
+        splash.stop_animation()
         splash.close()
         window.show()
 

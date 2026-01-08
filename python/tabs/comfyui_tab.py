@@ -199,8 +199,17 @@ class ComfyUITab(BaseTab):
     # PRESET MANAGEMENT
     # =========================================================================
 
+    def _get_preset_display_name(self, full_name):
+        """Get display name from preset name (last part after slash if present)."""
+        # Support both forward and back slashes
+        if '/' in full_name:
+            return full_name.rsplit('/', 1)[-1]
+        if '\\' in full_name:
+            return full_name.rsplit('\\', 1)[-1]
+        return full_name
+
     def _on_choose_preset_clicked(self):
-        """Show popup menu with available workflow presets."""
+        """Show popup menu with available workflow presets, grouped by folder."""
         from settings_manager import get_comfyui_workflow_presets
 
         menu = QMenu(self.main_window)
@@ -210,13 +219,42 @@ class ComfyUITab(BaseTab):
             action = menu.addAction("No presets available")
             action.setEnabled(False)
         else:
+            # Group presets by folder prefix
+            folders = {}  # folder_name -> [(full_name, display_name), ...]
+            root_items = []  # Items without folder prefix
+
             for name in sorted(presets.keys()):
-                action = menu.addAction(name)
-                action.setData(name)
-                # Mark current preset with a checkmark
-                if name == self._current_preset_name:
+                # Check for folder separator (support both / and \)
+                if '/' in name:
+                    folder, display = name.rsplit('/', 1)
+                    if folder not in folders:
+                        folders[folder] = []
+                    folders[folder].append((name, display))
+                elif '\\' in name:
+                    folder, display = name.rsplit('\\', 1)
+                    if folder not in folders:
+                        folders[folder] = []
+                    folders[folder].append((name, display))
+                else:
+                    root_items.append((name, name))
+
+            # Add root items first
+            for full_name, display_name in root_items:
+                action = menu.addAction(display_name)
+                action.setData(full_name)
+                if full_name == self._current_preset_name:
                     action.setCheckable(True)
                     action.setChecked(True)
+
+            # Add folders as submenus
+            for folder in sorted(folders.keys()):
+                submenu = menu.addMenu(folder)
+                for full_name, display_name in folders[folder]:
+                    action = submenu.addAction(display_name)
+                    action.setData(full_name)
+                    if full_name == self._current_preset_name:
+                        action.setCheckable(True)
+                        action.setChecked(True)
 
         # Show menu below the button
         action = menu.exec_(self.ui.ComfyUIChoosePreset.mapToGlobal(
@@ -236,7 +274,9 @@ class ComfyUITab(BaseTab):
         workflow_path = get_comfyui_workflow_preset_path(preset_name)
         if workflow_path and os.path.exists(workflow_path):
             self._current_preset_name = preset_name
-            self.ui.ComfyUICurrentPreset.setText(preset_name)
+            # Display short name (last part after slash) but store full name internally
+            display_name = self._get_preset_display_name(preset_name)
+            self.ui.ComfyUICurrentPreset.setText(display_name)
             self.ui.ComfyUIWorkflowPath.setText(workflow_path)
             self.app_state.comfyui_workflow_path = workflow_path
             self._refresh_editable_nodes()
@@ -247,13 +287,18 @@ class ComfyUITab(BaseTab):
             is_iteratable = is_workflow_preset_iteratable(preset_name)
             self._update_iterate_mode_visibility(is_iteratable)
         else:
-            self.main_window.animator.show_error(f"Workflow file not found: {workflow_path}")
-            self.ui.ComfyUIWorkflowPath.setText("Workflow file not found")
-            self.ui.ComfyUICurrentPreset.setText("No preset selected")
-            self._current_preset_name = None
+            # Workflow file not found - still keep preset name so user can edit/delete it
+            self._current_preset_name = preset_name
+            display_name = self._get_preset_display_name(preset_name)
+            self.ui.ComfyUICurrentPreset.setText(f"{display_name} (missing)")
+            self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
             self.app_state.comfyui_workflow_path = None
+            self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_iterate_mode_visibility(False)
+            # Guard for animator not being initialized yet during tab initialization
+            if hasattr(self.main_window, 'animator') and self.main_window.animator:
+                self.main_window.animator.show_error(f"Workflow file not found: {workflow_path}")
 
     def _on_add_preset_clicked(self):
         """Add a new workflow preset."""
@@ -327,22 +372,24 @@ class ComfyUITab(BaseTab):
         presets = get_comfyui_workflow_presets()
         preset = presets.get(self._current_preset_name, {})
         if isinstance(preset, str):
-            preset = {"path": preset, "description": "", "iteratable": False}
+            preset = {"path": preset, "description": "", "iteratable": False, "note": ""}
 
         current_name = self._current_preset_name
         current_path = preset.get("path", "")
         current_iteratable = preset.get("iteratable", False)
+        current_note = preset.get("note", "")
 
         # Create edit dialog
         dialog = QDialog(self.main_window)
-        dialog.setWindowTitle(f"Edit Preset: {current_name}")
+        dialog.setWindowTitle(f"Edit Model: {current_name}")
         dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(350)
 
         layout = QVBoxLayout(dialog)
 
         # Preset name
         name_layout = QHBoxLayout()
-        name_label = QLabel("Preset Name:")
+        name_label = QLabel("Model Name:")
         name_edit = QLineEdit(current_name)
         name_layout.addWidget(name_label)
         name_layout.addWidget(name_edit)
@@ -376,6 +423,16 @@ class ComfyUITab(BaseTab):
             "and refining the prompt before the next generation."
         )
         layout.addWidget(iteratable_check)
+
+        # Note field
+        note_label = QLabel("Note:")
+        layout.addWidget(note_label)
+
+        note_edit = QtWidgets.QPlainTextEdit()
+        note_edit.setPlaceholderText("Add a note or description for this model...")
+        note_edit.setPlainText(current_note)
+        note_edit.setMaximumHeight(80)
+        layout.addWidget(note_edit)
 
         # Buttons layout with Delete on the left, OK/Cancel on the right
         buttons_layout = QHBoxLayout()
@@ -428,6 +485,7 @@ class ComfyUITab(BaseTab):
             new_name = name_edit.text().strip()
             new_path = path_edit.text().strip()
             new_iteratable = iteratable_check.isChecked()
+            new_note = note_edit.toPlainText().strip()
 
             if not new_name:
                 self.main_window.animator.show_error("Preset name cannot be empty")
@@ -445,7 +503,7 @@ class ComfyUITab(BaseTab):
 
                 # Delete old preset and create new one with new name
                 delete_comfyui_workflow_preset(current_name)
-                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable)
+                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable, note=new_note)
                 self._current_preset_name = new_name
                 self.ui.ComfyUICurrentPreset.setText(new_name)
                 self.main_window.animator.show_success(f"Preset renamed to '{new_name}'")
@@ -454,7 +512,8 @@ class ComfyUITab(BaseTab):
                 update_comfyui_workflow_preset(
                     current_name,
                     workflow_path=new_path,
-                    iteratable=new_iteratable
+                    iteratable=new_iteratable,
+                    note=new_note
                 )
                 self.main_window.animator.show_success(f"Preset '{current_name}' updated")
 
@@ -477,19 +536,85 @@ class ComfyUITab(BaseTab):
                 item.widget().deleteLater()
 
         self._comfyui_dynamic_widgets = {}
+        self._comfyui_condition_map = {}  # Maps condition_node_name -> list of dependent widgets
 
         if not self.app_state.comfyui_workflow_path:
             return
 
         editable_nodes = extract_editable_nodes(self.app_state.comfyui_workflow_path)
+
+        # First pass: create all widgets
         for node in editable_nodes:
             widget = self._create_editable_node_widget(node)
             if widget:
                 layout.addWidget(widget)
                 self._comfyui_dynamic_widgets[node.node_id] = widget
+                # Store the node info on the widget for condition handling
+                widget.editable_node = node
+
+        # Second pass: set up conditional visibility connections
+        for node in editable_nodes:
+            if node.condition_node:
+                # Find the toggle widget that controls this node's visibility
+                toggle_widget = self._find_toggle_widget_by_name(node.condition_node)
+                if toggle_widget:
+                    # Register this widget as dependent on the toggle
+                    if node.condition_node not in self._comfyui_condition_map:
+                        self._comfyui_condition_map[node.condition_node] = []
+                    self._comfyui_condition_map[node.condition_node].append(node.node_id)
+
+                    # Set initial visibility based on toggle state
+                    dependent_widget = self._comfyui_dynamic_widgets.get(node.node_id)
+                    if dependent_widget and hasattr(toggle_widget, 'input_widget'):
+                        checkbox = toggle_widget.input_widget
+                        if hasattr(checkbox, 'isChecked'):
+                            dependent_widget.setVisible(checkbox.isChecked())
 
         # Apply any pending editable values from restored state
         self._apply_pending_editable_values()
+
+    def _find_toggle_widget_by_name(self, condition_name):
+        """Find a toggle widget by the condition node name."""
+        for node_id, widget in self._comfyui_dynamic_widgets.items():
+            node = getattr(widget, 'editable_node', None)
+            if node:
+                # Match by display name (base title without _editable)
+                # The condition_name is the base title of the controlling node
+                is_edit, base_title, _ = self._parse_node_title(node.title)
+                if base_title == condition_name:
+                    return widget
+        return None
+
+    def _parse_node_title(self, title):
+        """Parse node title for editable marker and condition (mirrors comfyui_service logic)."""
+        editable_markers = ['_editable', '_editble']
+        is_editable = False
+        condition_node = None
+        base_title = title
+
+        for marker in editable_markers:
+            if marker in title:
+                is_editable = True
+                parts = title.split(marker)
+                base_title = parts[0]
+                if len(parts) > 1:
+                    after_marker = parts[1]
+                    for sep in ['@if_', '&if_']:
+                        if after_marker.startswith(sep):
+                            condition_node = after_marker[len(sep):]
+                            break
+                break
+
+        return is_editable, base_title, condition_node
+
+    def _on_toggle_changed(self, checked, toggle_node_name):
+        """Handle toggle widget state change - update visibility of dependent widgets."""
+        dependent_node_ids = self._comfyui_condition_map.get(toggle_node_name, [])
+        for node_id in dependent_node_ids:
+            widget = self._comfyui_dynamic_widgets.get(node_id)
+            if widget:
+                widget.setVisible(checked)
+        self._save_state()
 
     def _create_editable_node_widget(self, node):
         """Create a widget for an editable node."""
@@ -499,10 +624,55 @@ class ComfyUITab(BaseTab):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        label = QLabel(f"{node.display_name}:")
-        layout.addWidget(label)
+        layout.setContentsMargins(0, 5, 0, 5)
 
-        if node.widget_type == 'text':
+        if node.widget_type == 'toggle':
+            # Toggle/switch widget - displayed as checkbox
+            # Parse the base name for the toggle label
+            _, base_title, _ = self._parse_node_title(node.title)
+            toggle_name = base_title.replace('_', ' ')
+
+            input_widget = QtWidgets.QCheckBox(toggle_name)
+            # Index 0 = unchecked (first input), Index 1 = checked (second input)
+            # For switch nodes, value != 0 means use second input
+            is_checked = bool(node.current_value) if node.current_value else False
+            input_widget.setChecked(is_checked)
+
+            # Connect to toggle change handler
+            input_widget.stateChanged.connect(
+                lambda state, name=base_title: self._on_toggle_changed(state != 0, name)
+            )
+            layout.addWidget(input_widget)
+            container.input_widget = input_widget
+            container.toggle_name = base_title  # Store for condition matching
+
+        elif node.widget_type == '3d_model':
+            # 3D model selector - file browser for GLB/OBJ/FBX files
+            label = QLabel(f"{node.display_name}:")
+            layout.addWidget(label)
+
+            file_row = QHBoxLayout()
+            file_path_edit = QLineEdit()
+            file_path_edit.setPlaceholderText("Select a 3D model file (GLB, OBJ, FBX)...")
+            if node.current_value:
+                file_path_edit.setText(str(node.current_value))
+            file_row.addWidget(file_path_edit)
+
+            browse_btn = QPushButton("Browse...")
+            browse_btn.setFixedWidth(80)
+            browse_btn.clicked.connect(
+                lambda checked=False, edit=file_path_edit: self._browse_3d_model(edit)
+            )
+            file_row.addWidget(browse_btn)
+            layout.addLayout(file_row)
+
+            file_path_edit.textChanged.connect(self._on_text_changed)
+            container.input_widget = file_path_edit
+
+        elif node.widget_type == 'text':
+            label = QLabel(f"{node.display_name}:")
+            layout.addWidget(label)
+
             # Add preset row with button
             preset_row = QHBoxLayout()
             preset_btn = QPushButton("Presets")
@@ -518,15 +688,19 @@ class ComfyUITab(BaseTab):
                 input_widget.setPlainText(str(node.current_value))
             layout.addWidget(input_widget)
             container.input_widget = input_widget
+            container.node_type = node.node_type  # Store node type for preset lookup
 
             # Connect preset button to show popup menu
             preset_btn.clicked.connect(
-                lambda checked=False, w=input_widget, btn=preset_btn: self._on_prompt_preset_clicked(w, btn)
+                lambda checked=False, w=input_widget, btn=preset_btn, nt=node.node_type: self._on_prompt_preset_clicked(w, btn, nt)
             )
             # Save state when text changes (with delay)
             input_widget.textChanged.connect(self._on_text_changed)
 
         elif node.widget_type == 'image':
+            label = QLabel(f"{node.display_name}:")
+            layout.addWidget(label)
+
             input_widget = BatchImageSelector()
             # Set last browse directory for image selector
             last_dir = get_last_browse_directory("comfyui_images")
@@ -536,7 +710,12 @@ class ComfyUITab(BaseTab):
             input_widget.images_changed.connect(self._on_images_changed)
             layout.addWidget(input_widget)
             container.input_widget = input_widget
+
         else:
+            # Default: generic line edit for strings, ints, floats
+            label = QLabel(f"{node.display_name}:")
+            layout.addWidget(label)
+
             input_widget = QLineEdit()
             if node.current_value:
                 input_widget.setText(str(node.current_value))
@@ -545,6 +724,21 @@ class ComfyUITab(BaseTab):
             container.input_widget = input_widget
 
         return container
+
+    def _browse_3d_model(self, line_edit):
+        """Open file browser for 3D model selection."""
+        from settings_manager import get_last_browse_directory, set_last_browse_directory
+
+        last_dir = get_last_browse_directory("comfyui_3d_models") or ""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self.main_window,
+            "Select 3D Model",
+            last_dir,
+            "3D Models (*.glb *.gltf *.obj *.fbx *.usd *.usda *.usdc *.usdz);;All Files (*)"
+        )
+        if file_path:
+            line_edit.setText(file_path)
+            set_last_browse_directory("comfyui_3d_models", os.path.dirname(file_path))
 
     def _apply_pending_editable_values(self):
         """Apply pending editable values that were saved from a previous session."""
@@ -572,28 +766,21 @@ class ComfyUITab(BaseTab):
     # PROMPT PRESETS
     # =========================================================================
 
-    def _on_prompt_preset_clicked(self, text_widget, button):
-        """Show popup menu for prompt presets (per-workflow)."""
-        from settings_manager import get_comfyui_prompt_presets_for_workflow
+    def _on_prompt_preset_clicked(self, text_widget, button, node_type):
+        """Show popup menu for prompt presets (per-node-type)."""
+        from settings_manager import get_comfyui_prompt_presets_for_node_type
 
         menu = QMenu(self.main_window)
 
-        # Get current workflow name
-        workflow_name = self._current_preset_name or ""
-        if not workflow_name:
-            menu.addAction("No workflow selected").setEnabled(False)
-            menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
-            return
-
-        # Get presets for this workflow
-        presets = get_comfyui_prompt_presets_for_workflow(workflow_name)
+        # Get presets for this node type
+        presets = get_comfyui_prompt_presets_for_node_type(node_type)
 
         # Add preset items
         if presets:
             for name in sorted(presets.keys()):
                 action = menu.addAction(name)
                 action.triggered.connect(
-                    lambda checked=False, n=name, w=text_widget: self._apply_prompt_preset(n, w)
+                    lambda checked=False, n=name, w=text_widget, nt=node_type: self._apply_prompt_preset(n, w, nt)
                 )
             menu.addSeparator()
         else:
@@ -604,7 +791,7 @@ class ComfyUITab(BaseTab):
         # Add save/delete options
         save_action = menu.addAction("Save Current...")
         save_action.triggered.connect(
-            lambda checked=False, w=text_widget: self._save_prompt_preset(w)
+            lambda checked=False, w=text_widget, nt=node_type: self._save_prompt_preset(w, nt)
         )
 
         if presets:
@@ -612,37 +799,34 @@ class ComfyUITab(BaseTab):
             for name in sorted(presets.keys()):
                 delete_action = delete_menu.addAction(name)
                 delete_action.triggered.connect(
-                    lambda checked=False, n=name: self._delete_prompt_preset(n)
+                    lambda checked=False, n=name, nt=node_type: self._delete_prompt_preset(n, nt)
                 )
 
         menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
 
-    def _apply_prompt_preset(self, preset_name, text_widget):
+    def _apply_prompt_preset(self, preset_name, text_widget, node_type):
         """Apply a prompt preset to the text widget."""
-        from settings_manager import get_comfyui_prompt_presets_for_workflow
+        from settings_manager import get_comfyui_prompt_presets_for_node_type
 
-        workflow_name = self._current_preset_name or ""
-        presets = get_comfyui_prompt_presets_for_workflow(workflow_name)
+        presets = get_comfyui_prompt_presets_for_node_type(node_type)
         if preset_name in presets:
             text_widget.setPlainText(presets[preset_name])
 
-    def _save_prompt_preset(self, text_widget):
-        """Save current text as a new prompt preset for the current workflow."""
-        from settings_manager import save_comfyui_prompt_preset_for_workflow
-
-        workflow_name = self._current_preset_name or ""
-        if not workflow_name:
-            self.main_window.animator.show_error("No workflow selected")
-            return
+    def _save_prompt_preset(self, text_widget, node_type):
+        """Save current text as a new prompt preset for the node type."""
+        from settings_manager import save_comfyui_prompt_preset_for_node_type
 
         current_text = text_widget.toPlainText().strip()
         if not current_text:
             self.main_window.animator.show_error("Cannot save empty preset")
             return
 
+        # Make node type more readable for display
+        display_type = node_type.replace('Plus', '+')
+
         dialog = QInputDialog(self.main_window)
         dialog.setWindowTitle("Save Prompt Preset")
-        dialog.setLabelText(f"Preset name (for '{workflow_name}'):")
+        dialog.setLabelText(f"Preset name (for {display_type} nodes):")
         dialog.setTextValue("")
         dialog.setWindowModality(Qt.WindowModal)
 
@@ -651,24 +835,23 @@ class ComfyUITab(BaseTab):
             if not name:
                 self.main_window.animator.show_error("Preset name cannot be empty")
                 return
-            save_comfyui_prompt_preset_for_workflow(workflow_name, name, current_text)
+            save_comfyui_prompt_preset_for_node_type(node_type, name, current_text)
             self.main_window.animator.show_success(f"Preset '{name}' saved")
 
-    def _delete_prompt_preset(self, preset_name):
-        """Delete a prompt preset from the current workflow."""
-        from settings_manager import delete_comfyui_prompt_preset_for_workflow
+    def _delete_prompt_preset(self, preset_name, node_type):
+        """Delete a prompt preset for a node type."""
+        from settings_manager import delete_comfyui_prompt_preset_for_node_type
 
-        workflow_name = self._current_preset_name or ""
-        if not workflow_name:
-            return
+        # Make node type more readable for display
+        display_type = node_type.replace('Plus', '+')
 
         reply = QMessageBox.question(
             self.main_window, "Delete Preset",
-            f"Delete prompt preset '{preset_name}' from '{workflow_name}'?",
+            f"Delete prompt preset '{preset_name}' from {display_type} nodes?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            delete_comfyui_prompt_preset_for_workflow(workflow_name, preset_name)
+            delete_comfyui_prompt_preset_for_node_type(node_type, preset_name)
             self.main_window.animator.show_info(f"Preset '{preset_name}' deleted")
 
     # =========================================================================
@@ -825,6 +1008,7 @@ class ComfyUITab(BaseTab):
             use_server_mode=use_server_mode,
             base_seed=base_seed,
             network_output_dir=network_output_dir,
+            workflow_preset=self._current_preset_name,
         )
         worker.signals.result.connect(on_result)
         worker.signals.error.connect(on_error)
@@ -877,6 +1061,9 @@ class ComfyUITab(BaseTab):
         self.log(f"[Iterate] Starting polling for job {job_id}")
         self.log(f"[Iterate] Network output dir: {network_output_dir}")
         self.log(f"[Iterate] Expected frames: {self._iterate_total_tasks}")
+
+        # Start status bar spinner
+        self.main_window.start_status_spinner()
 
         # Update UI
         self.ui.ComfyUIIterateStatus.setText("Job submitted, waiting for Deadline...")
@@ -992,6 +1179,8 @@ class ComfyUITab(BaseTab):
         """Stop the iterate poll timer."""
         if self._iterate_poll_timer:
             self._iterate_poll_timer.stop()
+        # Stop status bar spinner
+        self.main_window.stop_status_spinner()
 
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
@@ -1108,6 +1297,9 @@ class ComfyUITab(BaseTab):
         total_frames = total_jobs * self._batch_generation_count
 
         self.log(f"[Batch] Starting polling for {total_jobs} job(s), {total_frames} total frame(s)")
+
+        # Start status bar spinner
+        self.main_window.start_status_spinner()
 
         self.main_window.animator.update_status_animated(
             f"🎨 ComfyUI Batch: {total_jobs} job(s), {total_frames} frame(s) • Waiting for workers...",
@@ -1227,8 +1419,11 @@ class ComfyUITab(BaseTab):
             pending_count = len(self._batch_pending_jobs)
 
             # Count jobs in different states
+            # Active jobs are those with "Active" or "Rendering" status
             active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
-            queued_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Pending", "Queued"))
+            # Queued jobs = pending jobs that aren't actively rendering
+            # Use pending_count as the base since _batch_job_statuses may not have all jobs yet
+            queued_jobs = pending_count - active_jobs
 
             if status in ("Active", "Rendering"):
                 eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
@@ -1252,6 +1447,8 @@ class ComfyUITab(BaseTab):
         """Stop the batch poll timer."""
         if self._batch_poll_timer:
             self._batch_poll_timer.stop()
+        # Stop status bar spinner
+        self.main_window.stop_status_spinner()
 
     def _on_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion - cleanup and refresh gallery.
@@ -1311,6 +1508,75 @@ class ComfyUITab(BaseTab):
         if gallery_tab:
             self.log("[Batch] Triggering gallery refresh...")
             gallery_tab._on_refresh()
+
+    # =========================================================================
+    # APPLY SETTINGS FROM IMAGE METADATA
+    # =========================================================================
+
+    def apply_settings_from_metadata(self, metadata):
+        """
+        Apply settings from image metadata to restore the ComfyUI tab state.
+
+        This allows users to recreate the exact configuration used to generate
+        a specific image by copying settings from the gallery context menu.
+
+        Args:
+            metadata: Dictionary containing image generation metadata with keys:
+                - workflow_preset: Full preset name (e.g. "folder/preset_name")
+                - base_seed: The seed value used
+                - generation_count: Number of generations
+                - editable_values: Dict of node_id -> {display_name, value, ...}
+        """
+        from settings_manager import get_comfyui_workflow_presets
+
+        if not metadata:
+            self.main_window.animator.show_warning("No settings metadata found for this image")
+            return
+
+        self.log(f"[ComfyUI] Applying settings from image metadata...")
+
+        # Restore workflow preset
+        workflow_preset = metadata.get("workflow_preset")
+        if workflow_preset:
+            presets = get_comfyui_workflow_presets()
+            if workflow_preset in presets:
+                self._select_preset(workflow_preset)
+                self.log(f"[ComfyUI] Applied workflow preset: {workflow_preset}")
+            else:
+                self.log(f"[ComfyUI] Warning: Workflow preset '{workflow_preset}' not found")
+                self.main_window.animator.show_warning(
+                    f"Workflow preset '{workflow_preset}' not found in settings"
+                )
+
+        # Restore seed
+        base_seed = metadata.get("base_seed")
+        if base_seed is not None:
+            self.ui.ComfyUISeed.setValue(base_seed)
+            self.log(f"[ComfyUI] Applied seed: {base_seed}")
+
+        # Restore generation count
+        gen_count = metadata.get("generation_count")
+        if gen_count is not None:
+            self.ui.ComfyUIGenerationCount.setValue(gen_count)
+            self.log(f"[ComfyUI] Applied generation count: {gen_count}")
+
+        # Restore editable values
+        editable_values = metadata.get("editable_values")
+        if editable_values:
+            # Store as pending values - they'll be applied after widgets are created
+            # This handles the case where preset selection triggers widget recreation
+            self._pending_editable_values = {
+                node_id: data.get("value", "")
+                for node_id, data in editable_values.items()
+            }
+            # Try to apply immediately if widgets exist
+            self._apply_pending_editable_values()
+            self.log(f"[ComfyUI] Applied {len(editable_values)} editable value(s)")
+
+        self.main_window.animator.show_success("Settings applied from image")
+
+        # Switch to this tab
+        self.main_window.switch_to_tab("comfyui")
 
     # =========================================================================
     # STATE PERSISTENCE
