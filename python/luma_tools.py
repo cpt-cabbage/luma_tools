@@ -366,16 +366,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _on_tab_request_attention(self, tab_instance):
         """Handle tab requesting attention with pulsing glow."""
-        from settings_manager import get_tab_flashing_enabled
-
         print(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
-
-        # Check if tab flashing is enabled in settings
-        flashing_enabled = get_tab_flashing_enabled()
-        print(f"[TabAttention] Tab flashing enabled: {flashing_enabled}")
-        if not flashing_enabled:
-            print(f"Tab '{tab_instance.tab_name}' requested attention (flashing disabled)")
-            return
 
         if not hasattr(self, 'tab_glow_manager'):
             print(f"[TabAttention] ERROR: No tab_glow_manager!")

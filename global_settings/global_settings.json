@@ -8,18 +8,45 @@
     "Qwen\\Qwen Image Edit 2511 HQ": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511_HQ.json",
       "description": "",
-      "iteratable": true
+      "iteratable": true,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {
+        "Negative Prompt_editable": {
+          "enabled": false,
+          "default_value": ""
+        }
+      }
     },
     "Trellis\\Trellis-Ultramesh": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis-Ultramesh.json",
       "description": "",
       "iteratable": false,
-      "note": "Work in progress"
+      "note": "Work in progress",
+      "full_restart": true,
+      "node_overrides": {
+        "TRELLIS.2 Export GLB_editable": {
+          "enabled": false,
+          "default_value": "trellis_"
+        },
+        "UltraShape Save GLB/OBJ_editable": {
+          "enabled": false,
+          "default_value": "ultrashape_"
+        }
+      }
     },
     "Qwen/Qwen Image Edit 2511 LQ": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511.json",
       "description": "",
-      "iteratable": true
+      "iteratable": true,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {
+        "Negative Prompt_editable": {
+          "enabled": false,
+          "default_value": ""
+        }
+      }
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",
@@ -39,5 +66,6 @@
     "comfyui",
     "comfyui_gallery",
     "settings"
-  ]
+  ],
+  "comfyui_timeout": 600
 }

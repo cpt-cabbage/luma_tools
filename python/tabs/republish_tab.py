@@ -38,10 +38,46 @@ class RePublishTab(BaseTab):
         self.ui.RePublishBrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.RePublishRendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.RePublishPublish.clicked.connect(self._on_publish_clicked)
+        self.ui.RePublishTaskButton.clicked.connect(self._on_task_button_clicked)
 
     def initialize(self):
         """Initialize rePublish tab."""
         self.ui.RePublishPublish.setEnabled(False)
+
+        # Task options
+        self._task = "lighting"  # Default
+        self._task_options = [
+            ("lighting", "lighting"),
+            ("compositing", "compositing"),
+            ("fx", "fx"),
+        ]
+        self._update_task_button_text()
+
+    def _update_task_button_text(self):
+        """Update the task button text to show current selection."""
+        self.ui.RePublishTaskButton.setText(f"Task: {self._task}")
+
+    def _on_task_button_clicked(self):
+        """Show popup menu with task options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, value in self._task_options:
+            action = menu.addAction(label)
+            action.setData(value)
+            if value == self._task:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.RePublishTaskButton.mapToGlobal(
+            self.ui.RePublishTaskButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._task = action.data()
+            self._update_task_button_text()
 
     def _on_source_changed(self):
         """Handle rePublish source type radio button changes."""
@@ -190,7 +226,7 @@ class RePublishTab(BaseTab):
             return
 
         # Get options
-        task = self.ui.RePublishTask.currentText()
+        task = self._task
         use_farm = self.ui.RePublishUseFarm.isChecked()
         product_name = self.ui.RePublishProductName.text().strip()
 

@@ -39,10 +39,49 @@ class MP4MakerTab(BaseTab):
         self.ui.MP4RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.MP4BrowseOutput.clicked.connect(self._on_browse_output)
         self.ui.MP4Generate.clicked.connect(self._on_generate_clicked)
+        self.ui.MP4QualityButton.clicked.connect(self._on_quality_button_clicked)
 
     def initialize(self):
         """Initialize MP4 maker tab."""
         self.ui.MP4Generate.setEnabled(False)
+
+        # Quality options (index, label, button_label)
+        self._quality_index = 0  # Default: high quality
+        self._quality_options = [
+            (0, "High Quality (CRF 18)", "Quality: High (CRF 18)"),
+            (1, "Medium Quality (CRF 23)", "Quality: Medium (CRF 23)"),
+            (2, "Low Quality (CRF 28)", "Quality: Low (CRF 28)"),
+        ]
+        self._update_quality_button_text()
+
+    def _update_quality_button_text(self):
+        """Update the quality button text to show current selection."""
+        for index, label, button_label in self._quality_options:
+            if index == self._quality_index:
+                self.ui.MP4QualityButton.setText(button_label)
+                break
+
+    def _on_quality_button_clicked(self):
+        """Show popup menu with quality options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for index, label, button_label in self._quality_options:
+            action = menu.addAction(label)
+            action.setData(index)
+            if index == self._quality_index:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.MP4QualityButton.mapToGlobal(
+            self.ui.MP4QualityButton.rect().bottomLeft()
+        ))
+
+        if action and action.data() is not None:
+            self._quality_index = action.data()
+            self._update_quality_button_text()
 
     def _on_source_changed(self):
         """Handle source type change - enable/disable custom path button and trigger scan."""
@@ -261,7 +300,7 @@ class MP4MakerTab(BaseTab):
             StatusColors.INFO
         )
 
-        quality_index = self.ui.MP4Quality.currentIndex()
+        quality_index = self._quality_index
         burn_in_timecode = self.ui.MP4BurnInTimecode.isChecked()
 
         def on_progress(progress, message):

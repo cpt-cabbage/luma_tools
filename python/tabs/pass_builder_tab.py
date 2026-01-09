@@ -31,6 +31,7 @@ class PassBuilderTab(BaseTab):
         self.ui.RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.BuildPasses.pressed.connect(self._on_build_passes_clicked)
         self.ui.CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
+        self.ui.BuildTypeButton.clicked.connect(self._on_build_type_button_clicked)
 
     def initialize(self):
         """Initialize pass builder tab."""
@@ -38,6 +39,43 @@ class PassBuilderTab(BaseTab):
         # Create inline spinner for pass detection (will be positioned in showEvent)
         from ui_components import InlineSpinner
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
+
+        # Build type options
+        self._build_type = "local"  # Default: local
+        self._build_type_options = [
+            ("Local", "local"),
+            ("Farm", "farm"),
+        ]
+        self._update_build_type_button_text()
+
+    def _update_build_type_button_text(self):
+        """Update the build type button text to show current selection."""
+        for label, mode in self._build_type_options:
+            if mode == self._build_type:
+                self.ui.BuildTypeButton.setText(f"Location: {label}")
+                break
+
+    def _on_build_type_button_clicked(self):
+        """Show popup menu with build type options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, mode in self._build_type_options:
+            action = menu.addAction(label)
+            action.setData(mode)
+            if mode == self._build_type:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.BuildTypeButton.mapToGlobal(
+            self.ui.BuildTypeButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._build_type = action.data()
+            self._update_build_type_button_text()
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
@@ -173,12 +211,15 @@ class PassBuilderTab(BaseTab):
         self.log(f"Building with passes: {all_passes}")
 
         # Get build location (Local or Farm)
-        build_type = self.ui.BuildType.currentText()
+        build_type = self._build_type
+
+        # Get display name for status
+        build_type_display = "Local" if build_type == "local" else "Farm"
 
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
         self.main_window.animator.update_status_animated(
-            f"🔧 Pass Builder: Building passes ({build_type})...",
+            f"🔧 Pass Builder: Building passes ({build_type_display})...",
             StatusColors.INFO
         )
 
@@ -190,7 +231,7 @@ class PassBuilderTab(BaseTab):
                 all_passes,
                 self.app_state.startframe,
                 self.app_state.endframe,
-                build_type.lower()
+                build_type
             )
 
         def on_result(result):

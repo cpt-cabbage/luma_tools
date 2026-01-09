@@ -1,10 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.13
+- Replace loading overlay with status bar progress 
+- Better batch job polling 
+- Add editable node overrides in Edit Model dialog
+
 ## Version 0.12
 - Fix tab notifications not showing
-- Replace loading overlay with status bar progress across all tabs (allows user interaction during tasks)
-- Consolidate batch job polling to prevent status bar flickering with multiple jobs
-- Add editable node overrides in Edit Model dialog (enable/disable nodes and set default prompts)
 
 ## Version 0.11
 - Installer Updates

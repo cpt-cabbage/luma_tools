@@ -45,25 +45,18 @@
       </widget>
      </item>
      <item>
-      <widget class="QLabel" name="GallerySortLabel">
+      <widget class="QPushButton" name="GallerySortButton">
        <property name="text">
-        <string>Sort:</string>
+        <string>Sort: Newest First</string>
        </property>
-       <property name="styleSheet">
-        <string>color: #888888;</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QComboBox" name="GallerySortCombo">
        <property name="minimumSize">
         <size>
-         <width>140</width>
+         <width>160</width>
          <height>0</height>
         </size>
        </property>
        <property name="toolTip">
-        <string>Sort gallery items</string>
+        <string>Click to change sort order</string>
        </property>
       </widget>
      </item>

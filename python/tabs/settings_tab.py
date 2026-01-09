@@ -76,7 +76,7 @@ class SettingsTab(BaseTab):
         self.ui.BrowseComfyUIPath.clicked.connect(self._on_browse_comfyui_path)
         self.ui.BrowseComfyUIPython.clicked.connect(self._on_browse_comfyui_python)
         self.ui.BrowseComfyUINetworkOutput.clicked.connect(self._on_browse_comfyui_network_output)
-        self.ui.ComfyUIModeCombo.currentIndexChanged.connect(self._on_comfyui_mode_changed)
+        self.ui.ComfyUIModeButton.clicked.connect(self._on_comfyui_mode_button_clicked)
         self.ui.SaveGlobalSettings.clicked.connect(self._on_save_global_settings)
 
         # Admin user management
@@ -87,6 +87,14 @@ class SettingsTab(BaseTab):
 
     def initialize(self):
         """Initialize settings tab."""
+        # ComfyUI mode options
+        self._comfyui_mode = "embedded"  # Default
+        self._comfyui_mode_options = [
+            ("Embedded (python_embeded)", "embedded"),
+            ("Portable (venv)", "portable"),
+            ("Standalone", "standalone"),
+        ]
+
         self._load_version_ui()
         self._load_default_passes_ui()
         self._load_user_settings_ui()
@@ -123,11 +131,7 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        from settings_manager import get_tab_flashing_enabled
-
-        # Load tab flashing setting
-        if hasattr(self.ui, 'TabFlashingEnabled'):
-            self.ui.TabFlashingEnabled.setChecked(get_tab_flashing_enabled())
+        pass
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -177,9 +181,8 @@ class SettingsTab(BaseTab):
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
         # ComfyUI mode
-        mode = get_comfyui_mode()
-        mode_index = {"embedded": 0, "portable": 1, "standalone": 2}.get(mode, 0)
-        self.ui.ComfyUIModeCombo.setCurrentIndex(mode_index)
+        self._comfyui_mode = get_comfyui_mode()
+        self._update_comfyui_mode_button_text()
 
         # ComfyUI paths
         self.ui.ComfyUIPathEdit.setText(get_comfyui_path())
@@ -206,9 +209,39 @@ class SettingsTab(BaseTab):
         for user in get_admin_users():
             self.ui.AdminUsersList.addItem(user)
 
+    def _update_comfyui_mode_button_text(self):
+        """Update the ComfyUI mode button text to show current selection."""
+        for label, mode in self._comfyui_mode_options:
+            if mode == self._comfyui_mode:
+                self.ui.ComfyUIModeButton.setText(f"ComfyUI Mode: {label}")
+                break
+
+    def _on_comfyui_mode_button_clicked(self):
+        """Show popup menu with ComfyUI mode options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, mode in self._comfyui_mode_options:
+            action = menu.addAction(label)
+            action.setData(mode)
+            if mode == self._comfyui_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.ComfyUIModeButton.mapToGlobal(
+            self.ui.ComfyUIModeButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._comfyui_mode = action.data()
+            self._update_comfyui_mode_button_text()
+            self._update_comfyui_python_visibility()
+
     def _update_comfyui_python_visibility(self):
         """Show/hide Python path field based on selected mode."""
-        is_standalone = self.ui.ComfyUIModeCombo.currentIndex() == 2
+        is_standalone = self._comfyui_mode == "standalone"
         self.ui.ComfyUIPythonEdit.setEnabled(is_standalone)
         self.ui.BrowseComfyUIPython.setEnabled(is_standalone)
 
@@ -284,18 +317,9 @@ class SettingsTab(BaseTab):
         set_default_passes(selected_passes)
         self.log(f"Saved default passes: {selected_passes}")
 
-        # Save tab flashing setting
-        if hasattr(self.ui, 'TabFlashingEnabled'):
-            set_tab_flashing_enabled(self.ui.TabFlashingEnabled.isChecked())
-            self.log(f"Saved tab flashing enabled: {self.ui.TabFlashingEnabled.isChecked()}")
-
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
             self.main_window.animator.show_success("User settings saved")
-
-    def _on_comfyui_mode_changed(self, index):
-        """Handle ComfyUI mode combo change."""
-        self._update_comfyui_python_visibility()
 
     def _on_browse_global_settings_path(self):
         """Browse for global settings directory."""
@@ -366,8 +390,7 @@ class SettingsTab(BaseTab):
             self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
 
         # Save ComfyUI settings
-        mode_map = {0: "embedded", 1: "portable", 2: "standalone"}
-        set_comfyui_mode(mode_map.get(self.ui.ComfyUIModeCombo.currentIndex(), "embedded"))
+        set_comfyui_mode(self._comfyui_mode)
         set_comfyui_path(self.ui.ComfyUIPathEdit.text().strip())
         set_comfyui_python_path(self.ui.ComfyUIPythonEdit.text().strip())
         set_comfyui_network_output_path(self.ui.ComfyUINetworkOutputEdit.text().strip())

@@ -229,19 +229,6 @@
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="TabFlashingEnabled">
-            <property name="toolTip">
-             <string>Enable tab flashing/glow effect when new content is available (e.g., ComfyUI Gallery when images are generated)</string>
-            </property>
-            <property name="text">
-             <string>Enable Tab Flashing Notifications</string>
-            </property>
-            <property name="checked">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
            <widget class="QLabel" name="defaultPassesLabel">
             <property name="text">
              <string>Default Passes (Beauty and Alpha are always included):</string>
@@ -421,32 +408,13 @@
           <item>
            <layout class="QHBoxLayout" name="comfyuiModeLayout">
             <item>
-             <widget class="QLabel" name="comfyuiModeLabel">
+             <widget class="QPushButton" name="ComfyUIModeButton">
               <property name="text">
-               <string>ComfyUI Mode:</string>
+               <string>ComfyUI Mode: Embedded</string>
               </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="ComfyUIModeCombo">
               <property name="toolTip">
-               <string>Select ComfyUI installation type</string>
+               <string>Click to select ComfyUI installation type</string>
               </property>
-              <item>
-               <property name="text">
-                <string>Embedded (python_embeded)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Portable (venv)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Standalone</string>
-               </property>
-              </item>
              </widget>
             </item>
             <item>

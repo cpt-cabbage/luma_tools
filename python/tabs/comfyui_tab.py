@@ -498,16 +498,7 @@ class ComfyUITab(BaseTab):
                 nodes_scroll_layout.addWidget(no_nodes_label)
                 return
 
-            # Filter to only show text-type nodes (prompts) - skip toggles, images, 3d models
-            text_nodes = [n for n in editable_nodes if n.widget_type == 'text']
-
-            if not text_nodes:
-                no_nodes_label = QLabel("No text/prompt nodes found in this workflow")
-                no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
-                nodes_scroll_layout.addWidget(no_nodes_label)
-                return
-
-            for node in text_nodes:
+            for node in editable_nodes:
                 # Get existing override for this node
                 override = current_node_overrides.get(node.title, {})
                 is_enabled = override.get("enabled", True)
@@ -526,18 +517,25 @@ class ComfyUITab(BaseTab):
                 enable_check.setFixedWidth(20)
                 node_row_layout.addWidget(enable_check)
 
-                # Node name label
-                name_label = QLabel(node.display_name)
-                name_label.setFixedWidth(150)
-                name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}")
+                # Node name label with type indicator
+                type_indicator = f" ({node.widget_type})" if node.widget_type != 'text' else ""
+                name_label = QLabel(f"{node.display_name}{type_indicator}")
+                name_label.setFixedWidth(180)
+                name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}\nWidget: {node.widget_type}")
                 node_row_layout.addWidget(name_label)
 
-                # Default value input
-                default_input = QLineEdit()
-                default_input.setPlaceholderText("Leave blank to keep unchanged")
-                default_input.setText(default_value)
-                default_input.setToolTip("Default value to pre-fill (leave empty to use workflow default)")
-                node_row_layout.addWidget(default_input, 1)
+                # Default value input - show for text and string nodes
+                if node.widget_type in ('text', 'string'):
+                    default_input = QLineEdit()
+                    default_input.setPlaceholderText("Leave blank to keep unchanged")
+                    default_input.setText(default_value)
+                    default_input.setToolTip("Default value to pre-fill (leave empty to use workflow default)")
+                    node_row_layout.addWidget(default_input, 1)
+                else:
+                    # For non-text nodes, add a spacer/placeholder
+                    default_input = None
+                    spacer = QLabel("")
+                    node_row_layout.addWidget(spacer, 1)
 
                 nodes_scroll_layout.addWidget(node_row)
 
@@ -612,7 +610,9 @@ class ComfyUITab(BaseTab):
             new_node_overrides = {}
             for node_title, widgets in node_override_widgets.items():
                 is_enabled = widgets["enable_check"].isChecked()
-                default_value = widgets["default_input"].text().strip()
+                # default_input is None for non-text nodes
+                default_input = widgets["default_input"]
+                default_value = default_input.text().strip() if default_input else ""
                 # Store override if node is disabled or has a default value set
                 if not is_enabled or default_value:
                     new_node_overrides[node_title] = {
@@ -701,9 +701,9 @@ class ComfyUITab(BaseTab):
                 # Node is disabled, skip it
                 continue
 
-            # Apply default value override if present
+            # Apply default value override if present (for text and string nodes)
             default_value = override.get("default_value", "")
-            if default_value and node.widget_type == 'text':
+            if default_value and node.widget_type in ('text', 'string'):
                 # Override the current_value with the default
                 node.current_value = default_value
 

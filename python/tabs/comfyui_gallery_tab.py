@@ -32,7 +32,7 @@ class ComfyUIGalleryTab(BaseTab):
         self.ui.GallerySourceToggle.clicked.connect(self._on_source_toggle)
         self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
         self.ui.GalleryRefresh.clicked.connect(self._on_refresh)
-        self.ui.GallerySortCombo.currentIndexChanged.connect(self._on_sort_changed)
+        self.ui.GallerySortButton.clicked.connect(self._on_sort_button_clicked)
 
     def initialize(self):
         """Initialize the gallery tab."""
@@ -44,6 +44,8 @@ class ComfyUIGalleryTab(BaseTab):
 
         # File system watcher for auto-refresh
         self._watcher = None
+        self._watched_path = None
+        self._watcher_setup_in_progress = False
         self._refresh_timer = None
 
         # Source mode: "network" or "custom"
@@ -51,9 +53,16 @@ class ComfyUIGalleryTab(BaseTab):
         self._custom_path = ""
         self._current_path = ""
 
-        # Sort mode
+        # Sort mode and options
         self._sort_mode = "date_desc"  # Default: newest first
-        self._setup_sort_options()
+        self._sort_options = [
+            ("Date (Newest)", "date_desc"),
+            ("Date (Oldest)", "date_asc"),
+            ("Name (A-Z)", "name_asc"),
+            ("Name (Z-A)", "name_desc"),
+            ("Workflow", "workflow"),
+        ]
+        self._update_sort_button_text()
 
         # Track known images to detect new additions
         self._known_images = set()
@@ -61,6 +70,7 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Cache for scanned items (to avoid rescanning when just changing sort)
         self._cached_items = None
+        self._scan_in_progress = False
 
         # Set initial output directory to network path with user subfolder
         self._update_gallery_path()
@@ -70,6 +80,8 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _use_prewarm_cache(self):
         """Use pre-warmed cache from splash screen if available."""
+        from ui_components import Worker
+
         try:
             from gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
 
@@ -77,28 +89,15 @@ class ComfyUIGalleryTab(BaseTab):
             if cache and cache.get('items'):
                 self.log(f"[Gallery] Using pre-warmed cache with {len(cache['items'])} items")
 
-                # Use the pre-warmed items directly
-                items = cache['items']
-
-                # Add workflow metadata (not included in basic prewarm scan)
-                # This enriches items with workflow info for sorting
-                from comfyui_service import get_image_metadata
-                for item in items:
-                    if 'workflow' not in item or not item['workflow']:
-                        try:
-                            output_dir = os.path.dirname(item['path'])
-                            filename = os.path.basename(item['path'])
-                            metadata = get_image_metadata(output_dir, filename)
-                            if metadata:
-                                item['workflow'] = metadata.get('workflow_preset', '') or ''
-                        except Exception:
-                            item['workflow'] = ''
-
-                # Process items through normal flow
-                self._on_scan_complete(items)
-
                 # Clear the cache so it's not reused
                 clear_prewarm_cache()
+
+                # Enrich items with workflow metadata on worker thread
+                self._scan_in_progress = True
+                worker = Worker(self._enrich_prewarm_items, cache['items'])
+                worker.signals.result.connect(self._on_scan_complete)
+                worker.signals.error.connect(self._on_scan_error)
+                QThreadPool.globalInstance().start(worker)
                 return
 
         except ImportError:
@@ -109,21 +108,55 @@ class ComfyUIGalleryTab(BaseTab):
         # No cache available, do normal scan
         self._on_refresh()
 
-    def _setup_sort_options(self):
-        """Set up the sort dropdown options."""
-        self.ui.GallerySortCombo.blockSignals(True)
-        self.ui.GallerySortCombo.clear()
-        self.ui.GallerySortCombo.addItem("Date (Newest)", "date_desc")
-        self.ui.GallerySortCombo.addItem("Date (Oldest)", "date_asc")
-        self.ui.GallerySortCombo.addItem("Name (A-Z)", "name_asc")
-        self.ui.GallerySortCombo.addItem("Name (Z-A)", "name_desc")
-        self.ui.GallerySortCombo.addItem("Workflow", "workflow")
-        self.ui.GallerySortCombo.setCurrentIndex(0)
-        self.ui.GallerySortCombo.blockSignals(False)
+    def _enrich_prewarm_items(self, items):
+        """Enrich pre-warmed items with workflow metadata (runs on worker thread)."""
+        from comfyui_service import get_image_metadata
 
-    def _on_sort_changed(self, index):
-        """Handle sort mode change."""
-        self._sort_mode = self.ui.GallerySortCombo.currentData()
+        for item in items:
+            if 'workflow' not in item or not item['workflow']:
+                try:
+                    output_dir = os.path.dirname(item['path'])
+                    filename = os.path.basename(item['path'])
+                    metadata = get_image_metadata(output_dir, filename)
+                    if metadata:
+                        item['workflow'] = metadata.get('workflow_preset', '') or ''
+                except Exception:
+                    item['workflow'] = ''
+
+        return items
+
+    def _update_sort_button_text(self):
+        """Update the sort button text to show current selection."""
+        for label, mode in self._sort_options:
+            if mode == self._sort_mode:
+                self.ui.GallerySortButton.setText(f"Sort: {label}")
+                break
+
+    def _on_sort_button_clicked(self):
+        """Show popup menu with sort options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, mode in self._sort_options:
+            action = menu.addAction(label)
+            action.setData(mode)
+            if mode == self._sort_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.GallerySortButton.mapToGlobal(
+            self.ui.GallerySortButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._select_sort_mode(action.data())
+
+    def _select_sort_mode(self, mode):
+        """Select a sort mode and update the gallery."""
+        self._sort_mode = mode
+        self._update_sort_button_text()
         self.log(f"[Gallery] Sort mode changed to: {self._sort_mode}")
 
         # Re-sort and redisplay using cached items if available
@@ -254,14 +287,19 @@ class ComfyUIGalleryTab(BaseTab):
         """Refresh the gallery with images from the current directory."""
         from ui_components import Worker
 
-        if not self._current_path or not os.path.isdir(self._current_path):
+        # Skip if scan already in progress
+        if self._scan_in_progress:
+            return
+
+        if not self._current_path:
             self.ui.GalleryStatus.setText("Invalid directory")
             return
 
-        # Run scan on worker thread
+        # Run scan on worker thread (includes isdir check)
+        self._scan_in_progress = True
         worker = Worker(self._scan_directory, self._current_path)
         worker.signals.result.connect(self._on_scan_complete)
-        worker.signals.error.connect(lambda msg, tb: self.log(f"Gallery scan error: {msg}"))
+        worker.signals.error.connect(self._on_scan_error)
         QThreadPool.globalInstance().start(worker)
 
         self.ui.GalleryStatus.setText("Scanning...")
@@ -271,6 +309,11 @@ class ComfyUIGalleryTab(BaseTab):
         from comfyui_service import get_image_metadata
 
         items = []
+
+        # Check if directory exists (can be slow on network paths)
+        if not os.path.isdir(output_dir):
+            return items
+
         image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
         model_extensions = {'.glb', '.gltf'}
         supported_extensions = image_extensions | model_extensions
@@ -306,12 +349,19 @@ class ComfyUIGalleryTab(BaseTab):
 
         return items
 
+    def _on_scan_error(self, msg, tb):
+        """Handle scan or prewarm enrichment error."""
+        self._scan_in_progress = False
+        self.log(f"[Gallery] Scan error: {msg}")
+
     def _on_scan_complete(self, items):
         """Handle scan completion - prepare data and start async population.
 
         Args:
             items: List of dicts with keys: path, mtime, type, name, workflow
         """
+        self._scan_in_progress = False
+
         # Handle legacy format (tuples or plain paths)
         if items and isinstance(items[0], tuple):
             items = [{'path': item[0], 'mtime': item[1], 'type': item[2] if len(item) > 2 else 'image',
@@ -721,25 +771,69 @@ class ComfyUIGalleryTab(BaseTab):
         """Start or restart the file system watcher for auto-refresh.
 
         Watches the root directory and all existing subfolders recursively.
+        Directory collection is done async to avoid blocking the UI.
         """
-        from PySide2.QtCore import QFileSystemWatcher
+        from ui_components import Worker
+
+        # Skip if already watching this directory or setup is in progress for same path
+        if self._watched_path == output_dir and (self._watcher or self._watcher_setup_in_progress):
+            return
 
         # Stop existing watcher
         if self._watcher:
             self._watcher.deleteLater()
             self._watcher = None
 
-        # Start new watcher if directory is valid
-        if output_dir and os.path.isdir(output_dir):
-            # Collect all directories to watch (root + subfolders)
-            dirs_to_watch = [output_dir]
-            for root, dirs, files in os.walk(output_dir):
-                for dir_name in dirs:
-                    dirs_to_watch.append(os.path.join(root, dir_name))
+        # Track the path we're setting up (to avoid duplicate setups)
+        self._watched_path = output_dir
+        self._watcher_setup_in_progress = True
 
-            self._watcher = QFileSystemWatcher(dirs_to_watch, self.main_window)
-            self._watcher.directoryChanged.connect(self._on_directory_changed)
-            self.log(f"Started watching gallery directory: {output_dir} ({len(dirs_to_watch)} folders)")
+        # Start new watcher if directory is valid (check async to avoid network lag)
+        if output_dir:
+            # Collect directories async to avoid blocking UI (includes isdir check)
+            worker = Worker(self._collect_watch_directories, output_dir)
+            worker.signals.result.connect(self._on_watch_directories_collected)
+            worker.signals.error.connect(self._on_watcher_setup_error)
+            QThreadPool.globalInstance().start(worker)
+        else:
+            self._watcher_setup_in_progress = False
+
+    def _collect_watch_directories(self, output_dir):
+        """Collect all directories to watch (runs on worker thread)."""
+        # Check if directory exists (can be slow on network paths)
+        if not os.path.isdir(output_dir):
+            return None
+
+        dirs_to_watch = [output_dir]
+        for root, dirs, files in os.walk(output_dir):
+            for dir_name in dirs:
+                dirs_to_watch.append(os.path.join(root, dir_name))
+        return (output_dir, dirs_to_watch)
+
+    def _on_watch_directories_collected(self, result):
+        """Handle watch directory collection completion (runs on main thread)."""
+        self._watcher_setup_in_progress = False
+
+        if result is None:
+            return
+
+        from PySide2.QtCore import QFileSystemWatcher
+
+        output_dir, dirs_to_watch = result
+
+        # Verify we still want to watch this path (might have changed while async)
+        if self._watched_path != output_dir:
+            return
+
+        # Create the watcher on the main thread
+        self._watcher = QFileSystemWatcher(dirs_to_watch, self.main_window)
+        self._watcher.directoryChanged.connect(self._on_directory_changed)
+        self.log(f"Started watching gallery directory: {output_dir} ({len(dirs_to_watch)} folders)")
+
+    def _on_watcher_setup_error(self, msg, tb):
+        """Handle watcher setup error."""
+        self._watcher_setup_in_progress = False
+        self.log(f"[Gallery] Watcher setup error: {msg}")
 
     def _on_directory_changed(self, path):
         """Handle directory change notification."""

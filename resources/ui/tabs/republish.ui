@@ -224,29 +224,13 @@
        </property>
        <layout class="QVBoxLayout" name="republishOptionsLayout">
         <item>
-         <widget class="QLabel" name="republishTaskLabel">
+         <widget class="QPushButton" name="RePublishTaskButton">
           <property name="text">
-           <string>Task:</string>
+           <string>Task: lighting</string>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QComboBox" name="RePublishTask">
-          <item>
-           <property name="text">
-            <string>lighting</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>compositing</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>fx</string>
-           </property>
-          </item>
+          <property name="toolTip">
+           <string>Click to select the task for publishing</string>
+          </property>
          </widget>
         </item>
         <item>

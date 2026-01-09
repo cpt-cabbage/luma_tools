@@ -836,29 +836,6 @@ def save_tab_order(tab_names):
     save_user_settings(settings)
 
 
-def get_tab_flashing_enabled():
-    """
-    Get whether tab flashing/glow notifications are enabled.
-
-    Returns:
-        bool: True if tab flashing is enabled (default: True)
-    """
-    settings = load_user_settings()
-    return settings.get("tab_flashing_enabled", True)
-
-
-def set_tab_flashing_enabled(enabled):
-    """
-    Set whether tab flashing/glow notifications are enabled.
-
-    Args:
-        enabled: True to enable tab flashing notifications
-    """
-    settings = load_user_settings()
-    settings["tab_flashing_enabled"] = enabled
-    save_user_settings(settings)
-
-
 # ============================================================================
 # ADMIN USER MANAGEMENT
 # ============================================================================

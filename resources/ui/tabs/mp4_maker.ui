@@ -233,38 +233,19 @@
          <number>12</number>
         </property>
         <item>
-         <widget class="QLabel" name="mp4QualityLabel">
+         <widget class="QPushButton" name="MP4QualityButton">
           <property name="text">
-           <string>Quality:</string>
+           <string>Quality: High (CRF 18)</string>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QComboBox" name="MP4Quality">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>32</height>
+            <height>0</height>
            </size>
           </property>
           <property name="toolTip">
-           <string>Select output quality (lower CRF = higher quality)</string>
+           <string>Click to select output quality (lower CRF = higher quality)</string>
           </property>
-          <item>
-           <property name="text">
-            <string>High Quality (CRF 18)</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Medium Quality (CRF 23)</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Low Quality (CRF 28)</string>
-           </property>
-          </item>
          </widget>
         </item>
         <item>
