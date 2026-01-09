@@ -566,6 +566,52 @@ def modify_workflow_api_format(
                     inputs['model_file'] = os.path.basename(value)
                     print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(value)}")
 
+    # Build a map of toggle node names to their values (True/False)
+    # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name
+    toggle_values = {}
+    for node_id, data in (editable_values or {}).items():
+        node_info = data.get('node')
+        if node_info and node_info.widget_type == 'toggle':
+            title = node_info.title or ''
+            # Extract base name (remove _editable suffix)
+            base_name = title.replace('_editable', '').strip()
+            value = bool(data.get('value'))
+            toggle_values[base_name.lower()] = value
+            print(f"[Toggle] Found toggle '{base_name}' = {value}")
+
+    # Process nodes with @if_ conditional in their title
+    # Format: "Node Name_editable&if_ToggleName" or "Node Name&if_ToggleName"
+    # If the referenced toggle is False, bypass this node
+    for node_id, node_data in modified.items():
+        if not isinstance(node_data, dict):
+            continue
+        meta = node_data.get('_meta', {})
+        title = meta.get('title', '')
+
+        # Check for &if_ or @if_ pattern in title
+        if_match = None
+        for separator in ['&if_', '@if_']:
+            if separator in title.lower():
+                # Extract the toggle name after &if_ or @if_
+                parts = title.lower().split(separator)
+                if len(parts) > 1:
+                    # Get toggle name (may have _editable or other suffixes)
+                    toggle_ref = parts[1].split('_editable')[0].split('&')[0].strip()
+                    if_match = toggle_ref
+                    break
+
+        if if_match:
+            # Check if this toggle exists and its value
+            toggle_value = toggle_values.get(if_match)
+            if toggle_value is not None:
+                if not toggle_value:
+                    # Toggle is OFF - bypass this node
+                    node_data['mode'] = 4  # 4 = bypassed
+                    class_type = node_data.get('class_type', 'unknown')
+                    print(f"[Bypass] Bypassed node {node_id} ({class_type}) - '{if_match}' is OFF")
+            else:
+                print(f"[Bypass] Warning: Node {node_id} references toggle '{if_match}' but toggle not found")
+
     # Find and modify nodes by class_type
     # Apply special handling for certain node types (seeds, output prefixes, directories)
     # even if they were already handled by editable_values

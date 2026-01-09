@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.23
+- -Add support for exporting 3D models to ABC, OBJ, USD, and FBX formats from the gallery context menu. Include texture extraction functionality for 3D models. - Update metadata handling to use per-workflow subfolders. - Fix runner to avoid double prefixing filenames and adjust tab reordering logic.
+
 ## Version 0.22
 - Fix Changelog generation
 

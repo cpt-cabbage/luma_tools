@@ -4328,100 +4328,114 @@ class GLBThumbnailWidget(QWidget):
             )
 
     def _export_to_usd_format(self, scene_or_mesh, output_path, format_type):
-        """Export mesh data to USD or Alembic format using pxr library.
+        """Export mesh data to USD format using a subprocess to avoid DLL conflicts.
 
         Args:
-            scene_or_mesh: Trimesh Scene or Trimesh mesh object
+            scene_or_mesh: Trimesh Scene or Trimesh mesh object (not used - we reload in subprocess)
             output_path: Path to save the file
             format_type: 'usd' or 'abc'
         """
-        import trimesh
+        import subprocess
         import sys
-        import builtins
 
-        # Work around PySide2/shiboken2 import hook conflicts with pxr
-        # Save the original __import__ and use it directly
-        _original_import = builtins.__import__
+        # Escape backslashes for the script
+        model_path_escaped = self.model_path.replace('\\', '\\\\')
+        output_path_escaped = output_path.replace('\\', '\\\\')
 
-        def _safe_import(name, *args, **kwargs):
-            """Import bypassing shiboken's import hook for pxr modules."""
-            # For pxr modules, try to import without going through hooks
-            if name.startswith('pxr'):
-                try:
-                    # Try direct import first
-                    return _original_import(name, *args, **kwargs)
-                except Exception:
-                    pass
-            return _original_import(name, *args, **kwargs)
+        # Create a Python script to run in subprocess (avoids PySide2/pxr DLL conflicts)
+        script = f'''
+import sys
+try:
+    from pxr import Usd, UsdGeom, Gf, Vt
+except ImportError as e:
+    print(f"IMPORT_ERROR: {{e}}")
+    sys.exit(1)
 
+try:
+    import trimesh
+
+    # Load the model
+    scene_or_mesh = trimesh.load(r"{model_path_escaped}")
+
+    # Create the USD stage
+    stage = Usd.Stage.CreateNew(r"{output_path_escaped}")
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+
+    def add_mesh_to_stage(mesh, name, parent_path="/World"):
+        safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name)
+        if not safe_name or safe_name[0].isdigit():
+            safe_name = "mesh_" + safe_name
+
+        mesh_path = f"{{parent_path}}/{{safe_name}}"
+        usd_mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+
+        vertices = mesh.vertices
+        points = [Gf.Vec3f(float(v[0]), float(v[1]), float(v[2])) for v in vertices]
+        usd_mesh.GetPointsAttr().Set(Vt.Vec3fArray(points))
+
+        faces = mesh.faces
+        face_vertex_counts = [3] * len(faces)
+        face_vertex_indices = faces.flatten().tolist()
+
+        usd_mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(face_vertex_counts))
+        usd_mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(face_vertex_indices))
+
+        if mesh.vertex_normals is not None and len(mesh.vertex_normals) > 0:
+            normals = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in mesh.vertex_normals]
+            usd_mesh.GetNormalsAttr().Set(Vt.Vec3fArray(normals))
+            usd_mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+
+        return usd_mesh
+
+    root = UsdGeom.Xform.Define(stage, "/World")
+
+    if isinstance(scene_or_mesh, trimesh.Scene):
+        for name, geometry in scene_or_mesh.geometry.items():
+            if isinstance(geometry, trimesh.Trimesh):
+                add_mesh_to_stage(geometry, name)
+    elif isinstance(scene_or_mesh, trimesh.Trimesh):
+        add_mesh_to_stage(scene_or_mesh, "mesh")
+
+    stage.GetRootLayer().Save()
+    print("SUCCESS")
+except Exception as e:
+    print(f"EXPORT_ERROR: {{e}}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+'''
+
+        # Run in subprocess to avoid DLL conflicts with PySide2
         try:
-            # Temporarily replace __import__ to bypass shiboken hook
-            builtins.__import__ = _safe_import
-
-            # Import pxr modules
-            Usd = __import__('pxr.Usd', fromlist=['Usd'])
-            UsdGeom = __import__('pxr.UsdGeom', fromlist=['UsdGeom'])
-            Gf = __import__('pxr.Gf', fromlist=['Gf'])
-            Vt = __import__('pxr.Vt', fromlist=['Vt'])
-        except (ImportError, ModuleNotFoundError) as e:
-            raise RuntimeError(
-                f"USD/Alembic export requires the 'pxr' library.\n\n"
-                f"Install with: pip install usd-core\n\n"
-                f"Note: This provides OpenUSD (Pixar's Universal Scene Description)\n\n"
-                f"Error: {e}"
+            result = subprocess.run(
+                [sys.executable, '-c', script],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
-        finally:
-            # Restore original __import__
-            builtins.__import__ = _original_import
 
-        # Create the USD stage
-        stage = Usd.Stage.CreateNew(output_path)
-        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+            output = result.stdout.strip()
+            stderr = result.stderr.strip()
 
-        # Helper to add a mesh to the stage
-        def add_mesh_to_stage(mesh, name, parent_path="/World"):
-            # Sanitize name for USD (no special characters)
-            safe_name = "".join(c if c.isalnum() or c == '_' else '_' for c in name)
-            if not safe_name or safe_name[0].isdigit():
-                safe_name = "mesh_" + safe_name
+            if result.returncode != 0 or 'ERROR' in output:
+                error_msg = stderr or output
+                if 'IMPORT_ERROR' in output:
+                    raise RuntimeError(
+                        "USD export requires the 'pxr' library.\n\n"
+                        "Install with: pip install usd-core\n\n"
+                        f"Error: {output}"
+                    )
+                else:
+                    raise RuntimeError(f"USD export failed:\n{error_msg}")
 
-            mesh_path = f"{parent_path}/{safe_name}"
-            usd_mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+            if 'SUCCESS' not in output:
+                raise RuntimeError(f"USD export may have failed. Output: {output}\nStderr: {stderr}")
 
-            # Set vertices
-            vertices = mesh.vertices
-            points = [Gf.Vec3f(float(v[0]), float(v[1]), float(v[2])) for v in vertices]
-            usd_mesh.GetPointsAttr().Set(Vt.Vec3fArray(points))
-
-            # Set faces
-            faces = mesh.faces
-            face_vertex_counts = [3] * len(faces)  # All triangles
-            face_vertex_indices = faces.flatten().tolist()
-
-            usd_mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(face_vertex_counts))
-            usd_mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(face_vertex_indices))
-
-            # Set normals if available
-            if mesh.vertex_normals is not None and len(mesh.vertex_normals) > 0:
-                normals = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in mesh.vertex_normals]
-                usd_mesh.GetNormalsAttr().Set(Vt.Vec3fArray(normals))
-                usd_mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
-
-            return usd_mesh
-
-        # Create root xform
-        root = UsdGeom.Xform.Define(stage, "/World")
-
-        # Process meshes
-        if isinstance(scene_or_mesh, trimesh.Scene):
-            for name, geometry in scene_or_mesh.geometry.items():
-                if isinstance(geometry, trimesh.Trimesh):
-                    add_mesh_to_stage(geometry, name)
-        elif isinstance(scene_or_mesh, trimesh.Trimesh):
-            add_mesh_to_stage(scene_or_mesh, "mesh")
-
-        # Save the stage
-        stage.GetRootLayer().Save()
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("USD export timed out after 60 seconds")
+        except FileNotFoundError:
+            raise RuntimeError(f"Python executable not found: {sys.executable}")
 
     def _export_to_alembic(self, scene_or_mesh, output_path):
         """Export mesh data to Alembic format.
