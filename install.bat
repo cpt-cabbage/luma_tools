@@ -50,8 +50,9 @@ REM Prompt user to update changelog
 echo.
 set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
 if /i "%UPDATE_CHANGELOG%"=="y" (
-    REM Prepend new version entry to changelog.md
-    powershell -Command "$nl = [char]10; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + '%COMMIT_MSG%'; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    REM Prepend new version entry to changelog.md (escape single quotes for PowerShell)
+    set "COMMIT_MSG_ESCAPED=!COMMIT_MSG:'=''!"
+    powershell -Command "$nl = [char]10; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + '!COMMIT_MSG_ESCAPED!'; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
     echo Changelog updated with: %COMMIT_MSG%
 ) else (
     echo Changelog not updated.
