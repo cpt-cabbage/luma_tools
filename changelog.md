@@ -1,5 +1,15 @@
 # Luma Tools Changelog
 
+## Version 0.21
+- fix installer
+## Version 0.20
+- Implement user selector for viewing other users' galleries in network mode with view-only restrictions
+- Add job cancellation functionality for running ComfyUI submissions
+- Pause/resume controls for log output
+- Update installer
+- Enhance thumbnail widgets with new item highlighting and editable permissions
+- Auto-enable iterate mode when single image selected
+- Background caching updates
 ## Version 0.14
 - UI Updates
 
