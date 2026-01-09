@@ -992,6 +992,10 @@ def main():
     parser.add_argument('--fp16-accumulation', action='store_true', help='Enable --fp16-accumulation for faster FP16 math')
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files that cannot specify output path)')
     parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs (ignored in non-persistent mode)')
+    parser.add_argument('--server-not-found', choices=['fail', 'wait'], default='fail',
+                       help='Behavior when server not found in persistent mode: fail immediately or wait')
+    parser.add_argument('--server-wait-timeout', type=int, default=300,
+                       help='Timeout in seconds when waiting for server to start (default: 300 = 5 minutes)')
 
     args = parser.parse_args()
 
@@ -1099,10 +1103,23 @@ def main():
         # Persistent mode - expect server to be already running (user started it)
         print(f"Persistent mode: connecting to server on port {args.port}...")
         if not check_server_running(args.port):
-            print(f"ERROR: No ComfyUI server found on port {args.port}")
-            print("Please start ComfyUI manually on the farm node before submitting jobs.")
-            print(f"Expected server URL: http://127.0.0.1:{args.port}")
-            sys.exit(1)
+            if args.server_not_found == 'wait':
+                # Wait for server to start
+                wait_timeout = args.server_wait_timeout
+                print(f"Server not found - waiting up to {wait_timeout}s for it to start...")
+                print(f"Expected server URL: http://127.0.0.1:{args.port}")
+                if wait_for_server(args.port, timeout=wait_timeout):
+                    print(f"Server is now available on port {args.port}")
+                else:
+                    print(f"ERROR: Server did not start within {wait_timeout}s timeout")
+                    print("Please ensure ComfyUI is configured to start on the farm node.")
+                    sys.exit(1)
+            else:
+                # Fail immediately (default behavior)
+                print(f"ERROR: No ComfyUI server found on port {args.port}")
+                print("Please start ComfyUI manually on the farm node before submitting jobs.")
+                print(f"Expected server URL: http://127.0.0.1:{args.port}")
+                sys.exit(1)
         print(f"Connected to existing ComfyUI server on port {args.port}")
         print("Models should already be loaded - submissions will be fast")
 

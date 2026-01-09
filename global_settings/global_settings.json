@@ -25,10 +25,6 @@
       "note": "Work in progress",
       "full_restart": true,
       "node_overrides": {
-        "TRELLIS.2 Export GLB_editable": {
-          "enabled": false,
-          "default_value": "trellis_"
-        },
         "UltraShape Save GLB/OBJ_editable": {
           "enabled": false,
           "default_value": "ultrashape_"

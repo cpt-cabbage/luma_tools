@@ -684,7 +684,7 @@ class ComfyUIGalleryTab(BaseTab):
         # Reset widget cache
         self._widget_cache = {}
 
-        # Store items for async loading
+        # Store items for widget creation
         self._pending_items = [(item['path'], item['type']) for item in items]
         self._load_index = 0
 
@@ -704,8 +704,18 @@ class ComfyUIGalleryTab(BaseTab):
                 parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
             self.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
 
-        # Start async loading of thumbnails
-        self._load_next_batch()
+        # Create all widgets at once (with placeholders), then lazy load visible thumbnails
+        self._create_all_widgets()
+
+        # Connect scroll events for lazy loading (if not already connected)
+        if not hasattr(self, '_scroll_connected') or not self._scroll_connected:
+            scroll_area = self.ui.galleryScrollArea
+            scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+            scroll_area.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+            self._scroll_connected = True
+
+        # Initial lazy load of visible thumbnails
+        QTimer.singleShot(50, self._load_visible_thumbnails)
 
     def _reorder_widgets(self, items):
         """Reorder existing widgets without recreating them.
@@ -737,20 +747,19 @@ class ComfyUIGalleryTab(BaseTab):
         self._flow_layout.invalidate()
         container.updateGeometry()
 
-    def _load_next_batch(self):
-        """Load the next batch of thumbnails asynchronously."""
+        # Trigger lazy loading for visible items after reorder
+        QTimer.singleShot(50, self._load_visible_thumbnails)
+
+    def _create_all_widgets(self):
+        """Create all thumbnail widgets at once with placeholders (no thumbnail loading yet)."""
         from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
 
-        if not hasattr(self, '_pending_items') or self._load_index >= len(self._pending_items):
+        if not hasattr(self, '_pending_items') or not self._pending_items:
             return
 
         # Ensure widget cache exists
         if not hasattr(self, '_widget_cache'):
             self._widget_cache = {}
-
-        # Larger batch size for faster loading (thumbnails load async anyway)
-        batch_size = 15
-        end_index = min(self._load_index + batch_size, len(self._pending_items))
 
         # Block layout updates during batch insertion
         container = self.ui.galleryThumbnailContainer
@@ -760,8 +769,7 @@ class ComfyUIGalleryTab(BaseTab):
         is_editable = self._is_own_gallery()
 
         try:
-            for i in range(self._load_index, end_index):
-                path, file_type = self._pending_items[i]
+            for path, file_type in self._pending_items:
                 is_new = path in self._new_items
                 # Use the file's parent directory for metadata lookup (not gallery root)
                 # Metadata is stored per-workflow subfolder, not at the gallery root
@@ -801,11 +809,56 @@ class ComfyUIGalleryTab(BaseTab):
         finally:
             container.setUpdatesEnabled(True)
 
-        self._load_index = end_index
+    def _on_scroll(self, value=None):
+        """Handle scroll events - trigger lazy loading of visible thumbnails."""
+        # Debounce scroll events
+        if not hasattr(self, '_scroll_timer'):
+            self._scroll_timer = QTimer()
+            self._scroll_timer.setSingleShot(True)
+            self._scroll_timer.timeout.connect(self._load_visible_thumbnails)
 
-        # Schedule next batch if more items remain
-        if self._load_index < len(self._pending_items):
-            QTimer.singleShot(20, self._load_next_batch)
+        self._scroll_timer.start(100)  # 100ms debounce
+
+    def _load_visible_thumbnails(self):
+        """Load thumbnails for widgets that are currently visible in the viewport."""
+        if not hasattr(self, '_widget_cache') or not self._widget_cache:
+            return
+
+        scroll_area = self.ui.galleryScrollArea
+        viewport = scroll_area.viewport()
+        viewport_rect = viewport.rect()
+
+        # Get the visible area in container coordinates
+        container = self.ui.galleryThumbnailContainer
+
+        # Convert viewport rect to container coordinates
+        visible_top = scroll_area.verticalScrollBar().value()
+        visible_bottom = visible_top + viewport_rect.height()
+        visible_left = scroll_area.horizontalScrollBar().value()
+        visible_right = visible_left + viewport_rect.width()
+
+        # Add buffer zone (load thumbnails slightly outside visible area for smoother scrolling)
+        buffer = 200  # pixels
+        visible_top = max(0, visible_top - buffer)
+        visible_bottom += buffer
+        visible_left = max(0, visible_left - buffer)
+        visible_right += buffer
+
+        # Check each widget's visibility and load if needed
+        for widget in self._widget_cache.values():
+            if not widget or not hasattr(widget, 'load_thumbnail_if_needed'):
+                continue
+
+            # Get widget position in container
+            widget_rect = widget.geometry()
+
+            # Check if widget intersects with visible area
+            if (widget_rect.bottom() >= visible_top and
+                widget_rect.top() <= visible_bottom and
+                widget_rect.right() >= visible_left and
+                widget_rect.left() <= visible_right):
+                # Widget is visible - trigger lazy load
+                widget.load_thumbnail_if_needed()
 
     def _show_new_items_toast(self, image_count, model_count):
         """Show a toast notification for new items added to gallery.

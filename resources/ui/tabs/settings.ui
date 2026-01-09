@@ -229,6 +229,53 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="AutoExtractTextures">
+            <property name="toolTip">
+             <string>Automatically extract textures to a 'textures' folder when exporting 3D models from the gallery</string>
+            </property>
+            <property name="text">
+             <string>Auto-extract textures on model export</string>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="thumbnailCacheLayout">
+            <item>
+             <widget class="QLabel" name="thumbnailCacheLabel">
+              <property name="text">
+               <string>Gallery Thumbnails:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="RegenerateThumbnailsButton">
+              <property name="minimumSize">
+               <size>
+                <width>180</width>
+                <height>28</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>Regenerate Thumbnails</string>
+              </property>
+              <property name="toolTip">
+               <string>Clear cached thumbnails and regenerate them. Use this if 3D model thumbnails look incorrect.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="thumbnailCacheSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
            <widget class="QLabel" name="defaultPassesLabel">
             <property name="text">
              <string>Default Passes (Beauty and Alpha are always included):</string>
@@ -593,6 +640,73 @@
             </item>
             <item>
              <spacer name="timeoutSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="serverNotFoundLayout">
+            <item>
+             <widget class="QLabel" name="serverNotFoundLabel">
+              <property name="text">
+               <string>If Server Not Found:</string>
+              </property>
+              <property name="toolTip">
+               <string>Behavior when ComfyUI server is not running in persistent mode</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="ServerNotFoundCombo">
+              <property name="toolTip">
+               <string>Choose whether to fail immediately or wait for the server to start when not found</string>
+              </property>
+              <property name="minimumWidth">
+               <number>150</number>
+              </property>
+              <item>
+               <property name="text">
+                <string>Fail Immediately</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Wait for Server</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="serverWaitTimeoutLabel">
+              <property name="text">
+               <string>Wait Timeout:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="ServerWaitTimeoutSpinBox">
+              <property name="toolTip">
+               <string>Maximum time in minutes to wait for the server to start</string>
+              </property>
+              <property name="minimum">
+               <number>1</number>
+              </property>
+              <property name="maximum">
+               <number>60</number>
+              </property>
+              <property name="value">
+               <number>5</number>
+              </property>
+              <property name="suffix">
+               <string> min</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="serverNotFoundSpacer">
               <property name="orientation">
                <enum>Qt::Horizontal</enum>
               </property>

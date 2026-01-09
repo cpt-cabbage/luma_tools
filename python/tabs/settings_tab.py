@@ -71,6 +71,10 @@ class SettingsTab(BaseTab):
         self.ui.ResetPassesButton.clicked.connect(self._on_reset_passes_clicked)
         self.ui.SaveSettingsButton.clicked.connect(self._on_save_settings_clicked)
 
+        # Regenerate thumbnails button
+        if hasattr(self.ui, 'RegenerateThumbnailsButton'):
+            self.ui.RegenerateThumbnailsButton.clicked.connect(self._on_regenerate_thumbnails)
+
         # Global settings
         self.ui.BrowseGlobalSettingsPath.clicked.connect(self._on_browse_global_settings_path)
         self.ui.BrowseComfyUIPath.clicked.connect(self._on_browse_comfyui_path)
@@ -131,7 +135,11 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        pass
+        from settings_manager import get_auto_extract_textures
+
+        # Auto-extract textures checkbox
+        if hasattr(self.ui, 'AutoExtractTextures'):
+            self.ui.AutoExtractTextures.setChecked(get_auto_extract_textures())
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -172,7 +180,8 @@ class SettingsTab(BaseTab):
         from settings_manager import (
             get_global_settings_path, get_comfyui_mode, get_comfyui_path,
             get_comfyui_python_path, get_comfyui_network_output_path,
-            get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout
+            get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout,
+            get_comfyui_server_not_found_behavior, get_comfyui_server_wait_timeout
         )
 
         # Global settings path
@@ -199,7 +208,22 @@ class SettingsTab(BaseTab):
             # Convert to minutes for UI display
             self.ui.ComfyUITimeoutSpinBox.setValue(timeout_seconds // 60)
 
+        # Server not found behavior setting
+        if hasattr(self.ui, 'ServerNotFoundCombo'):
+            behavior = get_comfyui_server_not_found_behavior()
+            # Index 0 = "Fail Immediately" (fail), Index 1 = "Wait for Server" (wait)
+            self.ui.ServerNotFoundCombo.setCurrentIndex(0 if behavior == "fail" else 1)
+            # Connect signal to update wait timeout visibility
+            self.ui.ServerNotFoundCombo.currentIndexChanged.connect(self._update_server_wait_visibility)
+
+        # Server wait timeout setting
+        if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
+            timeout_seconds = get_comfyui_server_wait_timeout()
+            # Convert to minutes for UI display
+            self.ui.ServerWaitTimeoutSpinBox.setValue(timeout_seconds // 60)
+
         self._update_comfyui_python_visibility()
+        self._update_server_wait_visibility()
 
     def _load_admin_users_ui(self):
         """Load admin users list."""
@@ -244,6 +268,14 @@ class SettingsTab(BaseTab):
         is_standalone = self._comfyui_mode == "standalone"
         self.ui.ComfyUIPythonEdit.setEnabled(is_standalone)
         self.ui.BrowseComfyUIPython.setEnabled(is_standalone)
+
+    def _update_server_wait_visibility(self):
+        """Show/hide server wait timeout based on selected behavior."""
+        if hasattr(self.ui, 'ServerNotFoundCombo') and hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
+            is_wait = self.ui.ServerNotFoundCombo.currentIndex() == 1
+            self.ui.ServerWaitTimeoutSpinBox.setEnabled(is_wait)
+            if hasattr(self.ui, 'serverWaitTimeoutLabel'):
+                self.ui.serverWaitTimeoutLabel.setEnabled(is_wait)
 
     def _on_add_pass_clicked(self):
         """Add a custom pass to the default passes list."""
@@ -302,7 +334,7 @@ class SettingsTab(BaseTab):
     def _on_save_settings_clicked(self):
         """Save user settings."""
         from config import REQUIRED_PASSES
-        from settings_manager import set_default_passes, set_tab_flashing_enabled
+        from settings_manager import set_default_passes, set_auto_extract_textures
 
         # Collect selected passes
         selected_passes = []
@@ -317,9 +349,60 @@ class SettingsTab(BaseTab):
         set_default_passes(selected_passes)
         self.log(f"Saved default passes: {selected_passes}")
 
+        # Save auto-extract textures setting
+        if hasattr(self.ui, 'AutoExtractTextures'):
+            set_auto_extract_textures(self.ui.AutoExtractTextures.isChecked())
+
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
             self.main_window.animator.show_success("User settings saved")
+
+    def _on_regenerate_thumbnails(self):
+        """Clear all cached thumbnails and trigger regeneration."""
+        reply = QMessageBox.question(
+            self.main_window, "Regenerate Thumbnails",
+            "This will clear all cached gallery thumbnails.\n"
+            "They will be regenerated when you view the gallery.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                # Clear GLB thumbnail cache
+                from glb_thumbnail_service import get_glb_thumbnail_service
+                service = get_glb_thumbnail_service()
+                service.clear_cache()
+                self.log("Cleared GLB thumbnail cache")
+
+                # Clear image thumbnail cache (if it exists)
+                thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
+                if os.path.exists(thumbnail_cache_dir):
+                    import shutil
+                    count = 0
+                    for filename in os.listdir(thumbnail_cache_dir):
+                        filepath = os.path.join(thumbnail_cache_dir, filename)
+                        try:
+                            os.remove(filepath)
+                            count += 1
+                        except Exception:
+                            pass
+                    self.log(f"Cleared {count} cached thumbnail files")
+
+                # Notify gallery tab to refresh
+                gallery_tab = self.main_window.get_tab("comfyui_gallery")
+                if gallery_tab:
+                    # Clear widget cache to force thumbnail reload
+                    if hasattr(gallery_tab, '_widget_cache'):
+                        gallery_tab._widget_cache = {}
+                    gallery_tab._on_refresh()
+
+                if hasattr(self.main_window, 'animator'):
+                    self.main_window.animator.show_success("Thumbnail cache cleared")
+
+            except Exception as e:
+                self.log(f"Error clearing thumbnails: {e}")
+                if hasattr(self.main_window, 'animator'):
+                    self.main_window.animator.show_error(f"Error: {e}")
 
     def _on_browse_global_settings_path(self):
         """Browse for global settings directory."""
@@ -364,7 +447,8 @@ class SettingsTab(BaseTab):
             set_global_settings_path, set_comfyui_mode, set_comfyui_path,
             set_comfyui_python_path, set_comfyui_network_output_path,
             set_comfyui_fast_mode, set_comfyui_fp16_accumulation,
-            set_comfyui_timeout
+            set_comfyui_timeout, set_comfyui_server_not_found_behavior,
+            set_comfyui_server_wait_timeout
         )
 
         # Save global settings path
@@ -401,6 +485,16 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
             timeout_minutes = self.ui.ComfyUITimeoutSpinBox.value()
             set_comfyui_timeout(timeout_minutes * 60)  # Convert to seconds
+
+        # Save server not found behavior setting
+        if hasattr(self.ui, 'ServerNotFoundCombo'):
+            behavior = "fail" if self.ui.ServerNotFoundCombo.currentIndex() == 0 else "wait"
+            set_comfyui_server_not_found_behavior(behavior)
+
+        # Save server wait timeout setting
+        if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
+            timeout_minutes = self.ui.ServerWaitTimeoutSpinBox.value()
+            set_comfyui_server_wait_timeout(timeout_minutes * 60)  # Convert to seconds
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()

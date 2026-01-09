@@ -1035,6 +1035,13 @@ def submit_comfyui_to_deadline(
     # Add persistent flag if server mode is enabled
     if use_server_mode:
         runner_args += ' --persistent'
+        # Add server not found behavior setting
+        from settings_manager import get_comfyui_server_not_found_behavior, get_comfyui_server_wait_timeout
+        server_behavior = get_comfyui_server_not_found_behavior()
+        runner_args += f' --server-not-found {server_behavior}'
+        if server_behavior == 'wait':
+            server_wait_timeout = get_comfyui_server_wait_timeout()
+            runner_args += f' --server-wait-timeout {server_wait_timeout}'
 
     # Add full restart flag if enabled
     if full_restart:

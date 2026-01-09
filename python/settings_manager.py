@@ -610,6 +610,62 @@ def set_comfyui_timeout(timeout_seconds):
     print(f"Set ComfyUI timeout to: {timeout_seconds} seconds")
 
 
+# Default wait time for server not found (5 minutes)
+DEFAULT_SERVER_NOT_FOUND_WAIT = 300
+
+
+def get_comfyui_server_not_found_behavior():
+    """
+    Get the behavior when ComfyUI server is not found in persistent mode.
+
+    Returns:
+        str: 'fail' to fail immediately, 'wait' to wait for server to start
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_server_not_found_behavior", "fail")
+
+
+def set_comfyui_server_not_found_behavior(behavior):
+    """
+    Set the behavior when ComfyUI server is not found in persistent mode.
+
+    Args:
+        behavior: 'fail' to fail immediately, 'wait' to wait for server to start
+    """
+    if behavior not in ("fail", "wait"):
+        raise ValueError(f"Invalid behavior: {behavior}. Must be 'fail' or 'wait'")
+    settings = load_global_settings()
+    settings["comfyui_server_not_found_behavior"] = behavior
+    save_global_settings(settings)
+    print(f"Set ComfyUI server not found behavior to: {behavior}")
+
+
+def get_comfyui_server_wait_timeout():
+    """
+    Get the timeout for waiting for ComfyUI server to start (in seconds).
+
+    Returns:
+        int: Timeout in seconds (default: 300 = 5 minutes)
+    """
+    settings = load_global_settings()
+    return settings.get("comfyui_server_wait_timeout", DEFAULT_SERVER_NOT_FOUND_WAIT)
+
+
+def set_comfyui_server_wait_timeout(timeout_seconds):
+    """
+    Set the timeout for waiting for ComfyUI server to start.
+
+    Args:
+        timeout_seconds: Timeout in seconds (minimum 30, maximum 3600)
+    """
+    # Clamp to valid range
+    timeout_seconds = max(30, min(3600, int(timeout_seconds)))
+    settings = load_global_settings()
+    settings["comfyui_server_wait_timeout"] = timeout_seconds
+    save_global_settings(settings)
+    print(f"Set ComfyUI server wait timeout to: {timeout_seconds} seconds")
+
+
 
 
 # ============================================================================
@@ -906,3 +962,31 @@ def remove_admin_user(username):
     if len(settings["admin_users"]) < len(original_list):
         save_global_settings(settings)
         print(f"Removed admin user: {username}")
+
+
+# ============================================================================
+# MODEL EXPORT SETTINGS (User Settings)
+# ============================================================================
+
+def get_auto_extract_textures():
+    """
+    Get whether to automatically extract textures when exporting 3D models.
+
+    Returns:
+        bool: True if auto texture extraction is enabled
+    """
+    settings = load_user_settings()
+    return settings.get("auto_extract_textures", False)
+
+
+def set_auto_extract_textures(enabled):
+    """
+    Set whether to automatically extract textures when exporting 3D models.
+
+    Args:
+        enabled: True to enable auto texture extraction
+    """
+    settings = load_user_settings()
+    settings["auto_extract_textures"] = enabled
+    save_user_settings(settings)
+    print(f"Set auto extract textures to: {enabled}")

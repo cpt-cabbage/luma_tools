@@ -3163,8 +3163,9 @@ class GalleryThumbnailWidget(QWidget):
         self._editable = editable  # Can this item be edited/deleted
         self._is_new = is_new  # New item that hasn't been viewed yet
         self._cached_metadata = None
+        self._thumbnail_loaded = False  # Track if thumbnail has been loaded
         self._setup_ui()
-        self._load_thumbnail_async()
+        # Don't load thumbnail yet - wait for visibility check (lazy loading)
         self._update_tooltip()
 
     def _setup_ui(self):
@@ -3240,6 +3241,12 @@ class GalleryThumbnailWidget(QWidget):
             self._is_new = False
             self._apply_thumbnail_style()
             self.viewed.emit(self.image_path)
+
+    def load_thumbnail_if_needed(self):
+        """Load thumbnail if not already loaded (called by gallery for lazy loading)."""
+        if not self._thumbnail_loaded:
+            self._thumbnail_loaded = True
+            self._load_thumbnail_async()
 
     def _load_thumbnail_async(self):
         """Load the thumbnail image asynchronously."""
@@ -3452,9 +3459,27 @@ class GalleryThumbnailWidget(QWidget):
                 print(f"Deleted file: {self.image_path}")
                 # Emit signal so gallery can refresh
                 self.deleted.emit(self.image_path)
-                # Remove this widget from its parent layout
-                self.setParent(None)
-                self.deleteLater()
+                # Remove this widget from its parent layout efficiently
+                # Disable updates on the container to prevent costly relayout during removal
+                container = self.parentWidget()
+                if container:
+                    container.setUpdatesEnabled(False)
+                    try:
+                        # Remove from layout's internal item list directly
+                        layout = container.layout()
+                        if layout:
+                            for i in range(layout.count()):
+                                item = layout.itemAt(i)
+                                if item and item.widget() is self:
+                                    layout.takeAt(i)
+                                    break
+                        self.setParent(None)
+                        self.deleteLater()
+                    finally:
+                        container.setUpdatesEnabled(True)
+                else:
+                    self.setParent(None)
+                    self.deleteLater()
             except Exception as e:
                 print(f"Error deleting file: {e}")
                 QMessageBox.critical(
@@ -3778,9 +3803,10 @@ class GLBThumbnailWidget(QWidget):
         self._editable = editable  # Can this item be edited/deleted
         self._is_new = is_new  # New item that hasn't been viewed yet
         self._thumbnail_loading = False
+        self._thumbnail_loaded = False  # Track if thumbnail load has been triggered
         self._cached_metadata = None
         self._setup_ui()
-        self._load_thumbnail()
+        # Don't load thumbnail yet - wait for visibility check (lazy loading)
         self._update_tooltip()
 
     def _setup_ui(self):
@@ -3863,6 +3889,12 @@ class GLBThumbnailWidget(QWidget):
             self._apply_thumbnail_style()
             self._apply_filename_style()
             self.viewed.emit(self.model_path)
+
+    def load_thumbnail_if_needed(self):
+        """Load thumbnail if not already loaded (called by gallery for lazy loading)."""
+        if not self._thumbnail_loaded:
+            self._thumbnail_loaded = True
+            self._load_thumbnail()
 
     def _load_thumbnail(self):
         """Load or generate the thumbnail asynchronously."""
@@ -4114,9 +4146,27 @@ class GLBThumbnailWidget(QWidget):
                 print(f"Deleted file: {self.model_path}")
                 # Emit signal so gallery can refresh
                 self.deleted.emit(self.model_path)
-                # Remove this widget from its parent layout
-                self.setParent(None)
-                self.deleteLater()
+                # Remove this widget from its parent layout efficiently
+                # Disable updates on the container to prevent costly relayout during removal
+                container = self.parentWidget()
+                if container:
+                    container.setUpdatesEnabled(False)
+                    try:
+                        # Remove from layout's internal item list directly
+                        layout = container.layout()
+                        if layout:
+                            for i in range(layout.count()):
+                                item = layout.itemAt(i)
+                                if item and item.widget() is self:
+                                    layout.takeAt(i)
+                                    break
+                        self.setParent(None)
+                        self.deleteLater()
+                    finally:
+                        container.setUpdatesEnabled(True)
+                else:
+                    self.setParent(None)
+                    self.deleteLater()
             except Exception as e:
                 print(f"Error deleting file: {e}")
                 QMessageBox.critical(
@@ -4311,10 +4361,25 @@ class GLBThumbnailWidget(QWidget):
                     )
 
             print(f"Exported model to: {output_path}")
+
+            # Auto-extract textures if setting is enabled
+            texture_msg = ""
+            try:
+                from settings_manager import get_auto_extract_textures
+                if get_auto_extract_textures():
+                    # Create textures folder next to export location
+                    export_dir = os.path.dirname(output_path)
+                    textures_dir = os.path.join(export_dir, "textures")
+                    texture_count = self._extract_textures_to_folder(textures_dir)
+                    if texture_count > 0:
+                        texture_msg = f"\n\nAlso extracted {texture_count} texture(s) to:\n{textures_dir}"
+            except Exception as tex_e:
+                print(f"Auto texture extraction failed: {tex_e}")
+
             QMessageBox.information(
                 parent_window,
                 "Export Complete",
-                f"Model exported successfully to:\n{output_path}"
+                f"Model exported successfully to:\n{output_path}{texture_msg}"
             )
 
         except Exception as e:
@@ -4656,6 +4721,117 @@ except Exception as e:
                 "Extraction Error",
                 f"Failed to extract textures:\n\n{str(e)}"
             )
+
+    def _extract_textures_to_folder(self, output_dir):
+        """Extract textures from the model to a specified folder (no UI prompts).
+
+        Args:
+            output_dir: Path to folder where textures will be saved
+
+        Returns:
+            int: Number of textures extracted
+        """
+        import trimesh
+
+        # Create output directory if needed
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Load the model
+        scene_or_mesh = trimesh.load(self.model_path)
+
+        extracted_count = 0
+        base_name = os.path.splitext(os.path.basename(self.model_path))[0]
+
+        # Helper to extract textures from a mesh
+        def extract_from_mesh(mesh, mesh_name=""):
+            nonlocal extracted_count
+
+            if not hasattr(mesh, 'visual') or mesh.visual is None:
+                return
+
+            visual = mesh.visual
+
+            # Check for PBR material with textures
+            if hasattr(visual, 'material') and visual.material is not None:
+                material = visual.material
+
+                # Common texture attributes in PBR materials
+                texture_attrs = [
+                    ('baseColorTexture', 'basecolor'),
+                    ('image', 'diffuse'),
+                    ('normalTexture', 'normal'),
+                    ('metallicRoughnessTexture', 'metallic_roughness'),
+                    ('occlusionTexture', 'occlusion'),
+                    ('emissiveTexture', 'emissive'),
+                ]
+
+                for attr, suffix in texture_attrs:
+                    texture = getattr(material, attr, None)
+                    if texture is not None:
+                        try:
+                            # Handle PIL Image
+                            if hasattr(texture, 'save'):
+                                prefix = f"{base_name}_{mesh_name}_" if mesh_name else f"{base_name}_"
+                                filename = f"{prefix}{suffix}.png"
+                                filepath = os.path.join(output_dir, filename)
+                                texture.save(filepath)
+                                extracted_count += 1
+                                print(f"Extracted texture: {filename}")
+                        except Exception as e:
+                            print(f"Could not extract {attr}: {e}")
+
+            # Check for TextureVisuals (contains UV-mapped textures)
+            if hasattr(visual, 'material') and hasattr(visual.material, 'image'):
+                img = visual.material.image
+                if img is not None:
+                    try:
+                        prefix = f"{base_name}_{mesh_name}_" if mesh_name else f"{base_name}_"
+                        filename = f"{prefix}texture.png"
+                        filepath = os.path.join(output_dir, filename)
+                        if hasattr(img, 'save'):
+                            img.save(filepath)
+                            extracted_count += 1
+                            print(f"Extracted texture: {filename}")
+                    except Exception as e:
+                        print(f"Could not extract texture image: {e}")
+
+        # Process scene or single mesh
+        if isinstance(scene_or_mesh, trimesh.Scene):
+            for name, geometry in scene_or_mesh.geometry.items():
+                if isinstance(geometry, trimesh.Trimesh):
+                    extract_from_mesh(geometry, name)
+        elif isinstance(scene_or_mesh, trimesh.Trimesh):
+            extract_from_mesh(scene_or_mesh)
+
+        # Also try to extract embedded textures from GLB/GLTF
+        if self.model_path.lower().endswith(('.glb', '.gltf')):
+            try:
+                import json
+
+                # For GLTF, try to load the JSON directly to find embedded images
+                if self.model_path.lower().endswith('.gltf'):
+                    with open(self.model_path, 'r') as f:
+                        gltf_data = json.load(f)
+                        if 'images' in gltf_data:
+                            gltf_dir = os.path.dirname(self.model_path)
+                            for i, img_info in enumerate(gltf_data['images']):
+                                if 'uri' in img_info and not img_info['uri'].startswith('data:'):
+                                    # External image file
+                                    src_path = os.path.join(gltf_dir, img_info['uri'])
+                                    if os.path.exists(src_path):
+                                        import shutil
+                                        dst_name = f"{base_name}_texture_{i}{os.path.splitext(img_info['uri'])[1]}"
+                                        dst_path = os.path.join(output_dir, dst_name)
+                                        shutil.copy2(src_path, dst_path)
+                                        extracted_count += 1
+                                        print(f"Copied texture: {dst_name}")
+            except Exception as e:
+                print(f"Could not extract GLTF textures: {e}")
+
+        if extracted_count > 0:
+            print(f"Auto-extracted {extracted_count} texture(s) to: {output_dir}")
+
+        return extracted_count
 
 
 def enhance_ui(parent_widget):
