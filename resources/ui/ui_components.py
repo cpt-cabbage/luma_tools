@@ -1476,8 +1476,8 @@ class TabGlowEffect(QObject):
         self._animation_interval = 50  # 20 FPS
         self._intensity_step = 0.08  # How much to change per frame
 
-        # Store original stylesheet
-        self._original_style = None
+        # Store original icon for restoration
+        self._original_icon = None
 
     def start(self, pulse_count=0):
         """
@@ -1495,9 +1495,9 @@ class TabGlowEffect(QObject):
         self._pulse_count = pulse_count
         self._current_pulses = 0
 
-        # Store original tab bar style if not already stored
-        if self._original_style is None:
-            self._original_style = self.tab_widget.tabBar().styleSheet()
+        # Store original icon if not already stored
+        if self._original_icon is None:
+            self._original_icon = self.tab_widget.tabIcon(self.tab_index)
 
         self._timer.start(self._animation_interval)
 
@@ -1506,9 +1506,8 @@ class TabGlowEffect(QObject):
         self._is_running = False
         self._timer.stop()
 
-        # Restore original style
-        if self._original_style is not None:
-            self._update_tab_style(0.0)
+        # Restore original icon
+        self._update_tab_style(0.0)
 
     def _animate(self):
         """Update the glow intensity for animation."""
@@ -1534,49 +1533,74 @@ class TabGlowEffect(QObject):
 
     def _update_tab_style(self, intensity):
         """
-        Update the tab bar stylesheet to show the glow effect.
+        Update the tab appearance to show the glow effect.
+
+        Uses setTabIcon to replace the tab icon with a glowing version,
+        since setTabTextColor is overridden by stylesheets.
 
         Args:
             intensity: Glow intensity from 0.0 to 1.0
         """
-        tab_bar = self.tab_widget.tabBar()
-
         if intensity <= 0.01:
-            # Reset to original
-            tab_bar.setStyleSheet(self._original_style or "")
+            # Reset to original icon
+            if self._original_icon is not None:
+                self.tab_widget.setTabIcon(self.tab_index, self._original_icon)
             return
 
-        # Create glow color with varying alpha
-        glow_alpha = int(180 * intensity)
-        shadow_spread = int(15 * intensity)
+        # Store original icon if not already stored
+        if self._original_icon is None:
+            self._original_icon = self.tab_widget.tabIcon(self.tab_index)
 
-        # Build stylesheet targeting the specific tab
-        # Use nth-child or specific index styling
-        glow_style = f"""
-            QTabBar::tab:nth({self.tab_index}) {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha}),
-                    stop:0.5 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha // 2}),
-                    stop:1 rgba({self.color.red()}, {self.color.green()}, {self.color.blue()}, {glow_alpha})
-                );
-            }}
-        """
-
-        # Since nth() selector may not work in Qt, use a different approach:
-        # Apply a custom property and use that in styling
-        # For now, we'll use tab text color change as a simpler approach
-
-        # Alternative: directly modify tab icon with glow overlay
-        # For best results, we'll use setTabTextColor which is more reliable
-
-        # Calculate glowing text color
+        # Calculate glowing color that pulses between base color and bright white
         glow_r = int(255 * intensity + self.base_color.red() * (1 - intensity))
         glow_g = int(255 * intensity + self.base_color.green() * (1 - intensity))
         glow_b = int(255 * intensity + self.base_color.blue() * (1 - intensity))
 
-        text_color = QColor(glow_r, glow_g, glow_b)
-        tab_bar.setTabTextColor(self.tab_index, text_color)
+        # Create a glowing version of the icon
+        glow_icon = self._create_glow_icon(QColor(glow_r, glow_g, glow_b), intensity)
+        if glow_icon:
+            self.tab_widget.setTabIcon(self.tab_index, glow_icon)
+
+    def _create_glow_icon(self, glow_color, intensity):
+        """
+        Create a glowing version of the tab icon.
+
+        Args:
+            glow_color: The color for the glow effect
+            intensity: Glow intensity from 0.0 to 1.0
+
+        Returns:
+            QIcon with glow effect, or None if no original icon
+        """
+        from PySide2.QtGui import QPixmap, QPainter, QIcon
+        from PySide2.QtCore import Qt
+
+        if self._original_icon is None or self._original_icon.isNull():
+            return None
+
+        # Get the original pixmap at a reasonable size
+        original_pixmap = self._original_icon.pixmap(24, 24)
+        if original_pixmap.isNull():
+            return None
+
+        # Create a new pixmap for the glowing icon
+        glow_pixmap = QPixmap(original_pixmap.size())
+        glow_pixmap.fill(Qt.transparent)
+
+        painter = QPainter(glow_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        # Draw the original icon
+        painter.drawPixmap(0, 0, original_pixmap)
+
+        # Apply color overlay with the glow color
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(glow_pixmap.rect(), glow_color)
+
+        painter.end()
+
+        return QIcon(glow_pixmap)
 
 
 class TabGlowManager(QObject):

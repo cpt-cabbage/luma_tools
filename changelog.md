@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.11
+- Installer Updates
+- Fix texture toggle mode
+
 ## Version 0.1
 - Change 3D viewer to PyVista
 - Add full restart option to ComfyUI workflow presets
