@@ -33,6 +33,7 @@ class ComfyUIGalleryTab(BaseTab):
         self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
         self.ui.GalleryRefresh.clicked.connect(self._on_refresh)
         self.ui.GallerySortButton.clicked.connect(self._on_sort_button_clicked)
+        self.ui.GalleryUserButton.clicked.connect(self._on_user_button_clicked)
 
     def initialize(self):
         """Initialize the gallery tab."""
@@ -65,12 +66,29 @@ class ComfyUIGalleryTab(BaseTab):
         self._update_sort_button_text()
 
         # Track known images to detect new additions
-        self._known_images = set()
+        self._known_items = set()
         self._initial_scan_done = False
+
+        # Track new (unviewed) items - these get highlighted until viewed
+        self._new_items = set()
 
         # Cache for scanned items (to avoid rescanning when just changing sort)
         self._cached_items = None
         self._scan_in_progress = False
+
+        # User selection for multi-user gallery viewing
+        self._selected_user = self.app_state.user
+        self._available_users = []
+
+        # Cache for other users' gallery items (keyed by username)
+        self._user_cache = {}
+        self._precache_in_progress = set()  # Users currently being pre-cached
+
+        # Initialize user selector and populate with available users
+        self._populate_user_selector()
+
+        # Hide "View Only" label initially (shown when viewing others' galleries)
+        self.ui.GalleryViewOnlyLabel.hide()
 
         # Set initial output directory to network path with user subfolder
         self._update_gallery_path()
@@ -125,6 +143,60 @@ class ComfyUIGalleryTab(BaseTab):
 
         return items
 
+    def _start_background_precache(self):
+        """Start background pre-caching of other users' galleries."""
+        if self._source_mode != "network":
+            return
+
+        # Get list of other users to pre-cache
+        other_users = [u for u in self._available_users if u != self._selected_user]
+        if not other_users:
+            return
+
+        # Start pre-caching each user's gallery in the background
+        for username in other_users:
+            self._precache_user(username)
+
+    def _precache_user(self, username):
+        """Pre-cache a single user's gallery in the background."""
+        from ui_components import Worker
+
+        # Skip if already cached or in progress
+        if username in self._user_cache or username in self._precache_in_progress:
+            return
+
+        user_path = self._get_network_user_path(username)
+        if not user_path:
+            return
+
+        self._precache_in_progress.add(username)
+
+        worker = Worker(self._scan_directory, user_path)
+        worker.signals.result.connect(lambda items, u=username: self._on_precache_complete(u, items))
+        worker.signals.error.connect(lambda msg, tb, u=username: self._on_precache_error(u, msg))
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_precache_complete(self, username, items):
+        """Handle completion of background pre-cache for a user."""
+        self._precache_in_progress.discard(username)
+
+        if items:
+            # Normalize items format
+            if items and isinstance(items[0], tuple):
+                items = [{'path': item[0], 'mtime': item[1], 'type': item[2] if len(item) > 2 else 'image',
+                          'name': os.path.basename(item[0]).lower(), 'workflow': ''} for item in items]
+            elif items and not isinstance(items[0], dict):
+                items = [{'path': p, 'mtime': 0, 'type': 'image', 'name': os.path.basename(p).lower(),
+                          'workflow': ''} for p in items]
+
+            self._user_cache[username] = items
+            self.log(f"[Gallery] Pre-cached {len(items)} items for user: {username}")
+
+    def _on_precache_error(self, username, msg):
+        """Handle pre-cache error for a user."""
+        self._precache_in_progress.discard(username)
+        # Silently ignore - pre-caching is best-effort
+
     def _update_sort_button_text(self):
         """Update the sort button text to show current selection."""
         for label, mode in self._sort_options:
@@ -173,6 +245,9 @@ class ComfyUIGalleryTab(BaseTab):
 
     def on_tab_activated(self):
         """Called when tab becomes visible - only refresh if needed."""
+        # Refresh available users in case new users appeared
+        self._populate_user_selector()
+
         # Update path in case settings changed
         self._update_gallery_path(reset_tracking=False)
 
@@ -182,13 +257,168 @@ class ComfyUIGalleryTab(BaseTab):
             if self._flow_layout.count() == 0:
                 self._on_refresh()
 
-    def _get_network_user_path(self):
-        """Get the network path with user subfolder."""
+    # =========================================================================
+    # USER SELECTION (Multi-user gallery viewing)
+    # =========================================================================
+
+    def _discover_users(self):
+        """Discover available users by scanning the network output path.
+
+        Returns:
+            list: Sorted list of usernames (folder names in network output path)
+        """
+        from settings_manager import get_comfyui_network_output_path
+
+        network_path = get_comfyui_network_output_path()
+        if not network_path or not os.path.isdir(network_path):
+            return []
+
+        users = []
+        try:
+            for entry in os.scandir(network_path):
+                # Only include directories, skip hidden folders
+                if entry.is_dir() and not entry.name.startswith('.'):
+                    users.append(entry.name)
+        except Exception as e:
+            self.log(f"[Gallery] Error discovering users: {e}")
+            return []
+
+        return sorted(users, key=str.lower)
+
+    def _populate_user_selector(self):
+        """Populate the available users list and update button text."""
+        # Discover available users
+        self._available_users = self._discover_users()
+
+        # Ensure current user is in the list
+        current_user = self.app_state.user
+        if current_user and current_user not in self._available_users:
+            self._available_users.insert(0, current_user)
+
+        # Update button text
+        self._update_user_button_text()
+
+        # Update visibility based on source mode
+        self._update_user_selector_visibility()
+
+    def _update_user_button_text(self):
+        """Update the user button text to show current selection."""
+        current_user = self.app_state.user
+        if self._selected_user == current_user:
+            self.ui.GalleryUserButton.setText(f"User: {self._selected_user} (You)")
+        else:
+            self.ui.GalleryUserButton.setText(f"User: {self._selected_user}")
+
+    def _update_user_selector_visibility(self):
+        """Show/hide user selector based on source mode."""
+        # Only show user selector in network mode
+        self.ui.GalleryUserButton.setVisible(self._source_mode == "network")
+
+    def _on_user_button_clicked(self):
+        """Show popup menu with user options."""
+        from PySide2.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+        current_user = self.app_state.user
+
+        for user in self._available_users:
+            # Add "(You)" suffix for current user
+            if user == current_user:
+                action = menu.addAction(f"{user} (You)")
+            else:
+                action = menu.addAction(user)
+            action.setData(user)
+            if user == self._selected_user:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.GalleryUserButton.mapToGlobal(
+            self.ui.GalleryUserButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._select_user(action.data())
+
+    def _select_user(self, new_user):
+        """Select a user and update the gallery.
+
+        Args:
+            new_user: The username to switch to
+        """
+        if new_user == self._selected_user:
+            return
+
+        # Store old user for potential caching
+        old_user = self._selected_user
+
+        self._selected_user = new_user
+        self._update_user_button_text()
+        self.log(f"[Gallery] Switched to user: {new_user}")
+
+        # Update view-only indicator
+        self._update_view_only_indicator()
+
+        # Cache current user's items before switching (if we have them)
+        if old_user and self._cached_items:
+            self._user_cache[old_user] = self._cached_items
+
+        # Clear widget cache (widgets need to be recreated)
+        if hasattr(self, '_widget_cache'):
+            self._widget_cache = {}
+        self._known_items = set()
+        self._new_items = set()
+        self._initial_scan_done = False
+
+        # Update path
+        self._update_gallery_path()
+
+        # Check if we have pre-cached data for this user
+        if new_user in self._user_cache:
+            self.log(f"[Gallery] Using pre-cached data for user: {new_user}")
+            self._cached_items = self._user_cache[new_user]
+            # Update known images from cache
+            self._known_items = set(item['path'] for item in self._cached_items)
+            self._initial_scan_done = True
+            # Sort and display cached items
+            sorted_items = self._sort_items(self._cached_items)
+            self._display_items(sorted_items)
+        else:
+            # No cache, need to scan
+            self._cached_items = None
+            self._on_refresh()
+
+    def _is_own_gallery(self):
+        """Check if currently viewing own gallery.
+
+        Returns:
+            bool: True if viewing own gallery, False if viewing another user's
+        """
+        return self._selected_user == self.app_state.user
+
+    def _update_view_only_indicator(self):
+        """Update the view-only indicator visibility."""
+        if self._is_own_gallery():
+            self.ui.GalleryViewOnlyLabel.hide()
+        else:
+            self.ui.GalleryViewOnlyLabel.setText(f"Viewing {self._selected_user}'s gallery (View Only)")
+            self.ui.GalleryViewOnlyLabel.show()
+
+    def _get_network_user_path(self, username=None):
+        """Get the network path with user subfolder.
+
+        Args:
+            username: Optional username override. If None, uses _selected_user.
+
+        Returns:
+            str: Full path to user's gallery folder, or empty string if not configured.
+        """
         from settings_manager import get_comfyui_network_output_path
 
         network_path = get_comfyui_network_output_path()
         if network_path:
-            return os.path.join(network_path, self.app_state.user)
+            user = username if username else self._selected_user
+            return os.path.join(network_path, user)
         return ""
 
     def _update_gallery_path(self, reset_tracking=True):
@@ -210,7 +440,7 @@ class ComfyUIGalleryTab(BaseTab):
         # Only reset image tracking when path actually changes
         if reset_tracking and old_path != self._current_path:
             self.log(f"[Gallery] Path changed from {old_path} to {self._current_path} - resetting tracking")
-            self._known_images = set()
+            self._known_items = set()
             self._initial_scan_done = False
 
         # Start watcher on new path
@@ -258,6 +488,8 @@ class ComfyUIGalleryTab(BaseTab):
         else:
             # Switch back to network
             self._source_mode = "network"
+            self._update_user_selector_visibility()
+            self._update_view_only_indicator()
             self._update_gallery_path()
             self._on_refresh()
 
@@ -276,6 +508,9 @@ class ComfyUIGalleryTab(BaseTab):
             self._custom_path = directory
             self._source_mode = "custom"
             set_last_browse_directory("comfyui_gallery", directory)
+            # Hide user selector and view-only label in custom mode
+            self._update_user_selector_visibility()
+            self.ui.GalleryViewOnlyLabel.hide()
             self._update_gallery_path()
             self._on_refresh()
 
@@ -376,7 +611,7 @@ class ComfyUIGalleryTab(BaseTab):
         # Check for new items (only after initial scan)
         file_paths = [item['path'] for item in items]
         current_items = set(file_paths)
-        new_items = current_items - self._known_images
+        new_items = current_items - self._known_items
 
         self.log(f"[Gallery] Scan complete: {len(file_paths)} items, {len(new_items)} new")
 
@@ -387,9 +622,17 @@ class ComfyUIGalleryTab(BaseTab):
             new_images = sum(1 for item in items if item['path'] in new_items and item['type'] == 'image')
             new_models = sum(1 for item in items if item['path'] in new_items and item['type'] == 'model')
             self._show_new_items_toast(new_images, new_models)
+            # Add to unviewed items set for highlighting
+            self._new_items.update(new_items)
 
         # Update known items
-        self._known_images = current_items
+        self._known_items = current_items
+
+        # Start background pre-caching of other users on first scan
+        if not self._initial_scan_done:
+            # Delay pre-caching slightly to let the UI settle first
+            QTimer.singleShot(1000, self._start_background_precache)
+
         self._initial_scan_done = True
 
         # Sort items based on current sort mode
@@ -513,23 +756,32 @@ class ComfyUIGalleryTab(BaseTab):
         container = self.ui.galleryThumbnailContainer
         container.setUpdatesEnabled(False)
 
+        # Check if viewing own gallery (for edit/delete permissions)
+        is_editable = self._is_own_gallery()
+
         try:
             for i in range(self._load_index, end_index):
                 path, file_type = self._pending_items[i]
+                is_new = path in self._new_items
 
                 if file_type == 'model':
                     thumbnail = GLBThumbnailWidget(
                         path,
                         container,
-                        output_dir=self._current_path
+                        output_dir=self._current_path,
+                        editable=is_editable,
+                        is_new=is_new
                     )
                     thumbnail.clicked.connect(self._on_thumbnail_clicked)
                     thumbnail.deleted.connect(self._on_item_deleted)
+                    thumbnail.viewed.connect(self._on_item_viewed)
                 else:
                     thumbnail = GalleryThumbnailWidget(
                         path,
                         container,
-                        output_dir=self._current_path
+                        output_dir=self._current_path,
+                        editable=is_editable,
+                        is_new=is_new
                     )
                     thumbnail.clicked.connect(self._on_thumbnail_clicked)
                     # Capture path in closure properly
@@ -538,6 +790,7 @@ class ComfyUIGalleryTab(BaseTab):
                     )
                     thumbnail.copy_settings_requested.connect(self._on_copy_settings_requested)
                     thumbnail.deleted.connect(self._on_item_deleted)
+                    thumbnail.viewed.connect(self._on_item_viewed)
 
                 # Cache widget by path for fast reordering
                 self._widget_cache[path] = thumbnail
@@ -591,8 +844,8 @@ class ComfyUIGalleryTab(BaseTab):
             self._cached_items = [item for item in self._cached_items if item['path'] != item_path]
 
         # Remove from known images
-        if item_path in self._known_images:
-            self._known_images.discard(item_path)
+        if item_path in self._known_items:
+            self._known_items.discard(item_path)
 
         # Update status count
         if self._cached_items:
@@ -610,6 +863,10 @@ class ComfyUIGalleryTab(BaseTab):
                 self.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
 
         self.log(f"[Gallery] Item deleted: {os.path.basename(item_path)}")
+
+    def _on_item_viewed(self, item_path):
+        """Handle item viewed - remove from new items set."""
+        self._new_items.discard(item_path)
 
     def _on_copy_settings_requested(self, metadata):
         """Handle request to copy settings from an image to the ComfyUI tab."""

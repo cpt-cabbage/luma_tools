@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.14
+- UI Updates
+
 ## Version 0.13
 - Replace loading overlay with status bar progress 
 - Better batch job polling 

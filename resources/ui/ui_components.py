@@ -3153,12 +3153,15 @@ class GalleryThumbnailWidget(QWidget):
     fullscreen_requested = Signal(str)  # Emits the image path for fullscreen view
     copy_settings_requested = Signal(dict)  # Emits metadata for copying settings to ComfyUI tab
     deleted = Signal(str)  # Emits the image path when deleted
+    viewed = Signal(str)  # Emits when item has been viewed (no longer new)
     THUMBNAIL_SIZE = (150, 150)
 
-    def __init__(self, image_path, parent=None, output_dir=None):
+    def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
         self.image_path = image_path
         self.output_dir = output_dir or os.path.dirname(image_path)
+        self._editable = editable  # Can this item be edited/deleted
+        self._is_new = is_new  # New item that hasn't been viewed yet
         self._cached_metadata = None
         self._setup_ui()
         self._load_thumbnail_async()
@@ -3177,13 +3180,7 @@ class GalleryThumbnailWidget(QWidget):
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet("""
-            QLabel {
-                background-color: #2c313a;
-                border: 1px solid #3c414b;
-                border-radius: 4px;
-            }
-        """)
+        self._apply_thumbnail_style()
         self.thumbnail_label.setPixmap(self._create_placeholder("..."))
         layout.addWidget(self.thumbnail_label)
 
@@ -3215,6 +3212,34 @@ class GalleryThumbnailWidget(QWidget):
         # Context menu
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _apply_thumbnail_style(self):
+        """Apply the appropriate style to the thumbnail based on new status."""
+        if self._is_new:
+            # Green glow effect for new items
+            self.thumbnail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #2c313a;
+                    border: 2px solid #10b981;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            # Normal style
+            self.thumbnail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #2c313a;
+                    border: 1px solid #3c414b;
+                    border-radius: 4px;
+                }
+            """)
+
+    def mark_as_viewed(self):
+        """Mark this item as viewed, removing the new highlight."""
+        if self._is_new:
+            self._is_new = False
+            self._apply_thumbnail_style()
+            self.viewed.emit(self.image_path)
 
     def _load_thumbnail_async(self):
         """Load the thumbnail image asynchronously."""
@@ -3292,6 +3317,7 @@ class GalleryThumbnailWidget(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse press to emit clicked signal."""
         if event.button() == Qt.LeftButton:
+            self.mark_as_viewed()
             self.clicked.emit(self.image_path)
         super().mousePressEvent(event)
 
@@ -3319,6 +3345,10 @@ class GalleryThumbnailWidget(QWidget):
 
         edit_action = menu.addAction("Edit Item")
         edit_action.triggered.connect(self._edit_item)
+        # Disable edit when not editable (viewing another user's gallery)
+        if not self._editable:
+            edit_action.setEnabled(False)
+            edit_action.setText("Edit Item (view only)")
 
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder())
@@ -3350,6 +3380,10 @@ class GalleryThumbnailWidget(QWidget):
         # Delete action
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self._delete_item)
+        # Disable delete when not editable (viewing another user's gallery)
+        if not self._editable:
+            delete_action.setEnabled(False)
+            delete_action.setText("Delete (view only)")
 
         menu.exec_(self.mapToGlobal(pos))
 
@@ -3734,12 +3768,15 @@ class GLBThumbnailWidget(QWidget):
     """
     clicked = Signal(str)  # Emits the model path when clicked
     deleted = Signal(str)  # Emits the model path when deleted
+    viewed = Signal(str)  # Emits when item has been viewed (no longer new)
     THUMBNAIL_SIZE = (150, 150)
 
-    def __init__(self, model_path, parent=None, output_dir=None):
+    def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
         self.model_path = model_path
         self.output_dir = output_dir or os.path.dirname(model_path)
+        self._editable = editable  # Can this item be edited/deleted
+        self._is_new = is_new  # New item that hasn't been viewed yet
         self._thumbnail_loading = False
         self._cached_metadata = None
         self._setup_ui()
@@ -3759,19 +3796,13 @@ class GLBThumbnailWidget(QWidget):
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet("""
-            QLabel {
-                background-color: #2c313a;
-                border: 2px solid #4a9eff;
-                border-radius: 4px;
-            }
-        """)
+        self._apply_thumbnail_style()
         layout.addWidget(self.thumbnail_label)
 
         # Filename label
         self.filename_label = QLabel(os.path.basename(self.model_path))
         self.filename_label.setAlignment(Qt.AlignCenter)
-        self.filename_label.setStyleSheet("color: #4a9eff; font-size: 10px;")
+        self._apply_filename_style()
         self.filename_label.setWordWrap(True)
         self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
         layout.addWidget(self.filename_label)
@@ -3796,6 +3827,42 @@ class GLBThumbnailWidget(QWidget):
         # Context menu
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _apply_thumbnail_style(self):
+        """Apply the appropriate style to the thumbnail based on new status."""
+        if self._is_new:
+            # Green glow effect for new items (distinct from normal blue)
+            self.thumbnail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #2c313a;
+                    border: 2px solid #10b981;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            # Normal blue border for 3D models
+            self.thumbnail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #2c313a;
+                    border: 2px solid #4a9eff;
+                    border-radius: 4px;
+                }
+            """)
+
+    def _apply_filename_style(self):
+        """Apply the appropriate style to the filename based on new status."""
+        if self._is_new:
+            self.filename_label.setStyleSheet("color: #10b981; font-size: 10px; font-weight: bold;")
+        else:
+            self.filename_label.setStyleSheet("color: #4a9eff; font-size: 10px;")
+
+    def mark_as_viewed(self):
+        """Mark this item as viewed, removing the new highlight."""
+        if self._is_new:
+            self._is_new = False
+            self._apply_thumbnail_style()
+            self._apply_filename_style()
+            self.viewed.emit(self.model_path)
 
     def _load_thumbnail(self):
         """Load or generate the thumbnail asynchronously."""
@@ -3932,6 +3999,7 @@ class GLBThumbnailWidget(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse press to open 3D viewer."""
         if event.button() == Qt.LeftButton:
+            self.mark_as_viewed()
             self.clicked.emit(self.model_path)
         super().mousePressEvent(event)
 
@@ -3956,6 +4024,10 @@ class GLBThumbnailWidget(QWidget):
 
         edit_action = menu.addAction("Edit Model")
         edit_action.triggered.connect(self._edit_model)
+        # Disable edit when not editable (viewing another user's gallery)
+        if not self._editable:
+            edit_action.setEnabled(False)
+            edit_action.setText("Edit Model (view only)")
 
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(self._open_folder)
@@ -3982,6 +4054,10 @@ class GLBThumbnailWidget(QWidget):
         # Delete action
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self._delete_model)
+        # Disable delete when not editable (viewing another user's gallery)
+        if not self._editable:
+            delete_action.setEnabled(False)
+            delete_action.setText("Delete (view only)")
 
         menu.exec_(self.mapToGlobal(pos))
 

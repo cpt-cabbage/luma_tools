@@ -50,8 +50,10 @@ class ComfyUITab(BaseTab):
 
 
         # Iterate mode signals
-        self.ui.ComfyUIChooseMode.clicked.connect(self._on_choose_mode_clicked)
         self.ui.ComfyUIUseAsInput.clicked.connect(self._on_use_as_input_clicked)
+
+        # Cancel jobs button
+        self.ui.ComfyUICancelJobs.clicked.connect(self._on_cancel_jobs_clicked)
 
     def initialize(self):
         """Initialize ComfyUI tab."""
@@ -80,9 +82,6 @@ class ComfyUITab(BaseTab):
         self._batch_poll_count = 0
         self._batch_start_time = None  # For ETA calculation
         self._batch_generation_count = 1  # Frames per job
-
-        # Hide iterate mode controls by default
-        self._update_iterate_mode_visibility(False)
 
         # Display network path from global settings
         self._update_network_path_display()
@@ -131,69 +130,6 @@ class ComfyUITab(BaseTab):
         new_seed = random.randint(0, 2147483647)
         self.ui.ComfyUISeed.setValue(new_seed)
 
-
-    # =========================================================================
-    # MODE SELECTION (BATCH/ITERATE)
-    # =========================================================================
-
-    def _on_choose_mode_clicked(self):
-        """Show popup menu with available modes (Batch/Iterate)."""
-        menu = QMenu(self.main_window)
-
-        modes = [
-            ("Batch", "Submit all images at once"),
-            ("Iterate", "Submit one, review result, refine prompt")
-        ]
-
-        current_mode = self.ui.ComfyUICurrentMode.text()
-
-        for mode_name, description in modes:
-            action = menu.addAction(f"{mode_name} - {description}")
-            action.setData(mode_name)
-            if mode_name == current_mode:
-                action.setCheckable(True)
-                action.setChecked(True)
-
-        # Show menu below the button
-        action = menu.exec_(self.ui.ComfyUIChooseMode.mapToGlobal(
-            self.ui.ComfyUIChooseMode.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._select_mode(action.data())
-
-    def _select_mode(self, mode_name):
-        """Select a mode by name."""
-        self.ui.ComfyUICurrentMode.setText(mode_name)
-
-        is_iterate = mode_name == "Iterate"
-        self.app_state.comfyui_iterate_mode = is_iterate
-        self.log(f"[ComfyUI] Mode changed to: {mode_name}")
-
-        # Show/hide iterate frame
-        self.ui.comfyuiIterateFrame.setVisible(is_iterate)
-
-        # In iterate mode, force generation count to 1
-        if is_iterate:
-            self.ui.ComfyUIGenerationCount.setValue(1)
-            self.ui.ComfyUIGenerationCount.setEnabled(False)
-        else:
-            self.ui.ComfyUIGenerationCount.setEnabled(True)
-
-        self._save_state()
-
-    def _update_iterate_mode_visibility(self, show):
-        """Show or hide the iterate mode controls based on workflow capability."""
-        self.ui.comfyuiModeLabel.setVisible(show)
-        self.ui.ComfyUIChooseMode.setVisible(show)
-        self.ui.ComfyUICurrentMode.setVisible(show)
-
-        if not show:
-            # Reset to batch mode when hiding
-            self.ui.ComfyUICurrentMode.setText("Batch")
-            self.ui.comfyuiIterateFrame.setVisible(False)
-            self.ui.ComfyUIGenerationCount.setEnabled(True)
-            self.app_state.comfyui_iterate_mode = False
 
     # =========================================================================
     # PRESET MANAGEMENT
@@ -266,10 +202,7 @@ class ComfyUITab(BaseTab):
 
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
-        from settings_manager import (
-            get_comfyui_workflow_preset_path,
-            is_workflow_preset_iteratable
-        )
+        from settings_manager import get_comfyui_workflow_preset_path
 
         workflow_path = get_comfyui_workflow_preset_path(preset_name)
         if workflow_path and os.path.exists(workflow_path):
@@ -282,10 +215,6 @@ class ComfyUITab(BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._save_state()
-
-            # Show/hide iterate mode based on workflow's iteratable flag
-            is_iteratable = is_workflow_preset_iteratable(preset_name)
-            self._update_iterate_mode_visibility(is_iteratable)
         else:
             # Workflow file not found - still keep preset name so user can edit/delete it
             self._current_preset_name = preset_name
@@ -295,7 +224,6 @@ class ComfyUITab(BaseTab):
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
             self._validate_inputs()
-            self._update_iterate_mode_visibility(False)
             # Guard for animator not being initialized yet during tab initialization
             if hasattr(self.main_window, 'animator') and self.main_window.animator:
                 self.main_window.animator.show_error(f"Workflow file not found: {workflow_path}")
@@ -346,8 +274,8 @@ class ComfyUITab(BaseTab):
         iteratable = QMessageBox.question(
             self.main_window, "Iterate Mode",
             "Does this workflow support Iterate mode?\n\n"
-            "Iterate mode allows submitting one image, reviewing the result,\n"
-            "and refining the prompt before the next generation.",
+            "Iterate mode is automatically enabled when only 1 image is selected.\n"
+            "It allows reviewing results and refining prompts between generations.",
             QMessageBox.Yes | QMessageBox.No
         ) == QMessageBox.Yes
 
@@ -424,8 +352,9 @@ class ComfyUITab(BaseTab):
         iteratable_check = QtWidgets.QCheckBox("Enable Iterate Mode for this workflow")
         iteratable_check.setChecked(current_iteratable)
         iteratable_check.setToolTip(
-            "Iterate mode allows submitting one image, reviewing the result,\n"
-            "and refining the prompt before the next generation."
+            "Iterate mode is automatically enabled when only 1 image is selected.\n"
+            "It allows reviewing results and refining prompts between generations.\n"
+            "This option must be enabled for the workflow to support iterate mode."
         )
         layout.addWidget(iteratable_check)
 
@@ -1062,7 +991,7 @@ class ComfyUITab(BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui_service import extract_editable_nodes, submit_comfyui_job
-        from settings_manager import get_comfyui_network_output_path, is_workflow_preset_full_restart
+        from settings_manager import get_comfyui_network_output_path, is_workflow_preset_full_restart, is_workflow_preset_iteratable
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
@@ -1084,6 +1013,7 @@ class ComfyUITab(BaseTab):
         # Collect editable values from dynamic widgets
         editable_values = {}
         editable_nodes = extract_editable_nodes(self.app_state.comfyui_workflow_path)
+        selected_image_count = 0  # Track number of selected images for auto iterate mode
 
         for node in editable_nodes:
             node_id = node.node_id
@@ -1095,10 +1025,21 @@ class ComfyUITab(BaseTab):
                         value = input_widget.toPlainText().strip()
                     elif node.widget_type == 'image':
                         value = getattr(input_widget, 'selected_files', [])
+                        selected_image_count = max(selected_image_count, len(value) if value else 0)
                     else:
                         value = input_widget.text().strip() if hasattr(input_widget, 'text') else str(node.current_value)
 
                     editable_values[node_id] = {'node': node, 'value': value}
+
+        # Auto-determine iterate mode: enabled when only 1 image selected AND workflow supports it
+        workflow_is_iteratable = is_workflow_preset_iteratable(self._current_preset_name) if self._current_preset_name else False
+        use_iterate_mode = workflow_is_iteratable and selected_image_count == 1
+        self.app_state.comfyui_iterate_mode = use_iterate_mode
+
+        if use_iterate_mode:
+            self.log(f"[ComfyUI] Iterate mode enabled (1 image selected, workflow supports iteration)")
+        else:
+            self.log(f"[ComfyUI] Batch mode ({selected_image_count} images selected)")
 
         # Build job name from shot/project
         job_name = f"{self.app_state.shot}_luma_tools" if self.app_state.shot else "luma_tools_job"
@@ -1255,6 +1196,9 @@ class ComfyUITab(BaseTab):
 
         self._iterate_poll_timer.start(5000)  # Poll every 5 seconds
 
+        # Show cancel button
+        self._update_cancel_button_visibility()
+
         # Also do an immediate first poll
         self._poll_iterate_job()
 
@@ -1352,6 +1296,8 @@ class ComfyUITab(BaseTab):
             self._iterate_poll_timer.stop()
         # Stop status bar spinner
         self.main_window.stop_status_spinner()
+        # Update cancel button visibility
+        self._update_cancel_button_visibility()
 
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
@@ -1485,6 +1431,9 @@ class ComfyUITab(BaseTab):
             self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
 
         self._batch_poll_timer.start(10000)  # Poll every 10 seconds
+
+        # Show cancel button
+        self._update_cancel_button_visibility()
 
         # Do an immediate first poll
         self._poll_batch_jobs()
@@ -1624,6 +1573,111 @@ class ComfyUITab(BaseTab):
             self._batch_poll_timer.stop()
         # Stop status bar spinner
         self.main_window.stop_status_spinner()
+        # Update cancel button visibility
+        self._update_cancel_button_visibility()
+
+    def _on_cancel_jobs_clicked(self):
+        """Handle cancel jobs button click."""
+        from ui_components import Worker, StatusColors
+        from comfyui_service import cancel_deadline_jobs
+
+        # Collect all active job IDs
+        job_ids = []
+
+        # Get iterate mode job
+        iterate_job_id = self.app_state.comfyui_current_job_id
+        if iterate_job_id and self._iterate_poll_timer and self._iterate_poll_timer.isActive():
+            job_ids.append(iterate_job_id)
+
+        # Get batch mode jobs
+        if self._batch_pending_jobs:
+            job_ids.extend(list(self._batch_pending_jobs))
+
+        if not job_ids:
+            self.log("[Cancel] No running jobs to cancel")
+            self.main_window.animator.show_warning("No running jobs to cancel")
+            return
+
+        # Confirm cancellation
+        reply = QMessageBox.question(
+            self.main_window,
+            "Cancel Jobs",
+            f"Are you sure you want to cancel {len(job_ids)} running job(s)?\n\n"
+            "This will complete all tasks immediately, triggering auto-deletion.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        self.log(f"[Cancel] Cancelling {len(job_ids)} jobs...")
+        self.ui.ComfyUICancelJobs.setEnabled(False)
+        self.ui.ComfyUICancelJobs.setText("Cancelling...")
+
+        # Run cancellation on worker thread
+        worker = Worker(cancel_deadline_jobs, job_ids)
+        worker.signals.result.connect(self._on_cancel_complete)
+        worker.signals.error.connect(self._on_cancel_error)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_cancel_complete(self, result):
+        """Handle cancel jobs completion."""
+        from ui_components import StatusColors
+
+        succeeded, failed, errors = result
+
+        # Stop polling
+        self._stop_iterate_polling()
+        self._stop_batch_polling()
+
+        # Clear job tracking
+        self.app_state.comfyui_current_job_id = ""
+        self._batch_pending_jobs.clear()
+        self._batch_job_ids.clear()
+
+        # Hide cancel button and reset state
+        self._update_cancel_button_visibility()
+        self.ui.ComfyUICancelJobs.setText("Cancel Jobs")
+        self.ui.ComfyUICancelJobs.setEnabled(True)
+
+        # Reset iterate mode UI
+        self.ui.ComfyUIIterateStatus.setText("Cancelled")
+        self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
+        self.ui.ComfyUIIterateProgress.setValue(0)
+
+        if failed > 0:
+            self.log(f"[Cancel] Cancelled {succeeded} jobs, {failed} failed")
+            for err in errors:
+                self.log(f"[Cancel] Error: {err}")
+            self.main_window.animator.update_status_animated(
+                f"⚠️ Cancelled {succeeded} jobs, {failed} failed",
+                StatusColors.WARNING
+            )
+        else:
+            self.log(f"[Cancel] Successfully cancelled {succeeded} jobs")
+            self.main_window.animator.update_status_animated(
+                f"🛑 Cancelled {succeeded} job(s)",
+                StatusColors.WARNING
+            )
+
+    def _on_cancel_error(self, msg, tb):
+        """Handle cancel jobs error."""
+        self.log(f"[Cancel] Error: {msg}")
+        self.ui.ComfyUICancelJobs.setText("Cancel Jobs")
+        self.ui.ComfyUICancelJobs.setEnabled(True)
+        self.main_window.animator.show_error(f"Failed to cancel jobs: {msg}")
+
+    def _update_cancel_button_visibility(self):
+        """Update the cancel button visibility based on running jobs."""
+        has_iterate_job = (
+            self.app_state.comfyui_current_job_id and
+            self._iterate_poll_timer and
+            self._iterate_poll_timer.isActive()
+        )
+        has_batch_jobs = bool(self._batch_pending_jobs)
+
+        self.ui.ComfyUICancelJobs.setVisible(has_iterate_job or has_batch_jobs)
 
     def _on_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion - cleanup and refresh gallery.

@@ -51,7 +51,7 @@ echo.
 set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
 if /i "%UPDATE_CHANGELOG%"=="y" (
     REM Prepend new version entry to changelog.md
-    powershell -Command "$nl = [char]10; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + '- %COMMIT_MSG%'; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    powershell -Command "$nl = [char]10; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + '%COMMIT_MSG%'; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
     echo Changelog updated with: %COMMIT_MSG%
 ) else (
     echo Changelog not updated.
@@ -61,14 +61,20 @@ echo.
 echo Version updated to %NEW_VERSION%
 echo.
 
-REM Copy launcher batch file
-echo Copying launcher...
+REM Copy launcher batch files
+echo Copying launchers...
 xcopy "%SOURCE%\luma_tools.bat" "%TARGET%\" /Y /Q
+xcopy "%SOURCE%\luma_tools_standalone.bat" "%TARGET%\" /Y /Q
 if errorlevel 1 (
     echo ERROR: Failed to copy launcher
     pause
     exit /b 1
 )
+
+REM Remove pause from launcher batch files in target
+echo Removing pause from launchers...
+powershell -Command "(Get-Content '%TARGET%\luma_tools.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools.bat'"
+powershell -Command "(Get-Content '%TARGET%\luma_tools_standalone.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools_standalone.bat'"
 
 REM Copy Python files (root)
 echo Copying Python files...

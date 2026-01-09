@@ -1568,6 +1568,72 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         return {"status": "Unknown", "progress": 0, "error_message": str(e)}
 
 
+def complete_deadline_job(job_id: str) -> Tuple[bool, str]:
+    """
+    Complete (mark as done) a Deadline job, causing it to be auto-deleted.
+
+    Uses 'CompleteJob' which marks all remaining tasks as complete,
+    triggering the OnJobComplete=Delete behavior.
+
+    Args:
+        job_id: The Deadline job ID to complete
+
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        if not DEADLINE_PATH:
+            return False, "Deadline not available"
+
+        # Use CompleteJob to mark all tasks complete (triggers auto-delete)
+        result = subprocess.run(
+            [DEADLINE_PATH, "CompleteJob", job_id],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+
+        if result.returncode == 0:
+            print(f"[complete_deadline_job] Successfully completed job {job_id}")
+            return True, f"Job {job_id} completed"
+        else:
+            error = result.stderr.strip() or result.stdout.strip()
+            # Check if job was already deleted/completed
+            if "not found" in error.lower() or "does not exist" in error.lower():
+                return True, f"Job {job_id} already completed or deleted"
+            print(f"[complete_deadline_job] Failed to complete job {job_id}: {error}")
+            return False, f"Failed to complete job: {error}"
+
+    except Exception as e:
+        print(f"[complete_deadline_job] Error completing job {job_id}: {e}")
+        return False, str(e)
+
+
+def cancel_deadline_jobs(job_ids: List[str]) -> Tuple[int, int, List[str]]:
+    """
+    Cancel multiple Deadline jobs by completing them.
+
+    Args:
+        job_ids: List of Deadline job IDs to cancel
+
+    Returns:
+        Tuple of (succeeded_count, failed_count, error_messages)
+    """
+    succeeded = 0
+    failed = 0
+    errors = []
+
+    for job_id in job_ids:
+        success, message = complete_deadline_job(job_id)
+        if success:
+            succeeded += 1
+        else:
+            failed += 1
+            errors.append(f"{job_id}: {message}")
+
+    return succeeded, failed, errors
+
+
 def get_job_output_files(output_dir: str) -> List[str]:
     """
     Get the output files from a job's output directory.

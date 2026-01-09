@@ -45,6 +45,22 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="GalleryUserButton">
+       <property name="text">
+        <string>User: You</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>Click to select user gallery to view</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="GallerySortButton">
        <property name="text">
         <string>Sort: Newest First</string>
@@ -140,6 +156,16 @@
         <enum>Qt::Horizontal</enum>
        </property>
       </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="GalleryViewOnlyLabel">
+       <property name="text">
+        <string>View Only</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: #4a9eff; font-weight: bold; padding: 2px 8px; background-color: rgba(74, 158, 255, 0.2); border-radius: 4px;</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
