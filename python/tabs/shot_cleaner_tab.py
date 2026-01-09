@@ -79,7 +79,7 @@ class ShotCleanerTab(BaseTab):
         Args:
             on_complete: Optional callback to call when scanning completes
         """
-        from ui_components import Worker
+        from ui_components import Worker, StatusColors
 
         if not hasattr(self, 'scanner'):
             self._setup_scanner()
@@ -97,8 +97,12 @@ class ShotCleanerTab(BaseTab):
             # Select all items by default
             self._deselect_renders_in_comp(result.get('renders_in_comp', []))
 
-            # Hide loading overlay
-            self.hide_loading()
+            # Stop spinner and update status
+            self.main_window.stop_status_spinner()
+            self.main_window.animator.update_status_animated(
+                "✅ Shot Cleaner: Scan complete",
+                StatusColors.SUCCESS
+            )
 
             # Call completion callback if provided
             if on_complete:
@@ -106,7 +110,11 @@ class ShotCleanerTab(BaseTab):
 
         def on_error(error_msg, traceback_str):
             """Called when scanning fails."""
-            self.hide_loading()
+            self.main_window.stop_status_spinner()
+            self.main_window.animator.update_status_animated(
+                f"Shot Cleaner: Scan error - {error_msg}",
+                StatusColors.ERROR
+            )
             self.log(f"Scanner error: {error_msg}")
             self.log(traceback_str)
 
@@ -114,8 +122,12 @@ class ShotCleanerTab(BaseTab):
             if on_complete:
                 on_complete()
 
-        # Show loading
-        self.show_loading("Scanning directories...")
+        # Show status bar progress (no overlay so user can still interact)
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            "🔍 Shot Cleaner: Scanning directories...",
+            StatusColors.INFO
+        )
 
         # Create worker and run scan on background thread
         worker = Worker(self.scanner.scan_all)

@@ -12,7 +12,7 @@ from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
     QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton, QCheckBox,
     QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit,
-    QMenu, QSizePolicy, QDialog, QDialogButtonBox, QPlainTextEdit
+    QMenu, QSizePolicy, QDialog, QDialogButtonBox, QPlainTextEdit, QComboBox
 )
 from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QPixmap
 
@@ -1511,6 +1511,9 @@ class TabGlowEffect(QObject):
 
     def _animate(self):
         """Update the glow intensity for animation."""
+        if not self._is_running:
+            return
+
         # Update intensity
         self._intensity += self._intensity_step * self._direction
 
@@ -1535,14 +1538,14 @@ class TabGlowEffect(QObject):
         """
         Update the tab appearance to show the glow effect.
 
-        Uses setTabIcon to replace the tab icon with a glowing version,
+        Uses a pulsing notification dot indicator next to the tab icon,
         since setTabTextColor is overridden by stylesheets.
 
         Args:
             intensity: Glow intensity from 0.0 to 1.0
         """
         if intensity <= 0.01:
-            # Reset to original icon
+            # Reset to original icon (remove notification dot)
             if self._original_icon is not None:
                 self.tab_widget.setTabIcon(self.tab_index, self._original_icon)
             return
@@ -1551,56 +1554,83 @@ class TabGlowEffect(QObject):
         if self._original_icon is None:
             self._original_icon = self.tab_widget.tabIcon(self.tab_index)
 
-        # Calculate glowing color that pulses between base color and bright white
-        glow_r = int(255 * intensity + self.base_color.red() * (1 - intensity))
-        glow_g = int(255 * intensity + self.base_color.green() * (1 - intensity))
-        glow_b = int(255 * intensity + self.base_color.blue() * (1 - intensity))
-
-        # Create a glowing version of the icon
-        glow_icon = self._create_glow_icon(QColor(glow_r, glow_g, glow_b), intensity)
+        # Create icon with pulsing notification dot
+        glow_icon = self._create_notification_icon(intensity)
         if glow_icon:
             self.tab_widget.setTabIcon(self.tab_index, glow_icon)
 
-    def _create_glow_icon(self, glow_color, intensity):
+    def _create_notification_icon(self, intensity):
         """
-        Create a glowing version of the tab icon.
+        Create an icon with a pulsing notification dot overlay.
 
         Args:
-            glow_color: The color for the glow effect
             intensity: Glow intensity from 0.0 to 1.0
 
         Returns:
-            QIcon with glow effect, or None if no original icon
+            QIcon with notification dot, or None if no original icon
         """
-        from PySide2.QtGui import QPixmap, QPainter, QIcon
-        from PySide2.QtCore import Qt
+        from PySide2.QtGui import QPixmap, QPainter, QIcon, QBrush, QPen
+        from PySide2.QtCore import Qt, QRectF
 
-        if self._original_icon is None or self._original_icon.isNull():
-            return None
+        # Icon size - match the tab icon size (16px)
+        icon_size = 16
 
-        # Get the original pixmap at a reasonable size
-        original_pixmap = self._original_icon.pixmap(24, 24)
-        if original_pixmap.isNull():
-            return None
+        # Create a new pixmap for the icon with notification
+        result_pixmap = QPixmap(icon_size, icon_size)
+        result_pixmap.fill(Qt.transparent)
 
-        # Create a new pixmap for the glowing icon
-        glow_pixmap = QPixmap(original_pixmap.size())
-        glow_pixmap.fill(Qt.transparent)
-
-        painter = QPainter(glow_pixmap)
+        painter = QPainter(result_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Draw the original icon
-        painter.drawPixmap(0, 0, original_pixmap)
+        # Draw the original icon if available
+        if self._original_icon is not None and not self._original_icon.isNull():
+            original_pixmap = self._original_icon.pixmap(icon_size, icon_size)
+            if not original_pixmap.isNull():
+                painter.drawPixmap(0, 0, original_pixmap)
 
-        # Apply color overlay with the glow color
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(glow_pixmap.rect(), glow_color)
+        # Draw pulsing notification dot in top-right corner
+        # Use a bright, attention-grabbing color (red/orange) instead of the subtle tab color
+        dot_size = 6 + int(2 * intensity)  # Pulse between 6-8px
+        dot_x = icon_size - dot_size
+        dot_y = 0
+
+        # Use a bright notification color - red for high visibility
+        notification_color = QColor(255, 80, 80)  # Bright red
+
+        # Calculate pulsing alpha (full visibility during pulse)
+        alpha = int(200 + 55 * intensity)  # 200-255
+
+        # Draw outer glow for visibility
+        glow_color = QColor(255, 100, 100, int(100 * intensity))
+        painter.setBrush(QBrush(glow_color))
+        painter.setPen(Qt.NoPen)
+        glow_rect = QRectF(dot_x - 2, dot_y - 1, dot_size + 3, dot_size + 3)
+        painter.drawEllipse(glow_rect)
+
+        # Draw main dot
+        dot_color = QColor(notification_color)
+        dot_color.setAlpha(alpha)
+        painter.setBrush(QBrush(dot_color))
+        painter.setPen(Qt.NoPen)
+        dot_rect = QRectF(dot_x, dot_y, dot_size, dot_size)
+        painter.drawEllipse(dot_rect)
+
+        # Draw bright center highlight
+        highlight_color = QColor(255, 255, 255, int(180 * intensity))
+        painter.setBrush(QBrush(highlight_color))
+        highlight_size = dot_size * 0.35
+        highlight_rect = QRectF(
+            dot_x + dot_size * 0.2,
+            dot_y + dot_size * 0.15,
+            highlight_size,
+            highlight_size
+        )
+        painter.drawEllipse(highlight_rect)
 
         painter.end()
 
-        return QIcon(glow_pixmap)
+        return QIcon(result_pixmap)
 
 
 class TabGlowManager(QObject):
@@ -1803,6 +1833,10 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
     A widget that displays an image with support for zooming and panning.
     """
     double_clicked = Signal()
+    zoom_changed = Signal(str)  # Emits zoom level as string (e.g., "100%", "Fit")
+
+    # Predefined zoom levels
+    ZOOM_LEVELS = ["Fit", "100%", "50%", "25%", "10%"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1820,18 +1854,55 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
         self.setScene(self._scene)
         self._pixmap_item = QtWidgets.QGraphicsPixmapItem()
         self._scene.addItem(self._pixmap_item)
-        
+
         # Pan state
         self._is_panning = False
         self._pan_start_x = 0
         self._pan_start_y = 0
+
+        # Current zoom mode
+        self._current_zoom = "Fit"
         
     def setPixmap(self, pixmap):
         self._scene.removeItem(self._pixmap_item)
         self._pixmap_item = QtWidgets.QGraphicsPixmapItem(pixmap)
         self._scene.addItem(self._pixmap_item)
         self.setSceneRect(self._pixmap_item.boundingRect())
+        self._current_zoom = "Fit"
         self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+        self.zoom_changed.emit("Fit")
+
+    def setZoomLevel(self, level):
+        """Set zoom to a predefined level.
+
+        Args:
+            level: One of "Fit", "100%", "50%", "25%", "10%"
+        """
+        if not self._pixmap_item.pixmap() or self._pixmap_item.pixmap().isNull():
+            return
+
+        self._current_zoom = level
+
+        if level == "Fit":
+            self.resetTransform()
+            self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+        else:
+            # Parse percentage
+            percentage = int(level.replace("%", ""))
+            scale = percentage / 100.0
+
+            # Reset transform and apply new scale
+            self.resetTransform()
+            self.scale(scale, scale)
+
+            # Center the image
+            self.centerOn(self._pixmap_item)
+
+        self.zoom_changed.emit(level)
+
+    def currentZoom(self):
+        """Return the current zoom level string."""
+        return self._current_zoom
         
     def wheelEvent(self, event):
         zoom_in_factor = 1.15
@@ -1842,8 +1913,14 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
             zoom_factor = zoom_in_factor
         else:
             zoom_factor = zoom_out_factor
-            
+
         self.scale(zoom_factor, zoom_factor)
+
+        # Update zoom tracking - calculate actual percentage
+        current_scale = self.transform().m11() * 100
+        self._current_zoom = f"{int(current_scale)}%"
+        self.zoom_changed.emit(self._current_zoom)
+
         event.accept()
 
     def mousePressEvent(self, event):
@@ -1964,6 +2041,44 @@ class EmbeddedImageViewer(QWidget):
         self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
         top_layout.addWidget(self.counter_label)
 
+        # Zoom dropdown
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
+        self.zoom_combo.setCurrentText("Fit")
+        self.zoom_combo.setFixedWidth(80)
+        self.zoom_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2a2a2a;
+                color: #cccccc;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 3px 8px;
+                font-size: 11px;
+            }
+            QComboBox:hover {
+                border-color: #4a9eff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #888888;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a2a;
+                color: #cccccc;
+                selection-background-color: #4a9eff;
+                border: 1px solid #555555;
+            }
+        """)
+        self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
+        top_layout.addWidget(self.zoom_combo)
+
         # Fullscreen button
         self.fullscreen_btn = QPushButton("Fullscreen")
         self.fullscreen_btn.setStyleSheet("""
@@ -2022,6 +2137,7 @@ class EmbeddedImageViewer(QWidget):
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
         self.image_view.double_clicked.connect(self.close)
+        self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
         self.image_stack.addWidget(self.image_view)
 
         # 2. 3D Model Viewer (GLB/GLTF) - Lazy initialization to avoid startup lag
@@ -2420,6 +2536,23 @@ class EmbeddedImageViewer(QWidget):
         if self.image_paths:
             self.view_fullscreen.emit(self.image_paths[self.current_index], self.current_index)
 
+    def _on_zoom_changed(self, level):
+        """Handle zoom dropdown selection."""
+        self.image_view.setZoomLevel(level)
+
+    def _on_image_zoom_changed(self, level):
+        """Handle zoom change from image widget (e.g., mouse wheel)."""
+        # Block signals to prevent feedback loop
+        self.zoom_combo.blockSignals(True)
+        # Check if level matches a preset, otherwise just show the percentage
+        if level in ZoomableImageWidget.ZOOM_LEVELS:
+            self.zoom_combo.setCurrentText(level)
+        else:
+            # For custom zoom levels, update the combo box text without changing selection
+            # Find the index and temporarily add/update the displayed text
+            self.zoom_combo.setEditText(level) if self.zoom_combo.isEditable() else None
+        self.zoom_combo.blockSignals(False)
+
     def _toggle_3d_render_mode(self):
         """Toggle between textured and wireframe mode for 3D models."""
         if not self._current_3d_path:
@@ -2662,6 +2795,7 @@ class FullscreenImageViewer(QWidget):
         # Viewer says "Double-click to close" in mouse events later.
         # But image_view swallows double clicks unless we connect signal.
         self.image_view.double_clicked.connect(self.close)
+        self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
         self.image_stack.addWidget(self.image_view)
 
         # 2. Message Label
@@ -2694,6 +2828,44 @@ class FullscreenImageViewer(QWidget):
         self.counter_label = QLabel()
         self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
         info_layout.addWidget(self.counter_label)
+
+        # Zoom dropdown
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
+        self.zoom_combo.setCurrentText("Fit")
+        self.zoom_combo.setFixedWidth(80)
+        self.zoom_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2a2a2a;
+                color: #cccccc;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 3px 8px;
+                font-size: 11px;
+            }
+            QComboBox:hover {
+                border-color: #4a9eff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #888888;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a2a;
+                color: #cccccc;
+                selection-background-color: #4a9eff;
+                border: 1px solid #555555;
+            }
+        """)
+        self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
+        info_layout.addWidget(self.zoom_combo)
 
         # Help hint
         self.help_label = QLabel("← → Navigate  |  Esc Close  |  Space Toggle Info  |  C Copy Prompt")
@@ -2821,6 +2993,19 @@ class FullscreenImageViewer(QWidget):
         if self.current_index > 0:
             self.current_index -= 1
             self._load_current_image()
+
+    def _on_zoom_changed(self, level):
+        """Handle zoom dropdown selection."""
+        self.image_view.setZoomLevel(level)
+
+    def _on_image_zoom_changed(self, level):
+        """Handle zoom change from image widget (e.g., mouse wheel)."""
+        # Block signals to prevent feedback loop
+        self.zoom_combo.blockSignals(True)
+        # Check if level matches a preset, otherwise just show the percentage
+        if level in ZoomableImageWidget.ZOOM_LEVELS:
+            self.zoom_combo.setCurrentText(level)
+        self.zoom_combo.blockSignals(False)
 
     def _copy_prompt(self):
         """Copy prompt for current image to clipboard."""

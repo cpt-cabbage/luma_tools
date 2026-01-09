@@ -213,18 +213,18 @@ class MP4MakerTab(BaseTab):
         from ui_components import Worker, StatusColors
         from mp4_maker import generate_mp4
 
-        # Show loading overlay
-        self.main_window.animator.show_loading(
-            "Generating MP4",
-            "Preparing to convert...",
-            show_progress=True
+        # Show status bar progress (no overlay so user can still interact)
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            "🎬 MP4: Preparing to convert...",
+            StatusColors.INFO
         )
         self.main_window.animator.animate_button_click(self.ui.MP4Generate)
 
         # Get selected render
         sel0 = self.ui.MP4RendersList.currentRow()
         if sel0 < 0 or sel0 >= len(self.app_state.mp4_renders):
-            self.main_window.animator.hide_loading()
+            self.main_window.stop_status_spinner()
             self.main_window.animator.update_status_animated(
                 "No render selected",
                 StatusColors.ERROR
@@ -232,11 +232,10 @@ class MP4MakerTab(BaseTab):
             return
 
         # Get render info
-        self.main_window.animator.update_loading_message(
-            "Generating MP4",
-            "Analyzing render sequence..."
+        self.main_window.animator.update_status_animated(
+            "🎬 MP4: Analyzing render sequence...",
+            StatusColors.INFO
         )
-        self.main_window.animator.update_loading_progress(5)
 
         subdir, render_seq = self.app_state.mp4_renders[sel0]
         framename = render_seq.frame(self.app_state.mp4_startframe)
@@ -246,7 +245,7 @@ class MP4MakerTab(BaseTab):
         base_filename = os.path.basename(framename)
         parts = base_filename.split(".")
         if len(parts) < 3:
-            self.main_window.animator.hide_loading()
+            self.main_window.stop_status_spinner()
             self.main_window.animator.update_status_animated(
                 f"Unexpected filename format: {base_filename}",
                 StatusColors.ERROR
@@ -257,31 +256,31 @@ class MP4MakerTab(BaseTab):
         input_pattern = os.path.join(base_dir, f"{parts[0]}.%04d.exr")
 
         # Get settings
-        self.main_window.animator.update_loading_message(
-            "Generating MP4",
-            "Configuring conversion settings..."
+        self.main_window.animator.update_status_animated(
+            "🎬 MP4: Configuring conversion settings...",
+            StatusColors.INFO
         )
-        self.main_window.animator.update_loading_progress(8)
 
         quality_index = self.ui.MP4Quality.currentIndex()
         burn_in_timecode = self.ui.MP4BurnInTimecode.isChecked()
 
         def on_progress(progress, message):
             """Update UI with MP4 generation progress."""
-            self.main_window.animator.update_loading_message("Generating MP4", message)
-            self.main_window.animator.update_loading_progress(progress)
+            self.main_window.animator.update_status_animated(
+                f"🎬 MP4: {message} ({progress}%)",
+                StatusColors.INFO
+            )
 
         def on_result(success):
             """Called when MP4 generation completes."""
+            self.main_window.stop_status_spinner()
             if success:
-                self.main_window.animator.update_loading_message(
-                    "Generating MP4",
-                    "MP4 generation complete!"
+                self.main_window.animator.update_status_animated(
+                    f"✅ MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
+                    StatusColors.SUCCESS
                 )
-                self.main_window.animator.update_loading_progress(100)
-                QTimer.singleShot(500, lambda: self._finish_mp4_success())
+                self.main_window.animator.show_success("MP4 generation complete!")
             else:
-                self.main_window.animator.hide_loading()
                 self.main_window.animator.update_status_animated(
                     "MP4 generation failed",
                     StatusColors.ERROR
@@ -289,7 +288,7 @@ class MP4MakerTab(BaseTab):
 
         def on_error(error_msg, traceback_str):
             """Called when MP4 generation fails."""
-            self.main_window.animator.hide_loading()
+            self.main_window.stop_status_spinner()
             self.main_window.animator.update_status_animated(
                 f"MP4 generation failed: {error_msg}",
                 StatusColors.ERROR
@@ -311,13 +310,3 @@ class MP4MakerTab(BaseTab):
         worker.signals.error.connect(on_error)
         worker.signals.progress.connect(on_progress)
         QThreadPool.globalInstance().start(worker)
-
-    def _finish_mp4_success(self):
-        """Called after successful MP4 generation to show completion message."""
-        from ui_components import StatusColors
-
-        self.main_window.animator.hide_loading()
-        self.main_window.animator.update_status_animated(
-            f"MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
-            StatusColors.SUCCESS
-        )

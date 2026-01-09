@@ -158,7 +158,7 @@ class PassBuilderTab(BaseTab):
         from pass_builder import pass_builder
         from render_service import save_pass_config
         from settings_manager import get_all_default_passes
-        from ui_components import Worker
+        from ui_components import Worker, StatusColors
 
         # Get selected passes from the list
         selected_items = self.ui.Passes.selectedItems()
@@ -175,8 +175,12 @@ class PassBuilderTab(BaseTab):
         # Get build location (Local or Farm)
         build_type = self.ui.BuildType.currentText()
 
-        # Show loading
-        self.show_loading(f"Building passes ({build_type})...")
+        # Show status bar progress (no overlay so user can still interact)
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            f"🔧 Pass Builder: Building passes ({build_type})...",
+            StatusColors.INFO
+        )
 
         def do_build():
             """Run the pass building operation."""
@@ -191,17 +195,23 @@ class PassBuilderTab(BaseTab):
 
         def on_result(result):
             """Called when build completes."""
-            self.hide_loading()
+            self.main_window.stop_status_spinner()
             self.log(f"Build completed: {result}")
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_success("Build completed successfully")
+            self.main_window.animator.update_status_animated(
+                "✅ Pass Builder: Build completed successfully",
+                StatusColors.SUCCESS
+            )
+            self.main_window.animator.show_success("Build completed successfully")
 
         def on_error(error_msg, traceback_str):
             """Called when build fails."""
-            self.hide_loading()
+            self.main_window.stop_status_spinner()
             self.log(f"Build failed: {error_msg}")
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_error(f"Build failed: {error_msg}")
+            self.main_window.animator.update_status_animated(
+                f"Pass Builder failed: {error_msg}",
+                StatusColors.ERROR
+            )
+            self.main_window.animator.show_error(f"Build failed: {error_msg}")
 
         worker = Worker(do_build)
         worker.signals.result.connect(on_result)

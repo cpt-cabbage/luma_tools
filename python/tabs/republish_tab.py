@@ -199,8 +199,12 @@ class RePublishTab(BaseTab):
             parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
             product_name = parts[0] if parts else base.replace("#", "").strip(".")
 
-        # Show loading overlay
-        self.main_window.animator.show_loading("Publishing to AYON", "Preparing metadata...")
+        # Show status bar progress (no overlay so user can still interact)
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            "📦 AYON: Preparing metadata...",
+            StatusColors.INFO
+        )
 
         try:
             # Get render path information
@@ -245,9 +249,9 @@ class RePublishTab(BaseTab):
             if not metadata_path:
                 raise Exception("Failed to write metadata file")
 
-            self.main_window.animator.update_loading_message(
-                "Publishing to AYON",
-                "Submitting to farm..." if use_farm else "Publishing locally..."
+            self.main_window.animator.update_status_animated(
+                f"📦 AYON: {'Submitting to farm' if use_farm else 'Publishing locally'}...",
+                StatusColors.INFO
             )
 
             # Publish
@@ -263,10 +267,14 @@ class RePublishTab(BaseTab):
                 )
 
                 if job_id:
-                    success_msg = f"Published to farm!\nJob ID: {job_id}"
+                    success_msg = f"Published to farm! Job ID: {job_id}"
                     self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
-                    self.main_window.animator.hide_loading()
-                    self.main_window.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
+                    self.main_window.stop_status_spinner()
+                    self.main_window.animator.update_status_animated(
+                        f"✅ AYON: {success_msg}",
+                        StatusColors.SUCCESS
+                    )
+                    self.main_window.animator.show_success("Published to farm!")
                 else:
                     raise Exception("Failed to submit to Deadline")
             else:
@@ -282,16 +290,23 @@ class RePublishTab(BaseTab):
                 if success:
                     success_msg = f"Published: {product_name}"
                     self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
-                    self.main_window.animator.hide_loading()
-                    self.main_window.animator.update_status_animated(success_msg, StatusColors.SUCCESS)
+                    self.main_window.stop_status_spinner()
+                    self.main_window.animator.update_status_animated(
+                        f"✅ AYON: {success_msg}",
+                        StatusColors.SUCCESS
+                    )
+                    self.main_window.animator.show_success("Published successfully!")
                 else:
                     raise Exception("Local publish failed")
 
         except Exception as e:
             error_msg = f"Publish failed: {str(e)}"
             self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
-            self.main_window.animator.hide_loading()
-            self.main_window.animator.update_status_animated(error_msg, StatusColors.ERROR)
+            self.main_window.stop_status_spinner()
+            self.main_window.animator.update_status_animated(
+                f"AYON: {error_msg}",
+                StatusColors.ERROR
+            )
             self.log(f"Publish error: {e}")
             import traceback
             traceback.print_exc()

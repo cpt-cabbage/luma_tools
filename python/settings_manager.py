@@ -399,7 +399,7 @@ def get_comfyui_workflow_presets():
     return settings.get("comfyui_workflow_presets", {})
 
 
-def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note="", full_restart=False):
+def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note="", full_restart=False, node_overrides=None):
     """
     Save a ComfyUI workflow preset to global settings.
 
@@ -410,6 +410,7 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
         iteratable: Whether this workflow supports iterate mode
         note: Optional user note for this preset
         full_restart: Whether to completely restart ComfyUI server before processing
+        node_overrides: Dict of node title -> {enabled: bool, default_value: str} overrides
     """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
@@ -420,13 +421,14 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
         "description": description,
         "iteratable": iteratable,
         "note": note,
-        "full_restart": full_restart
+        "full_restart": full_restart,
+        "node_overrides": node_overrides or {}
     }
     save_global_settings(settings)
     print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable}, full_restart={full_restart})")
 
 
-def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None, full_restart=None):
+def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None, full_restart=None, node_overrides=None):
     """
     Update an existing ComfyUI workflow preset.
 
@@ -437,6 +439,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         iteratable: New iteratable flag (None to keep existing)
         note: New note (None to keep existing)
         full_restart: New full_restart flag (None to keep existing)
+        node_overrides: New node overrides dict (None to keep existing)
 
     Returns:
         bool: True if updated, False if preset not found
@@ -450,7 +453,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
     preset = presets[name]
     # Handle legacy format
     if isinstance(preset, str):
-        preset = {"path": preset, "description": "", "iteratable": False, "note": "", "full_restart": False}
+        preset = {"path": preset, "description": "", "iteratable": False, "note": "", "full_restart": False, "node_overrides": {}}
 
     if workflow_path is not None:
         preset["path"] = workflow_path
@@ -462,6 +465,8 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         preset["note"] = note
     if full_restart is not None:
         preset["full_restart"] = full_restart
+    if node_overrides is not None:
+        preset["node_overrides"] = node_overrides
 
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets

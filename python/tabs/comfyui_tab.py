@@ -358,6 +358,7 @@ class ComfyUITab(BaseTab):
 
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
+        from comfyui_service import extract_editable_nodes
         from settings_manager import (
             get_comfyui_workflow_presets,
             save_comfyui_workflow_preset,
@@ -372,19 +373,20 @@ class ComfyUITab(BaseTab):
         presets = get_comfyui_workflow_presets()
         preset = presets.get(self._current_preset_name, {})
         if isinstance(preset, str):
-            preset = {"path": preset, "description": "", "iteratable": False, "note": ""}
+            preset = {"path": preset, "description": "", "iteratable": False, "note": "", "node_overrides": {}}
 
         current_name = self._current_preset_name
         current_path = preset.get("path", "")
         current_iteratable = preset.get("iteratable", False)
         current_note = preset.get("note", "")
         current_full_restart = preset.get("full_restart", False)
+        current_node_overrides = preset.get("node_overrides", {})
 
         # Create edit dialog
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle(f"Edit Model: {current_name}")
-        dialog.setMinimumWidth(500)
-        dialog.setMinimumHeight(350)
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(500)
 
         layout = QVBoxLayout(dialog)
 
@@ -413,6 +415,8 @@ class ComfyUITab(BaseTab):
             )
             if file_path:
                 path_edit.setText(file_path)
+                # Refresh editable nodes when workflow changes
+                refresh_editable_nodes_list()
 
         browse_btn.clicked.connect(browse_workflow)
 
@@ -444,6 +448,111 @@ class ComfyUITab(BaseTab):
         note_edit.setPlainText(current_note)
         note_edit.setMaximumHeight(80)
         layout.addWidget(note_edit)
+
+        # Editable Nodes section
+        nodes_group = QtWidgets.QGroupBox("Editable Nodes")
+        nodes_group_layout = QVBoxLayout(nodes_group)
+
+        nodes_info_label = QLabel("Configure which nodes appear in the UI and set default values:")
+        nodes_info_label.setStyleSheet("color: #888; font-size: 11px;")
+        nodes_group_layout.addWidget(nodes_info_label)
+
+        # Scroll area for editable nodes
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(150)
+        scroll_area.setMaximumHeight(250)
+
+        nodes_container = QWidget()
+        nodes_scroll_layout = QVBoxLayout(nodes_container)
+        nodes_scroll_layout.setContentsMargins(5, 5, 5, 5)
+        nodes_scroll_layout.setSpacing(8)
+
+        scroll_area.setWidget(nodes_container)
+        nodes_group_layout.addWidget(scroll_area)
+        layout.addWidget(nodes_group)
+
+        # Store node override widgets for retrieval
+        node_override_widgets = {}
+
+        def refresh_editable_nodes_list():
+            """Refresh the list of editable nodes from the workflow."""
+            # Clear existing widgets
+            while nodes_scroll_layout.count():
+                item = nodes_scroll_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            node_override_widgets.clear()
+
+            workflow_path = path_edit.text().strip()
+            if not workflow_path or not os.path.exists(workflow_path):
+                no_nodes_label = QLabel("No workflow selected or file not found")
+                no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
+                nodes_scroll_layout.addWidget(no_nodes_label)
+                return
+
+            editable_nodes = extract_editable_nodes(workflow_path)
+            if not editable_nodes:
+                no_nodes_label = QLabel("No editable nodes found in this workflow")
+                no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
+                nodes_scroll_layout.addWidget(no_nodes_label)
+                return
+
+            # Filter to only show text-type nodes (prompts) - skip toggles, images, 3d models
+            text_nodes = [n for n in editable_nodes if n.widget_type == 'text']
+
+            if not text_nodes:
+                no_nodes_label = QLabel("No text/prompt nodes found in this workflow")
+                no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
+                nodes_scroll_layout.addWidget(no_nodes_label)
+                return
+
+            for node in text_nodes:
+                # Get existing override for this node
+                override = current_node_overrides.get(node.title, {})
+                is_enabled = override.get("enabled", True)
+                default_value = override.get("default_value", "")
+
+                # Create row for this node
+                node_row = QWidget()
+                node_row_layout = QHBoxLayout(node_row)
+                node_row_layout.setContentsMargins(0, 0, 0, 0)
+                node_row_layout.setSpacing(8)
+
+                # Checkbox to enable/disable
+                enable_check = QtWidgets.QCheckBox()
+                enable_check.setChecked(is_enabled)
+                enable_check.setToolTip("Show this node in the UI")
+                enable_check.setFixedWidth(20)
+                node_row_layout.addWidget(enable_check)
+
+                # Node name label
+                name_label = QLabel(node.display_name)
+                name_label.setFixedWidth(150)
+                name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}")
+                node_row_layout.addWidget(name_label)
+
+                # Default value input
+                default_input = QLineEdit()
+                default_input.setPlaceholderText("Leave blank to keep unchanged")
+                default_input.setText(default_value)
+                default_input.setToolTip("Default value to pre-fill (leave empty to use workflow default)")
+                node_row_layout.addWidget(default_input, 1)
+
+                nodes_scroll_layout.addWidget(node_row)
+
+                # Store reference for later retrieval
+                node_override_widgets[node.title] = {
+                    "enable_check": enable_check,
+                    "default_input": default_input,
+                    "node": node
+                }
+
+            # Add stretch at end
+            nodes_scroll_layout.addStretch()
+
+        # Initial population of editable nodes
+        refresh_editable_nodes_list()
 
         # Buttons layout with Delete on the left, OK/Cancel on the right
         buttons_layout = QHBoxLayout()
@@ -499,6 +608,18 @@ class ComfyUITab(BaseTab):
             new_note = note_edit.toPlainText().strip()
             new_full_restart = full_restart_check.isChecked()
 
+            # Collect node overrides from widgets - always store if there's any override
+            new_node_overrides = {}
+            for node_title, widgets in node_override_widgets.items():
+                is_enabled = widgets["enable_check"].isChecked()
+                default_value = widgets["default_input"].text().strip()
+                # Store override if node is disabled or has a default value set
+                if not is_enabled or default_value:
+                    new_node_overrides[node_title] = {
+                        "enabled": is_enabled,
+                        "default_value": default_value
+                    }
+
             if not new_name:
                 self.main_window.animator.show_error("Preset name cannot be empty")
                 return
@@ -515,7 +636,13 @@ class ComfyUITab(BaseTab):
 
                 # Delete old preset and create new one with new name
                 delete_comfyui_workflow_preset(current_name)
-                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable, note=new_note, full_restart=new_full_restart)
+                save_comfyui_workflow_preset(
+                    new_name, new_path,
+                    iteratable=new_iteratable,
+                    note=new_note,
+                    full_restart=new_full_restart,
+                    node_overrides=new_node_overrides
+                )
                 self._current_preset_name = new_name
                 self.ui.ComfyUICurrentPreset.setText(new_name)
                 self.main_window.animator.show_success(f"Preset renamed to '{new_name}'")
@@ -526,7 +653,8 @@ class ComfyUITab(BaseTab):
                     workflow_path=new_path,
                     iteratable=new_iteratable,
                     note=new_note,
-                    full_restart=new_full_restart
+                    full_restart=new_full_restart,
+                    node_overrides=new_node_overrides
                 )
                 self.main_window.animator.show_success(f"Preset '{current_name}' updated")
 
@@ -540,6 +668,7 @@ class ComfyUITab(BaseTab):
     def _refresh_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
         from comfyui_service import extract_editable_nodes
+        from settings_manager import get_comfyui_workflow_presets
 
         # Clear layout
         layout = self.ui.comfyuiEditableNodesLayout
@@ -554,10 +683,30 @@ class ComfyUITab(BaseTab):
         if not self.app_state.comfyui_workflow_path:
             return
 
+        # Get node overrides from current preset
+        node_overrides = {}
+        if self._current_preset_name:
+            presets = get_comfyui_workflow_presets()
+            preset = presets.get(self._current_preset_name, {})
+            if isinstance(preset, dict):
+                node_overrides = preset.get("node_overrides", {})
+
         editable_nodes = extract_editable_nodes(self.app_state.comfyui_workflow_path)
 
-        # First pass: create all widgets
+        # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
+            # Check if this node is disabled via overrides
+            override = node_overrides.get(node.title, {})
+            if not override.get("enabled", True):
+                # Node is disabled, skip it
+                continue
+
+            # Apply default value override if present
+            default_value = override.get("default_value", "")
+            if default_value and node.widget_type == 'text':
+                # Override the current_value with the default
+                node.current_value = default_value
+
             widget = self._create_editable_node_widget(node)
             if widget:
                 layout.addWidget(widget)
@@ -567,6 +716,11 @@ class ComfyUITab(BaseTab):
 
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:
+            # Skip disabled nodes
+            override = node_overrides.get(node.title, {})
+            if not override.get("enabled", True):
+                continue
+
             if node.condition_node:
                 # Find the toggle widget that controls this node's visibility
                 toggle_widget = self._find_toggle_widget_by_name(node.condition_node)
@@ -949,11 +1103,11 @@ class ComfyUITab(BaseTab):
         # Build job name from shot/project
         job_name = f"{self.app_state.shot}_luma_tools" if self.app_state.shot else "luma_tools_job"
 
-        # Show loading overlay
-        self.main_window.animator.show_loading(
-            "Submitting to ComfyUI",
-            f"Preparing {generation_count} generation(s)...",
-            show_progress=True
+        # Show status bar progress (no overlay so user can still interact)
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            f"🎨 ComfyUI: Preparing {generation_count} generation(s)...",
+            StatusColors.INFO
         )
         self.main_window.animator.animate_button_click(self.ui.ComfyUISubmit)
 
@@ -967,7 +1121,7 @@ class ComfyUITab(BaseTab):
 
         def on_result(result):
             """Called when submission completes."""
-            self.main_window.animator.hide_loading()
+            # Stop spinner only if no jobs were submitted (polling will handle spinner otherwise)
             job_ids, error_msg = result
 
             if job_ids:
@@ -986,6 +1140,7 @@ class ComfyUITab(BaseTab):
                 else:
                     self._start_batch_polling(job_ids, network_output_dir)
             else:
+                self.main_window.stop_status_spinner()
                 self.main_window.animator.show_error(f"Submission failed: {error_msg}")
                 self.main_window.animator.update_status_animated(
                     f"ComfyUI failed: {error_msg}",
@@ -994,7 +1149,7 @@ class ComfyUITab(BaseTab):
 
         def on_error(error_msg, traceback_str):
             """Called when submission fails."""
-            self.main_window.animator.hide_loading()
+            self.main_window.stop_status_spinner()
             self.main_window.animator.show_error(f"Submission error: {error_msg}")
             self.main_window.animator.update_status_animated(
                 f"ComfyUI error: {error_msg}",
@@ -1004,9 +1159,11 @@ class ComfyUITab(BaseTab):
             self.log(traceback_str)
 
         def on_progress(progress, message):
-            """Called for progress updates."""
-            self.main_window.animator.update_loading_message(message)
-            self.main_window.animator.update_loading_progress(progress)
+            """Called for progress updates - show in status bar."""
+            self.main_window.animator.update_status_animated(
+                f"🎨 ComfyUI: {message}",
+                StatusColors.INFO
+            )
 
         # Create worker and run submission on background thread
         worker = Worker(
@@ -1306,6 +1463,8 @@ class ComfyUITab(BaseTab):
         self._batch_poll_count = 0
         self._batch_start_time = time.time()
         self._batch_generation_count = self.ui.ComfyUIGenerationCount.value()
+        self._batch_poll_pending_results = 0  # Track pending poll results per cycle
+        self._batch_poll_results = {}  # Collected results for current poll cycle
 
         total_jobs = len(job_ids)
         total_frames = total_jobs * self._batch_generation_count
@@ -1331,7 +1490,7 @@ class ComfyUITab(BaseTab):
         self._poll_batch_jobs()
 
     def _poll_batch_jobs(self):
-        """Poll all pending batch jobs."""
+        """Poll all pending batch jobs and collect results before updating status."""
         from ui_components import Worker
         from comfyui_service import poll_deadline_job_status
 
@@ -1339,123 +1498,125 @@ class ComfyUITab(BaseTab):
             self._stop_batch_polling()
             return
 
+        # Track how many results we're waiting for in this poll cycle
+        self._batch_poll_pending_results = len(self._batch_pending_jobs)
+        self._batch_poll_results = {}
+
         # Poll each pending job, passing output_dir to verify success via output files
         output_dir = self._batch_network_output_dir
         for job_id in list(self._batch_pending_jobs):
             worker = Worker(poll_deadline_job_status, job_id, output_dir)
-            worker.signals.result.connect(lambda result, jid=job_id: self._on_batch_poll_result(jid, result))
-            worker.signals.error.connect(lambda msg, tb, jid=job_id: self.log(f"[Batch] Poll error for {jid}: {msg}"))
+            worker.signals.result.connect(lambda result, jid=job_id: self._on_batch_poll_result_collected(jid, result))
+            worker.signals.error.connect(lambda msg, tb, jid=job_id: self._on_batch_poll_error(jid, msg))
             QThreadPool.globalInstance().start(worker)
 
-    def _on_batch_poll_result(self, job_id, result):
-        """Handle batch poll result for a single job."""
+    def _on_batch_poll_error(self, job_id, error_msg):
+        """Handle poll error for a single job."""
+        self.log(f"[Batch] Poll error for {job_id}: {error_msg}")
+        # Store error as a failed result
+        self._batch_poll_results[job_id] = {"status": "PollError", "error_message": error_msg}
+        self._batch_poll_pending_results -= 1
+        if self._batch_poll_pending_results <= 0:
+            self._process_collected_poll_results()
+
+    def _on_batch_poll_result_collected(self, job_id, result):
+        """Collect a single job's poll result, then process all when complete."""
+        self._batch_poll_results[job_id] = result
+        self._batch_poll_pending_results -= 1
+
+        # Once all results are collected, process them together
+        if self._batch_poll_pending_results <= 0:
+            self._process_collected_poll_results()
+
+    def _process_collected_poll_results(self):
+        """Process all collected poll results and update status bar once."""
         from ui_components import StatusColors
 
-        status = result.get("status", "Unknown")
-        progress = result.get("progress", 0)
-        completed_tasks = result.get("completed_tasks", 0)
-        total_tasks = result.get("total_tasks", 1)
-
-        # Update job status tracking
-        self._batch_job_statuses[job_id] = status
-        if total_tasks > 1:
-            self._batch_total_tasks[job_id] = total_tasks
-
-        self._batch_poll_count += 1
+        had_new_frames = False
         total_jobs = len(self._batch_job_ids)
-        completed_jobs = total_jobs - len(self._batch_pending_jobs)
 
-        # Calculate total frames across all jobs
+        # Process each result
+        for job_id, result in self._batch_poll_results.items():
+            status = result.get("status", "Unknown")
+            completed_tasks = result.get("completed_tasks", 0)
+            total_tasks = result.get("total_tasks", 1)
+
+            # Update job status tracking
+            self._batch_job_statuses[job_id] = status
+            if total_tasks > 1:
+                self._batch_total_tasks[job_id] = total_tasks
+
+            # Check if new tasks completed since last poll (new frames rendered)
+            prev_completed = self._batch_completed_tasks.get(job_id, 0)
+            if completed_tasks > prev_completed:
+                new_frames = completed_tasks - prev_completed
+                self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
+                self._batch_completed_tasks[job_id] = completed_tasks
+                had_new_frames = True
+
+            self.log(f"[Batch Poll] Job {job_id}: {status}, Tasks: {completed_tasks}/{total_tasks}")
+
+            if status == "Completed":
+                self._batch_pending_jobs.discard(job_id)
+                # Update completed tasks to total for this job
+                self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
+                self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
+
+            elif status == "Failed":
+                self._batch_pending_jobs.discard(job_id)
+                self._batch_failed_jobs.add(job_id)
+                error_msg = result.get("error_message", "Unknown error")
+                self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
+
+        # Refresh gallery if any new frames were rendered
+        if had_new_frames:
+            gallery_tab = self.main_window.get_tab("comfyui_gallery")
+            if gallery_tab:
+                self.log(f"[Batch] Triggering gallery refresh for new frames")
+                gallery_tab._on_refresh()
+                gallery_tab.signals.request_attention.emit()
+
+        # Calculate totals for status update
+        completed_jobs = total_jobs - len(self._batch_pending_jobs)
         total_frames_all = sum(self._batch_total_tasks.values())
         completed_frames_all = sum(self._batch_completed_tasks.values())
-
-        # Calculate elapsed time
         elapsed = time.time() - self._batch_start_time if self._batch_start_time else 0
         elapsed_str = self._format_elapsed_time(elapsed)
 
-        # Check if new tasks completed since last poll (new frames rendered)
-        prev_completed = self._batch_completed_tasks.get(job_id, 0)
-        if completed_tasks > prev_completed:
-            new_frames = completed_tasks - prev_completed
-            self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
-            self._batch_completed_tasks[job_id] = completed_tasks
-            completed_frames_all = sum(self._batch_completed_tasks.values())
+        # Check if all jobs are done
+        if not self._batch_pending_jobs:
+            self._on_batch_jobs_completed(had_failures=len(self._batch_failed_jobs) > 0)
+            return
 
-            # Refresh gallery and request attention directly
-            gallery_tab = self.main_window.get_tab("comfyui_gallery")
-            if gallery_tab:
-                self.log(f"[Batch] Triggering gallery refresh and attention for new frames")
-                gallery_tab._on_refresh()
-                # Emit attention signal directly since we know new images were generated
-                gallery_tab.signals.request_attention.emit()
+        # Build consolidated status message
+        active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
+        queued_jobs = len(self._batch_pending_jobs) - active_jobs
+        failed_count = len(self._batch_failed_jobs)
 
-        self.log(f"[Batch Poll] Job {job_id}: {status} ({progress}%), Tasks: {completed_tasks}/{total_tasks}")
-
-        if status == "Completed":
-            self._batch_pending_jobs.discard(job_id)
-            # Update completed tasks to total for this job
-            self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
-            completed_jobs = total_jobs - len(self._batch_pending_jobs)
-            completed_frames_all = sum(self._batch_completed_tasks.values())
-            self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
-
-            # Count active jobs
-            active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
-
-            if self._batch_pending_jobs:
-                eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
-                main_status = f"🎨 ComfyUI: {completed_frames_all}/{total_frames_all} frames • {completed_jobs}/{total_jobs} jobs done"
+        # Determine overall status
+        if failed_count > 0:
+            main_status = f"⚠️ ComfyUI: {completed_frames_all}/{total_frames_all} frames • {failed_count} failed, {completed_jobs}/{total_jobs} done"
+            status_color = StatusColors.WARNING
+        elif active_jobs > 0:
+            eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
+            if completed_frames_all > 0:
+                main_status = f"🎨 ComfyUI: {completed_frames_all}/{total_frames_all} frames • {active_jobs} rendering"
+                if queued_jobs > 0:
+                    main_status += f", {queued_jobs} queued"
+                main_status += f" • {elapsed_str}"
                 if eta_str:
-                    main_status += f" • ~{eta_str} left"
-                self.main_window.animator.update_status_animated(main_status, StatusColors.INFO)
+                    main_status += f" (~{eta_str} left)"
             else:
-                # All done
-                self._on_batch_jobs_completed(had_failures=len(self._batch_failed_jobs) > 0)
-
-        elif status == "Failed":
-            self._batch_pending_jobs.discard(job_id)
-            self._batch_failed_jobs.add(job_id)  # Track this failure
-            completed_jobs = total_jobs - len(self._batch_pending_jobs)
-            error_msg = result.get("error_message", "Unknown error")
-            self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
-            self.log(f"[Batch] {len(self._batch_pending_jobs)} job(s) remaining")
-
-            failed_count = len(self._batch_failed_jobs)
-            self.main_window.animator.update_status_animated(
-                f"⚠️ ComfyUI: {failed_count} failed • {completed_jobs}/{total_jobs} jobs processed",
-                StatusColors.WARNING
-            )
-
-            if not self._batch_pending_jobs:
-                self._on_batch_jobs_completed(had_failures=True)
+                main_status = f"🎨 ComfyUI: Starting {total_frames_all} frames • {active_jobs} active, {queued_jobs} queued"
+            status_color = StatusColors.INFO
+        elif queued_jobs > 0:
+            main_status = f"⏳ ComfyUI: {queued_jobs} job(s) queued • Waiting for workers..."
+            status_color = StatusColors.INFO
         else:
-            # Still running - build detailed status
-            pending_count = len(self._batch_pending_jobs)
+            main_status = f"🎨 ComfyUI: {completed_jobs}/{total_jobs} jobs • {elapsed_str}"
+            status_color = StatusColors.INFO
 
-            # Count jobs in different states
-            # Active jobs are those with "Active" or "Rendering" status
-            active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
-            # Queued jobs = pending jobs that aren't actively rendering
-            # Use pending_count as the base since _batch_job_statuses may not have all jobs yet
-            queued_jobs = pending_count - active_jobs
-
-            if status in ("Active", "Rendering"):
-                eta_str = self._estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
-                if completed_frames_all > 0:
-                    main_status = f"🎨 ComfyUI: {completed_frames_all}/{total_frames_all} frames • {active_jobs} rendering"
-                    if queued_jobs > 0:
-                        main_status += f", {queued_jobs} queued"
-                    main_status += f" • {elapsed_str}"
-                    if eta_str:
-                        main_status += f" (~{eta_str} left)"
-                else:
-                    main_status = f"🎨 ComfyUI: Starting {total_frames_all} frames • {active_jobs} active, {queued_jobs} queued"
-            elif status in ("Pending", "Queued"):
-                main_status = f"⏳ ComfyUI: {queued_jobs} job(s) queued • Waiting for workers..."
-            else:
-                main_status = f"🎨 ComfyUI: {status} • {completed_jobs}/{total_jobs} jobs"
-
-            self.main_window.animator.update_status_animated(main_status, StatusColors.INFO)
+        self.main_window.animator.update_status_animated(main_status, status_color)
 
     def _stop_batch_polling(self):
         """Stop the batch poll timer."""
