@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.22
+- Fix Changelog generation
+
 ## Version 0.21
 - fix installer
 ## Version 0.20

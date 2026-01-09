@@ -985,6 +985,7 @@ def main():
     parser.add_argument('--fast', action='store_true', help='Enable --fast flag for faster execution (may reduce quality)')
     parser.add_argument('--fp16-accumulation', action='store_true', help='Enable --fp16-accumulation for faster FP16 math')
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files that cannot specify output path)')
+    parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs (ignored in non-persistent mode)')
 
     args = parser.parse_args()
 
