@@ -763,12 +763,15 @@ class ComfyUIGalleryTab(BaseTab):
             for i in range(self._load_index, end_index):
                 path, file_type = self._pending_items[i]
                 is_new = path in self._new_items
+                # Use the file's parent directory for metadata lookup (not gallery root)
+                # Metadata is stored per-workflow subfolder, not at the gallery root
+                item_output_dir = os.path.dirname(path)
 
                 if file_type == 'model':
                     thumbnail = GLBThumbnailWidget(
                         path,
                         container,
-                        output_dir=self._current_path,
+                        output_dir=item_output_dir,
                         editable=is_editable,
                         is_new=is_new
                     )
@@ -779,7 +782,7 @@ class ComfyUIGalleryTab(BaseTab):
                     thumbnail = GalleryThumbnailWidget(
                         path,
                         container,
-                        output_dir=self._current_path,
+                        output_dir=item_output_dir,
                         editable=is_editable,
                         is_new=is_new
                     )
@@ -899,10 +902,12 @@ class ComfyUIGalleryTab(BaseTab):
 
         if fullscreen:
             # Open fullscreen viewer as separate window
+            # Don't pass output_dir - let viewer derive it from each image's path
+            # (metadata is stored per-workflow subfolder, not at gallery root)
             self._fullscreen_viewer = FullscreenImageViewer(
                 image_paths,
                 start_index=start_index,
-                output_dir=self._current_path,
+                output_dir=None,
                 parent=None
             )
             self._fullscreen_viewer.copy_settings_requested.connect(self._on_copy_settings_requested)
@@ -992,10 +997,12 @@ class ComfyUIGalleryTab(BaseTab):
             self._viewer_loading_widget.hide()
 
         # Create the viewer
+        # Don't pass output_dir - let viewer derive it from each image's path
+        # (metadata is stored per-workflow subfolder, not at gallery root)
         self._embedded_viewer = EmbeddedImageViewer(
             image_paths,
             start_index=start_index,
-            output_dir=self._current_path,
+            output_dir=None,
             parent=self.ui
         )
         self._embedded_viewer.closed.connect(self._close_embedded_viewer)

@@ -14,7 +14,8 @@
       "Bash(activate.bat)",
       "Bash(pip install:*)",
       "Bash(cmd /c \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\activate.bat && pip install \"\"numpy<2\"\"\")",
-      "Bash(cmd /c \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe install \"\"numpy<2\"\"\")"
+      "Bash(cmd /c \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe install \"\"numpy<2\"\"\")",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

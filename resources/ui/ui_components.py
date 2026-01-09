@@ -4051,6 +4051,23 @@ class GLBThumbnailWidget(QWidget):
 
         menu.addSeparator()
 
+        # Export submenu
+        export_menu = menu.addMenu("Export As...")
+        export_abc_action = export_menu.addAction("Alembic (.abc)")
+        export_abc_action.triggered.connect(lambda: self._export_model("abc"))
+        export_obj_action = export_menu.addAction("Wavefront OBJ (.obj)")
+        export_obj_action.triggered.connect(lambda: self._export_model("obj"))
+        export_usd_action = export_menu.addAction("USD (.usd)")
+        export_usd_action.triggered.connect(lambda: self._export_model("usd"))
+        export_fbx_action = export_menu.addAction("FBX (.fbx)")
+        export_fbx_action.triggered.connect(lambda: self._export_model("fbx"))
+
+        # Extract textures action
+        extract_textures_action = menu.addAction("Extract Textures...")
+        extract_textures_action.triggered.connect(self._extract_textures)
+
+        menu.addSeparator()
+
         # Delete action
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self._delete_model)
@@ -4203,6 +4220,428 @@ class GLBThumbnailWidget(QWidget):
             self._generate_thumbnail_async()
         except Exception as e:
             print(f"Error regenerating thumbnail: {e}")
+
+    def _export_model(self, format_type):
+        """Export the model to a different format.
+
+        Args:
+            format_type: Target format - 'abc', 'obj', 'usd', or 'fbx'
+        """
+        from PySide2.QtWidgets import QFileDialog, QMessageBox
+
+        # Format configuration
+        format_config = {
+            'abc': {'ext': '.abc', 'name': 'Alembic', 'filter': 'Alembic Files (*.abc)'},
+            'obj': {'ext': '.obj', 'name': 'Wavefront OBJ', 'filter': 'OBJ Files (*.obj)'},
+            'usd': {'ext': '.usd', 'name': 'USD', 'filter': 'USD Files (*.usd *.usda *.usdc)'},
+            'fbx': {'ext': '.fbx', 'name': 'FBX', 'filter': 'FBX Files (*.fbx)'},
+        }
+
+        if format_type not in format_config:
+            print(f"Unsupported export format: {format_type}")
+            return
+
+        config = format_config[format_type]
+
+        # Find the main window for dialogs
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        # Generate default output filename
+        base_name = os.path.splitext(os.path.basename(self.model_path))[0]
+        default_dir = os.path.dirname(self.model_path)
+        default_path = os.path.join(default_dir, base_name + config['ext'])
+
+        # Ask user for save location
+        output_path, _ = QFileDialog.getSaveFileName(
+            parent_window,
+            f"Export as {config['name']}",
+            default_path,
+            config['filter']
+        )
+
+        if not output_path:
+            return  # User cancelled
+
+        # Ensure correct extension
+        if not output_path.lower().endswith(config['ext']):
+            output_path += config['ext']
+
+        try:
+            import trimesh
+
+            # Load the model
+            scene_or_mesh = trimesh.load(self.model_path)
+
+            # Export based on format
+            if format_type == 'obj':
+                # OBJ export - trimesh handles this directly
+                if isinstance(scene_or_mesh, trimesh.Scene):
+                    # Combine all meshes for OBJ export
+                    combined = scene_or_mesh.dump(concatenate=True)
+                    if combined:
+                        combined.export(output_path, file_type='obj')
+                    else:
+                        scene_or_mesh.export(output_path, file_type='obj')
+                else:
+                    scene_or_mesh.export(output_path, file_type='obj')
+
+            elif format_type == 'abc':
+                # Alembic export
+                self._export_to_alembic(scene_or_mesh, output_path)
+
+            elif format_type == 'usd':
+                # USD export using pxr (OpenUSD)
+                self._export_to_usd_format(scene_or_mesh, output_path, 'usd')
+
+            elif format_type == 'fbx':
+                # FBX export - try trimesh first, fall back to error message
+                try:
+                    scene_or_mesh.export(output_path, file_type='fbx')
+                except Exception as e:
+                    raise RuntimeError(
+                        f"FBX export is not supported by trimesh.\n\n"
+                        f"Alternatives:\n"
+                        f"- Export as OBJ and convert in Blender/Maya\n"
+                        f"- Use Blender's Python API for direct FBX export\n\n"
+                        f"Error: {e}"
+                    )
+
+            print(f"Exported model to: {output_path}")
+            QMessageBox.information(
+                parent_window,
+                "Export Complete",
+                f"Model exported successfully to:\n{output_path}"
+            )
+
+        except Exception as e:
+            print(f"Error exporting model: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                parent_window,
+                "Export Error",
+                f"Failed to export model:\n\n{str(e)}"
+            )
+
+    def _export_to_usd_format(self, scene_or_mesh, output_path, format_type):
+        """Export mesh data to USD or Alembic format using pxr library.
+
+        Args:
+            scene_or_mesh: Trimesh Scene or Trimesh mesh object
+            output_path: Path to save the file
+            format_type: 'usd' or 'abc'
+        """
+        import trimesh
+        import sys
+        import builtins
+
+        # Work around PySide2/shiboken2 import hook conflicts with pxr
+        # Save the original __import__ and use it directly
+        _original_import = builtins.__import__
+
+        def _safe_import(name, *args, **kwargs):
+            """Import bypassing shiboken's import hook for pxr modules."""
+            # For pxr modules, try to import without going through hooks
+            if name.startswith('pxr'):
+                try:
+                    # Try direct import first
+                    return _original_import(name, *args, **kwargs)
+                except Exception:
+                    pass
+            return _original_import(name, *args, **kwargs)
+
+        try:
+            # Temporarily replace __import__ to bypass shiboken hook
+            builtins.__import__ = _safe_import
+
+            # Import pxr modules
+            Usd = __import__('pxr.Usd', fromlist=['Usd'])
+            UsdGeom = __import__('pxr.UsdGeom', fromlist=['UsdGeom'])
+            Gf = __import__('pxr.Gf', fromlist=['Gf'])
+            Vt = __import__('pxr.Vt', fromlist=['Vt'])
+        except (ImportError, ModuleNotFoundError) as e:
+            raise RuntimeError(
+                f"USD/Alembic export requires the 'pxr' library.\n\n"
+                f"Install with: pip install usd-core\n\n"
+                f"Note: This provides OpenUSD (Pixar's Universal Scene Description)\n\n"
+                f"Error: {e}"
+            )
+        finally:
+            # Restore original __import__
+            builtins.__import__ = _original_import
+
+        # Create the USD stage
+        stage = Usd.Stage.CreateNew(output_path)
+        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+
+        # Helper to add a mesh to the stage
+        def add_mesh_to_stage(mesh, name, parent_path="/World"):
+            # Sanitize name for USD (no special characters)
+            safe_name = "".join(c if c.isalnum() or c == '_' else '_' for c in name)
+            if not safe_name or safe_name[0].isdigit():
+                safe_name = "mesh_" + safe_name
+
+            mesh_path = f"{parent_path}/{safe_name}"
+            usd_mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+
+            # Set vertices
+            vertices = mesh.vertices
+            points = [Gf.Vec3f(float(v[0]), float(v[1]), float(v[2])) for v in vertices]
+            usd_mesh.GetPointsAttr().Set(Vt.Vec3fArray(points))
+
+            # Set faces
+            faces = mesh.faces
+            face_vertex_counts = [3] * len(faces)  # All triangles
+            face_vertex_indices = faces.flatten().tolist()
+
+            usd_mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(face_vertex_counts))
+            usd_mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(face_vertex_indices))
+
+            # Set normals if available
+            if mesh.vertex_normals is not None and len(mesh.vertex_normals) > 0:
+                normals = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in mesh.vertex_normals]
+                usd_mesh.GetNormalsAttr().Set(Vt.Vec3fArray(normals))
+                usd_mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+
+            return usd_mesh
+
+        # Create root xform
+        root = UsdGeom.Xform.Define(stage, "/World")
+
+        # Process meshes
+        if isinstance(scene_or_mesh, trimesh.Scene):
+            for name, geometry in scene_or_mesh.geometry.items():
+                if isinstance(geometry, trimesh.Trimesh):
+                    add_mesh_to_stage(geometry, name)
+        elif isinstance(scene_or_mesh, trimesh.Trimesh):
+            add_mesh_to_stage(scene_or_mesh, "mesh")
+
+        # Save the stage
+        stage.GetRootLayer().Save()
+
+    def _export_to_alembic(self, scene_or_mesh, output_path):
+        """Export mesh data to Alembic format.
+
+        Args:
+            scene_or_mesh: Trimesh Scene or Trimesh mesh object
+            output_path: Path to save the .abc file
+        """
+        import trimesh
+
+        try:
+            import alembic
+            from alembic import Abc, AbcGeom
+            import imath
+        except ImportError:
+            raise RuntimeError(
+                "Alembic export requires the 'alembic' and 'imath' packages.\n\n"
+                "Install with: pip install alembic\n\n"
+                "Note: On Windows, you may need to install from conda:\n"
+                "  conda install -c conda-forge alembic"
+            )
+
+        # Create the Alembic archive
+        archive = Abc.OArchive(output_path)
+        top = archive.getTop()
+
+        # Helper to add a mesh
+        def add_mesh(mesh, name, parent):
+            # Create the mesh object
+            mesh_obj = AbcGeom.OPolyMesh(parent, name)
+            mesh_schema = mesh_obj.getSchema()
+
+            # Get mesh data
+            vertices = mesh.vertices.flatten().tolist()
+            faces = mesh.faces
+
+            # Build face counts and indices
+            face_counts = [3] * len(faces)  # All triangles
+            face_indices = faces.flatten().tolist()
+
+            # Create the sample
+            sample = AbcGeom.OPolyMeshSchemaSample(
+                imath.V3fArray(len(mesh.vertices)),  # positions
+                imath.IntArray(face_indices),        # face indices
+                imath.IntArray(face_counts)          # face counts
+            )
+
+            # Set positions manually
+            positions = sample.getPositions()
+            for i, v in enumerate(mesh.vertices):
+                positions[i] = imath.V3f(float(v[0]), float(v[1]), float(v[2]))
+
+            mesh_schema.set(sample)
+
+        # Process meshes
+        if isinstance(scene_or_mesh, trimesh.Scene):
+            for name, geometry in scene_or_mesh.geometry.items():
+                if isinstance(geometry, trimesh.Trimesh):
+                    # Sanitize name
+                    safe_name = "".join(c if c.isalnum() or c == '_' else '_' for c in name)
+                    if not safe_name or safe_name[0].isdigit():
+                        safe_name = "mesh_" + safe_name
+                    add_mesh(geometry, safe_name, top)
+        elif isinstance(scene_or_mesh, trimesh.Trimesh):
+            add_mesh(scene_or_mesh, "mesh", top)
+
+    def _extract_textures(self):
+        """Extract textures from the model to a folder."""
+        from PySide2.QtWidgets import QFileDialog, QMessageBox
+
+        # Find the main window for dialogs
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        # Default to a 'textures' subfolder next to the model
+        default_dir = os.path.join(os.path.dirname(self.model_path), "textures")
+
+        # Ask user for output folder
+        output_dir = QFileDialog.getExistingDirectory(
+            parent_window,
+            "Select Folder for Extracted Textures",
+            os.path.dirname(self.model_path)
+        )
+
+        if not output_dir:
+            return  # User cancelled
+
+        try:
+            import trimesh
+            from PIL import Image
+            import io
+
+            # Load the model with resolver to access textures
+            scene_or_mesh = trimesh.load(self.model_path)
+
+            extracted_count = 0
+            base_name = os.path.splitext(os.path.basename(self.model_path))[0]
+
+            # Helper to extract textures from a mesh
+            def extract_from_mesh(mesh, mesh_name=""):
+                nonlocal extracted_count
+
+                if not hasattr(mesh, 'visual') or mesh.visual is None:
+                    return
+
+                visual = mesh.visual
+
+                # Check for PBR material with textures
+                if hasattr(visual, 'material') and visual.material is not None:
+                    material = visual.material
+
+                    # Common texture attributes in PBR materials
+                    texture_attrs = [
+                        ('baseColorTexture', 'basecolor'),
+                        ('image', 'diffuse'),
+                        ('normalTexture', 'normal'),
+                        ('metallicRoughnessTexture', 'metallic_roughness'),
+                        ('occlusionTexture', 'occlusion'),
+                        ('emissiveTexture', 'emissive'),
+                    ]
+
+                    for attr, suffix in texture_attrs:
+                        texture = getattr(material, attr, None)
+                        if texture is not None:
+                            try:
+                                # Handle PIL Image
+                                if hasattr(texture, 'save'):
+                                    prefix = f"{base_name}_{mesh_name}_" if mesh_name else f"{base_name}_"
+                                    filename = f"{prefix}{suffix}.png"
+                                    filepath = os.path.join(output_dir, filename)
+                                    texture.save(filepath)
+                                    extracted_count += 1
+                                    print(f"Extracted texture: {filename}")
+                            except Exception as e:
+                                print(f"Could not extract {attr}: {e}")
+
+                # Check for TextureVisuals (contains UV-mapped textures)
+                if hasattr(visual, 'material') and hasattr(visual.material, 'image'):
+                    img = visual.material.image
+                    if img is not None:
+                        try:
+                            prefix = f"{base_name}_{mesh_name}_" if mesh_name else f"{base_name}_"
+                            filename = f"{prefix}texture.png"
+                            filepath = os.path.join(output_dir, filename)
+                            if hasattr(img, 'save'):
+                                img.save(filepath)
+                                extracted_count += 1
+                                print(f"Extracted texture: {filename}")
+                        except Exception as e:
+                            print(f"Could not extract texture image: {e}")
+
+            # Process scene or single mesh
+            if isinstance(scene_or_mesh, trimesh.Scene):
+                for name, geometry in scene_or_mesh.geometry.items():
+                    if isinstance(geometry, trimesh.Trimesh):
+                        extract_from_mesh(geometry, name)
+            elif isinstance(scene_or_mesh, trimesh.Trimesh):
+                extract_from_mesh(scene_or_mesh)
+
+            # Also try to extract embedded textures from GLB
+            if self.model_path.lower().endswith(('.glb', '.gltf')):
+                try:
+                    import json
+
+                    # For GLTF, try to load the JSON directly to find embedded images
+                    if self.model_path.lower().endswith('.gltf'):
+                        with open(self.model_path, 'r') as f:
+                            gltf_data = json.load(f)
+                            if 'images' in gltf_data:
+                                gltf_dir = os.path.dirname(self.model_path)
+                                for i, img_info in enumerate(gltf_data['images']):
+                                    if 'uri' in img_info and not img_info['uri'].startswith('data:'):
+                                        # External image file
+                                        src_path = os.path.join(gltf_dir, img_info['uri'])
+                                        if os.path.exists(src_path):
+                                            import shutil
+                                            dst_name = f"{base_name}_texture_{i}{os.path.splitext(img_info['uri'])[1]}"
+                                            dst_path = os.path.join(output_dir, dst_name)
+                                            shutil.copy2(src_path, dst_path)
+                                            extracted_count += 1
+                                            print(f"Copied texture: {dst_name}")
+                except Exception as e:
+                    print(f"Could not extract GLTF textures: {e}")
+
+            if extracted_count > 0:
+                print(f"Extracted {extracted_count} texture(s) to: {output_dir}")
+                QMessageBox.information(
+                    parent_window,
+                    "Texture Extraction Complete",
+                    f"Extracted {extracted_count} texture(s) to:\n{output_dir}"
+                )
+            else:
+                print("No textures found in model")
+                QMessageBox.information(
+                    parent_window,
+                    "No Textures Found",
+                    "No embedded textures were found in this model.\n\n"
+                    "The model may use vertex colors or procedural materials instead."
+                )
+
+        except ImportError as e:
+            print(f"Missing dependency for texture extraction: {e}")
+            QMessageBox.warning(
+                parent_window,
+                "Missing Dependency",
+                f"Texture extraction requires PIL/Pillow.\n\n"
+                f"Install with: pip install Pillow\n\nError: {e}"
+            )
+        except Exception as e:
+            print(f"Error extracting textures: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                parent_window,
+                "Extraction Error",
+                f"Failed to extract textures:\n\n{str(e)}"
+            )
 
 
 def enhance_ui(parent_widget):

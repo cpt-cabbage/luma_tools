@@ -464,9 +464,15 @@ def move_output_files(comfyui_output_dir: str, target_dir: str, filename_prefix:
         ext = os.path.splitext(original_filename)[1]
 
         # Create new filename with our prefix
-        # Keep original name parts after the node's prefix for identification
-        # Format: {our_prefix}_{original_filename}
-        new_filename = f"{filename_prefix}_{original_filename}"
+        # But skip adding prefix if file already starts with it (avoid double prefix)
+        if original_filename.startswith(filename_prefix):
+            # File already has our prefix (from workflow node settings)
+            new_filename = original_filename
+            print(f"[move_output_files] File already has prefix, keeping: {original_filename}")
+        else:
+            # Add our prefix for identification
+            # Format: {our_prefix}_{original_filename}
+            new_filename = f"{filename_prefix}_{original_filename}"
         dest_path = os.path.join(target_dir, new_filename)
 
         # Handle duplicate filenames by adding a counter

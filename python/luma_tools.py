@@ -233,7 +233,6 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Create tab widget with expanding size policy
         self.tab_widget = QtWidgets.QTabWidget()
-        self.tab_widget.setMovable(True)
         self.tab_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding
@@ -242,6 +241,9 @@ class LumaShotTools(QtWidgets.QWidget):
         # Use custom expanding tab bar
         expanding_tab_bar = ExpandingTabBar(self.tab_widget)
         self.tab_widget.setTabBar(expanding_tab_bar)
+
+        # Enable tab reordering (must be after setTabBar, as it replaces the tab bar)
+        self.tab_widget.setMovable(True)
 
         layout.addWidget(self.tab_widget, 1)  # stretch factor 1 to expand
 
