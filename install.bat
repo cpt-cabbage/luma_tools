@@ -22,21 +22,42 @@ REM Get current version from version.json using PowerShell
 for /f "usebackq delims=" %%v in (`powershell -Command "(Get-Content '%SOURCE%\version.json' | ConvertFrom-Json).version"`) do set CURRENT_VERSION=%%v
 echo Current version: %CURRENT_VERSION%
 
-REM Increment version by 0.1 using PowerShell
-for /f "usebackq delims=" %%v in (`powershell -Command "[math]::Round([decimal]'%CURRENT_VERSION%' + 0.1, 1)"`) do set NEW_VERSION=%%v
-echo New version: %NEW_VERSION%
+REM Prompt user for update type
+echo.
+set /p BIG_UPDATE="Big Update? (y/n): "
+if /i "%BIG_UPDATE%"=="y" (
+    set INCREMENT=0.1
+    set DECIMALS=1
+) else (
+    set INCREMENT=0.01
+    set DECIMALS=2
+)
 
-REM Get the last git commit message
-cd /d "%SOURCE%"
-for /f "usebackq delims=" %%m in (`git log -1 --pretty^=%%s`) do set COMMIT_MSG=%%m
-echo Last commit: %COMMIT_MSG%
+REM Increment version using PowerShell
+for /f "usebackq delims=" %%v in (`powershell -Command "[math]::Round([decimal]'%CURRENT_VERSION%' + %INCREMENT%, %DECIMALS%)"`) do set NEW_VERSION=%%v
+echo New version: %NEW_VERSION%
 
 REM Update version.json with new version
 powershell -Command "$json = Get-Content '%SOURCE%\version.json' | ConvertFrom-Json; $json.version = '%NEW_VERSION%'; $json | ConvertTo-Json | Set-Content '%SOURCE%\version.json'"
 
-REM Prepend new version entry to changelog.md
-powershell -Command "$changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = \"`n`n## Version %NEW_VERSION%`n- %COMMIT_MSG%\"; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+REM Get the last git commit message
+cd /d "%SOURCE%"
+for /f "usebackq delims=" %%m in (`git log -1 --pretty^=%%s`) do set COMMIT_MSG=%%m
+echo.
+echo Last git commit: %COMMIT_MSG%
 
+REM Prompt user to update changelog
+echo.
+set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
+if /i "%UPDATE_CHANGELOG%"=="y" (
+    REM Prepend new version entry to changelog.md
+    powershell -Command "$changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = \"`n`n## Version %NEW_VERSION%`n- %COMMIT_MSG%\"; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    echo Changelog updated with: %COMMIT_MSG%
+) else (
+    echo Changelog not updated.
+)
+
+echo.
 echo Version updated to %NEW_VERSION%
 echo.
 

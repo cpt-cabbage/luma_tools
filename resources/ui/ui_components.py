@@ -2408,11 +2408,11 @@ class EmbeddedImageViewer(QWidget):
 
             # Button label shows what clicking will switch TO (opposite of current state)
             if self._3d_textured_mode:
-                # Currently in wireframe mode, button will switch to textured
-                self.texture_toggle_btn.setText("📷 Textured")
-            else:
                 # Currently in textured mode, button will switch to wireframe
                 self.texture_toggle_btn.setText("🔲 Wireframe")
+            else:
+                # Currently in wireframe mode, button will switch to textured
+                self.texture_toggle_btn.setText("📷 Textured")
     
     def _show_textured_render(self, model_path):
         """Show a static textured render of the 3D model."""
