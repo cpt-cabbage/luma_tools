@@ -1,8 +1,8 @@
 """
-Standalone GLB thumbnail renderer.
+Standalone GLB thumbnail renderer using PIL/Pillow for rendering.
 
 This script runs as a separate process to avoid OpenGL context conflicts with Qt.
-It renders a GLB/GLTF file to a PNG thumbnail using trimesh and pyrender.
+It renders a GLB/GLTF file to a PNG thumbnail by creating a simple orthographic projection.
 
 Usage:
     python glb_thumbnail_renderer.py <input_glb_path> <output_png_path> [size]
@@ -10,11 +10,6 @@ Usage:
 
 import sys
 import os
-import math
-
-# Set environment before importing pyrender
-os.environ['PYOPENGL_PLATFORM'] = 'pyglet'
-
 
 def render_thumbnail(glb_path: str, output_path: str, size: int = 150) -> bool:
     """
@@ -23,116 +18,96 @@ def render_thumbnail(glb_path: str, output_path: str, size: int = 150) -> bool:
     Args:
         glb_path: Path to the GLB/GLTF file
         output_path: Path to save the PNG thumbnail
-        size: Size of the square thumbnail
+        size: Size of the square thumbnail (in pixels)
 
     Returns:
         True if successful, False otherwise
     """
     try:
-        import numpy as np
         import trimesh
-        import pyrender
-        from PIL import Image
-
+        import numpy as np
+        from PIL import Image, ImageDraw
+        
         # Load the model
         scene_or_mesh = trimesh.load(glb_path)
-
-        # Create pyrender scene
-        pr_scene = pyrender.Scene(
-            bg_color=[0.16, 0.18, 0.22, 1.0],  # Dark background matching UI
-            ambient_light=[0.3, 0.3, 0.3]
-        )
-
-        # Add meshes to scene
-        if isinstance(scene_or_mesh, trimesh.Scene):
-            for name, geometry in scene_or_mesh.geometry.items():
-                if isinstance(geometry, trimesh.Trimesh):
-                    mesh = pyrender.Mesh.from_trimesh(geometry)
-                    if mesh:
-                        try:
-                            transform = scene_or_mesh.graph.get(name)[0]
-                        except:
-                            transform = np.eye(4)
-                        pr_scene.add(mesh, pose=transform)
-        elif isinstance(scene_or_mesh, trimesh.Trimesh):
-            mesh = pyrender.Mesh.from_trimesh(scene_or_mesh)
-            if mesh:
-                pr_scene.add(mesh)
+        
+        # Get the scene (convert single mesh to scene if needed)
+        if isinstance(scene_or_mesh, trimesh.Trimesh):
+            scene = trimesh.Scene(scene_or_mesh)
         else:
-            print(f"Unsupported mesh type: {type(scene_or_mesh)}", file=sys.stderr)
-            return False
-
-        # Calculate bounds
-        if isinstance(scene_or_mesh, trimesh.Scene):
-            bounds = scene_or_mesh.bounds
-        else:
-            bounds = scene_or_mesh.bounds
-
+            scene = scene_or_mesh
+        
+        # Use simple wireframe/point cloud rendering (no OpenGL/windowing required)
+        print("Using headless point cloud rendering", file=sys.stderr)
+        
+        # Get bounds for camera positioning
+        bounds = scene.bounds
         if bounds is None:
             print("Could not determine bounds", file=sys.stderr)
             return False
-
+        
         center = (bounds[0] + bounds[1]) / 2
-        diagonal = np.linalg.norm(bounds[1] - bounds[0])
-
-        # Camera setup
-        camera = pyrender.PerspectiveCamera(yfov=math.radians(45))
-        distance = diagonal * 2.0
-
-        # Position camera at 45 degree angle
-        azimuth = math.radians(45)
-        elevation = math.radians(25)
-
-        cam_x = center[0] + distance * math.cos(elevation) * math.sin(azimuth)
-        cam_y = center[1] + distance * math.sin(elevation)
-        cam_z = center[2] + distance * math.cos(elevation) * math.cos(azimuth)
-
-        # Look-at matrix
-        eye = np.array([cam_x, cam_y, cam_z])
-        target = center
-        up = np.array([0, 1, 0])
-
-        forward = target - eye
-        forward = forward / np.linalg.norm(forward)
-        right = np.cross(forward, up)
-        right = right / np.linalg.norm(right)
-        new_up = np.cross(right, forward)
-
-        camera_pose = np.eye(4)
-        camera_pose[:3, 0] = right
-        camera_pose[:3, 1] = new_up
-        camera_pose[:3, 2] = -forward
-        camera_pose[:3, 3] = eye
-
-        pr_scene.add(camera, pose=camera_pose)
-
-        # Add lights
-        # Key light
-        key_light = pyrender.DirectionalLight(color=[1.0, 0.95, 0.9], intensity=3.0)
-        key_pose = np.eye(4)
-        key_pose[:3, 3] = [distance, distance * 0.8, distance * 0.5]
-        pr_scene.add(key_light, pose=key_pose)
-
-        # Fill light
-        fill_light = pyrender.DirectionalLight(color=[0.8, 0.85, 1.0], intensity=1.5)
-        fill_pose = np.eye(4)
-        fill_pose[:3, 3] = [-distance * 0.5, distance * 0.3, distance]
-        pr_scene.add(fill_light, pose=fill_pose)
-
-        # Render
-        renderer = pyrender.OffscreenRenderer(size, size)
-        color, _ = renderer.render(pr_scene)
-        renderer.delete()
-
-        # Save as PNG
-        image = Image.fromarray(color)
+        extents = bounds[1] - bounds[0]
+        max_extent = max(extents)
+        
+        # Create blank image with dark background
+        img = Image.new('RGB', (size, size), color=(41, 46, 56))
+        draw = ImageDraw.Draw(img)
+        
+        # Simple orthographic projection from 3/4 view
+        # Rotate the scene for a nice viewing angle
+        rotation = trimesh.transformations.euler_matrix(
+            np.radians(25),  # pitch
+            np.radians(45),  # yaw  
+            0  # roll
+        )
+        
+        # Get all vertices from the scene
+        vertices = []
+        for geometry in scene.geometry.values():
+            if hasattr(geometry, 'vertices'):
+                # Apply rotation
+                verts = geometry.vertices.copy()
+                verts_homogeneous = np.hstack([verts, np.ones((len(verts), 1))])
+                rotated = verts_homogeneous @ rotation.T
+                vertices.append(rotated[:, :3])
+        
+        if not vertices:
+            print("No vertices found in model", file=sys.stderr)
+            return False
+        
+        all_vertices = np.vstack(vertices)
+        
+        # Center the vertices
+        all_vertices -= center
+        
+        # Project to 2D (orthographic - just drop Z)
+        points_2d = all_vertices[:, :2]
+        
+        # Scale to fit image with padding
+        padding = 0.1
+        scale = (size * (1 - 2 * padding)) / max_extent
+        points_2d *= scale
+        
+        # Center in image
+        points_2d += size / 2
+        
+        # Draw points as small circles to create a point cloud effect
+        point_color = (180, 190, 200)  # Light gray
+        for point in points_2d[::max(1, len(points_2d) // 1000)]:  # Sample points if too many
+            x, y = int(point[0]), int(point[1])
+            if 0 <= x < size and 0 <= y < size:
+                draw.ellipse([x-1, y-1, x+1, y+1], fill=point_color)
+        
+        # Save the image
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        image.save(output_path, 'PNG')
-
+        img.save(output_path, 'PNG')
+        
+        print(f"Successfully rendered fallback thumbnail", file=sys.stderr)
         return True
-
+        
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"Rendering failed: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
         return False

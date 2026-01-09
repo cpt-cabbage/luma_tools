@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 REM Install script - copies files to production location
 REM Source: L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools
 REM Target: L:\tools\_studio_tools\luma_tools
@@ -9,6 +10,34 @@ set DEV_PATH=L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tool
 set PROD_PATH=L:/tools/_studio_tools/luma_tools
 
 echo Installing Luma Tools to %TARGET%...
+echo.
+
+REM ============================================================================
+REM VERSION INCREMENT AND CHANGELOG UPDATE
+REM ============================================================================
+
+echo Updating version and changelog...
+
+REM Get current version from version.json using PowerShell
+for /f "usebackq delims=" %%v in (`powershell -Command "(Get-Content '%SOURCE%\version.json' | ConvertFrom-Json).version"`) do set CURRENT_VERSION=%%v
+echo Current version: %CURRENT_VERSION%
+
+REM Increment version by 0.1 using PowerShell
+for /f "usebackq delims=" %%v in (`powershell -Command "[math]::Round([decimal]'%CURRENT_VERSION%' + 0.1, 1)"`) do set NEW_VERSION=%%v
+echo New version: %NEW_VERSION%
+
+REM Get the last git commit message
+cd /d "%SOURCE%"
+for /f "usebackq delims=" %%m in (`git log -1 --pretty^=%%s`) do set COMMIT_MSG=%%m
+echo Last commit: %COMMIT_MSG%
+
+REM Update version.json with new version
+powershell -Command "$json = Get-Content '%SOURCE%\version.json' | ConvertFrom-Json; $json.version = '%NEW_VERSION%'; $json | ConvertTo-Json | Set-Content '%SOURCE%\version.json'"
+
+REM Prepend new version entry to changelog.md
+powershell -Command "$changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = \"`n`n## Version %NEW_VERSION%`n- %COMMIT_MSG%\"; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+
+echo Version updated to %NEW_VERSION%
 echo.
 
 REM Copy launcher batch file
@@ -87,6 +116,14 @@ if errorlevel 1 (
     echo WARNING: Failed to update paths in global_settings.json
 )
 
+REM Copy version and changelog files
+echo Copying version and changelog files...
+xcopy "%SOURCE%\version.json" "%TARGET%\" /Y /Q
+xcopy "%SOURCE%\changelog.md" "%TARGET%\" /Y /Q
+if errorlevel 1 (
+    echo WARNING: Failed to copy version/changelog files
+)
+
 echo.
-echo Installation complete!
+echo Installation complete! Version %NEW_VERSION% deployed.
 pause

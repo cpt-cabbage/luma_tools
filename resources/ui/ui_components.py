@@ -10,7 +10,7 @@ from PySide2.QtCore import (
 )
 from PySide2.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QProgressBar, QGraphicsOpacityEffect,
-    QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton,
+    QApplication, QFrame, QHBoxLayout, QGroupBox, QPushButton, QCheckBox,
     QListWidget, QListWidgetItem, QFileDialog, QSpinBox, QLineEdit, QTextEdit,
     QMenu, QSizePolicy, QDialog, QDialogButtonBox, QPlainTextEdit
 )
@@ -1989,7 +1989,7 @@ class EmbeddedImageViewer(QWidget):
         self.left_btn.clicked.connect(self._prev_image)
         image_layout.addWidget(self.left_btn)
 
-        # Image display
+        # Media display (images, 3D models, videos)
         self.image_stack = QtWidgets.QStackedWidget()
         image_layout.addWidget(self.image_stack, stretch=1)
 
@@ -2000,7 +2000,32 @@ class EmbeddedImageViewer(QWidget):
         self.image_view.double_clicked.connect(self.close)
         self.image_stack.addWidget(self.image_view)
 
-        # 2. Message Label (for errors/EXR)
+        # 2. 3D Model Viewer (GLB/GLTF) - Lazy initialization to avoid startup lag
+        # The actual viewer widget will be created on first use
+        self._has_glb_viewer = None  # None = not yet checked, True/False after check
+        self.glb_viewer = None
+        self._use_pyvista_viewer = False
+        self._glb_viewer_initialized = False
+
+        # 3. Video Player
+        try:
+            from PySide2.QtMultimedia import QMediaPlayer, QMediaContent
+            from PySide2.QtMultimediaWidgets import QVideoWidget
+            from PySide2.QtCore import QUrl
+            
+            self.video_widget = QVideoWidget()
+            self.video_widget.setStyleSheet("background-color: #000000;")
+            self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+            self.media_player.setVideoOutput(self.video_widget)
+            self.image_stack.addWidget(self.video_widget)
+            self._has_video_player = True
+        except Exception as e:
+            print(f"Video player not available: {e}")
+            self._has_video_player = False
+            self.video_widget = None
+            self.media_player = None
+
+        # 4. Message Label (for errors/unsupported formats)
         self.message_label = QLabel()
         self.message_label.setAlignment(Qt.AlignCenter)
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
@@ -2042,6 +2067,58 @@ class EmbeddedImageViewer(QWidget):
         self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         info_layout.addWidget(self.filename_label)
 
+        # 3D Model texture toggle (hidden by default)
+        self.texture_toggle_btn = QPushButton("📷 Textured")
+        self.texture_toggle_btn.setFixedHeight(25)
+        self.texture_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4a9eff;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 0 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #5aa9ff;
+            }
+        """)
+        self.texture_toggle_btn.clicked.connect(self._toggle_3d_render_mode)
+        self.texture_toggle_btn.hide()  # Hidden by default, shown for 3D models
+        info_layout.addWidget(self.texture_toggle_btn)
+
+        # Keep camera checkbox for 3D models (hidden by default)
+        self.keep_camera_checkbox = QCheckBox("Keep Camera")
+        self.keep_camera_checkbox.setFixedHeight(25)
+        self.keep_camera_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #888888;
+                font-size: 11px;
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                background-color: #2a2a2a;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4a9eff;
+                border-color: #4a9eff;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #4a9eff;
+            }
+        """)
+        self.keep_camera_checkbox.setToolTip("Preserve camera position when navigating between 3D models")
+        self.keep_camera_checkbox.hide()  # Hidden by default, shown for 3D models
+        info_layout.addWidget(self.keep_camera_checkbox)
+
+        self._3d_textured_mode = False  # Track current mode
+        self._current_3d_path = None  # Track current 3D model path
+        self._saved_camera_state = None  # Store camera state for preservation
+
         info_layout.addStretch()
 
         # Help hint
@@ -2060,21 +2137,167 @@ class EmbeddedImageViewer(QWidget):
         """Handle resize."""
         super().resizeEvent(event)
 
+    def _init_glb_viewer_async(self, callback=None):
+        """
+        Initialize the GLB viewer widget asynchronously.
+
+        This defers the heavy import of PyVista/PyOpenGL to avoid lag on first click.
+        The callback is called with True if viewer is ready, False if not available.
+        """
+        if self._glb_viewer_initialized:
+            # Already initialized
+            if callback:
+                callback(self._has_glb_viewer)
+            return
+
+        # Show loading state with spinner
+        self.message_label.setText("Initializing 3D viewer...")
+        self.image_stack.setCurrentWidget(self.message_label)
+
+        # Add inline spinner if not already present
+        if not hasattr(self, '_init_spinner_shown'):
+            self._init_spinner_shown = True
+            # The message label will show the text, spinner would require more UI changes
+            # For now just ensure the message is visible
+
+        # Use a worker to do the heavy import in background
+        from ui_components import Worker
+        from PySide2.QtCore import QThreadPool
+
+        def init_viewer():
+            """Initialize viewer in background thread (import heavy modules)."""
+            # Try PyVista first (better PBR support)
+            try:
+                from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
+                if is_pyvista_available():
+                    return ('pyvista', PyVistaGLBViewerWidget)
+            except Exception as e:
+                print(f"PyVista GLB viewer not available: {e}")
+
+            # Fallback to OpenGL viewer
+            try:
+                from glb_viewer import GLBViewerWidget
+                return ('opengl', GLBViewerWidget)
+            except Exception as e:
+                print(f"OpenGL GLB viewer not available: {e}")
+
+            return (None, None)
+
+        def on_init_complete(result):
+            """Handle viewer initialization completion on main thread."""
+            viewer_type, widget_class = result
+            self._glb_viewer_initialized = True
+
+            if widget_class:
+                # Create the widget on the main thread
+                self.glb_viewer = widget_class()
+                self.image_stack.addWidget(self.glb_viewer)
+                self._has_glb_viewer = True
+                self._use_pyvista_viewer = (viewer_type == 'pyvista')
+                print(f"Using {viewer_type} GLB viewer")
+            else:
+                self._has_glb_viewer = False
+
+            if callback:
+                callback(self._has_glb_viewer)
+
+        def on_init_error(error, traceback):
+            """Handle initialization error."""
+            print(f"GLB viewer init error: {error}")
+            self._glb_viewer_initialized = True
+            self._has_glb_viewer = False
+            if callback:
+                callback(False)
+
+        worker = Worker(init_viewer)
+        worker.signals.result.connect(on_init_complete)
+        worker.signals.error.connect(on_init_error)
+        QThreadPool.globalInstance().start(worker)
+
     def _load_current_image(self):
-        """Load and display the current image."""
+        """Load and display the current media (image, 3D model, or video)."""
         if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
             return
 
-        image_path = self.image_paths[self.current_index]
+        media_path = self.image_paths[self.current_index]
 
         try:
-            ext = os.path.splitext(image_path)[1].lower()
+            ext = os.path.splitext(media_path)[1].lower()
 
-            if ext == '.exr':
+            # Stop any playing video from previous item
+            if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player:
+                self.media_player.stop()
+
+            # Handle 3D models (.glb, .gltf)
+            if ext in ('.glb', '.gltf'):
+                # Show texture toggle button and keep camera checkbox
+                self.texture_toggle_btn.show()
+                if hasattr(self, 'keep_camera_checkbox'):
+                    self.keep_camera_checkbox.show()
+                self._current_3d_path = media_path
+                self._3d_textured_mode = False  # Start in textured/surface mode
+                self.texture_toggle_btn.setText("🔲 Wireframe")  # Shows what clicking will do
+
+                # Check if viewer needs lazy initialization
+                if not self._glb_viewer_initialized:
+                    # First time loading a 3D model - initialize viewer async
+                    self.message_label.setText(f"Initializing 3D viewer...")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+                    # Store the path to load after initialization
+                    self._pending_3d_path = media_path
+
+                    def on_viewer_ready(available):
+                        if available and hasattr(self, '_pending_3d_path'):
+                            self._load_3d_model(self._pending_3d_path)
+                        elif not available:
+                            self.message_label.setText("3D Model Viewer Not Available\n\nInstall pyvista and pyvistaqt:\npip install pyvista pyvistaqt")
+                            self.image_stack.setCurrentWidget(self.message_label)
+
+                    self._init_glb_viewer_async(callback=on_viewer_ready)
+                elif self._has_glb_viewer and self.glb_viewer:
+                    # Viewer already initialized - load model directly
+                    self._load_3d_model(media_path)
+                else:
+                    self.message_label.setText("3D Model Viewer Not Available\n\nInstall pyvista and pyvistaqt:\npip install pyvista pyvistaqt")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+            # Handle videos (.mp4, .mov, .avi, .webm)
+            elif ext in ('.mp4', '.mov', '.avi', '.webm'):
+                # Hide 3D controls for videos
+                self.texture_toggle_btn.hide()
+                if hasattr(self, 'keep_camera_checkbox'):
+                    self.keep_camera_checkbox.hide()
+                self._current_3d_path = None
+                if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
+                    from PySide2.QtMultimedia import QMediaContent
+                    from PySide2.QtCore import QUrl
+                    
+                    # Load and play video
+                    media_content = QMediaContent(QUrl.fromLocalFile(media_path))
+                    self.media_player.setMedia(media_content)
+                    self.image_stack.setCurrentWidget(self.video_widget)
+                    self.media_player.play()
+                else:
+                    self.message_label.setText("Video Player Not Available\n\nPySide2 multimedia support required")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+            # Handle EXR (not supported)
+            elif ext == '.exr':
+                self.texture_toggle_btn.hide()
+                if hasattr(self, 'keep_camera_checkbox'):
+                    self.keep_camera_checkbox.hide()
+                self._current_3d_path = None
                 self.message_label.setText("EXR Preview Not Available")
                 self.image_stack.setCurrentWidget(self.message_label)
+
+            # Handle regular images (.png, .jpg, .jpeg, .webp, etc.)
             else:
-                pixmap = QPixmap(image_path)
+                self.texture_toggle_btn.hide()
+                if hasattr(self, 'keep_camera_checkbox'):
+                    self.keep_camera_checkbox.hide()
+                self._current_3d_path = None
+                pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
                     self.image_view.setPixmap(pixmap)
                     self.image_stack.setCurrentWidget(self.image_view)
@@ -2087,6 +2310,55 @@ class EmbeddedImageViewer(QWidget):
             self.image_stack.setCurrentWidget(self.message_label)
 
         self._update_info()
+
+    def _load_3d_model(self, media_path):
+        """Load a 3D model into the viewer (assumes viewer is initialized)."""
+        from PySide2.QtCore import QThreadPool
+
+        # Save camera state if "Keep Camera" is checked and viewer exists
+        if (hasattr(self, 'keep_camera_checkbox') and
+            self.keep_camera_checkbox.isChecked() and
+            self.glb_viewer and
+            hasattr(self.glb_viewer, 'get_camera_state')):
+            self._saved_camera_state = self.glb_viewer.get_camera_state()
+        else:
+            self._saved_camera_state = None
+
+        # Show loading message
+        self.message_label.setText(f"Loading 3D model...\n{os.path.basename(media_path)}")
+        self.image_stack.setCurrentWidget(self.message_label)
+
+        # Use PyVista's direct import for best PBR support
+        if self._use_pyvista_viewer:
+            from glb_viewer_pyvista import PyVistaModelLoaderWorker
+            loader = PyVistaModelLoaderWorker(media_path)
+            loader.signals.finished.connect(self._on_model_loaded)
+            loader.signals.error.connect(self._on_model_error)
+            QThreadPool.globalInstance().start(loader)
+        else:
+            # Fallback to OpenGL loader
+            from glb_viewer import ModelLoaderWorker
+            loader = ModelLoaderWorker(media_path)
+            loader.signals.finished.connect(self._on_model_loaded)
+            loader.signals.error.connect(self._on_model_error)
+            QThreadPool.globalInstance().start(loader)
+
+    def _on_model_loaded(self, model_data):
+        """Handle successful 3D model loading."""
+        if self.glb_viewer:
+            self.glb_viewer.set_model_data(model_data)
+
+            # Restore camera state if saved
+            if self._saved_camera_state and hasattr(self.glb_viewer, 'set_camera_state'):
+                self.glb_viewer.set_camera_state(self._saved_camera_state)
+
+            self.image_stack.setCurrentWidget(self.glb_viewer)
+            self.glb_viewer.setFocus()  # Allow keyboard controls
+
+    def _on_model_error(self, error_msg):
+        """Handle 3D model loading error."""
+        self.message_label.setText(f"Error Loading 3D Model\n\n{error_msg}")
+        self.image_stack.setCurrentWidget(self.message_label)
 
     def _update_info(self):
         """Update info labels and button states."""
@@ -2123,6 +2395,78 @@ class EmbeddedImageViewer(QWidget):
         """Handle fullscreen button."""
         if self.image_paths:
             self.view_fullscreen.emit(self.image_paths[self.current_index], self.current_index)
+
+    def _toggle_3d_render_mode(self):
+        """Toggle between textured and wireframe mode for 3D models."""
+        if not self._current_3d_path:
+            return
+
+        # Toggle wireframe mode on the viewer directly
+        if hasattr(self, '_has_glb_viewer') and self._has_glb_viewer and self.glb_viewer:
+            self.glb_viewer.toggle_wireframe()
+            self._3d_textured_mode = not self._3d_textured_mode
+
+            # Button label shows what clicking will switch TO (opposite of current state)
+            if self._3d_textured_mode:
+                # Currently in wireframe mode, button will switch to textured
+                self.texture_toggle_btn.setText("📷 Textured")
+            else:
+                # Currently in textured mode, button will switch to wireframe
+                self.texture_toggle_btn.setText("🔲 Wireframe")
+    
+    def _show_textured_render(self, model_path):
+        """Show a static textured render of the 3D model."""
+        try:
+            # Use the thumbnail service to generate a high-res textured render
+            from glb_thumbnail_service import get_glb_thumbnail_service
+            import trimesh
+            from PIL import Image
+            import numpy as np
+            from PySide2.QtGui import QPixmap, QImage
+            
+            # Load the model with trimesh
+            scene = trimesh.load(model_path)
+            
+            # Try to render with textures using trimesh's scene export
+            # This creates a larger, higher quality render than thumbnails
+            size = min(800, self.width() - 100, self.height() - 100)
+            
+            # Create a simple textured render
+            # For now, show a message that textured mode uses the thumbnail
+            service = get_glb_thumbnail_service()
+            pixmap = service.get_cached_thumbnail(model_path)
+            
+            if pixmap and not pixmap.isNull():
+                # Scale up the thumbnail for display
+                scaled = pixmap.scaled(
+                    size, size,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.image_view.setPixmap(scaled)
+                self.image_stack.setCurrentWidget(self.image_view)
+            else:
+                self.message_label.setText("Textured render not available\nGenerating thumbnail...")
+                self.image_stack.setCurrentWidget(self.message_label)
+        except Exception as e:
+            print(f"Error showing textured render: {e}")
+            self.message_label.setText(f"Error loading textured view:\n{e}")
+            self.image_stack.setCurrentWidget(self.message_label)
+    
+    def _show_wireframe_view(self, model_path):
+        """Show the interactive wireframe OpenGL view."""
+        # Reload the model in the GLB viewer
+        if hasattr(self, '_has_glb_viewer') and self._has_glb_viewer and self.glb_viewer:
+            from glb_viewer import ModelLoaderWorker
+            from PySide2.QtCore import QThreadPool
+            
+            self.message_label.setText(f"Loading 3D model...\n{os.path.basename(model_path)}")
+            self.image_stack.setCurrentWidget(self.message_label)
+            
+            loader = ModelLoaderWorker(model_path)
+            loader.signals.finished.connect(self._on_model_loaded)
+            loader.signals.error.connect(self._on_model_error)
+            QThreadPool.globalInstance().start(loader)
 
     def _copy_prompt(self):
         """Copy prompt for current image to clipboard."""
@@ -3379,7 +3723,7 @@ class GLBThumbnailWidget(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse press to open 3D viewer."""
         if event.button() == Qt.LeftButton:
-            self._open_viewer()
+            self.clicked.emit(self.model_path)
         super().mousePressEvent(event)
 
     def _get_metadata(self):
@@ -3520,17 +3864,28 @@ class GLBThumbnailWidget(QWidget):
 
     def _open_viewer(self):
         """Open the 3D model viewer dialog."""
+        from PySide2.QtWidgets import QApplication
+
+        # Find the main window safely
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        # Try PyVista viewer first (better PBR support)
+        try:
+            from glb_viewer_pyvista import PyVistaGLBViewerDialog, is_pyvista_available
+            if is_pyvista_available():
+                dialog = PyVistaGLBViewerDialog(self.model_path, parent_window)
+                dialog.show()
+                return
+        except ImportError as e:
+            print(f"PyVista GLB viewer not available: {e}")
+
+        # Fallback to OpenGL viewer
         try:
             from glb_viewer import GLBViewerDialog
-            from PySide2.QtWidgets import QApplication
-
-            # Find the main window safely
-            parent_window = None
-            for widget in QApplication.topLevelWidgets():
-                if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                    parent_window = widget
-                    break
-
             dialog = GLBViewerDialog(self.model_path, parent_window)
             dialog.exec_()
         except ImportError as e:

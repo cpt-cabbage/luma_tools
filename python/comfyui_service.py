@@ -891,6 +891,7 @@ def submit_comfyui_to_deadline(
     pool: Optional[str] = None,
     group: Optional[str] = None,
     use_server_mode: bool = False,
+    full_restart: bool = False,
 ) -> Optional[str]:
     """
     Submit ComfyUI job to Deadline using CommandLine plugin.
@@ -911,6 +912,8 @@ def submit_comfyui_to_deadline(
         group: Deadline group (default from config)
         use_server_mode: If True, keep ComfyUI server running between jobs.
                          Models stay loaded in GPU memory, server restarts only if workflow changes.
+        full_restart: If True, completely restart the ComfyUI server before processing this job.
+                     Overrides server mode persistence for this specific job.
 
     Returns:
         Deadline job ID or None if failed
@@ -986,6 +989,10 @@ def submit_comfyui_to_deadline(
     # Add persistent flag if server mode is enabled
     if use_server_mode:
         runner_args += ' --persistent'
+
+    # Add full restart flag if enabled
+    if full_restart:
+        runner_args += ' --full-restart'
 
     # Add performance flags from settings
     if get_comfyui_fast_mode():
@@ -1112,6 +1119,7 @@ def submit_comfyui_job(
     network_output_dir: Optional[str] = None,
     use_server_mode: bool = True,  # Deprecated, always True - kept for compatibility
     workflow_preset: Optional[str] = None,
+    full_restart: bool = False,
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch image processing.
@@ -1139,6 +1147,8 @@ def submit_comfyui_job(
                            to output_dir.
         use_server_mode: Deprecated - server mode is always enabled.
         workflow_preset: Full preset name (e.g. "folder/preset_name") for metadata.
+        full_restart: If True, completely restart the ComfyUI server before processing.
+                     Useful for certain models that require a clean server state.
 
     Returns:
         Tuple of (job_ids, error_message)
@@ -1309,6 +1319,7 @@ def submit_comfyui_job(
             render_name=current_job_name,
             generation_count=generation_count,
             use_server_mode=True,
+            full_restart=full_restart,
         )
 
         if job_id:

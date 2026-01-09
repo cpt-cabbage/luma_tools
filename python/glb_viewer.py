@@ -579,6 +579,35 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
             """Reset camera to default view."""
             self._reset_camera()
 
+        def get_camera_state(self) -> Optional[Dict]:
+            """Get the current camera state for preservation."""
+            return {
+                'rotation_x': self._rotation_x,
+                'rotation_y': self._rotation_y,
+                'pan_x': self._pan_x,
+                'pan_y': self._pan_y,
+                'zoom': self._zoom,
+                'camera_distance': self._camera_distance,
+            }
+
+        def set_camera_state(self, state: Dict):
+            """Restore a previously saved camera state."""
+            if not state:
+                return
+            if 'rotation_x' in state:
+                self._rotation_x = state['rotation_x']
+            if 'rotation_y' in state:
+                self._rotation_y = state['rotation_y']
+            if 'pan_x' in state:
+                self._pan_x = state['pan_x']
+            if 'pan_y' in state:
+                self._pan_y = state['pan_y']
+            if 'zoom' in state:
+                self._zoom = state['zoom']
+            if 'camera_distance' in state:
+                self._camera_distance = state['camera_distance']
+            self.update()
+
 else:
     # Fallback widget when OpenGL is not available
     class GLBViewerWidget(QWidget):
@@ -605,6 +634,12 @@ else:
             pass
 
         def reset_view(self):
+            pass
+
+        def get_camera_state(self) -> Optional[Dict]:
+            return None
+
+        def set_camera_state(self, state: Dict):
             pass
 
 

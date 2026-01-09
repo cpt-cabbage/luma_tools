@@ -473,6 +473,7 @@ class ComfyUIGalleryTab(BaseTab):
                         container,
                         output_dir=self._current_path
                     )
+                    thumbnail.clicked.connect(self._on_thumbnail_clicked)
                     thumbnail.deleted.connect(self._on_item_deleted)
                 else:
                     thumbnail = GalleryThumbnailWidget(
@@ -604,43 +605,98 @@ class ComfyUIGalleryTab(BaseTab):
             self._show_embedded_viewer(image_paths, start_index)
 
     def _get_image_paths(self):
-        """Get list of image paths from current gallery."""
-        image_paths = []
+        """Get list of all media paths (images, 3D models, videos) from current gallery."""
+        media_paths = []
         for i in range(self._flow_layout.count()):
             item = self._flow_layout.itemAt(i)
             if item and item.widget():
                 widget = item.widget()
-                # Only include image widgets, not 3D models
+                # Include all media: images and 3D models
                 if hasattr(widget, 'image_path'):
-                    image_paths.append(widget.image_path)
-        return image_paths
+                    media_paths.append(widget.image_path)
+                elif hasattr(widget, 'model_path'):
+                    media_paths.append(widget.model_path)
+        return media_paths
 
     def _show_embedded_viewer(self, image_paths, start_index):
         """Show the embedded image viewer, hiding the gallery grid."""
-        from ui_components import EmbeddedImageViewer
-
         # Hide gallery elements
         self.ui.galleryScrollArea.hide()
 
         # Create embedded viewer if not exists
         if not hasattr(self, '_embedded_viewer') or self._embedded_viewer is None:
-            self._embedded_viewer = EmbeddedImageViewer(
-                image_paths,
-                start_index=start_index,
-                output_dir=self._current_path,
-                parent=self.ui
-            )
-            self._embedded_viewer.closed.connect(self._close_embedded_viewer)
-            self._embedded_viewer.view_fullscreen.connect(self._on_view_fullscreen)
-            self._embedded_viewer.copy_settings_requested.connect(self._on_copy_settings_requested)
+            # Show loading indicator for first-time viewer creation
+            self._show_viewer_loading()
 
-            # Insert viewer into the main layout (after header, before footer)
-            self.ui.galleryMainLayout.insertWidget(1, self._embedded_viewer)
+            # Create viewer asynchronously to avoid UI freeze
+            QTimer.singleShot(10, lambda: self._create_embedded_viewer_async(image_paths, start_index))
         else:
-            # Update existing viewer
+            # Update existing viewer (fast path - no lag)
             self._embedded_viewer.image_paths = image_paths
             self._embedded_viewer.current_index = start_index
             self._embedded_viewer._load_current_image()
+            self._embedded_viewer.show()
+            self._embedded_viewer.setFocus()
+
+    def _show_viewer_loading(self):
+        """Show a loading indicator with spinner while the viewer is being created."""
+        from PySide2.QtWidgets import QLabel, QWidget, QVBoxLayout
+        from PySide2.QtCore import Qt
+        from ui_components import SpinnerWidget
+
+        # Create a temporary loading widget if not exists
+        if not hasattr(self, '_viewer_loading_widget'):
+            self._viewer_loading_widget = QWidget(self.ui)
+            self._viewer_loading_widget.setStyleSheet("background-color: #1a1a1a;")
+            layout = QVBoxLayout(self._viewer_loading_widget)
+            layout.setAlignment(Qt.AlignCenter)
+
+            # Add spinner
+            spinner = SpinnerWidget()
+            spinner.setFixedSize(40, 40)
+            layout.addWidget(spinner, alignment=Qt.AlignCenter)
+
+            # Add label
+            loading_label = QLabel("Loading viewer...")
+            loading_label.setStyleSheet("color: #888888; font-size: 14px;")
+            loading_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(loading_label)
+
+            # Store spinner reference for starting animation
+            self._viewer_loading_spinner = spinner
+
+            # Insert into main layout
+            self.ui.galleryMainLayout.insertWidget(1, self._viewer_loading_widget)
+
+        # Start spinner animation
+        if hasattr(self, '_viewer_loading_spinner'):
+            self._viewer_loading_spinner.start()
+
+        self._viewer_loading_widget.show()
+
+    def _create_embedded_viewer_async(self, image_paths, start_index):
+        """Create the embedded viewer (called after a short delay to let UI update)."""
+        from ui_components import EmbeddedImageViewer
+
+        # Stop spinner and hide loading widget
+        if hasattr(self, '_viewer_loading_spinner'):
+            self._viewer_loading_spinner.stop()
+        if hasattr(self, '_viewer_loading_widget'):
+            self._viewer_loading_widget.hide()
+
+        # Create the viewer
+        self._embedded_viewer = EmbeddedImageViewer(
+            image_paths,
+            start_index=start_index,
+            output_dir=self._current_path,
+            parent=self.ui
+        )
+        self._embedded_viewer.closed.connect(self._close_embedded_viewer)
+        self._embedded_viewer.view_fullscreen.connect(self._on_view_fullscreen)
+        self._embedded_viewer.copy_settings_requested.connect(self._on_copy_settings_requested)
+
+        # Insert viewer into the main layout (after header, before footer)
+        self.ui.galleryMainLayout.insertWidget(1, self._embedded_viewer)
 
         self._embedded_viewer.show()
         self._embedded_viewer.setFocus()

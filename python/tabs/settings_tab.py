@@ -5,11 +5,43 @@ Handles user settings (local) and global settings management.
 """
 
 import os
+import json
 from PySide2 import QtWidgets, QtCore
 from PySide2.QtCore import Qt
-from PySide2.QtWidgets import QMessageBox
+from PySide2.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 
 from .base_tab import BaseTab
+
+
+def get_version():
+    """Get the current version from version.json."""
+    config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root_dir = os.path.dirname(config_dir)
+    version_file = os.path.join(root_dir, "version.json")
+
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r') as f:
+                data = json.load(f)
+                return data.get("version", "0.1")
+        except Exception:
+            pass
+    return "0.1"
+
+
+def get_changelog():
+    """Get the changelog content from changelog.md."""
+    config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root_dir = os.path.dirname(config_dir)
+    changelog_file = os.path.join(root_dir, "changelog.md")
+
+    if os.path.exists(changelog_file):
+        try:
+            with open(changelog_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception:
+            pass
+    return "No changelog available."
 
 
 class SettingsTab(BaseTab):
@@ -29,6 +61,10 @@ class SettingsTab(BaseTab):
 
     def connect_signals(self):
         """Connect settings tab signals."""
+        # Version history button
+        if hasattr(self.ui, 'showVersionHistoryButton'):
+            self.ui.showVersionHistoryButton.clicked.connect(self._on_show_version_history)
+
         # User settings
         self.ui.AddPassButton.clicked.connect(self._on_add_pass_clicked)
         self.ui.RemovePassButton.clicked.connect(self._on_remove_pass_clicked)
@@ -51,11 +87,39 @@ class SettingsTab(BaseTab):
 
     def initialize(self):
         """Initialize settings tab."""
+        self._load_version_ui()
         self._load_default_passes_ui()
         self._load_user_settings_ui()
         self._load_global_settings_ui()
         self._load_admin_users_ui()
         self._load_restricted_tabs_ui()
+
+    def _load_version_ui(self):
+        """Load version information into the UI."""
+        version = get_version()
+        if hasattr(self.ui, 'versionValueLabel'):
+            self.ui.versionValueLabel.setText(version)
+
+    def _on_show_version_history(self):
+        """Show version history dialog."""
+        changelog = get_changelog()
+
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Luma Tools - Version History")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setMarkdown(changelog)
+        layout.addWidget(text_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+
+        dialog.exec_()
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""

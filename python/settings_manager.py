@@ -399,7 +399,7 @@ def get_comfyui_workflow_presets():
     return settings.get("comfyui_workflow_presets", {})
 
 
-def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note=""):
+def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note="", full_restart=False):
     """
     Save a ComfyUI workflow preset to global settings.
 
@@ -409,6 +409,7 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
         description: Optional description for the preset
         iteratable: Whether this workflow supports iterate mode
         note: Optional user note for this preset
+        full_restart: Whether to completely restart ComfyUI server before processing
     """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
@@ -418,13 +419,14 @@ def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable
         "path": workflow_path,
         "description": description,
         "iteratable": iteratable,
-        "note": note
+        "note": note,
+        "full_restart": full_restart
     }
     save_global_settings(settings)
-    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable})")
+    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable}, full_restart={full_restart})")
 
 
-def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None):
+def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None, full_restart=None):
     """
     Update an existing ComfyUI workflow preset.
 
@@ -434,6 +436,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         description: New description (None to keep existing)
         iteratable: New iteratable flag (None to keep existing)
         note: New note (None to keep existing)
+        full_restart: New full_restart flag (None to keep existing)
 
     Returns:
         bool: True if updated, False if preset not found
@@ -447,7 +450,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
     preset = presets[name]
     # Handle legacy format
     if isinstance(preset, str):
-        preset = {"path": preset, "description": "", "iteratable": False, "note": ""}
+        preset = {"path": preset, "description": "", "iteratable": False, "note": "", "full_restart": False}
 
     if workflow_path is not None:
         preset["path"] = workflow_path
@@ -457,6 +460,8 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         preset["iteratable"] = iteratable
     if note is not None:
         preset["note"] = note
+    if full_restart is not None:
+        preset["full_restart"] = full_restart
 
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets
@@ -480,6 +485,24 @@ def is_workflow_preset_iteratable(name):
         preset = presets[name]
         if isinstance(preset, dict):
             return preset.get("iteratable", False)
+    return False
+
+
+def is_workflow_preset_full_restart(name):
+    """
+    Check if a workflow preset requires full ComfyUI server restart.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        bool: True if full restart is required, False otherwise
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict):
+            return preset.get("full_restart", False)
     return False
 
 

@@ -378,6 +378,7 @@ class ComfyUITab(BaseTab):
         current_path = preset.get("path", "")
         current_iteratable = preset.get("iteratable", False)
         current_note = preset.get("note", "")
+        current_full_restart = preset.get("full_restart", False)
 
         # Create edit dialog
         dialog = QDialog(self.main_window)
@@ -423,6 +424,16 @@ class ComfyUITab(BaseTab):
             "and refining the prompt before the next generation."
         )
         layout.addWidget(iteratable_check)
+
+        # Full Restart checkbox
+        full_restart_check = QtWidgets.QCheckBox("Full Restart - Completely restart ComfyUI server before each job")
+        full_restart_check.setChecked(current_full_restart)
+        full_restart_check.setToolTip(
+            "Enable this if the model requires a clean server state.\n"
+            "The ComfyUI server will be completely restarted before processing this workflow.\n"
+            "This is slower but ensures consistent results for certain models."
+        )
+        layout.addWidget(full_restart_check)
 
         # Note field
         note_label = QLabel("Note:")
@@ -486,6 +497,7 @@ class ComfyUITab(BaseTab):
             new_path = path_edit.text().strip()
             new_iteratable = iteratable_check.isChecked()
             new_note = note_edit.toPlainText().strip()
+            new_full_restart = full_restart_check.isChecked()
 
             if not new_name:
                 self.main_window.animator.show_error("Preset name cannot be empty")
@@ -503,7 +515,7 @@ class ComfyUITab(BaseTab):
 
                 # Delete old preset and create new one with new name
                 delete_comfyui_workflow_preset(current_name)
-                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable, note=new_note)
+                save_comfyui_workflow_preset(new_name, new_path, iteratable=new_iteratable, note=new_note, full_restart=new_full_restart)
                 self._current_preset_name = new_name
                 self.ui.ComfyUICurrentPreset.setText(new_name)
                 self.main_window.animator.show_success(f"Preset renamed to '{new_name}'")
@@ -513,7 +525,8 @@ class ComfyUITab(BaseTab):
                     current_name,
                     workflow_path=new_path,
                     iteratable=new_iteratable,
-                    note=new_note
+                    note=new_note,
+                    full_restart=new_full_restart
                 )
                 self.main_window.animator.show_success(f"Preset '{current_name}' updated")
 
@@ -895,7 +908,7 @@ class ComfyUITab(BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui_service import extract_editable_nodes, submit_comfyui_job
-        from settings_manager import get_comfyui_network_output_path
+        from settings_manager import get_comfyui_network_output_path, is_workflow_preset_full_restart
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
@@ -1009,6 +1022,7 @@ class ComfyUITab(BaseTab):
             base_seed=base_seed,
             network_output_dir=network_output_dir,
             workflow_preset=self._current_preset_name,
+            full_restart=is_workflow_preset_full_restart(self._current_preset_name) if self._current_preset_name else False,
         )
         worker.signals.result.connect(on_result)
         worker.signals.error.connect(on_error)
