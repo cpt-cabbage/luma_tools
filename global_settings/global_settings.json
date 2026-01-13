@@ -1,48 +1,68 @@
 {
   "comfyui_workflow_presets": {
-    "Hy-Motion": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/la_Hy_Motion.json",
-      "description": "",
-      "iteratable": false
-    },
-    "Qwen\\Qwen Image Edit 2511 HQ": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511_HQ.json",
-      "description": "",
-      "iteratable": true,
-      "note": "",
-      "full_restart": false,
-      "node_overrides": {
-        "Negative Prompt_editable": {
-          "enabled": false,
-          "default_value": ""
-        }
-      }
-    },
-    "Trellis\\Trellis-Ultramesh": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis-Ultramesh.json",
+    "Image Editing/Qwen Image Edit": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511.json",
       "description": "",
       "iteratable": false,
-      "note": "Work in progress",
-      "full_restart": true,
-      "node_overrides": {
-        "UltraShape Save GLB/OBJ_editable": {
-          "enabled": false,
-          "default_value": "ultrashape_"
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": true,
+      "workflows": {
+        "Fast": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511.json",
+          "note": "",
+          "iteratable": true,
+          "full_restart": false,
+          "node_overrides": {}
+        },
+        "High Quality": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511_HQ.json",
+          "note": "",
+          "iteratable": true,
+          "full_restart": false,
+          "node_overrides": {}
         }
       }
     },
-    "Qwen/Qwen Image Edit 2511 LQ": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Qwen_Image_Edit_2511.json",
+    "Geometry\\Trellis": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
       "description": "",
-      "iteratable": true,
+      "iteratable": false,
       "note": "",
       "full_restart": false,
+      "node_overrides": {},
+      "is_multi": true,
+      "workflows": {
+        "Fast": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": true,
+          "node_overrides": {}
+        },
+        "High Quality": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_HQ.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": true,
+          "node_overrides": {}
+        }
+      }
+    },
+    "Animation/Hy-Motion": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Animation/la_Hy_Motion.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Text to Anmation",
+      "full_restart": false,
       "node_overrides": {
-        "Negative Prompt_editable": {
+        "HY-Motion Export FBX_editable": {
           "enabled": false,
           "default_value": ""
         }
-      }
+      },
+      "is_multi": false
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",
@@ -63,5 +83,7 @@
     "comfyui_gallery",
     "settings"
   ],
-  "comfyui_timeout": 600
+  "comfyui_timeout": 600,
+  "comfyui_server_not_found_behavior": "wait",
+  "comfyui_server_wait_timeout": 3600
 }

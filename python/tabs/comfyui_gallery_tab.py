@@ -128,17 +128,27 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _enrich_prewarm_items(self, items):
         """Enrich pre-warmed items with workflow metadata (runs on worker thread)."""
-        from comfyui_service import get_image_metadata
+        from comfyui_service import get_workflow_preset_for_files
 
+        # Group items by directory for batch metadata loading
+        items_by_dir = {}  # dir_path -> [item, ...]
         for item in items:
             if 'workflow' not in item or not item['workflow']:
-                try:
-                    output_dir = os.path.dirname(item['path'])
+                output_dir = os.path.dirname(item['path'])
+                if output_dir not in items_by_dir:
+                    items_by_dir[output_dir] = []
+                items_by_dir[output_dir].append(item)
+
+        # Batch load metadata per directory
+        for output_dir, dir_items in items_by_dir.items():
+            try:
+                filenames = [os.path.basename(item['path']) for item in dir_items]
+                workflow_map = get_workflow_preset_for_files(output_dir, filenames)
+                for item in dir_items:
                     filename = os.path.basename(item['path'])
-                    metadata = get_image_metadata(output_dir, filename)
-                    if metadata:
-                        item['workflow'] = metadata.get('workflow_preset', '') or ''
-                except Exception:
+                    item['workflow'] = workflow_map.get(filename, '')
+            except Exception:
+                for item in dir_items:
                     item['workflow'] = ''
 
         return items
@@ -541,7 +551,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _scan_directory(self, output_dir):
         """Scan directory recursively for image and 3D model files (runs on worker thread)."""
-        from comfyui_service import get_image_metadata
+        from comfyui_service import get_workflow_preset_for_files
 
         items = []
 
@@ -554,31 +564,42 @@ class ComfyUIGalleryTab(BaseTab):
         supported_extensions = image_extensions | model_extensions
 
         try:
-            # Walk directory recursively to find files in subfolders
+            # First pass: collect all files grouped by directory
+            # This allows us to batch load metadata per directory
+            files_by_dir = {}  # dir_path -> [(filename, full_path, mtime, file_type), ...]
+
             for root, dirs, files in os.walk(output_dir):
                 for filename in files:
                     ext = os.path.splitext(filename)[1].lower()
                     if ext in supported_extensions:
                         full_path = os.path.join(root, filename)
-                        mtime = os.path.getmtime(full_path)
+                        try:
+                            mtime = os.path.getmtime(full_path)
+                        except OSError:
+                            continue
                         file_type = 'model' if ext in model_extensions else 'image'
 
-                        # Get workflow preset from metadata (for sorting)
-                        workflow = ""
-                        try:
-                            metadata = get_image_metadata(root, filename)
-                            if metadata:
-                                workflow = metadata.get('workflow_preset', '') or ''
-                        except Exception:
-                            pass
+                        if root not in files_by_dir:
+                            files_by_dir[root] = []
+                        files_by_dir[root].append((filename, full_path, mtime, file_type))
 
-                        items.append({
-                            'path': full_path,
-                            'mtime': mtime,
-                            'type': file_type,
-                            'name': filename.lower(),
-                            'workflow': workflow
-                        })
+            # Second pass: batch load metadata per directory and create items
+            for dir_path, file_list in files_by_dir.items():
+                # Get workflow presets for all files in this directory at once
+                filenames = [f[0] for f in file_list]
+                try:
+                    workflow_map = get_workflow_preset_for_files(dir_path, filenames)
+                except Exception:
+                    workflow_map = {}
+
+                for filename, full_path, mtime, file_type in file_list:
+                    items.append({
+                        'path': full_path,
+                        'mtime': mtime,
+                        'type': file_type,
+                        'name': filename.lower(),
+                        'workflow': workflow_map.get(filename, '')
+                    })
         except Exception as e:
             print(f"Error scanning gallery directory: {e}")
 

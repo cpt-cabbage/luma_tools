@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.25
+- Implement lazy loading for gallery thumbnails to improve performance - Updates to thumbnaill rendering - Add auto-extract textures option for 3D model exports - Add server not found behavior settings for persistent mode - Add regenerate thumbnails button in settings
+
 ## Version 0.24
 - Add conditional node bypassing based on toggle values in workflows - Refactor USD export to use subprocess for avoiding DLL conflicts
 

@@ -1,0 +1,54 @@
+# Luma Tools Requirements
+# Python 3.10+ required
+# Install with: pip install -r requirements.txt
+
+# Core Qt GUI
+PySide2==5.15.2.1
+shiboken2==5.15.2.1
+QDarkStyle==3.2.3
+QtPy==2.4.2
+
+# File sequence handling
+fileseq==2.1.2
+
+# Utilities
+six>=1.16.0
+typing_extensions>=4.12.2
+packaging>=24.1
+
+# Windows-specific
+pywin32==308
+
+# .NET interop (for Deadline)
+pythonnet==3.0.4
+clr_loader>=0.2.6
+cffi>=1.17.1
+pycparser>=2.22
+
+# Web server (for ComfyUI communication)
+bottle>=0.13.2
+
+# Numerical/Scientific
+numpy>=1.26.4
+scipy>=1.15.3
+
+# Image processing
+pillow>=12.1.0
+imageio>=2.37.2
+
+# 3D model support
+trimesh>=4.10.1
+networkx>=3.4.2
+freetype-py>=2.5.1
+
+# OpenGL rendering
+PyOpenGL>=3.1.0
+PyOpenGL-accelerate>=3.1.10
+pyrender>=0.1.45
+pyglet>=1.5.31
+
+# USD support
+usd-core>=25.11
+
+# Spell checking (optional - for text prompts)
+pyenchant>=3.3.0

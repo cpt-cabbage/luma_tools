@@ -1809,18 +1809,39 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
 
 GALLERY_METADATA_FILE = "comfyui_gallery_metadata.json"
 
+# Cache for gallery metadata to avoid repeated disk reads during gallery scanning
+# Key: output_dir, Value: (mtime, metadata_dict)
+_gallery_metadata_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
+
 
 def _get_metadata_path(output_dir: str) -> str:
     """Get the path to the metadata file for a directory."""
     return os.path.join(output_dir, GALLERY_METADATA_FILE)
 
 
-def load_gallery_metadata(output_dir: str) -> Dict[str, Dict[str, Any]]:
+def clear_gallery_metadata_cache(output_dir: str = None) -> None:
+    """
+    Clear the gallery metadata cache.
+
+    Args:
+        output_dir: If provided, only clear cache for this directory.
+                   If None, clear entire cache.
+    """
+    global _gallery_metadata_cache
+    if output_dir:
+        _gallery_metadata_cache.pop(output_dir, None)
+    else:
+        _gallery_metadata_cache.clear()
+
+
+def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
     """
     Load gallery metadata from the output directory.
 
     Args:
         output_dir: Directory containing the metadata file
+        use_cache: If True, use cached metadata if available and still valid.
+                  Set to False to force reload from disk.
 
     Returns:
         Dictionary mapping filename -> metadata dict containing:
@@ -1830,13 +1851,26 @@ def load_gallery_metadata(output_dir: str) -> Dict[str, Dict[str, Any]]:
         - timestamp: When the image was generated
         - input_image: Optional input image filename
     """
+    global _gallery_metadata_cache
+
     metadata_path = _get_metadata_path(output_dir)
     if not os.path.exists(metadata_path):
         return {}
 
     try:
+        current_mtime = os.path.getmtime(metadata_path)
+
+        # Check cache validity
+        if use_cache and output_dir in _gallery_metadata_cache:
+            cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
+            if cached_mtime == current_mtime:
+                return cached_data
+
+        # Load from disk and update cache
         with open(metadata_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            _gallery_metadata_cache[output_dir] = (current_mtime, data)
+            return data
     except Exception as e:
         print(f"Error loading gallery metadata: {e}")
         return {}
@@ -1859,6 +1893,8 @@ def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) 
         os.makedirs(output_dir, exist_ok=True)
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, default=str)
+        # Clear cache for this directory since we just modified the file
+        clear_gallery_metadata_cache(output_dir)
         return True
     except Exception as e:
         print(f"Error saving gallery metadata: {e}")
@@ -1955,7 +1991,20 @@ def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any
         Metadata dict if found, None otherwise
     """
     metadata = load_gallery_metadata(output_dir)
+    return _lookup_file_metadata(metadata, filename)
 
+
+def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) -> Optional[Dict[str, Any]]:
+    """
+    Internal helper to look up metadata for a filename from a loaded metadata dict.
+
+    Args:
+        metadata: Already-loaded metadata dictionary
+        filename: The image filename (not full path)
+
+    Returns:
+        Metadata dict if found, None otherwise
+    """
     # First check for exact filename match
     if filename in metadata:
         return metadata[filename]
@@ -1971,6 +2020,32 @@ def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any
                 return value
 
     return None
+
+
+def get_workflow_preset_for_files(output_dir: str, filenames: List[str]) -> Dict[str, str]:
+    """
+    Get workflow preset names for multiple files in a single directory efficiently.
+
+    Loads metadata once and looks up all filenames, avoiding repeated disk I/O.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filenames: List of filenames to look up
+
+    Returns:
+        Dictionary mapping filename -> workflow_preset (empty string if not found)
+    """
+    metadata = load_gallery_metadata(output_dir)
+    results = {}
+
+    for filename in filenames:
+        file_metadata = _lookup_file_metadata(metadata, filename)
+        if file_metadata:
+            results[filename] = file_metadata.get('workflow_preset', '') or ''
+        else:
+            results[filename] = ''
+
+    return results
 
 
 def extract_prompts_from_editable_values(

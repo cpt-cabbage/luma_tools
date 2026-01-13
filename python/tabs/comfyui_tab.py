@@ -60,7 +60,12 @@ class ComfyUITab(BaseTab):
         # Internal state
         self._comfyui_dynamic_widgets = {}
         self._current_preset_name = None
+        self._current_selected_workflow = None  # For multi-workflow models
         self._pending_editable_values = {}
+
+        # Create workflow selector dropdown (will be added to UI dynamically)
+        self._setup_workflow_selector()
+        self._setup_note_display()
 
         # Iterate mode state
         self._iterate_poll_timer = None
@@ -111,6 +116,134 @@ class ComfyUITab(BaseTab):
         else:
             self.ui.ComfyUINetworkPathDisplay.setText("(Not configured - set in Settings tab)")
             self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #888888; font-style: italic;")
+
+    # =========================================================================
+    # WORKFLOW SELECTOR (for multi-workflow models)
+    # =========================================================================
+
+    def _setup_workflow_selector(self):
+        """Set up the workflow selector dropdown for multi-workflow models."""
+        # Create workflow selector row (hidden by default)
+        self._workflow_selector_widget = QWidget()
+        workflow_selector_layout = QHBoxLayout(self._workflow_selector_widget)
+        workflow_selector_layout.setContentsMargins(0, 5, 0, 5)
+
+        label = QLabel("Workflow:")
+        label.setFixedWidth(100)
+        workflow_selector_layout.addWidget(label)
+
+        self._workflow_selector_combo = QtWidgets.QComboBox()
+        self._workflow_selector_combo.setMinimumWidth(200)
+        self._workflow_selector_combo.currentTextChanged.connect(self._on_workflow_selected)
+        workflow_selector_layout.addWidget(self._workflow_selector_combo)
+
+        workflow_selector_layout.addStretch()
+
+        self._workflow_selector_widget.setVisible(False)
+
+        # Insert into comfyuiWorkflowLayout after comfyuiPresetLayout
+        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
+            # Insert after the preset info row (index 2, after buttons and preset label)
+            self.ui.comfyuiWorkflowLayout.insertWidget(2, self._workflow_selector_widget)
+
+    def _setup_note_display(self):
+        """Set up the note display area for showing model/workflow notes."""
+        # Create note display widget (hidden by default)
+        self._note_display_widget = QWidget()
+        note_layout = QHBoxLayout(self._note_display_widget)
+        note_layout.setContentsMargins(0, 0, 0, 5)
+
+        note_icon_label = QLabel("Note:")
+        note_icon_label.setFixedWidth(100)
+        note_icon_label.setStyleSheet("color: #4a9eff; font-weight: bold;")
+        note_layout.addWidget(note_icon_label)
+
+        self._note_display_label = QLabel("")
+        self._note_display_label.setWordWrap(True)
+        self._note_display_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        note_layout.addWidget(self._note_display_label, 1)
+
+        self._note_display_widget.setVisible(False)
+
+        # Insert into comfyuiWorkflowLayout after workflow selector (index 3)
+        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
+            self.ui.comfyuiWorkflowLayout.insertWidget(3, self._note_display_widget)
+
+    def _update_workflow_selector_visibility(self):
+        """Update workflow selector visibility based on current preset."""
+        from settings_manager import is_workflow_preset_multi, get_workflow_preset_workflows
+
+        if not self._current_preset_name:
+            self._workflow_selector_widget.setVisible(False)
+            return
+
+        is_multi = is_workflow_preset_multi(self._current_preset_name)
+        self._workflow_selector_widget.setVisible(is_multi)
+
+        if is_multi:
+            # Populate workflow options
+            workflows = get_workflow_preset_workflows(self._current_preset_name)
+            self._workflow_selector_combo.blockSignals(True)
+            self._workflow_selector_combo.clear()
+
+            for wf_name in sorted(workflows.keys()):
+                self._workflow_selector_combo.addItem(wf_name)
+
+            # Select first workflow by default or restore previously selected
+            if self._current_selected_workflow and self._current_selected_workflow in workflows:
+                self._workflow_selector_combo.setCurrentText(self._current_selected_workflow)
+            elif workflows:
+                first_workflow = sorted(workflows.keys())[0]
+                self._current_selected_workflow = first_workflow
+                self._workflow_selector_combo.setCurrentText(first_workflow)
+
+            self._workflow_selector_combo.blockSignals(False)
+
+    def _on_workflow_selected(self, workflow_name):
+        """Handle workflow selection change in multi-workflow model."""
+        from settings_manager import get_comfyui_workflow_preset_path, get_workflow_config
+
+        if not workflow_name:
+            return
+
+        self._current_selected_workflow = workflow_name
+
+        # Get the workflow path for this selection
+        workflow_path = get_comfyui_workflow_preset_path(
+            self._current_preset_name,
+            selected_workflow=workflow_name
+        )
+
+        if workflow_path and os.path.exists(workflow_path):
+            self.ui.ComfyUIWorkflowPath.setText(workflow_path)
+            self.app_state.comfyui_workflow_path = workflow_path
+            self._refresh_editable_nodes()
+        else:
+            self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
+            self.app_state.comfyui_workflow_path = None
+
+        self._update_note_display()
+        self._validate_inputs()
+        self._save_state()
+
+    def _update_note_display(self):
+        """Update the note display based on current preset/workflow."""
+        from settings_manager import get_workflow_preset_note
+
+        if not self._current_preset_name:
+            self._note_display_widget.setVisible(False)
+            return
+
+        note = get_workflow_preset_note(
+            self._current_preset_name,
+            selected_workflow=self._current_selected_workflow
+        )
+
+        if note:
+            self._note_display_label.setText(note)
+            self._note_display_widget.setVisible(True)
+        else:
+            self._note_display_widget.setVisible(False)
 
     # =========================================================================
     # GENERATION SETTINGS
@@ -202,28 +335,56 @@ class ComfyUITab(BaseTab):
 
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
-        from settings_manager import get_comfyui_workflow_preset_path
+        from settings_manager import (
+            get_comfyui_workflow_preset_path,
+            is_workflow_preset_multi,
+            get_workflow_preset_workflows
+        )
 
-        workflow_path = get_comfyui_workflow_preset_path(preset_name)
+        self._current_preset_name = preset_name
+        display_name = self._get_preset_display_name(preset_name)
+        self.ui.ComfyUICurrentPreset.setText(display_name)
+
+        # Check if this is a multi-workflow model
+        is_multi = is_workflow_preset_multi(preset_name)
+
+        if is_multi:
+            # For multi-workflow models, update selector and select first workflow
+            workflows = get_workflow_preset_workflows(preset_name)
+            if workflows:
+                # Reset selected workflow if switching presets
+                if not self._current_selected_workflow or self._current_selected_workflow not in workflows:
+                    self._current_selected_workflow = sorted(workflows.keys())[0]
+
+                workflow_path = get_comfyui_workflow_preset_path(
+                    preset_name,
+                    selected_workflow=self._current_selected_workflow
+                )
+            else:
+                workflow_path = None
+                self._current_selected_workflow = None
+        else:
+            # Single workflow model
+            self._current_selected_workflow = None
+            workflow_path = get_comfyui_workflow_preset_path(preset_name)
+
+        # Update workflow selector visibility
+        self._update_workflow_selector_visibility()
+
         if workflow_path and os.path.exists(workflow_path):
-            self._current_preset_name = preset_name
-            # Display short name (last part after slash) but store full name internally
-            display_name = self._get_preset_display_name(preset_name)
-            self.ui.ComfyUICurrentPreset.setText(display_name)
             self.ui.ComfyUIWorkflowPath.setText(workflow_path)
             self.app_state.comfyui_workflow_path = workflow_path
             self._refresh_editable_nodes()
             self._validate_inputs()
+            self._update_note_display()
             self._save_state()
         else:
-            # Workflow file not found - still keep preset name so user can edit/delete it
-            self._current_preset_name = preset_name
-            display_name = self._get_preset_display_name(preset_name)
             self.ui.ComfyUICurrentPreset.setText(f"{display_name} (missing)")
             self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
             self._validate_inputs()
+            self._update_note_display()
             # Guard for animator not being initialized yet during tab initialization
             if hasattr(self.main_window, 'animator') and self.main_window.animator:
                 self.main_window.animator.show_error(f"Workflow file not found: {workflow_path}")
@@ -301,7 +462,7 @@ class ComfyUITab(BaseTab):
         presets = get_comfyui_workflow_presets()
         preset = presets.get(self._current_preset_name, {})
         if isinstance(preset, str):
-            preset = {"path": preset, "description": "", "iteratable": False, "note": "", "node_overrides": {}}
+            preset = {"path": preset, "description": "", "iteratable": False, "note": "", "node_overrides": {}, "is_multi": False}
 
         current_name = self._current_preset_name
         current_path = preset.get("path", "")
@@ -309,12 +470,14 @@ class ComfyUITab(BaseTab):
         current_note = preset.get("note", "")
         current_full_restart = preset.get("full_restart", False)
         current_node_overrides = preset.get("node_overrides", {})
+        current_is_multi = preset.get("is_multi", False)
+        current_workflows = preset.get("workflows", {})
 
         # Create edit dialog
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle(f"Edit Model: {current_name}")
-        dialog.setMinimumWidth(600)
-        dialog.setMinimumHeight(500)
+        dialog.setMinimumWidth(700)
+        dialog.setMinimumHeight(600)
 
         layout = QVBoxLayout(dialog)
 
@@ -326,6 +489,21 @@ class ComfyUITab(BaseTab):
         name_layout.addWidget(name_edit)
         layout.addLayout(name_layout)
 
+        # Multi-workflow checkbox
+        is_multi_check = QtWidgets.QCheckBox("Multi-Workflow Model (allows multiple workflows per model)")
+        is_multi_check.setChecked(current_is_multi)
+        is_multi_check.setToolTip(
+            "Enable this to add multiple workflows to a single model.\n"
+            "Each workflow can have its own settings and note.\n"
+            "A dropdown will appear in the ComfyUI tab to select which workflow to use."
+        )
+        layout.addWidget(is_multi_check)
+
+        # ======== Single Workflow Section ========
+        single_workflow_widget = QWidget()
+        single_workflow_layout = QVBoxLayout(single_workflow_widget)
+        single_workflow_layout.setContentsMargins(0, 0, 0, 0)
+
         # Workflow path
         path_layout = QHBoxLayout()
         path_label = QLabel("Workflow File:")
@@ -334,19 +512,7 @@ class ComfyUITab(BaseTab):
         path_layout.addWidget(path_label)
         path_layout.addWidget(path_edit)
         path_layout.addWidget(browse_btn)
-        layout.addLayout(path_layout)
-
-        def browse_workflow():
-            last_dir = os.path.dirname(current_path) if current_path else ""
-            file_path, _ = QFileDialog.getOpenFileName(
-                dialog, "Select ComfyUI Workflow", last_dir, "ComfyUI JSON (*.json)"
-            )
-            if file_path:
-                path_edit.setText(file_path)
-                # Refresh editable nodes when workflow changes
-                refresh_editable_nodes_list()
-
-        browse_btn.clicked.connect(browse_workflow)
+        single_workflow_layout.addLayout(path_layout)
 
         # Iteratable checkbox
         iteratable_check = QtWidgets.QCheckBox("Enable Iterate Mode for this workflow")
@@ -356,7 +522,7 @@ class ComfyUITab(BaseTab):
             "It allows reviewing results and refining prompts between generations.\n"
             "This option must be enabled for the workflow to support iterate mode."
         )
-        layout.addWidget(iteratable_check)
+        single_workflow_layout.addWidget(iteratable_check)
 
         # Full Restart checkbox
         full_restart_check = QtWidgets.QCheckBox("Full Restart - Completely restart ComfyUI server before each job")
@@ -366,19 +532,182 @@ class ComfyUITab(BaseTab):
             "The ComfyUI server will be completely restarted before processing this workflow.\n"
             "This is slower but ensures consistent results for certain models."
         )
-        layout.addWidget(full_restart_check)
+        single_workflow_layout.addWidget(full_restart_check)
 
-        # Note field
+        # Note field for single workflow
         note_label = QLabel("Note:")
-        layout.addWidget(note_label)
+        single_workflow_layout.addWidget(note_label)
 
         note_edit = QtWidgets.QPlainTextEdit()
         note_edit.setPlaceholderText("Add a note or description for this model...")
         note_edit.setPlainText(current_note)
         note_edit.setMaximumHeight(80)
-        layout.addWidget(note_edit)
+        single_workflow_layout.addWidget(note_edit)
 
-        # Editable Nodes section
+        layout.addWidget(single_workflow_widget)
+
+        # ======== Multi-Workflow Section ========
+        multi_workflow_widget = QWidget()
+        multi_workflow_layout = QVBoxLayout(multi_workflow_widget)
+        multi_workflow_layout.setContentsMargins(0, 0, 0, 0)
+
+        workflows_group = QtWidgets.QGroupBox("Workflows")
+        workflows_group_layout = QVBoxLayout(workflows_group)
+
+        # Workflows list with scroll area
+        workflows_scroll = QtWidgets.QScrollArea()
+        workflows_scroll.setWidgetResizable(True)
+        workflows_scroll.setMinimumHeight(200)
+        workflows_scroll.setMaximumHeight(300)
+
+        workflows_container = QWidget()
+        workflows_list_layout = QVBoxLayout(workflows_container)
+        workflows_list_layout.setContentsMargins(5, 5, 5, 5)
+        workflows_list_layout.setSpacing(10)
+        workflows_scroll.setWidget(workflows_container)
+        workflows_group_layout.addWidget(workflows_scroll)
+
+        # Add workflow button
+        add_workflow_btn = QPushButton("+ Add Workflow")
+        add_workflow_btn.setFixedWidth(120)
+        workflows_group_layout.addWidget(add_workflow_btn)
+
+        multi_workflow_layout.addWidget(workflows_group)
+        layout.addWidget(multi_workflow_widget)
+
+        # Store workflow data for multi-workflow mode
+        workflow_entries = {}  # workflow_name -> {widgets...}
+
+        def create_workflow_entry(wf_name="", wf_config=None):
+            """Create a workflow entry widget."""
+            if wf_config is None:
+                wf_config = {"path": "", "note": "", "iteratable": False, "full_restart": False, "node_overrides": {}}
+
+            entry_widget = QWidget()
+            entry_widget.setStyleSheet("QWidget { background-color: #2a2a2a; border-radius: 4px; }")
+            entry_layout = QVBoxLayout(entry_widget)
+            entry_layout.setContentsMargins(10, 10, 10, 10)
+
+            # Header row with name and delete button
+            header_row = QHBoxLayout()
+            wf_name_edit = QLineEdit(wf_name)
+            wf_name_edit.setPlaceholderText("Workflow name...")
+            wf_name_edit.setFixedWidth(200)
+            header_row.addWidget(QLabel("Name:"))
+            header_row.addWidget(wf_name_edit)
+            header_row.addStretch()
+
+            delete_wf_btn = QPushButton("Remove")
+            delete_wf_btn.setStyleSheet("QPushButton { color: #ef4444; }")
+            delete_wf_btn.setFixedWidth(70)
+            header_row.addWidget(delete_wf_btn)
+            entry_layout.addLayout(header_row)
+
+            # Path row
+            path_row = QHBoxLayout()
+            wf_path_edit = QLineEdit(wf_config.get("path", ""))
+            wf_path_edit.setPlaceholderText("Workflow JSON file...")
+            wf_browse_btn = QPushButton("Browse...")
+            wf_browse_btn.setFixedWidth(80)
+            path_row.addWidget(QLabel("File:"))
+            path_row.addWidget(wf_path_edit)
+            path_row.addWidget(wf_browse_btn)
+            entry_layout.addLayout(path_row)
+
+            # Options row
+            options_row = QHBoxLayout()
+            wf_iteratable = QtWidgets.QCheckBox("Iterate Mode")
+            wf_iteratable.setChecked(wf_config.get("iteratable", False))
+            wf_full_restart = QtWidgets.QCheckBox("Full Restart")
+            wf_full_restart.setChecked(wf_config.get("full_restart", False))
+            options_row.addWidget(wf_iteratable)
+            options_row.addWidget(wf_full_restart)
+            options_row.addStretch()
+            entry_layout.addLayout(options_row)
+
+            # Note row
+            note_row = QHBoxLayout()
+            wf_note_edit = QLineEdit(wf_config.get("note", ""))
+            wf_note_edit.setPlaceholderText("Note for this workflow...")
+            note_row.addWidget(QLabel("Note:"))
+            note_row.addWidget(wf_note_edit)
+            entry_layout.addLayout(note_row)
+
+            # Generate unique key for this entry
+            import uuid
+            entry_key = str(uuid.uuid4())[:8]
+
+            # Store widgets
+            workflow_entries[entry_key] = {
+                "widget": entry_widget,
+                "name_edit": wf_name_edit,
+                "path_edit": wf_path_edit,
+                "iteratable": wf_iteratable,
+                "full_restart": wf_full_restart,
+                "note_edit": wf_note_edit,
+                "node_overrides": wf_config.get("node_overrides", {}),
+            }
+
+            # Connect browse button
+            def browse_wf():
+                last_dir = os.path.dirname(wf_path_edit.text()) if wf_path_edit.text() else ""
+                file_path, _ = QFileDialog.getOpenFileName(
+                    dialog, "Select ComfyUI Workflow", last_dir, "ComfyUI JSON (*.json)"
+                )
+                if file_path:
+                    wf_path_edit.setText(file_path)
+
+            wf_browse_btn.clicked.connect(browse_wf)
+
+            # Connect delete button
+            def delete_entry():
+                entry_widget.deleteLater()
+                if entry_key in workflow_entries:
+                    del workflow_entries[entry_key]
+
+            delete_wf_btn.clicked.connect(delete_entry)
+
+            return entry_widget
+
+        def add_workflow_entry():
+            """Add a new empty workflow entry."""
+            entry = create_workflow_entry()
+            workflows_list_layout.insertWidget(workflows_list_layout.count(), entry)
+
+        add_workflow_btn.clicked.connect(add_workflow_entry)
+
+        # Populate existing workflows
+        for wf_name, wf_config in current_workflows.items():
+            entry = create_workflow_entry(wf_name, wf_config)
+            workflows_list_layout.addWidget(entry)
+
+        # Add at least one empty entry if no workflows exist
+        if not current_workflows:
+            add_workflow_entry()
+
+        workflows_list_layout.addStretch()
+
+        def browse_workflow():
+            last_dir = os.path.dirname(path_edit.text()) if path_edit.text() else ""
+            file_path, _ = QFileDialog.getOpenFileName(
+                dialog, "Select ComfyUI Workflow", last_dir, "ComfyUI JSON (*.json)"
+            )
+            if file_path:
+                path_edit.setText(file_path)
+                refresh_editable_nodes_list()
+
+        browse_btn.clicked.connect(browse_workflow)
+
+        # Toggle visibility based on multi-workflow mode
+        def update_mode_visibility():
+            is_multi = is_multi_check.isChecked()
+            single_workflow_widget.setVisible(not is_multi)
+            multi_workflow_widget.setVisible(is_multi)
+
+        is_multi_check.stateChanged.connect(lambda: update_mode_visibility())
+        update_mode_visibility()
+
+        # Editable Nodes section (only for single workflow mode)
         nodes_group = QtWidgets.QGroupBox("Editable Nodes")
         nodes_group_layout = QVBoxLayout(nodes_group)
 
@@ -389,8 +718,8 @@ class ComfyUITab(BaseTab):
         # Scroll area for editable nodes
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(150)
-        scroll_area.setMaximumHeight(250)
+        scroll_area.setMinimumHeight(120)
+        scroll_area.setMaximumHeight(180)
 
         nodes_container = QWidget()
         nodes_scroll_layout = QVBoxLayout(nodes_container)
@@ -399,7 +728,7 @@ class ComfyUITab(BaseTab):
 
         scroll_area.setWidget(nodes_container)
         nodes_group_layout.addWidget(scroll_area)
-        layout.addWidget(nodes_group)
+        single_workflow_layout.addWidget(nodes_group)
 
         # Store node override widgets for retrieval
         node_override_widgets = {}
@@ -448,10 +777,10 @@ class ComfyUITab(BaseTab):
 
                 # Node name label with type indicator
                 type_indicator = f" ({node.widget_type})" if node.widget_type != 'text' else ""
-                name_label = QLabel(f"{node.display_name}{type_indicator}")
-                name_label.setFixedWidth(180)
-                name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}\nWidget: {node.widget_type}")
-                node_row_layout.addWidget(name_label)
+                node_name_label = QLabel(f"{node.display_name}{type_indicator}")
+                node_name_label.setFixedWidth(180)
+                node_name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}\nWidget: {node.widget_type}")
+                node_row_layout.addWidget(node_name_label)
 
                 # Default value input - show for text and string nodes
                 if node.widget_type in ('text', 'string'):
@@ -520,42 +849,74 @@ class ComfyUITab(BaseTab):
         if result == 2:
             delete_comfyui_workflow_preset(current_name)
             self._current_preset_name = None
+            self._current_selected_workflow = None
             self.ui.ComfyUICurrentPreset.setText("No model selected")
             self.ui.ComfyUIWorkflowPath.setText("No workflow selected")
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
             self._validate_inputs()
+            self._update_workflow_selector_visibility()
+            self._update_note_display()
             self.main_window.animator.show_info(f"Model '{current_name}' deleted")
             return
 
         if result == QDialog.Accepted:
             new_name = name_edit.text().strip()
-            new_path = path_edit.text().strip()
-            new_iteratable = iteratable_check.isChecked()
-            new_note = note_edit.toPlainText().strip()
-            new_full_restart = full_restart_check.isChecked()
-
-            # Collect node overrides from widgets - always store if there's any override
-            new_node_overrides = {}
-            for node_title, widgets in node_override_widgets.items():
-                is_enabled = widgets["enable_check"].isChecked()
-                # default_input is None for non-text nodes
-                default_input = widgets["default_input"]
-                default_value = default_input.text().strip() if default_input else ""
-                # Store override if node is disabled or has a default value set
-                if not is_enabled or default_value:
-                    new_node_overrides[node_title] = {
-                        "enabled": is_enabled,
-                        "default_value": default_value
-                    }
+            new_is_multi = is_multi_check.isChecked()
 
             if not new_name:
                 self.main_window.animator.show_error("Preset name cannot be empty")
                 return
 
-            if not new_path:
-                self.main_window.animator.show_error("Workflow path cannot be empty")
-                return
+            if new_is_multi:
+                # Collect workflows from entries
+                new_workflows = {}
+                for entry_key, entry_data in workflow_entries.items():
+                    wf_name = entry_data["name_edit"].text().strip()
+                    wf_path = entry_data["path_edit"].text().strip()
+                    if wf_name and wf_path:  # Only include if both name and path are set
+                        new_workflows[wf_name] = {
+                            "path": wf_path,
+                            "note": entry_data["note_edit"].text().strip(),
+                            "iteratable": entry_data["iteratable"].isChecked(),
+                            "full_restart": entry_data["full_restart"].isChecked(),
+                            "node_overrides": entry_data.get("node_overrides", {}),
+                        }
+
+                if not new_workflows:
+                    self.main_window.animator.show_error("Please add at least one workflow with name and path")
+                    return
+
+                # Get the first workflow path as default for compatibility
+                first_wf = list(new_workflows.values())[0]
+                new_path = first_wf["path"]
+                new_note = ""  # Multi-workflow models have notes per workflow
+                new_iteratable = False
+                new_full_restart = False
+                new_node_overrides = {}
+            else:
+                # Single workflow mode
+                new_path = path_edit.text().strip()
+                new_iteratable = iteratable_check.isChecked()
+                new_note = note_edit.toPlainText().strip()
+                new_full_restart = full_restart_check.isChecked()
+                new_workflows = None
+
+                # Collect node overrides from widgets
+                new_node_overrides = {}
+                for node_title, widgets in node_override_widgets.items():
+                    is_enabled = widgets["enable_check"].isChecked()
+                    default_input = widgets["default_input"]
+                    default_value = default_input.text().strip() if default_input else ""
+                    if not is_enabled or default_value:
+                        new_node_overrides[node_title] = {
+                            "enabled": is_enabled,
+                            "default_value": default_value
+                        }
+
+                if not new_path:
+                    self.main_window.animator.show_error("Workflow path cannot be empty")
+                    return
 
             # Check if name changed and new name already exists
             if new_name != current_name:
@@ -570,10 +931,13 @@ class ComfyUITab(BaseTab):
                     iteratable=new_iteratable,
                     note=new_note,
                     full_restart=new_full_restart,
-                    node_overrides=new_node_overrides
+                    node_overrides=new_node_overrides,
+                    is_multi=new_is_multi,
+                    workflows=new_workflows
                 )
                 self._current_preset_name = new_name
-                self.ui.ComfyUICurrentPreset.setText(new_name)
+                self._current_selected_workflow = None
+                self.ui.ComfyUICurrentPreset.setText(self._get_preset_display_name(new_name))
                 self.main_window.animator.show_success(f"Preset renamed to '{new_name}'")
             else:
                 # Just update the existing preset
@@ -583,11 +947,14 @@ class ComfyUITab(BaseTab):
                     iteratable=new_iteratable,
                     note=new_note,
                     full_restart=new_full_restart,
-                    node_overrides=new_node_overrides
+                    node_overrides=new_node_overrides,
+                    is_multi=new_is_multi,
+                    workflows=new_workflows
                 )
                 self.main_window.animator.show_success(f"Preset '{current_name}' updated")
 
             # Refresh the UI with the (possibly new) preset name
+            self._current_selected_workflow = None
             self._select_preset(self._current_preset_name)
 
     # =========================================================================
@@ -597,7 +964,7 @@ class ComfyUITab(BaseTab):
     def _refresh_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
         from comfyui_service import extract_editable_nodes
-        from settings_manager import get_comfyui_workflow_presets
+        from settings_manager import get_comfyui_workflow_presets, get_workflow_config
 
         # Clear layout
         layout = self.ui.comfyuiEditableNodesLayout
@@ -612,13 +979,15 @@ class ComfyUITab(BaseTab):
         if not self.app_state.comfyui_workflow_path:
             return
 
-        # Get node overrides from current preset
+        # Get node overrides from current preset (supports both single and multi-workflow)
         node_overrides = {}
         if self._current_preset_name:
-            presets = get_comfyui_workflow_presets()
-            preset = presets.get(self._current_preset_name, {})
-            if isinstance(preset, dict):
-                node_overrides = preset.get("node_overrides", {})
+            config = get_workflow_config(
+                self._current_preset_name,
+                selected_workflow=self._current_selected_workflow
+            )
+            if config:
+                node_overrides = config.get("node_overrides", {})
 
         editable_nodes = extract_editable_nodes(self.app_state.comfyui_workflow_path)
 
@@ -991,7 +1360,7 @@ class ComfyUITab(BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui_service import extract_editable_nodes, submit_comfyui_job
-        from settings_manager import get_comfyui_network_output_path, is_workflow_preset_full_restart, is_workflow_preset_iteratable
+        from settings_manager import get_comfyui_network_output_path, get_workflow_config
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
@@ -1031,8 +1400,14 @@ class ComfyUITab(BaseTab):
 
                     editable_values[node_id] = {'node': node, 'value': value}
 
+        # Get workflow config (supports both single and multi-workflow models)
+        workflow_config = get_workflow_config(
+            self._current_preset_name,
+            selected_workflow=self._current_selected_workflow
+        ) if self._current_preset_name else None
+
         # Auto-determine iterate mode: enabled when only 1 image selected AND workflow supports it
-        workflow_is_iteratable = is_workflow_preset_iteratable(self._current_preset_name) if self._current_preset_name else False
+        workflow_is_iteratable = workflow_config.get("iteratable", False) if workflow_config else False
         use_iterate_mode = workflow_is_iteratable and selected_image_count == 1
         self.app_state.comfyui_iterate_mode = use_iterate_mode
 
@@ -1106,6 +1481,9 @@ class ComfyUITab(BaseTab):
                 StatusColors.INFO
             )
 
+        # Get full_restart from workflow config
+        full_restart = workflow_config.get("full_restart", False) if workflow_config else False
+
         # Create worker and run submission on background thread
         worker = Worker(
             submit_comfyui_job,
@@ -1120,7 +1498,7 @@ class ComfyUITab(BaseTab):
             base_seed=base_seed,
             network_output_dir=network_output_dir,
             workflow_preset=self._current_preset_name,
-            full_restart=is_workflow_preset_full_restart(self._current_preset_name) if self._current_preset_name else False,
+            full_restart=full_restart,
         )
         worker.signals.result.connect(on_result)
         worker.signals.error.connect(on_error)
@@ -1817,6 +2195,7 @@ class ComfyUITab(BaseTab):
 
         state = {
             "workflow_preset": self._current_preset_name or "",
+            "selected_workflow": self._current_selected_workflow or "",  # For multi-workflow models
             "generation_count": self.ui.ComfyUIGenerationCount.value(),
             "seed": self.ui.ComfyUISeed.value(),
         }
@@ -1845,9 +2224,14 @@ class ComfyUITab(BaseTab):
 
         # Restore workflow preset selection
         preset_name = state.get("workflow_preset", "")
+        selected_workflow = state.get("selected_workflow", "")
+
         if preset_name:
             presets = get_comfyui_workflow_presets()
             if preset_name in presets:
+                # Set the selected workflow before selecting preset (for multi-workflow models)
+                if selected_workflow:
+                    self._current_selected_workflow = selected_workflow
                 self._select_preset(preset_name)
 
         # Restore generation count
@@ -1857,7 +2241,6 @@ class ComfyUITab(BaseTab):
         # Restore seed
         seed = state.get("seed", random.randint(0, 2147483647))
         self.ui.ComfyUISeed.setValue(seed)
-
 
         # Store editable values to apply after widgets are created
         self._pending_editable_values = state.get("editable_values", {})

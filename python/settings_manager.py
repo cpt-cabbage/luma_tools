@@ -392,43 +392,65 @@ def get_comfyui_workflow_presets():
         dict: Dictionary of preset_name -> {
             "path": workflow_path,
             "description": optional_description,
-            "iteratable": bool (whether iterate mode is available)
+            "iteratable": bool (whether iterate mode is available),
+            "note": optional_note,
+            "full_restart": bool,
+            "node_overrides": dict,
+            "is_multi": bool (whether this is a multi-workflow model),
+            "workflows": dict of workflow_name -> {
+                "path": workflow_path,
+                "note": optional_note,
+                "iteratable": bool,
+                "full_restart": bool,
+                "node_overrides": dict
+            }
         }
     """
     settings = load_global_settings()
     return settings.get("comfyui_workflow_presets", {})
 
 
-def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note="", full_restart=False, node_overrides=None):
+def save_comfyui_workflow_preset(name, workflow_path, description="", iteratable=False, note="", full_restart=False, node_overrides=None, is_multi=False, workflows=None):
     """
     Save a ComfyUI workflow preset to global settings.
 
     Args:
         name: Preset display name
-        workflow_path: Path to the workflow JSON file
+        workflow_path: Path to the workflow JSON file (for single-workflow models)
         description: Optional description for the preset
         iteratable: Whether this workflow supports iterate mode
         note: Optional user note for this preset
         full_restart: Whether to completely restart ComfyUI server before processing
         node_overrides: Dict of node title -> {enabled: bool, default_value: str} overrides
+        is_multi: Whether this is a multi-workflow model
+        workflows: Dict of workflow_name -> workflow config (for multi-workflow models)
     """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
         settings["comfyui_workflow_presets"] = {}
 
-    settings["comfyui_workflow_presets"][name] = {
+    preset_data = {
         "path": workflow_path,
         "description": description,
         "iteratable": iteratable,
         "note": note,
         "full_restart": full_restart,
-        "node_overrides": node_overrides or {}
+        "node_overrides": node_overrides or {},
+        "is_multi": is_multi,
     }
+
+    if is_multi and workflows:
+        preset_data["workflows"] = workflows
+
+    settings["comfyui_workflow_presets"][name] = preset_data
     save_global_settings(settings)
-    print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable}, full_restart={full_restart})")
+    if is_multi:
+        print(f"Saved ComfyUI multi-workflow preset: {name} with {len(workflows or {})} workflow(s)")
+    else:
+        print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path} (iteratable={iteratable}, full_restart={full_restart})")
 
 
-def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None, full_restart=None, node_overrides=None):
+def update_comfyui_workflow_preset(name, workflow_path=None, description=None, iteratable=None, note=None, full_restart=None, node_overrides=None, is_multi=None, workflows=None):
     """
     Update an existing ComfyUI workflow preset.
 
@@ -440,6 +462,8 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         note: New note (None to keep existing)
         full_restart: New full_restart flag (None to keep existing)
         node_overrides: New node overrides dict (None to keep existing)
+        is_multi: New is_multi flag (None to keep existing)
+        workflows: New workflows dict for multi-workflow models (None to keep existing)
 
     Returns:
         bool: True if updated, False if preset not found
@@ -453,7 +477,7 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
     preset = presets[name]
     # Handle legacy format
     if isinstance(preset, str):
-        preset = {"path": preset, "description": "", "iteratable": False, "note": "", "full_restart": False, "node_overrides": {}}
+        preset = {"path": preset, "description": "", "iteratable": False, "note": "", "full_restart": False, "node_overrides": {}, "is_multi": False}
 
     if workflow_path is not None:
         preset["path"] = workflow_path
@@ -467,6 +491,10 @@ def update_comfyui_workflow_preset(name, workflow_path=None, description=None, i
         preset["full_restart"] = full_restart
     if node_overrides is not None:
         preset["node_overrides"] = node_overrides
+    if is_multi is not None:
+        preset["is_multi"] = is_multi
+    if workflows is not None:
+        preset["workflows"] = workflows
 
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets
@@ -525,12 +553,13 @@ def delete_comfyui_workflow_preset(name):
         print(f"Deleted ComfyUI workflow preset: {name}")
 
 
-def get_comfyui_workflow_preset_path(name):
+def get_comfyui_workflow_preset_path(name, selected_workflow=None):
     """
     Get the workflow path for a specific preset.
 
     Args:
         name: Preset name
+        selected_workflow: For multi-workflow models, the name of the selected workflow
 
     Returns:
         str: Path to workflow file, or None if not found
@@ -539,10 +568,122 @@ def get_comfyui_workflow_preset_path(name):
     if name in presets:
         preset = presets[name]
         if isinstance(preset, dict):
+            # Check if it's a multi-workflow model and a specific workflow is selected
+            if preset.get("is_multi") and selected_workflow:
+                workflows = preset.get("workflows", {})
+                if selected_workflow in workflows:
+                    return workflows[selected_workflow].get("path")
             return preset.get("path")
         # Legacy format: just the path string
         return preset
     return None
+
+
+def is_workflow_preset_multi(name):
+    """
+    Check if a workflow preset is a multi-workflow model.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        bool: True if multi-workflow, False otherwise
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict):
+            return preset.get("is_multi", False)
+    return False
+
+
+def get_workflow_preset_workflows(name):
+    """
+    Get the workflows dictionary for a multi-workflow preset.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        dict: Dictionary of workflow_name -> workflow config, or empty dict
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict) and preset.get("is_multi"):
+            return preset.get("workflows", {})
+    return {}
+
+
+def get_workflow_preset_note(name, selected_workflow=None):
+    """
+    Get the note for a workflow preset.
+
+    Args:
+        name: Preset name
+        selected_workflow: For multi-workflow models, the name of the selected workflow
+
+    Returns:
+        str: Note text, or empty string if not found
+    """
+    presets = get_comfyui_workflow_presets()
+    if name in presets:
+        preset = presets[name]
+        if isinstance(preset, dict):
+            # For multi-workflow models with a selected workflow, return that workflow's note
+            if preset.get("is_multi") and selected_workflow:
+                workflows = preset.get("workflows", {})
+                if selected_workflow in workflows:
+                    return workflows[selected_workflow].get("note", "")
+            # Otherwise return the model-level note
+            return preset.get("note", "")
+    return ""
+
+
+def get_workflow_config(name, selected_workflow=None):
+    """
+    Get the complete workflow configuration for a preset.
+
+    For single-workflow models, returns the preset config.
+    For multi-workflow models, returns the selected workflow's config
+    merged with the model-level config.
+
+    Args:
+        name: Preset name
+        selected_workflow: For multi-workflow models, the name of the selected workflow
+
+    Returns:
+        dict: Workflow configuration with keys: path, iteratable, full_restart, note, node_overrides
+    """
+    presets = get_comfyui_workflow_presets()
+    if name not in presets:
+        return None
+
+    preset = presets[name]
+    if isinstance(preset, str):
+        return {"path": preset, "iteratable": False, "full_restart": False, "note": "", "node_overrides": {}}
+
+    # For multi-workflow models with a selected workflow
+    if preset.get("is_multi") and selected_workflow:
+        workflows = preset.get("workflows", {})
+        if selected_workflow in workflows:
+            wf = workflows[selected_workflow]
+            return {
+                "path": wf.get("path", ""),
+                "iteratable": wf.get("iteratable", False),
+                "full_restart": wf.get("full_restart", False),
+                "note": wf.get("note", ""),
+                "node_overrides": wf.get("node_overrides", {}),
+            }
+
+    # Single-workflow or default
+    return {
+        "path": preset.get("path", ""),
+        "iteratable": preset.get("iteratable", False),
+        "full_restart": preset.get("full_restart", False),
+        "note": preset.get("note", ""),
+        "node_overrides": preset.get("node_overrides", {}),
+    }
 
 
 # ============================================================================
