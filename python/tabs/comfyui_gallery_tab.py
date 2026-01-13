@@ -11,6 +11,11 @@ from PySide2.QtCore import Qt, QTimer, QThreadPool
 
 from .base_tab import BaseTab
 
+# Supported file extensions
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
+MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | MODEL_EXTENSIONS
+
 
 class ComfyUIGalleryTab(BaseTab):
     """Tab for viewing ComfyUI generated images."""
@@ -84,7 +89,7 @@ class ComfyUIGalleryTab(BaseTab):
         self._user_cache = {}
         self._precache_in_progress = set()  # Users currently being pre-cached
 
-        # Initialize user selector and populate with available users
+        # Initialize user selector (async discovery)
         self._populate_user_selector()
 
         # Hide "View Only" label initially (shown when viewing others' galleries)
@@ -93,11 +98,135 @@ class ComfyUIGalleryTab(BaseTab):
         # Set initial output directory to network path with user subfolder
         self._update_gallery_path()
 
-        # Check for pre-warmed cache from splash screen
-        self._use_prewarm_cache()
+        # Use pre-warmed cache from splash screen (already scanned during startup)
+        # This creates all widgets immediately since data is already available
+        self._use_prewarm_cache_sync()
+
+    def _use_prewarm_cache_sync(self):
+        """Use pre-warmed cache synchronously during initialization.
+
+        Called during initialize() to create widgets immediately using
+        data that was pre-scanned during the splash screen.
+        """
+        try:
+            from gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
+
+            cache = get_prewarm_cache()
+            if cache and cache.get('items'):
+                items = cache['items']
+                print(f"[Gallery] Using pre-warmed cache with {len(items)} items")
+
+                # Clear the cache so it's not reused
+                clear_prewarm_cache()
+
+                # Enrich with workflow metadata synchronously (fast with cached settings)
+                items = self._enrich_prewarm_items(items)
+
+                # Process items and create widgets synchronously
+                self._process_scan_results_sync(items)
+                return
+
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[Gallery] Pre-warm cache error: {e}")
+
+        # No cache available - gallery will be empty until user refreshes
+        # This shouldn't happen normally since splash screen does the scan
+        print("[Gallery] No pre-warm cache available")
+
+    def _process_scan_results_sync(self, items):
+        """Process scan results and create widgets synchronously.
+
+        Used during initialization when we have pre-warmed data.
+        """
+        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+
+        # Cache items for re-sorting without rescanning
+        self._cached_items = items
+
+        # Track all items as known (initial load)
+        self._known_items = set(item['path'] for item in items)
+        self._initial_scan_done = True
+
+        # Sort items based on current sort mode
+        sorted_items = self._sort_items(items)
+
+        # Count by type for status
+        image_count = sum(1 for item in sorted_items if item['type'] == 'image')
+        model_count = sum(1 for item in sorted_items if item['type'] == 'model')
+
+        # Update status
+        total_count = len(sorted_items)
+        if total_count == 0:
+            self.ui.GalleryStatus.setText("No files found")
+        else:
+            parts = []
+            if image_count > 0:
+                parts.append(f"{image_count} image{'s' if image_count != 1 else ''}")
+            if model_count > 0:
+                parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
+            self.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
+
+        # Ensure widget cache exists
+        if not hasattr(self, '_widget_cache'):
+            self._widget_cache = {}
+
+        # Create all widgets synchronously (we're still in splash/loading phase)
+        container = self.ui.galleryThumbnailContainer
+        is_editable = self._is_own_gallery()
+
+        for item in sorted_items:
+            path = item['path']
+            file_type = item['type']
+            item_output_dir = os.path.dirname(path)
+
+            if file_type == 'model':
+                thumbnail = GLBThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=is_editable,
+                    is_new=False
+                )
+                thumbnail.clicked.connect(self._on_thumbnail_clicked)
+                thumbnail.deleted.connect(self._on_item_deleted)
+                thumbnail.viewed.connect(self._on_item_viewed)
+            else:
+                thumbnail = GalleryThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=is_editable,
+                    is_new=False
+                )
+                thumbnail.clicked.connect(self._on_thumbnail_clicked)
+                thumbnail.fullscreen_requested.connect(
+                    lambda img_path=path: self._open_viewer(img_path, fullscreen=True)
+                )
+                thumbnail.copy_settings_requested.connect(self._on_copy_settings_requested)
+                thumbnail.deleted.connect(self._on_item_deleted)
+                thumbnail.viewed.connect(self._on_item_viewed)
+
+            self._widget_cache[path] = thumbnail
+            self._flow_layout.addWidget(thumbnail)
+
+        # Connect scroll events for lazy loading
+        scroll_area = self.ui.galleryScrollArea
+        scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        scroll_area.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+        self._scroll_connected = True
+
+        print(f"[Gallery] Created {len(sorted_items)} widgets synchronously")
+
+        # Defer thumbnail loading until after window is shown and layout is calculated
+        QTimer.singleShot(100, self._load_visible_thumbnails)
 
     def _use_prewarm_cache(self):
-        """Use pre-warmed cache from splash screen if available."""
+        """Use pre-warmed cache from splash screen if available (async version).
+
+        This is called when refreshing after initialization.
+        """
         from ui_components import Worker
 
         try:
@@ -155,6 +284,15 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _start_background_precache(self):
         """Start background pre-caching of other users' galleries."""
+        # DISABLED: Pre-caching was causing UI freezes by overwhelming QThreadPool
+        # The cache will be populated on-demand when user switches to another user
+        return
+
+        # Only run once per session
+        if getattr(self, '_precache_started', False):
+            return
+        self._precache_started = True
+
         if self._source_mode != "network":
             return
 
@@ -181,7 +319,8 @@ class ComfyUIGalleryTab(BaseTab):
 
         self._precache_in_progress.add(username)
 
-        worker = Worker(self._scan_directory, user_path)
+        # Use lightweight scan for precaching (skip metadata loading)
+        worker = Worker(self._scan_directory_lightweight, user_path)
         worker.signals.result.connect(lambda items, u=username: self._on_precache_complete(u, items))
         worker.signals.error.connect(lambda msg, tb, u=username: self._on_precache_error(u, msg))
         QThreadPool.globalInstance().start(worker)
@@ -271,8 +410,8 @@ class ComfyUIGalleryTab(BaseTab):
     # USER SELECTION (Multi-user gallery viewing)
     # =========================================================================
 
-    def _discover_users(self):
-        """Discover available users by scanning the network output path.
+    def _discover_users_sync(self):
+        """Discover available users by scanning the network output path (worker thread).
 
         Returns:
             list: Sorted list of usernames (folder names in network output path)
@@ -289,27 +428,36 @@ class ComfyUIGalleryTab(BaseTab):
                 # Only include directories, skip hidden folders
                 if entry.is_dir() and not entry.name.startswith('.'):
                     users.append(entry.name)
-        except Exception as e:
-            self.log(f"[Gallery] Error discovering users: {e}")
+        except Exception:
             return []
 
         return sorted(users, key=str.lower)
 
     def _populate_user_selector(self):
-        """Populate the available users list and update button text."""
-        # Discover available users
-        self._available_users = self._discover_users()
+        """Populate the available users list asynchronously."""
+        from ui_components import Worker
 
-        # Ensure current user is in the list
+        # Set initial state with just current user
         current_user = self.app_state.user
-        if current_user and current_user not in self._available_users:
-            self._available_users.insert(0, current_user)
-
-        # Update button text
+        self._available_users = [current_user] if current_user else []
         self._update_user_button_text()
-
-        # Update visibility based on source mode
         self._update_user_selector_visibility()
+
+        # Discover other users on worker thread
+        worker = Worker(self._discover_users_sync)
+        worker.signals.result.connect(self._on_users_discovered)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_users_discovered(self, users):
+        """Handle async user discovery completion."""
+        current_user = self.app_state.user
+
+        # Merge discovered users with current user
+        if current_user and current_user not in users:
+            users.insert(0, current_user)
+
+        self._available_users = users
+        self._update_user_button_text()
 
     def _update_user_button_text(self):
         """Update the user button text to show current selection."""
@@ -530,14 +678,20 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_refresh(self):
         """Refresh the gallery with images from the current directory."""
+        import time
+        _t0 = time.perf_counter()
+        print(f"[TIMING] _on_refresh START")
+
         from ui_components import Worker
 
         # Skip if scan already in progress
         if self._scan_in_progress:
+            print(f"[TIMING] _on_refresh SKIP (scan in progress)")
             return
 
         if not self._current_path:
             self.ui.GalleryStatus.setText("Invalid directory")
+            print(f"[TIMING] _on_refresh SKIP (no path)")
             return
 
         # Run scan on worker thread (includes isdir check)
@@ -548,6 +702,7 @@ class ComfyUIGalleryTab(BaseTab):
         QThreadPool.globalInstance().start(worker)
 
         self.ui.GalleryStatus.setText("Scanning...")
+        print(f"[TIMING] _on_refresh worker started: {(time.perf_counter()-_t0)*1000:.1f}ms")
 
     def _scan_directory(self, output_dir):
         """Scan directory recursively for image and 3D model files (runs on worker thread)."""
@@ -559,9 +714,10 @@ class ComfyUIGalleryTab(BaseTab):
         if not os.path.isdir(output_dir):
             return items
 
-        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
-        model_extensions = {'.glb', '.gltf'}
-        supported_extensions = image_extensions | model_extensions
+        # Use module-level constants for supported extensions
+        image_extensions = IMAGE_EXTENSIONS
+        model_extensions = MODEL_EXTENSIONS
+        supported_extensions = SUPPORTED_EXTENSIONS
 
         try:
             # First pass: collect all files grouped by directory
@@ -605,6 +761,47 @@ class ComfyUIGalleryTab(BaseTab):
 
         return items
 
+    def _scan_directory_lightweight(self, output_dir):
+        """Lightweight directory scan that skips metadata loading (for precaching).
+
+        This is faster than _scan_directory because it doesn't load workflow metadata,
+        which requires JSON file I/O. The workflow field is left empty and can be
+        enriched later if needed.
+        """
+        items = []
+
+        if not os.path.isdir(output_dir):
+            return items
+
+        # Use module-level constants for supported extensions
+        image_extensions = IMAGE_EXTENSIONS
+        model_extensions = MODEL_EXTENSIONS
+        supported_extensions = SUPPORTED_EXTENSIONS
+
+        try:
+            for root, dirs, files in os.walk(output_dir):
+                for filename in files:
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext in supported_extensions:
+                        full_path = os.path.join(root, filename)
+                        try:
+                            mtime = os.path.getmtime(full_path)
+                        except OSError:
+                            continue
+                        file_type = 'model' if ext in model_extensions else 'image'
+
+                        items.append({
+                            'path': full_path,
+                            'mtime': mtime,
+                            'type': file_type,
+                            'name': filename.lower(),
+                            'workflow': ''  # Skip metadata loading for speed
+                        })
+        except Exception as e:
+            print(f"Error in lightweight gallery scan: {e}")
+
+        return items
+
     def _on_scan_error(self, msg, tb):
         """Handle scan or prewarm enrichment error."""
         self._scan_in_progress = False
@@ -616,6 +813,10 @@ class ComfyUIGalleryTab(BaseTab):
         Args:
             items: List of dicts with keys: path, mtime, type, name, workflow
         """
+        import time
+        _t0 = time.perf_counter()
+        print(f"[TIMING] _on_scan_complete START with {len(items) if items else 0} items")
+
         self._scan_in_progress = False
 
         # Handle legacy format (tuples or plain paths)
@@ -634,6 +835,7 @@ class ComfyUIGalleryTab(BaseTab):
         current_items = set(file_paths)
         new_items = current_items - self._known_items
 
+        print(f"[TIMING] _on_scan_complete data prep: {(time.perf_counter()-_t0)*1000:.1f}ms")
         self.log(f"[Gallery] Scan complete: {len(file_paths)} items, {len(new_items)} new")
 
         if self._initial_scan_done and new_items:
@@ -651,10 +853,9 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Start background pre-caching of other users on first scan
         if not self._initial_scan_done:
+            self._initial_scan_done = True  # Set BEFORE scheduling to prevent duplicates
             # Delay pre-caching slightly to let the UI settle first
             QTimer.singleShot(1000, self._start_background_precache)
-
-        self._initial_scan_done = True
 
         # Sort items based on current sort mode
         sorted_items = self._sort_items(items)
@@ -691,16 +892,22 @@ class ComfyUIGalleryTab(BaseTab):
         Args:
             items: List of item dicts (already sorted)
         """
+        import time
+        _t0 = time.perf_counter()
+        print(f"[TIMING] _display_items START with {len(items)} items")
+
         # Clear existing thumbnails and widget cache
+        # Keep updates disabled - _create_all_widgets will re-enable when done
         container = self.ui.galleryThumbnailContainer
         container.setUpdatesEnabled(False)
-        try:
-            while self._flow_layout.count():
-                item = self._flow_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-        finally:
-            container.setUpdatesEnabled(True)
+
+        widget_count = self._flow_layout.count()
+        while self._flow_layout.count():
+            item = self._flow_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        print(f"[TIMING] _display_items cleared {widget_count} widgets: {(time.perf_counter()-_t0)*1000:.1f}ms")
 
         # Reset widget cache
         self._widget_cache = {}
@@ -725,9 +932,6 @@ class ComfyUIGalleryTab(BaseTab):
                 parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
             self.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
 
-        # Create all widgets at once (with placeholders), then lazy load visible thumbnails
-        self._create_all_widgets()
-
         # Connect scroll events for lazy loading (if not already connected)
         if not hasattr(self, '_scroll_connected') or not self._scroll_connected:
             scroll_area = self.ui.galleryScrollArea
@@ -735,8 +939,8 @@ class ComfyUIGalleryTab(BaseTab):
             scroll_area.horizontalScrollBar().valueChanged.connect(self._on_scroll)
             self._scroll_connected = True
 
-        # Initial lazy load of visible thumbnails
-        QTimer.singleShot(50, self._load_visible_thumbnails)
+        # Create widgets in batches to avoid blocking UI (lazy load triggered after completion)
+        self._create_all_widgets()
 
     def _reorder_widgets(self, items):
         """Reorder existing widgets without recreating them.
@@ -772,63 +976,94 @@ class ComfyUIGalleryTab(BaseTab):
         QTimer.singleShot(50, self._load_visible_thumbnails)
 
     def _create_all_widgets(self):
-        """Create all thumbnail widgets at once with placeholders (no thumbnail loading yet)."""
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        """Create thumbnail widgets in batches to avoid blocking the UI."""
+        import time
+        self._widget_create_start_time = time.perf_counter()
+        print(f"[TIMING] _create_all_widgets START")
 
         if not hasattr(self, '_pending_items') or not self._pending_items:
+            # Re-enable updates since we're not creating anything
+            self.ui.galleryThumbnailContainer.setUpdatesEnabled(True)
             return
 
         # Ensure widget cache exists
         if not hasattr(self, '_widget_cache'):
             self._widget_cache = {}
 
-        # Block layout updates during batch insertion
+        # Updates already disabled by _display_items, don't toggle
+        # Start batched creation
+        self._widget_create_index = 0
+        self._widget_batch_size = 12  # Create 12 widgets per batch for smoother UI
+        self._is_editable_cache = self._is_own_gallery()
+        self._create_widget_batch()
+
+    def _create_widget_batch(self):
+        """Create a batch of widgets, then schedule the next batch."""
+        import time
+        _batch_start = time.perf_counter()
+
+        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+
         container = self.ui.galleryThumbnailContainer
-        container.setUpdatesEnabled(False)
 
-        # Check if viewing own gallery (for edit/delete permissions)
-        is_editable = self._is_own_gallery()
+        if not hasattr(self, '_pending_items') or self._widget_create_index >= len(self._pending_items):
+            # All widgets created - re-enable updates and trigger layout
+            total_time = (time.perf_counter() - self._widget_create_start_time) * 1000
+            print(f"[TIMING] _create_widget_batch ALL DONE widget creation: {total_time:.1f}ms")
 
-        try:
-            for path, file_type in self._pending_items:
-                is_new = path in self._new_items
-                # Use the file's parent directory for metadata lookup (not gallery root)
-                # Metadata is stored per-workflow subfolder, not at the gallery root
-                item_output_dir = os.path.dirname(path)
-
-                if file_type == 'model':
-                    thumbnail = GLBThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new
-                    )
-                    thumbnail.clicked.connect(self._on_thumbnail_clicked)
-                    thumbnail.deleted.connect(self._on_item_deleted)
-                    thumbnail.viewed.connect(self._on_item_viewed)
-                else:
-                    thumbnail = GalleryThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new
-                    )
-                    thumbnail.clicked.connect(self._on_thumbnail_clicked)
-                    # Capture path in closure properly
-                    thumbnail.fullscreen_requested.connect(
-                        lambda img_path=path: self._open_viewer(img_path, fullscreen=True)
-                    )
-                    thumbnail.copy_settings_requested.connect(self._on_copy_settings_requested)
-                    thumbnail.deleted.connect(self._on_item_deleted)
-                    thumbnail.viewed.connect(self._on_item_viewed)
-
-                # Cache widget by path for fast reordering
-                self._widget_cache[path] = thumbnail
-                self._flow_layout.addWidget(thumbnail)
-        finally:
+            # This can be slow - triggers layout recalculation for all widgets
+            _layout_start = time.perf_counter()
             container.setUpdatesEnabled(True)
+            layout_time = (time.perf_counter() - _layout_start) * 1000
+            print(f"[TIMING] setUpdatesEnabled(True) layout recalc: {layout_time:.1f}ms")
+
+            # Trigger initial lazy load after layout settles
+            QTimer.singleShot(50, self._load_visible_thumbnails)
+            return
+
+        end_index = min(self._widget_create_index + self._widget_batch_size, len(self._pending_items))
+
+        for i in range(self._widget_create_index, end_index):
+            path, file_type = self._pending_items[i]
+            is_new = path in self._new_items
+            item_output_dir = os.path.dirname(path)
+
+            if file_type == 'model':
+                thumbnail = GLBThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=self._is_editable_cache,
+                    is_new=is_new
+                )
+                thumbnail.clicked.connect(self._on_thumbnail_clicked)
+                thumbnail.deleted.connect(self._on_item_deleted)
+                thumbnail.viewed.connect(self._on_item_viewed)
+            else:
+                thumbnail = GalleryThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=self._is_editable_cache,
+                    is_new=is_new
+                )
+                thumbnail.clicked.connect(self._on_thumbnail_clicked)
+                thumbnail.fullscreen_requested.connect(
+                    lambda img_path=path: self._open_viewer(img_path, fullscreen=True)
+                )
+                thumbnail.copy_settings_requested.connect(self._on_copy_settings_requested)
+                thumbnail.deleted.connect(self._on_item_deleted)
+                thumbnail.viewed.connect(self._on_item_viewed)
+
+            self._widget_cache[path] = thumbnail
+            self._flow_layout.addWidget(thumbnail)
+
+        self._widget_create_index = end_index
+        batch_time = (time.perf_counter() - _batch_start) * 1000
+        print(f"[TIMING] _create_widget_batch {end_index}/{len(self._pending_items)}: {batch_time:.1f}ms")
+
+        # Schedule next batch with small delay to keep UI responsive
+        QTimer.singleShot(10, self._create_widget_batch)
 
     def _on_scroll(self, value=None):
         """Handle scroll events - trigger lazy loading of visible thumbnails."""
@@ -841,7 +1076,10 @@ class ComfyUIGalleryTab(BaseTab):
         self._scroll_timer.start(100)  # 100ms debounce
 
     def _load_visible_thumbnails(self):
-        """Load thumbnails for widgets that are currently visible in the viewport."""
+        """Load thumbnails for widgets that are currently visible in the viewport.
+
+        Loads in batches to avoid overwhelming the thread pool.
+        """
         if not hasattr(self, '_widget_cache') or not self._widget_cache:
             return
 
@@ -849,37 +1087,56 @@ class ComfyUIGalleryTab(BaseTab):
         viewport = scroll_area.viewport()
         viewport_rect = viewport.rect()
 
-        # Get the visible area in container coordinates
-        container = self.ui.galleryThumbnailContainer
-
         # Convert viewport rect to container coordinates
         visible_top = scroll_area.verticalScrollBar().value()
         visible_bottom = visible_top + viewport_rect.height()
         visible_left = scroll_area.horizontalScrollBar().value()
         visible_right = visible_left + viewport_rect.width()
 
-        # Add buffer zone (load thumbnails slightly outside visible area for smoother scrolling)
-        buffer = 200  # pixels
+        # Add buffer zone for smoother scrolling
+        buffer = 200
         visible_top = max(0, visible_top - buffer)
         visible_bottom += buffer
         visible_left = max(0, visible_left - buffer)
         visible_right += buffer
 
-        # Check each widget's visibility and load if needed
+        # Collect widgets that need loading (not already loaded)
+        widgets_to_load = []
         for widget in self._widget_cache.values():
             if not widget or not hasattr(widget, 'load_thumbnail_if_needed'):
                 continue
+            if getattr(widget, '_thumbnail_loaded', False):
+                continue
 
-            # Get widget position in container
             widget_rect = widget.geometry()
-
-            # Check if widget intersects with visible area
             if (widget_rect.bottom() >= visible_top and
                 widget_rect.top() <= visible_bottom and
                 widget_rect.right() >= visible_left and
                 widget_rect.left() <= visible_right):
-                # Widget is visible - trigger lazy load
-                widget.load_thumbnail_if_needed()
+                widgets_to_load.append(widget)
+
+        if not widgets_to_load:
+            return
+
+        # Store and start batched loading
+        self._pending_thumbnail_loads = widgets_to_load
+        self._thumbnail_load_index = 0
+        self._load_thumbnail_batch()
+
+    def _load_thumbnail_batch(self):
+        """Load thumbnails one at a time with delays to prevent UI lag."""
+        if not hasattr(self, '_pending_thumbnail_loads'):
+            return
+        if self._thumbnail_load_index >= len(self._pending_thumbnail_loads):
+            return
+
+        # Load one widget at a time to stagger worker completions
+        self._pending_thumbnail_loads[self._thumbnail_load_index].load_thumbnail_if_needed()
+        self._thumbnail_load_index += 1
+
+        # Schedule next with delay so workers don't all finish at once
+        if self._thumbnail_load_index < len(self._pending_thumbnail_loads):
+            QTimer.singleShot(20, self._load_thumbnail_batch)
 
     def _show_new_items_toast(self, image_count, model_count):
         """Show a toast notification for new items added to gallery.

@@ -292,6 +292,90 @@ def wait_for_server(port: int, timeout: int = 120) -> bool:
     return False
 
 
+def signal_server_restart(port: int, health_port: int = None) -> bool:
+    """
+    Signal the persistent ComfyUI server to perform a full restart.
+
+    This sends a POST request to the server's /restart endpoint on the health port.
+    The server will terminate ComfyUI and restart it with the same configuration.
+
+    Args:
+        port: ComfyUI server port
+        health_port: Health check server port (default: port + 1000)
+
+    Returns:
+        True if restart was initiated, False on error
+    """
+    if health_port is None:
+        health_port = port + 1000
+
+    url = f"http://127.0.0.1:{health_port}/restart"
+    print(f"\n{'='*60}")
+    print("SIGNALING SERVER RESTART")
+    print(f"Sending restart request to {url}")
+    print(f"{'='*60}")
+
+    try:
+        req = urllib.request.Request(url, method='POST')
+        response = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(response.read().decode('utf-8'))
+        print(f"Restart response: {result.get('message', 'OK')}")
+        return True
+    except urllib.error.HTTPError as e:
+        print(f"HTTP Error {e.code}: {e.reason}")
+        return False
+    except Exception as e:
+        print(f"Error signaling restart: {e}")
+        return False
+
+
+def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
+    """
+    Wait for server to complete restart and become ready again.
+
+    First waits for server to go down, then waits for it to come back up.
+
+    Args:
+        port: ComfyUI server port
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        True if server is ready again, False on timeout
+    """
+    url = f"http://127.0.0.1:{port}/system_stats"
+    start_time = time.time()
+
+    # First, wait for server to go down (or stay down if restart is fast)
+    print("Waiting for server to restart...")
+    down_detected = False
+    while time.time() - start_time < 30:  # Max 30s to detect restart
+        try:
+            urllib.request.urlopen(url, timeout=2)
+            time.sleep(0.5)
+        except:
+            down_detected = True
+            break
+
+    if not down_detected:
+        print("Warning: Server may not have restarted (still responding)")
+
+    # Now wait for it to come back up
+    print("Waiting for server to become ready...")
+    while time.time() - start_time < timeout:
+        try:
+            req = urllib.request.urlopen(url, timeout=5)
+            if req.status == 200:
+                elapsed = int(time.time() - start_time)
+                print(f"Server restart complete after {elapsed}s")
+                return True
+        except:
+            pass
+        time.sleep(2)
+
+    print(f"Timeout waiting for server restart after {timeout}s")
+    return False
+
+
 def submit_workflow(workflow: dict, port: int) -> str:
     """Submit workflow to ComfyUI API and return prompt_id.
 
@@ -380,14 +464,21 @@ def download_image_from_server(filename: str, subfolder: str, image_type: str, p
 
 
 def move_output_files(comfyui_output_dir: str, target_dir: str, filename_prefix: str,
-                      extensions: tuple = ('.glb', '.gltf', '.fbx', '.obj'),
+                      extensions: tuple = (
+                          # 3D model formats
+                          '.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae',
+                          # Video formats
+                          '.mp4', '.mov', '.avi', '.webm',
+                          # Audio formats
+                          '.wav', '.mp3', '.flac', '.ogg',
+                      ),
                       recent_minutes: int = 10) -> list:
     """
     Move output files from ComfyUI's default output directory to our target directory.
 
-    Some ComfyUI nodes (like Trellis2ExportGLB, UltraShapeSaveGLB) save to the default
-    output folder or subdirectories without an option to specify a custom path. This
-    function finds and moves those files after workflow completion.
+    Some ComfyUI nodes save directly to the default output folder or subdirectories
+    without an option to specify a custom path. This function finds and moves those
+    files after workflow completion.
 
     Files are renamed to include the job prefix for better identification.
 
@@ -395,7 +486,7 @@ def move_output_files(comfyui_output_dir: str, target_dir: str, filename_prefix:
         comfyui_output_dir: ComfyUI's default output directory
         target_dir: Our target directory to move files to
         filename_prefix: Prefix for renamed files (e.g., 'sh0010_luma_tools')
-        extensions: File extensions to look for (default: 3D model formats)
+        extensions: File extensions to look for (default: 3D models, videos, audio)
         recent_minutes: Only move files modified within this many minutes (default: 10)
 
     Returns:
@@ -1102,6 +1193,23 @@ def main():
     if args.persistent:
         # Persistent mode - expect server to be already running (user started it)
         print(f"Persistent mode: connecting to server on port {args.port}...")
+
+        # Check if full restart is requested BEFORE connecting
+        full_restart = getattr(args, 'full_restart', False)
+        if full_restart:
+            print("\nFull restart requested - will restart ComfyUI server before processing")
+            # Signal the server to restart
+            if signal_server_restart(args.port):
+                # Wait for the restart to complete
+                if not wait_for_server_restart(args.port, timeout=300):
+                    print("ERROR: Server restart failed or timed out")
+                    sys.exit(1)
+                print("Server restart complete - continuing with job")
+            else:
+                print("WARNING: Could not signal server restart")
+                print("The health server may not be running (port + 1000)")
+                print("Continuing without restart...")
+
         if not check_server_running(args.port):
             if args.server_not_found == 'wait':
                 # Wait for server to start
@@ -1242,13 +1350,12 @@ def main():
                 print(f"Frame {frame_num} completed successfully", flush=True)
                 successful += 1
 
-                # Move 3D output files from ComfyUI's default output to our target directory
-                # This handles nodes like Trellis2ExportGLB that can't specify custom output paths
+                # Move output files (3D models, videos, audio) from ComfyUI's default output to target
+                # This handles nodes that can't specify custom output paths
                 if args.comfyui_output_dir:
-                    print(f"[Runner] Attempting to move 3D files from ComfyUI output")
+                    print(f"[Runner] Checking for output files to move (3D/video/audio)")
                     print(f"[Runner] ComfyUI output dir: {args.comfyui_output_dir}")
                     print(f"[Runner] Target directory: {args.output_directory}")
-                    print(f"[Runner] Output prefix: {args.output_prefix}")
                     moved = move_output_files(
                         args.comfyui_output_dir,
                         args.output_directory,
@@ -1258,9 +1365,9 @@ def main():
                     if moved:
                         print(f"Moved {len(moved)} output file(s) to target directory")
                     else:
-                        print(f"[Runner] No 3D files found to move - check if ComfyUI wrote to expected location")
+                        print(f"[Runner] No output files found to move")
                 else:
-                    print(f"[Runner] No comfyui_output_dir specified - cannot move 3D files")
+                    print(f"[Runner] No comfyui_output_dir specified - skipping file move")
             else:
                 print(f"Frame {frame_num} failed or timed out", flush=True)
                 failed += 1

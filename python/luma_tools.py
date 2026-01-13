@@ -410,7 +410,6 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_names.append(widget.objectName())
 
         save_tab_order(tab_names)
-        print(f"Tab order saved: {tab_names}")
 
     def _restore_tab_order(self):
         """Restore saved tab order on startup."""
@@ -439,7 +438,6 @@ class LumaShotTools(QtWidgets.QWidget):
                 self.tab_widget.tabBar().moveTab(current_index, target_index)
 
         self.tab_widget.setCurrentIndex(0)
-        print(f"Restored tab order: {saved_order}")
 
     def _check_admin_status(self):
         """Check if current user is an admin."""
@@ -551,6 +549,7 @@ class LumaShotTools(QtWidgets.QWidget):
 def main():
     """Main entry point."""
     import traceback
+    import time
 
     try:
         # Show splash screen
@@ -559,31 +558,95 @@ def main():
         splash.start_animation()
         app.processEvents()
 
-        # Pre-warm gallery (scan directory, generate thumbnails)
-        splash.update_progress(10, "Preparing", "Pre-warming gallery...")
+        # Pre-load settings to populate cache before tabs initialize
+        splash.update_progress(20, "Loading", "Loading settings...")
+        app.processEvents()
+        try:
+            from settings_manager import load_user_settings, load_global_settings
+            load_user_settings()  # Populate user settings cache
+            load_global_settings()  # Populate global settings cache (may hit network)
+        except Exception as e:
+            print(f"Warning: Could not pre-load settings: {e}")
+
+        # Pre-scan gallery directory on worker thread while splash shows
+        splash.update_progress(30, "Loading", "Scanning gallery...")
         app.processEvents()
 
+        # Shared state for progress updates from worker thread
+        gallery_data = {
+            'items': [],
+            'done': False,
+            'error': None,
+            'progress': 0,
+            'message': 'Starting scan...'
+        }
+
+        def progress_callback(pct, message):
+            """Callback for progress updates from prewarm (runs on worker thread)."""
+            # Map prewarm progress (0-100) to splash progress (30-75)
+            gallery_data['progress'] = 30 + int(pct * 0.45)
+            gallery_data['message'] = message
+
+        def scan_gallery_worker():
+            """Scan gallery directory (runs on worker thread)."""
+            try:
+                from gallery_prewarm import prewarm_gallery
+                result = prewarm_gallery(progress_callback=progress_callback)
+                gallery_data['items'] = result.get('items', [])
+                gallery_data['thumbnails_generated'] = result.get('thumbnails_generated', 0)
+            except Exception as e:
+                gallery_data['error'] = str(e)
+                print(f"Warning: Gallery pre-scan failed: {e}")
+            finally:
+                gallery_data['done'] = True
+
+        # Start worker thread for gallery scanning
+        from PySide2.QtCore import QThreadPool, QRunnable
+
+        class ScanWorker(QRunnable):
+            def run(self):
+                scan_gallery_worker()
+
+        worker = ScanWorker()
+        QThreadPool.globalInstance().start(worker)
+
+        # Wait for gallery scan while keeping splash responsive
+        last_message = ""
+        while not gallery_data['done']:
+            app.processEvents()
+            time.sleep(0.016)  # ~60fps polling for smooth updates
+
+            # Update splash with progress from worker thread
+            current_progress = gallery_data['progress']
+            current_message = gallery_data['message']
+            if current_message != last_message:
+                splash.update_progress(current_progress, "Loading", current_message)
+                last_message = current_message
+
+        # Show final count
+        if gallery_data['items']:
+            item_count = len(gallery_data['items'])
+            thumb_count = gallery_data.get('thumbnails_generated', 0)
+            if thumb_count > 0:
+                splash.update_progress(75, "Loading", f"Found {item_count} items, generated {thumb_count} thumbnails")
+            else:
+                splash.update_progress(75, "Loading", f"Found {item_count} items")
+            app.processEvents()
+
+        # Store gallery data for the gallery tab to use
         try:
-            from gallery_prewarm import prewarm_gallery, set_prewarm_cache
-
-            def prewarm_progress(pct, msg):
-                # Map 0-100 to 10-50 range
-                overall = 10 + int(pct * 0.4)
-                splash.update_progress(overall, "Preparing", msg)
-                app.processEvents()
-
-            cache = prewarm_gallery(prewarm_progress)
-            set_prewarm_cache(cache)
+            from gallery_prewarm import set_prewarm_cache
+            set_prewarm_cache({'items': gallery_data['items']})
         except Exception as e:
-            print(f"Gallery pre-warm failed (non-fatal): {e}")
+            print(f"Warning: Could not set prewarm cache: {e}")
 
         # Create main window
-        splash.update_progress(55, "Loading", "Creating main window...")
+        splash.update_progress(80, "Loading", "Creating main window...")
         app.processEvents()
 
         window = LumaShotTools()
 
-        splash.update_progress(90, "Loading", "Finalizing...")
+        splash.update_progress(95, "Loading", "Finalizing...")
         app.processEvents()
 
         # Close splash and show main window

@@ -15,7 +15,14 @@
       "Bash(pip install:*)",
       "Bash(cmd /c \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\activate.bat && pip install \"\"numpy<2\"\"\")",
       "Bash(cmd /c \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pip.exe install \"\"numpy<2\"\"\")",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/pip.exe\" list --format=freeze)",
+      "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/pip.exe\" install pyassimp)",
+      "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -c:*)",
+      "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -m py_compile:*)",
+      "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\":*)",
+      "Bash(powershell -Command:*)",
+      "Bash(l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)"
     ],
     "deny": [],
     "ask": []

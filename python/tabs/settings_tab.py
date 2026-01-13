@@ -368,11 +368,11 @@ class SettingsTab(BaseTab):
 
         if reply == QMessageBox.Yes:
             try:
-                # Clear GLB thumbnail cache
-                from glb_thumbnail_service import get_glb_thumbnail_service
-                service = get_glb_thumbnail_service()
+                # Clear model thumbnail cache
+                from model_thumbnail_service import get_model_thumbnail_service
+                service = get_model_thumbnail_service()
                 service.clear_cache()
-                self.log("Cleared GLB thumbnail cache")
+                self.log("Cleared model thumbnail cache")
 
                 # Clear image thumbnail cache (if it exists)
                 thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
@@ -570,8 +570,6 @@ class SettingsTab(BaseTab):
         for tab_name, checkbox in checkbox_map.items():
             if checkbox:
                 checkbox.setChecked(tab_name in restricted)
-
-        self.log(f"Loaded restricted tabs settings: {restricted}")
 
     def _save_restricted_tabs_settings(self):
         """Save restricted tabs settings from the checkboxes."""

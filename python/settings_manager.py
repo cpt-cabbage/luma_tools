@@ -6,6 +6,7 @@ Handles saving and loading user preferences and global settings.
 
 import os
 import json
+from typing import Optional, Dict, Any
 from config import (
     USER_SETTINGS_DIR,
     USER_SETTINGS_FILE,
@@ -14,6 +15,23 @@ from config import (
     DEFAULT_GLOBAL_SETTINGS_PATH,
     GLOBAL_SETTINGS_FILENAME,
 )
+
+# ============================================================================
+# SETTINGS CACHE
+# Caches settings to avoid repeated disk/network I/O during startup
+# ============================================================================
+
+_user_settings_cache: Optional[Dict[str, Any]] = None
+_global_settings_cache: Optional[Dict[str, Any]] = None
+_global_settings_path_cache: Optional[str] = None
+
+
+def clear_settings_cache():
+    """Clear all settings caches. Call after saving settings."""
+    global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
+    _user_settings_cache = None
+    _global_settings_cache = None
+    _global_settings_path_cache = None
 
 
 def ensure_settings_dir():
@@ -30,27 +48,35 @@ def load_user_settings():
     Returns:
         dict: User settings dictionary with default values if file doesn't exist
     """
+    global _user_settings_cache
+
+    # Return cached settings if available
+    if _user_settings_cache is not None:
+        return _user_settings_cache.copy()
+
     default_settings = {
         "default_passes": DEFAULT_PASSES.copy()
     }
 
     if not os.path.exists(USER_SETTINGS_FILE):
         print("No user settings file found, using defaults")
-        return default_settings
+        _user_settings_cache = default_settings
+        return default_settings.copy()
 
     try:
         with open(USER_SETTINGS_FILE, 'r') as f:
             settings = json.load(f)
-            print(f"Loaded user settings from: {USER_SETTINGS_FILE}")
 
             # Ensure default_passes key exists
             if "default_passes" not in settings:
                 settings["default_passes"] = DEFAULT_PASSES.copy()
 
-            return settings
+            _user_settings_cache = settings
+            return settings.copy()
     except Exception as e:
         print(f"Error loading user settings: {e}")
-        return default_settings
+        _user_settings_cache = default_settings
+        return default_settings.copy()
 
 
 def save_user_settings(settings):
@@ -60,12 +86,14 @@ def save_user_settings(settings):
     Args:
         settings: Dictionary containing user settings
     """
+    global _user_settings_cache
     ensure_settings_dir()
 
     try:
         with open(USER_SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
-            print(f"Saved user settings to: {USER_SETTINGS_FILE}")
+        # Update cache with new settings
+        _user_settings_cache = settings.copy()
     except Exception as e:
         print(f"Error saving user settings: {e}")
 
@@ -302,10 +330,19 @@ def get_global_settings_path():
     Returns:
         str: Path to global settings directory (user override or default)
     """
+    global _global_settings_path_cache
+
+    # Return cached path if available (avoids slow os.path.isdir on network)
+    if _global_settings_path_cache is not None:
+        return _global_settings_path_cache
+
     settings = load_user_settings()
     path = settings.get("global_settings_path")
     if path and os.path.isdir(path):
+        _global_settings_path_cache = path
         return path
+
+    _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
     return DEFAULT_GLOBAL_SETTINGS_PATH
 
 
@@ -316,9 +353,13 @@ def set_global_settings_path(path):
     Args:
         path: Path to global settings directory
     """
+    global _global_settings_path_cache, _global_settings_cache
     settings = load_user_settings()
     settings["global_settings_path"] = path
     save_user_settings(settings)
+    # Clear caches since path changed
+    _global_settings_path_cache = None
+    _global_settings_cache = None
     print(f"Set global settings path to: {path}")
 
 
@@ -342,6 +383,12 @@ def load_global_settings():
     Returns:
         dict: Global settings dictionary
     """
+    global _global_settings_cache
+
+    # Return cached settings if available
+    if _global_settings_cache is not None:
+        return _global_settings_cache.copy()
+
     default_settings = {
         "comfyui_workflow_presets": {},
         "admin_users": ["christophe.leyder"]  # Default admin user
@@ -350,16 +397,18 @@ def load_global_settings():
     settings_file = _get_global_settings_file()
     if not os.path.exists(settings_file):
         print(f"No global settings file found at {settings_file}, using defaults")
-        return default_settings
+        _global_settings_cache = default_settings
+        return default_settings.copy()
 
     try:
         with open(settings_file, 'r') as f:
             settings = json.load(f)
-            print(f"Loaded global settings from: {settings_file}")
-            return settings
+            _global_settings_cache = settings
+            return settings.copy()
     except Exception as e:
         print(f"Error loading global settings: {e}")
-        return default_settings
+        _global_settings_cache = default_settings
+        return default_settings.copy()
 
 
 def save_global_settings(settings):
@@ -369,6 +418,7 @@ def save_global_settings(settings):
     Args:
         settings: Dictionary containing global settings
     """
+    global _global_settings_cache
     _ensure_global_settings_dir()
 
     settings_file = _get_global_settings_file()
@@ -376,6 +426,8 @@ def save_global_settings(settings):
         with open(settings_file, 'w') as f:
             json.dump(settings, f, indent=2)
             print(f"Saved global settings to: {settings_file}")
+        # Update cache with new settings
+        _global_settings_cache = settings.copy()
     except Exception as e:
         print(f"Error saving global settings: {e}")
 
@@ -619,9 +671,11 @@ def get_workflow_preset_note(name, selected_workflow=None):
     """
     Get the note for a workflow preset.
 
+    For multi-workflow models, returns the model-level note (not per-workflow notes).
+
     Args:
         name: Preset name
-        selected_workflow: For multi-workflow models, the name of the selected workflow
+        selected_workflow: Ignored for multi-workflow models (kept for API compatibility)
 
     Returns:
         str: Note text, or empty string if not found
@@ -630,12 +684,7 @@ def get_workflow_preset_note(name, selected_workflow=None):
     if name in presets:
         preset = presets[name]
         if isinstance(preset, dict):
-            # For multi-workflow models with a selected workflow, return that workflow's note
-            if preset.get("is_multi") and selected_workflow:
-                workflows = preset.get("workflows", {})
-                if selected_workflow in workflows:
-                    return workflows[selected_workflow].get("note", "")
-            # Otherwise return the model-level note
+            # Always return the model-level note
             return preset.get("note", "")
     return ""
 

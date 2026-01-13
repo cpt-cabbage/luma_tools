@@ -57,7 +57,7 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
     """
     items = []
     image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
-    model_extensions = {'.glb', '.gltf'}
+    model_extensions = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
     supported_extensions = image_extensions | model_extensions
 
     try:
@@ -84,11 +84,11 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
     return items
 
 
-def prewarm_glb_thumbnails(items: List[Dict],
-                           progress_callback: Optional[Callable] = None,
-                           max_items: int = 20) -> int:
+def prewarm_model_thumbnails(items: List[Dict],
+                              progress_callback: Optional[Callable] = None,
+                              max_items: int = 15) -> int:
     """
-    Pre-generate thumbnails for GLB models that aren't cached.
+    Pre-generate thumbnails for 3D models that aren't cached.
 
     Uses subprocess to avoid OpenGL conflicts. Limits to max_items to prevent
     long delays on first launch with many new models.
@@ -96,21 +96,29 @@ def prewarm_glb_thumbnails(items: List[Dict],
     Args:
         items: List of item dicts from scan_gallery_items
         progress_callback: Optional callback(progress, message) for updates
-        max_items: Maximum number of thumbnails to generate (default 20)
+        max_items: Maximum number of thumbnails to generate (default 15)
 
     Returns:
         Number of thumbnails generated
     """
     try:
-        from glb_thumbnail_service import get_glb_thumbnail_service
-        service = get_glb_thumbnail_service()
+        from model_thumbnail_service import get_model_thumbnail_service
+        service = get_model_thumbnail_service()
     except ImportError:
-        print("[PreWarm] GLB thumbnail service not available")
+        print("[PreWarm] Model thumbnail service not available")
         return 0
 
     # Filter to just models
     models = [item for item in items if item['type'] == 'model']
-    print(f"[PreWarm] Found {len(models)} 3D models total")
+    total_models = len(models)
+
+    if total_models == 0:
+        return 0
+
+    print(f"[PreWarm] Found {total_models} 3D models total")
+
+    if progress_callback:
+        progress_callback(0, f"Checking {total_models} model thumbnails...")
 
     # Check which ones are already cached
     cached_count = 0
@@ -125,20 +133,25 @@ def prewarm_glb_thumbnails(items: List[Dict],
 
     if not uncached:
         if progress_callback:
-            progress_callback(100, f"All {cached_count} thumbnails cached")
+            progress_callback(100, f"{cached_count} model thumbnails ready")
         return 0
 
     # Limit to max_items
     to_generate = uncached[:max_items]
     total = len(to_generate)
     generated = 0
+    skipped = len(uncached) - total
 
-    print(f"[PreWarm] Generating {total} GLB thumbnails (limiting to {max_items})")
+    print(f"[PreWarm] Generating {total} model thumbnails (max {max_items})")
 
     for i, item in enumerate(to_generate):
+        filename = os.path.basename(item['path'])
+        # Truncate long filenames for display
+        display_name = filename[:25] + "..." if len(filename) > 28 else filename
+
         if progress_callback:
             pct = int((i / total) * 100)
-            progress_callback(pct, f"Generating thumbnail {i+1}/{total}")
+            progress_callback(pct, f"Generating thumbnail {i+1}/{total}: {display_name}")
 
         try:
             result = service.generate_thumbnail_sync(item['path'])
@@ -147,8 +160,12 @@ def prewarm_glb_thumbnails(items: List[Dict],
         except Exception as e:
             print(f"[PreWarm] Error generating thumbnail for {item['path']}: {e}")
 
+    # Final message
     if progress_callback:
-        progress_callback(100, f"Generated {generated} thumbnails")
+        if skipped > 0:
+            progress_callback(100, f"Generated {generated} thumbnails ({skipped} queued)")
+        else:
+            progress_callback(100, f"Generated {generated} model thumbnails")
 
     return generated
 
@@ -177,7 +194,7 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     # Step 1: Get gallery path
     if progress_callback:
-        progress_callback(10, "Finding gallery folder...")
+        progress_callback(5, "Locating gallery folder...")
 
     output_dir = get_gallery_output_path()
     if not output_dir:
@@ -191,33 +208,40 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     # Step 2: Scan directory
     if progress_callback:
-        progress_callback(30, "Scanning gallery...")
+        progress_callback(10, "Scanning gallery folder...")
 
     items = scan_gallery_items(output_dir)
     result['items'] = items
 
     image_count = sum(1 for i in items if i['type'] == 'image')
     model_count = sum(1 for i in items if i['type'] == 'model')
+    total_count = len(items)
     print(f"[PreWarm] Found {image_count} images, {model_count} 3D models")
 
     if progress_callback:
-        progress_callback(50, f"Found {len(items)} items")
+        if model_count > 0:
+            progress_callback(25, f"Found {total_count} items ({model_count} 3D models)")
+        else:
+            progress_callback(25, f"Found {total_count} items")
 
-    # Step 3: Pre-generate GLB thumbnails (only for uncached models)
+    # Step 3: Pre-generate model thumbnails (only for uncached models)
     if model_count > 0:
         def thumb_progress(pct, msg):
-            # Map 0-100 to 50-95 range
-            overall_pct = 50 + int(pct * 0.45)
+            # Map 0-100 to 30-95 range
+            overall_pct = 30 + int(pct * 0.65)
             if progress_callback:
                 progress_callback(overall_pct, msg)
 
-        generated = prewarm_glb_thumbnails(items, thumb_progress, max_items=15)
+        generated = prewarm_model_thumbnails(items, thumb_progress, max_items=15)
         result['thumbnails_generated'] = generated
 
         if generated == 0:
             # All were cached, skip to end quickly
             if progress_callback:
-                progress_callback(95, f"{model_count} models cached")
+                progress_callback(95, f"All {model_count} model thumbnails cached")
+    else:
+        if progress_callback:
+            progress_callback(95, f"Found {image_count} images")
 
     if progress_callback:
         progress_callback(100, "Gallery ready")

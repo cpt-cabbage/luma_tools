@@ -25,6 +25,11 @@ from settings_manager import (
     get_comfyui_path, get_comfyui_mode, get_comfyui_python_path,
     get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout
 )
+from comfyui_node_configs import (
+    EDITABLE_NODE_CONFIGS,
+    WIDGET_MAPPINGS,
+    SKIP_NODE_TYPES,
+)
 
 
 def load_workflow(workflow_path: str) -> Dict[str, Any]:
@@ -52,30 +57,6 @@ class EditableNode:
     current_value: Any = None
     options: List[str] = field(default_factory=list)  # For combo boxes
     condition_node: Optional[str] = None  # Node name that controls visibility (from @if_<name> syntax)
-
-
-# Mapping of node types to their editable widget configurations
-# Format: {node_type: [(widget_index, widget_name, widget_type), ...]}
-EDITABLE_NODE_CONFIGS = {
-    'LoadImage': [(0, 'image', 'image')],
-    'TextEncodeQwenImageEditPlus': [(0, 'prompt', 'text')],
-    'CLIPTextEncode': [(0, 'text', 'text')],
-    'HYMotionEncodeText': [(0, 'text', 'text')],  # HY-Motion text prompt
-    'KSampler': [
-        (0, 'seed', 'int'),
-        (2, 'steps', 'int'),
-        (3, 'cfg', 'float'),
-    ],
-    'SaveImage': [(0, 'filename_prefix', 'string')],
-    'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],  # output_dir auto-set to use main output
-    'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # TRELLIS2 GLB export
-    # UltraShape nodes
-    'UltraShapeSaveGLB': [(2, 'filename_prefix', 'string')],  # UltraShape GLB/OBJ export
-    # Switch nodes - used as toggle/boolean when they have exactly 2 inputs
-    'easy anythingIndexSwitch': [(0, 'index', 'toggle')],  # Index switch as toggle (0/1)
-    # 3D model loading
-    'Load3D': [(0, 'model_file', '3d_model')],  # Load 3D model for preview/manipulation
-}
 
 
 def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
@@ -226,6 +207,67 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     return editable_nodes
 
 
+def _extract_widget_names_from_node(node: Dict[str, Any]) -> Optional[List[str]]:
+    """
+    Extract widget names from a node's inputs array.
+
+    ComfyUI workflow nodes contain an 'inputs' array where each input with a
+    'widget' property represents a widget. The order of these widget-inputs
+    corresponds to the order of values in 'widgets_values'.
+
+    IMPORTANT: ComfyUI has a special 'control_after_generate' widget that appears
+    in widgets_values immediately after seed/noise_seed widgets, but is NOT listed
+    in the inputs array. We try inserting placeholders for it, but validate the
+    count matches before returning.
+
+    Args:
+        node: Node dictionary from workflow
+
+    Returns:
+        List of widget names in order, or None if extraction failed.
+        Names may include None for widgets we should skip (like control_after_generate).
+    """
+    inputs_spec = node.get('inputs', [])
+    widgets_values = node.get('widgets_values', [])
+
+    if not inputs_spec or not widgets_values:
+        return None
+
+    # Seed widget names that have control_after_generate following them
+    SEED_WIDGET_NAMES = {'seed', 'noise_seed'}
+
+    # Collect inputs that have widget properties (these are the widgets)
+    base_widget_names = []
+    for inp in inputs_spec:
+        widget_def = inp.get('widget')
+        if widget_def and isinstance(widget_def, dict):
+            widget_name = widget_def.get('name')
+            if widget_name:
+                base_widget_names.append(widget_name)
+
+    if not base_widget_names:
+        return None
+
+    # Check if base names match (no control_after_generate needed)
+    if len(base_widget_names) == len(widgets_values):
+        return base_widget_names
+
+    # Try adding control_after_generate placeholders after seed widgets
+    widget_names_with_placeholders = []
+    for name in base_widget_names:
+        widget_names_with_placeholders.append(name)
+        if name in SEED_WIDGET_NAMES:
+            widget_names_with_placeholders.append(None)  # None = skip this value
+
+    # Check if names with placeholders match
+    if len(widget_names_with_placeholders) == len(widgets_values):
+        return widget_names_with_placeholders
+
+    # Neither approach worked - return None to fall back to manual mapping
+    # This handles nodes with button widgets or other special cases
+    return None
+
+
 def is_api_format(workflow: Dict[str, Any]) -> bool:
     """
     Check if workflow is in API format vs UI/nodes format.
@@ -243,6 +285,32 @@ def is_api_format(workflow: Dict[str, Any]) -> bool:
             return True
 
     return False
+
+
+def _build_subgraph_widget_map(workflow: Dict[str, Any]) -> Dict[str, List[str]]:
+    """
+    Build a mapping of subgraph UUIDs to their widget names from workflow definitions.
+
+    Args:
+        workflow: Workflow dictionary containing 'definitions' section
+
+    Returns:
+        Dict mapping subgraph UUID -> list of input names that act as widgets
+    """
+    subgraph_map = {}
+    definitions = workflow.get('definitions', {})
+    subgraphs = definitions.get('subgraphs', [])
+
+    for sg in subgraphs:
+        sg_id = sg.get('id')
+        if sg_id:
+            # Get input names from subgraph definition - these become widgets
+            inputs = sg.get('inputs', [])
+            widget_names = [inp.get('name') for inp in inputs if inp.get('name')]
+            if widget_names:
+                subgraph_map[sg_id] = widget_names
+
+    return subgraph_map
 
 
 def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
@@ -264,17 +332,11 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
     nodes = workflow.get('nodes', [])
     links = workflow.get('links', [])
 
+    # Build subgraph widget map for UUID node types
+    subgraph_widgets = _build_subgraph_widget_map(workflow)
+
     # First pass: collect all node IDs that will be skipped (muted/bypassed)
     skipped_node_ids = set()
-    skip_types = [
-        'Reroute', 'Note', 'PrimitiveNode',
-        # Note/comment nodes from various extensions
-        'MarkdownNote', 'CR Text', 'ShowText', 'ShowTextForGPT',
-        'Note+', 'NoteNode', 'CommentNode',
-        # Preview/display nodes that don't affect output
-        # NOTE: Preview3D is NOT skipped - it can trigger execution of 3D pipelines
-        'PreviewImage', 'PreviewBridge',
-    ]
     for node in nodes:
         node_id = node.get('id')
         node_type = node.get('type')
@@ -283,8 +345,8 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         if node_mode in (2, 4):
             skipped_node_ids.add(node_id)
             print(f"Will skip node {node_id} ({node_type}) - mode {node_mode} (muted/bypassed)")
-        # Skip certain node types
-        elif node_type in skip_types or node_type is None:
+        # Skip certain node types (defined in comfyui_node_configs.py)
+        elif node_type in SKIP_NODE_TYPES or node_type is None:
             skipped_node_ids.add(node_id)
 
     print(f"Skipped node IDs: {skipped_node_ids}")
@@ -331,129 +393,40 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
         # Then, handle widget values
         # Widget values are stored in order of the node's widget definitions
-        # We need to map them to input names based on the node type
-        # This is a simplified mapping - real conversion requires node definitions
+        # We use a multi-tier approach to discover widget names:
+        # 1. Auto-extract from workflow's inputs array (most reliable)
+        # 2. Fall back to manual WIDGET_MAPPINGS (for edge cases)
+        # 3. Warn if both fail
 
-        # Common widget input names by node type
-        # Order matters - widgets_values are positional
-        widget_mappings = {
-            # Core ComfyUI nodes
-            'LoadImage': ['image', 'upload'],
-            'SaveImage': ['filename_prefix'],
-            'KSampler': ['seed', 'control_after_generate', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise'],
-            'KSamplerAdvanced': ['add_noise', 'noise_seed', 'control_after_generate', 'steps', 'cfg', 'sampler_name', 'scheduler', 'start_at_step', 'end_at_step', 'return_with_leftover_noise'],
-            'SamplerCustomAdvanced': ['noise_seed', 'control_after_generate'],
-            'CLIPTextEncode': ['text'],
-            'EmptyLatentImage': ['width', 'height', 'batch_size'],
-            'VAEDecode': [],
-            'VAEEncode': [],
-            'CheckpointLoaderSimple': ['ckpt_name'],
-            'LoraLoader': ['lora_name', 'strength_model', 'strength_clip'],
-            # Loader nodes
-            'VAELoader': ['vae_name'],
-            'CLIPLoader': ['clip_name', 'type', 'device'],
-            'UNETLoader': ['unet_name', 'weight_dtype'],
-            'LoraLoaderModelOnly': ['lora_name', 'strength_model'],
-            'DualCLIPLoader': ['clip_name1', 'clip_name2', 'type'],
-            # Sampler/scheduler nodes
-            'KSamplerSelect': ['sampler_name'],
-            'BasicScheduler': ['scheduler', 'steps', 'denoise'],
-            'BasicGuider': [],
-            'RandomNoise': ['noise_seed', 'control_after_generate'],
-            'SplitSigmas': ['step'],
-            'FlipSigmas': [],
-            # Model modification nodes
-            'ModelSamplingAuraFlow': ['shift'],
-            'ModelSamplingFlux': ['max_shift', 'base_shift', 'width', 'height'],
-            'CFGNorm': ['strength'],
-            'PatchModelAddDownscale': ['block_number', 'downscale_factor', 'start_percent', 'end_percent', 'downscale_after_skip', 'downscale_method', 'upscale_method'],
-            # Text/prompt nodes
-            'TextEncodeQwenImageEditPlus': ['prompt'],
-            'CLIPTextEncodeFlux': ['clip_l', 'guidance'],
-            'FluxGuidance': ['guidance'],
-            # Image processing nodes
-            'FluxKontextImageScale': [],  # No widgets, just connections
-            'ResizeImagesByLongerEdge': ['longer_edge'],
-            'ImageScale': ['upscale_method', 'width', 'height', 'crop'],
-            'ImageScaleBy': ['upscale_method', 'scale_by'],
-            'ImageInvert': [],
-            'ImageBatch': [],
-            'RepeatLatentBatch': ['amount'],
-            # Latent nodes
-            'LatentFromBatch': ['batch_index', 'length'],
-            'SetLatentNoiseMask': [],
-            'EmptySD3LatentImage': ['width', 'height', 'batch_size'],
-            # Conditioning nodes
-            'ConditioningCombine': [],
-            'ConditioningSetTimestepRange': ['start', 'end'],
-            'InstructPixToPixConditioning': [],
-            # Utility nodes
-            'GetImageSizeAndCount': [],
-            'CropImage': ['width', 'height', 'x', 'y'],
-            # Note/display nodes (no widgets needed in API)
-            'MarkdownNote': [],
-            # Image scaling nodes
-            'ImageScaleToTotalPixels': ['upscale_method', 'megapixels', 'resolution_steps'],
-            # Flux Kontext nodes
-            'FluxKontextMultiReferenceLatentMethod': ['reference_latents_method'],
-            # HYMotion nodes
-            'HYMotionLoadNetwork': ['model_name'],
-            'HYMotionLoadLLMGGUF': ['gguf_file'],
-            'HYMotionGenerate': ['duration', 'seed', 'control_after_generate', 'cfg_scale', 'num_samples'],
-            'HYMotionPreview': ['sample_index', 'frame_step', 'image_size'],
-            'HYMotionEncodeText': ['text'],
-            'HYMotionExportFBX': ['output_dir', 'filename_prefix'],
-            # TRELLIS2 nodes (3D mesh generation)
-            'LoadTrellis2Models': ['resolution', 'keep_model_loaded', 'attn_backend'],
-            'Trellis2GetConditioning': ['include_1024', 'background_color'],
-            'Trellis2ImageToShape': ['seed', 'control_after_generate', 'ss_guidance_strength', 'ss_sampling_steps', 'shape_guidance_strength', 'shape_sampling_steps'],
-            'Trellis2ShapeToTexturedMesh': ['seed', 'control_after_generate', 'tex_guidance_strength', 'tex_sampling_steps'],
-            'Trellis2ExportGLB': ['decimation_target', 'texture_size', 'remesh', 'filename_prefix'],
-            'Trellis2RemoveBackground': ['low_vram'],
-            # Mask nodes
-            'InvertMask': [],
-            'MaskPreview': [],
-            # UltraShape nodes
-            'UltraShapeLoadModel': ['checkpoint', 'config', 'dtype', 'low_vram'],
-            'UltraShapeLoadCoarseMesh': ['mesh_path', 'normalize_scale', 'num_sharp_points', 'num_uniform_points', 'num_latents'],
-            'UltraShapeRefine': ['steps', 'guidance_scale', 'octree_resolution', 'num_chunks', 'mc_level', 'box_v', 'seed', 'control_after_generate', 'remove_bg'],
-            'UltraShapeSaveGLB': ['output_dir', 'filename_prefix', 'file_format'],
-            # Switch nodes
-            'easy anythingIndexSwitch': ['index'],
-            # Load3D node - widgets_values has 7 items in this order:
-            # [0]: model_file, [1-3]: button text (upload3dmodel, uploadExtraResources, clear),
-            # [4]: extra, [5]: width, [6]: height
-            # We need to map all positions even for button widgets to get correct offsets
-            'Load3D': ['model_file', None, None, None, None, 'width', 'height'],
-        }
+        if widgets_values:
+            # Tier 1: Try to extract widget names from the node's inputs array
+            widget_names = _extract_widget_names_from_node(node)
 
-        # Get widget names for this node type
-        widget_names = widget_mappings.get(node_type, None)
+            # Tier 2: Check if this is a subgraph node (UUID type) with definition
+            if widget_names is None and node_type in subgraph_widgets:
+                widget_names = subgraph_widgets[node_type]
+                # Subgraph widgets might have extra None values for connected inputs
+                # Pad with None if needed
+                while len(widget_names) < len(widgets_values):
+                    widget_names = [None] + widget_names  # Prepend None for linked inputs
 
-        # For nodes in our mapping, use the defined widget order
-        if widgets_values and widget_names is not None:
-            for i, widget_name in enumerate(widget_names):
-                # Skip None entries (placeholder for button/UI-only widgets)
-                if widget_name is None:
-                    continue
-                if i < len(widgets_values) and widget_name not in inputs:
-                    value = widgets_values[i]
-                    # Skip control_after_generate - it's not an actual input
-                    if widget_name != 'control_after_generate':
-                        inputs[widget_name] = value
-        elif widgets_values and widget_names is None:
-            # For unknown nodes, try to extract widgets from node definition
-            # Look for 'widgets' in the node which may contain widget specs
-            node_widgets = node.get('widgets', [])
-            if node_widgets:
-                for i, widget in enumerate(node_widgets):
-                    if i < len(widgets_values):
-                        widget_name = widget.get('name')
-                        if widget_name and widget_name not in inputs:
-                            inputs[widget_name] = widgets_values[i]
+            # Tier 3: Fall back to manual mappings if auto-extraction failed
+            if widget_names is None:
+                widget_names = WIDGET_MAPPINGS.get(node_type, None)
+                if widget_names is not None:
+                    print(f"Using manual mapping for '{node_type}' (no widget info in workflow)")
+
+            # Apply widget values using discovered names
+            if widget_names is not None:
+                for i, widget_name in enumerate(widget_names):
+                    # Skip None entries (placeholder for control_after_generate or button widgets)
+                    if widget_name is None:
+                        continue
+                    if i < len(widgets_values) and widget_name not in inputs:
+                        inputs[widget_name] = widgets_values[i]
             else:
-                # Unknown node type without widget definitions
-                print(f"Warning: Unknown node type '{node_type}' with {len(widgets_values)} widget values - may have missing inputs")
+                # Tier 3: No widget info available - warn but continue
+                print(f"Warning: Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
 
         api_workflow[node_id] = {
             'class_type': node_type,
@@ -663,6 +636,11 @@ def modify_workflow_api_format(
             inputs['filename_prefix'] = output_prefix
             print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
 
+        # Trellis2ExportMesh nodes - set output prefix (always apply)
+        elif class_type == 'Trellis2ExportMesh':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
+
         # UltraShapeSaveGLB nodes - set output prefix (always apply)
         # NOTE: output_dir cannot be reliably cleared - node writes to subdirectory regardless
         # The move_output_files function searches recursively to handle this
@@ -679,6 +657,11 @@ def modify_workflow_api_format(
         elif class_type == 'Trellis2ShapeToTexturedMesh':
             inputs['seed'] = seed
             print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
+
+        # Trellis2MeshWithVoxelAdvancedGenerator nodes - set seed (always apply)
+        elif class_type == 'Trellis2MeshWithVoxelAdvancedGenerator':
+            inputs['seed'] = seed
+            print(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
 
         # KSampler nodes - set seed (always apply)
         elif class_type == 'KSampler':

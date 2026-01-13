@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.26
+- Introduce multi-workflow models allowing multiple workflows per preset with individual settings - Add UI components for workflow selection and notes display in ComfyUI tab - Implement metadata caching and batch loading for improved gallery performance - Update workflow presets structure
+
 ## Version 0.25
 - Implement lazy loading for gallery thumbnails to improve performance - Updates to thumbnaill rendering - Add auto-extract textures option for 3D model exports - Add server not found behavior settings for persistent mode - Add regenerate thumbnails button in settings
 

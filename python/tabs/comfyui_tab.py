@@ -476,8 +476,8 @@ class ComfyUITab(BaseTab):
         # Create edit dialog
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle(f"Edit Model: {current_name}")
-        dialog.setMinimumWidth(700)
-        dialog.setMinimumHeight(600)
+        dialog.setMinimumWidth(800)
+        dialog.setMinimumHeight(750)
 
         layout = QVBoxLayout(dialog)
 
@@ -551,14 +551,24 @@ class ComfyUITab(BaseTab):
         multi_workflow_layout = QVBoxLayout(multi_workflow_widget)
         multi_workflow_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Model-level note for multi-workflow models
+        multi_note_label = QLabel("Model Note:")
+        multi_workflow_layout.addWidget(multi_note_label)
+
+        multi_note_edit = QtWidgets.QPlainTextEdit()
+        multi_note_edit.setPlaceholderText("Add a note or description for this model...")
+        multi_note_edit.setPlainText(current_note)  # Use the model-level note
+        multi_note_edit.setMaximumHeight(60)
+        multi_workflow_layout.addWidget(multi_note_edit)
+
         workflows_group = QtWidgets.QGroupBox("Workflows")
         workflows_group_layout = QVBoxLayout(workflows_group)
 
         # Workflows list with scroll area
         workflows_scroll = QtWidgets.QScrollArea()
         workflows_scroll.setWidgetResizable(True)
-        workflows_scroll.setMinimumHeight(200)
-        workflows_scroll.setMaximumHeight(300)
+        workflows_scroll.setMinimumHeight(250)
+        workflows_scroll.setMaximumHeight(350)
 
         workflows_container = QWidget()
         workflows_list_layout = QVBoxLayout(workflows_container)
@@ -569,7 +579,7 @@ class ComfyUITab(BaseTab):
 
         # Add workflow button
         add_workflow_btn = QPushButton("+ Add Workflow")
-        add_workflow_btn.setFixedWidth(120)
+        add_workflow_btn.setMinimumWidth(130)
         workflows_group_layout.addWidget(add_workflow_btn)
 
         multi_workflow_layout.addWidget(workflows_group)
@@ -599,7 +609,7 @@ class ComfyUITab(BaseTab):
 
             delete_wf_btn = QPushButton("Remove")
             delete_wf_btn.setStyleSheet("QPushButton { color: #ef4444; }")
-            delete_wf_btn.setFixedWidth(70)
+            delete_wf_btn.setFixedWidth(80)
             header_row.addWidget(delete_wf_btn)
             entry_layout.addLayout(header_row)
 
@@ -608,7 +618,7 @@ class ComfyUITab(BaseTab):
             wf_path_edit = QLineEdit(wf_config.get("path", ""))
             wf_path_edit.setPlaceholderText("Workflow JSON file...")
             wf_browse_btn = QPushButton("Browse...")
-            wf_browse_btn.setFixedWidth(80)
+            wf_browse_btn.setFixedWidth(90)
             path_row.addWidget(QLabel("File:"))
             path_row.addWidget(wf_path_edit)
             path_row.addWidget(wf_browse_btn)
@@ -633,6 +643,116 @@ class ComfyUITab(BaseTab):
             note_row.addWidget(wf_note_edit)
             entry_layout.addLayout(note_row)
 
+            # Editable Nodes section (collapsible)
+            nodes_header_row = QHBoxLayout()
+            nodes_toggle_btn = QPushButton("Show Editable Nodes")
+            nodes_toggle_btn.setMinimumWidth(160)
+            nodes_toggle_btn.setCheckable(True)
+            nodes_toggle_btn.setChecked(False)
+            nodes_header_row.addWidget(nodes_toggle_btn)
+            nodes_header_row.addStretch()
+            entry_layout.addLayout(nodes_header_row)
+
+            # Nodes container (hidden by default)
+            nodes_container = QWidget()
+            nodes_container.setVisible(False)
+            nodes_container_layout = QVBoxLayout(nodes_container)
+            nodes_container_layout.setContentsMargins(0, 5, 0, 0)
+            nodes_container_layout.setSpacing(4)
+
+            # Scroll area for nodes
+            nodes_scroll = QtWidgets.QScrollArea()
+            nodes_scroll.setWidgetResizable(True)
+            nodes_scroll.setMaximumHeight(150)
+            nodes_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3c3c; }")
+
+            nodes_scroll_widget = QWidget()
+            nodes_scroll_layout = QVBoxLayout(nodes_scroll_widget)
+            nodes_scroll_layout.setContentsMargins(5, 5, 5, 5)
+            nodes_scroll_layout.setSpacing(4)
+            nodes_scroll.setWidget(nodes_scroll_widget)
+            nodes_container_layout.addWidget(nodes_scroll)
+
+            entry_layout.addWidget(nodes_container)
+
+            # Store node override widgets for this workflow
+            wf_node_override_widgets = {}
+            current_wf_node_overrides = wf_config.get("node_overrides", {})
+
+            def toggle_nodes_visibility(checked):
+                nodes_container.setVisible(checked)
+                nodes_toggle_btn.setText("Hide Editable Nodes" if checked else "Show Editable Nodes")
+                if checked and nodes_scroll_layout.count() == 0:
+                    # Refresh nodes when first shown
+                    refresh_wf_editable_nodes()
+
+            nodes_toggle_btn.toggled.connect(toggle_nodes_visibility)
+
+            def refresh_wf_editable_nodes():
+                """Refresh the editable nodes list for this workflow."""
+                # Clear existing widgets
+                while nodes_scroll_layout.count():
+                    item = nodes_scroll_layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+                wf_node_override_widgets.clear()
+
+                workflow_path = wf_path_edit.text().strip()
+                if not workflow_path or not os.path.exists(workflow_path):
+                    no_nodes_label = QLabel("No workflow selected or file not found")
+                    no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
+                    nodes_scroll_layout.addWidget(no_nodes_label)
+                    return
+
+                editable_nodes = extract_editable_nodes(workflow_path)
+                if not editable_nodes:
+                    no_nodes_label = QLabel("No editable nodes found")
+                    no_nodes_label.setStyleSheet("color: #888; font-style: italic;")
+                    nodes_scroll_layout.addWidget(no_nodes_label)
+                    return
+
+                for node in editable_nodes:
+                    override = current_wf_node_overrides.get(node.title, {})
+                    is_enabled = override.get("enabled", True)
+                    default_value = override.get("default_value", "")
+
+                    node_row = QWidget()
+                    node_row_layout = QHBoxLayout(node_row)
+                    node_row_layout.setContentsMargins(0, 0, 0, 0)
+                    node_row_layout.setSpacing(6)
+
+                    enable_check = QtWidgets.QCheckBox()
+                    enable_check.setChecked(is_enabled)
+                    enable_check.setToolTip("Show this node in the UI")
+                    enable_check.setFixedWidth(20)
+                    node_row_layout.addWidget(enable_check)
+
+                    type_indicator = f" ({node.widget_type})" if node.widget_type != 'text' else ""
+                    node_name_label = QLabel(f"{node.display_name}{type_indicator}")
+                    node_name_label.setFixedWidth(150)
+                    node_name_label.setStyleSheet("color: #ccc;")
+                    node_row_layout.addWidget(node_name_label)
+
+                    if node.widget_type in ('text', 'string'):
+                        default_input = QLineEdit()
+                        default_input.setPlaceholderText("Default value...")
+                        default_input.setText(default_value)
+                        default_input.setStyleSheet("background-color: #2a2a2a;")
+                        node_row_layout.addWidget(default_input, 1)
+                    else:
+                        default_input = None
+                        spacer = QLabel("")
+                        node_row_layout.addWidget(spacer, 1)
+
+                    nodes_scroll_layout.addWidget(node_row)
+                    wf_node_override_widgets[node.title] = {
+                        "enable_check": enable_check,
+                        "default_input": default_input,
+                        "node": node
+                    }
+
+                nodes_scroll_layout.addStretch()
+
             # Generate unique key for this entry
             import uuid
             entry_key = str(uuid.uuid4())[:8]
@@ -645,7 +765,9 @@ class ComfyUITab(BaseTab):
                 "iteratable": wf_iteratable,
                 "full_restart": wf_full_restart,
                 "note_edit": wf_note_edit,
-                "node_overrides": wf_config.get("node_overrides", {}),
+                "node_overrides": current_wf_node_overrides,
+                "node_override_widgets": wf_node_override_widgets,
+                "refresh_nodes": refresh_wf_editable_nodes,
             }
 
             # Connect browse button
@@ -656,6 +778,9 @@ class ComfyUITab(BaseTab):
                 )
                 if file_path:
                     wf_path_edit.setText(file_path)
+                    # Refresh nodes if visible
+                    if nodes_container.isVisible():
+                        refresh_wf_editable_nodes()
 
             wf_browse_btn.clicked.connect(browse_wf)
 
@@ -875,12 +1000,29 @@ class ComfyUITab(BaseTab):
                     wf_name = entry_data["name_edit"].text().strip()
                     wf_path = entry_data["path_edit"].text().strip()
                     if wf_name and wf_path:  # Only include if both name and path are set
+                        # Collect node overrides from widgets if they were populated
+                        wf_node_overrides = {}
+                        node_override_widgets = entry_data.get("node_override_widgets", {})
+                        if node_override_widgets:
+                            for node_title, widgets in node_override_widgets.items():
+                                is_enabled = widgets["enable_check"].isChecked()
+                                default_input = widgets["default_input"]
+                                default_value = default_input.text().strip() if default_input else ""
+                                if not is_enabled or default_value:
+                                    wf_node_overrides[node_title] = {
+                                        "enabled": is_enabled,
+                                        "default_value": default_value
+                                    }
+                        else:
+                            # Use existing node_overrides if widgets weren't shown
+                            wf_node_overrides = entry_data.get("node_overrides", {})
+
                         new_workflows[wf_name] = {
                             "path": wf_path,
                             "note": entry_data["note_edit"].text().strip(),
                             "iteratable": entry_data["iteratable"].isChecked(),
                             "full_restart": entry_data["full_restart"].isChecked(),
-                            "node_overrides": entry_data.get("node_overrides", {}),
+                            "node_overrides": wf_node_overrides,
                         }
 
                 if not new_workflows:
@@ -890,7 +1032,7 @@ class ComfyUITab(BaseTab):
                 # Get the first workflow path as default for compatibility
                 first_wf = list(new_workflows.values())[0]
                 new_path = first_wf["path"]
-                new_note = ""  # Multi-workflow models have notes per workflow
+                new_note = multi_note_edit.toPlainText().strip()  # Model-level note
                 new_iteratable = False
                 new_full_restart = False
                 new_node_overrides = {}

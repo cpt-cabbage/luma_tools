@@ -125,8 +125,6 @@ class BaseTab(ABC):
     def log(self, message: str):
         """Emit a log message signal."""
         self.signals.log_message.emit(message)
-        # Also print for compatibility
-        print(message)
 
     def set_status(self, message: str):
         """Emit a status update signal."""

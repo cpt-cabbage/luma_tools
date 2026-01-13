@@ -21,7 +21,12 @@
           "note": "",
           "iteratable": true,
           "full_restart": false,
-          "node_overrides": {}
+          "node_overrides": {
+            "Negative Prompt_editable": {
+              "enabled": false,
+              "default_value": ""
+            }
+          }
         }
       }
     },
@@ -62,6 +67,15 @@
           "default_value": ""
         }
       },
+      "is_multi": false
+    },
+    "pop": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2509.json",
+      "description": "",
+      "iteratable": true,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
       "is_multi": false
     }
   },

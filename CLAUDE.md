@@ -74,8 +74,12 @@ Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 | `cleanup_service.py` | File cleanup for renders/USD/HIP files |
 | `file_operations.py` | File utilities (find renders, normalize paths) |
 | `thumbnail_service.py` | EXR thumbnail generation with OIIO and caching |
-| `glb_thumbnail_service.py` | GLB/GLTF 3D model thumbnail generation with trimesh/pyrender |
-| `glb_viewer.py` | Interactive 3D viewer dialog using QOpenGLWidget |
+| `model_loader.py` | Universal 3D model loader (GLB, FBX, OBJ, USD) using Open3D/trimesh |
+| `model_viewer.py` | Enhanced 3D viewer with textures, skeletons, and animation playback |
+| `model_thumbnail_service.py` | Multi-format 3D thumbnail generation |
+| `model_thumbnail_renderer.py` | Subprocess renderer for 3D thumbnails |
+| `glb_thumbnail_service.py` | (Deprecated) Redirects to model_thumbnail_service |
+| `glb_viewer.py` | (Legacy) Basic 3D viewer, superseded by model_viewer |
 
 ### ComfyUI Integration
 
@@ -239,6 +243,37 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 ## Development
 
 No build process - runs directly from source. Venv location: `python/venv/`
+
+### Running Python Scripts on Windows (Claude Code)
+
+**IMPORTANT:** On Windows, the Bash tool runs in a compatibility layer that doesn't handle Windows paths well. Always use PowerShell to run Python scripts:
+
+```bash
+# CORRECT - Use PowerShell with full paths
+powershell -Command "& 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python\venv\Scripts\python.exe' 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python\script.py'"
+
+# CORRECT - PowerShell for simple commands
+powershell -Command "Remove-Item -Force 'path\to\file'"
+powershell -Command "Test-Path 'path\to\file'"
+```
+
+**What NOT to do:**
+```bash
+# WRONG - cd /d is cmd.exe syntax, doesn't work in bash
+cd /d "l:\path" && python script.py
+
+# WRONG - Direct Windows paths get mangled
+l:\path\python.exe script.py
+
+# WRONG - cmd /c often hangs or doesn't capture output properly
+cmd /c "python script.py"
+```
+
+**For inline Python code**, write to a temp file first, then execute:
+```bash
+# Write test script, then run it
+powershell -Command "& 'path\to\python.exe' 'path\to\test_script.py'"
+```
 
 ### Debugging
 

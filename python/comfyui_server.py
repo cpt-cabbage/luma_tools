@@ -51,6 +51,9 @@ server_state = {
     'cache_models': False,
     'cache_dir': None,
     'comfyui_path': None,
+    # Restart support - stores startup config
+    'restart_requested': False,
+    'startup_config': None,  # Stores args for restart
 }
 
 
@@ -69,6 +72,29 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self._handle_status()
         else:
             self.send_error(404, 'Not Found')
+
+    def do_POST(self):
+        """Handle POST requests."""
+        if self.path == '/restart':
+            self._handle_restart()
+        else:
+            self.send_error(404, 'Not Found')
+
+    def _handle_restart(self):
+        """Signal a full ComfyUI restart."""
+        print("\n" + "=" * 60)
+        print("RESTART REQUESTED via API")
+        print("=" * 60)
+        server_state['restart_requested'] = True
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        response = {
+            'status': 'restart_initiated',
+            'message': 'ComfyUI restart has been initiated. Wait for server to become ready again.',
+        }
+        self.wfile.write(json.dumps(response).encode())
 
     def _handle_health(self):
         """Return health status."""
@@ -434,6 +460,70 @@ def setup_lazy_model_cache(comfyui_path: str, cache_dir: str = None) -> str:
         return None
 
 
+def restart_comfyui():
+    """Restart the ComfyUI process using stored startup config."""
+    config = server_state.get('startup_config')
+    if not config:
+        print("ERROR: No startup config available for restart")
+        return False
+
+    print("\n" + "=" * 60)
+    print("RESTARTING COMFYUI")
+    print("=" * 60)
+
+    # Mark as not ready during restart
+    server_state['is_ready'] = False
+    server_state['restart_requested'] = False
+
+    # Terminate existing process
+    if server_state['comfyui_process']:
+        print("Terminating existing ComfyUI process...")
+        server_state['comfyui_process'].terminate()
+        try:
+            server_state['comfyui_process'].wait(timeout=30)
+            print("ComfyUI terminated gracefully")
+        except subprocess.TimeoutExpired:
+            print("Force killing ComfyUI...")
+            server_state['comfyui_process'].kill()
+            server_state['comfyui_process'].wait()
+
+    # Small delay to ensure port is released
+    time.sleep(2)
+
+    # Start new process with same config
+    try:
+        process = start_comfyui(
+            config['comfyui_path'],
+            config['port'],
+            config['extra_args'],
+            mode=config['mode'],
+            python_path=config['python_path'],
+            skip_dep_check=True  # Already validated on first start
+        )
+        server_state['comfyui_process'] = process
+        server_state['start_time'] = time.time()
+
+        # Start output streaming thread for new process
+        output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
+        output_thread.start()
+
+        # Wait for new instance to be ready
+        if wait_for_comfyui(config['port'], timeout=300):
+            server_state['is_ready'] = True
+            print("\n" + "=" * 60)
+            print("COMFYUI RESTART COMPLETE")
+            print(f"ComfyUI API: http://127.0.0.1:{config['port']}")
+            print("=" * 60 + "\n")
+            return True
+        else:
+            print("ERROR: ComfyUI failed to restart")
+            return False
+
+    except Exception as e:
+        print(f"ERROR: Failed to restart ComfyUI: {e}")
+        return False
+
+
 def shutdown(signum=None, frame=None):
     """Graceful shutdown handler."""
     print("\nShutdown requested...")
@@ -602,6 +692,15 @@ Examples:
     print(f"Started: {datetime.now().isoformat()}")
     print("=" * 60)
 
+    # Store startup config for restart support
+    server_state['startup_config'] = {
+        'comfyui_path': args.comfyui_path,
+        'port': args.port,
+        'extra_args': extra_args,
+        'mode': args.mode,
+        'python_path': args.python_path,
+    }
+
     # Start ComfyUI
     try:
         process = start_comfyui(
@@ -647,6 +746,15 @@ Examples:
     # Keep main thread alive, monitoring process health
     try:
         while not server_state['shutdown_requested']:
+            # Check for restart request
+            if server_state['restart_requested']:
+                if restart_comfyui():
+                    # Update local process reference
+                    process = server_state['comfyui_process']
+                else:
+                    print("ERROR: Restart failed, server will exit")
+                    break
+
             # Check if ComfyUI process is still alive
             ret = process.poll()
             if ret is not None:
