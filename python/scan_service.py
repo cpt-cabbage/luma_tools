@@ -399,9 +399,9 @@ class DirectoryScanner:
             main_text: Main status text
             sub_text: Sub-status text
         """
+        # Progress updates handled via status bar (no overlay)
         if self.animator:
-            if progress == 0:
-                self.animator.show_loading(main_text, sub_text, show_progress=True)
-            else:
+            if hasattr(self.animator, 'update_loading_message'):
                 self.animator.update_loading_message(main_text, sub_text)
+            if hasattr(self.animator, 'update_loading_progress'):
                 self.animator.update_loading_progress(progress)

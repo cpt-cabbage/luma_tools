@@ -109,7 +109,7 @@ Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 
 | File | Purpose |
 |------|---------|
-| `ui_components.py` | Worker class, animations, inline spinners, status colors, loading overlay |
+| `ui_components.py` | Worker class, animations, inline spinners, status colors |
 | `splash_screen.py` | Animated loading splash screen |
 | `icons.py` | `IconManager` for SVG icons, `TAB_COLORS` theme constants |
 | `main_window.ui` | Qt Designer main window UI file |
@@ -149,10 +149,10 @@ class MyTab(BaseTab):
 ```
 
 **Key BaseTab features:**
-- `TabSignals` for cross-tab communication (`log_message`, `status_update`, `show_loading`, `hide_loading`)
+- `TabSignals` for cross-tab communication (`log_message`, `status_update`, `request_attention`)
 - `load_ui()` loads from `resources/ui/tabs/{ui_file}`
 - Lifecycle hooks: `on_tab_activated()`, `on_tab_deactivated()`
-- Helper methods: `log()`, `set_status()`, `show_loading()`, `hide_loading()`, `get_widget()`
+- Helper methods: `log()`, `set_status()`, `get_widget()`
 
 **Adding a new tab:**
 1. Create `python/tabs/my_tab.py` inheriting from `BaseTab`
@@ -184,6 +184,26 @@ QThreadPool.globalInstance().start(worker)
 **Additional Threading Utilities:**
 - `ThreadedOperation` - Wrapper class for cleaner worker management
 - `LogStream` - Custom QObject in `luma_tools.py` that redirects stdout/stderr to the Log tab via signals (all `print()` output appears in Log tab)
+
+### Progress and Status Reporting (Critical)
+
+**IMPORTANT:** All progress feedback must use the main window status bar ONLY. Never create separate QProgressDialog, loading overlays, or custom progress widgets.
+
+**For Tabs (inheriting from BaseTab):**
+```python
+# Show status message on status bar
+self.set_status("Processing files...")
+
+# Log to console (appears in Log tab)
+self.log("Operation completed")
+```
+
+**For Non-Tab Functions:**
+If a function is called from outside a tab context (e.g., `comfyui_ayon_publisher.py`):
+- Use simple `print()` for console output (appears in Log tab)
+- Update status bar via `parent_widget.statusBar().showMessage()` if parent has status bar
+- Do NOT create QProgressDialog, loading overlays, or custom progress windows
+- Keep operations fast or run in background workers
 
 ### Strategy Pattern for Publishing
 
@@ -314,13 +334,29 @@ powershell -Command "& 'path\to\python.exe' 'path\to\test_script.py'"
 2. Add configuration to `config.py`
 3. For new tab: Follow "Adding a new tab" steps in Architecture section
 4. For long operations: Wrap in Worker, submit to QThreadPool
-5. Use `show_loading()` for loading overlay
+5. Use `set_status()` to update status bar, `print()` for logging
 
 **Thread Safety Checklist:**
 - Access `app_state` properties (thread-safe via RLock)
 - Update GUI via signals from worker threads
 - Never call Qt widget methods directly from workers
 - Never access Qt widgets from service functions
+
+### AYON Publishing
+
+**For single files (FBX, GLB, images):**
+Use `create_ayon_metadata_single_file()` in `ayon_service.py` - handles single files without frame sequences.
+
+**For EXR sequences:**
+Use `create_ayon_metadata()` in `ayon_service.py` - handles frame sequences with proper file lists.
+
+**Validators (Phase 2 AYON Integration):**
+Located in `python/ayon_plugins/validators/`:
+- `ValidateFileExists` - Checks file presence
+- `ValidateFileFormat` - Validates extension against product type
+- `ValidateNamingConvention` - Validates product/variant names
+
+Call `run_validators()` before publishing to catch errors early.
 
 ### Working with AYON
 

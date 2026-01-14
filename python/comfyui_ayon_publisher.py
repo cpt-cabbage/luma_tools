@@ -7,7 +7,10 @@ Includes Phase 2 AYON integration with validators.
 
 import os
 from typing import Optional, List, Tuple
-from PySide2.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox, QMessageBox
+from PySide2.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QComboBox, QCheckBox, QMessageBox
+)
 
 
 def _run_publish_validators(
@@ -83,8 +86,13 @@ def publish_comfyui_asset_to_ayon(
         bool: True if successfully published, False otherwise
     """
     try:
-        from ayon_service import AYON_AVAILABLE, create_ayon_metadata, write_metadata_file
-        from ayon_service import publish_to_ayon_local, submit_ayon_publish_to_deadline
+        from ayon_service import (
+            AYON_AVAILABLE,
+            create_ayon_metadata_single_file,
+            write_metadata_file,
+            publish_to_ayon_local,
+            convert_to_ayon_folder_path
+        )
         from state_manager import get_app_state
 
         if not AYON_AVAILABLE:
@@ -120,6 +128,7 @@ def publish_comfyui_asset_to_ayon(
         comment = dialog.get_comment()
 
         # Run validators before proceeding (Phase 2 AYON integration)
+        print("[AYON Publish] Running validators...")
         validators_passed, validator_error = _run_publish_validators(
             file_path, product_type, product_name, variant, parent_widget
         )
@@ -140,66 +149,31 @@ def publish_comfyui_asset_to_ayon(
 
         print(f"[AYON Publish] Product Type: {product_type}, Product Name: {full_product_name}, Task: {task}")
 
-        # Determine if this is a sequence or single file
-        ext = os.path.splitext(file_path)[1].lower()
-        is_sequence = ext in ['.exr', '.png', '.jpg', '.jpeg', '.tif', '.tiff']
-
-        # For sequences, we'd need to detect frame range
-        # For now, treat as single file
-        start_frame = 1001
-        end_frame = 1001
-
         # Get folder path
-        from ayon_service import convert_to_ayon_folder_path
+        print("[AYON Publish] Building AYON paths...")
         folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
 
-        # Create metadata
+        # Get render directory for metadata output
         render_dir = os.path.dirname(file_path)
-        filename = os.path.basename(file_path)
 
-        # Determine working directory
-        # Prefer app_state.working_dir, but fallback to render directory or shotpath/work
-        working_dir = app_state.working_dir
-        if not working_dir:
-            # Try to extract working dir from shotpath
-            if app_state.shotpath:
-                # Look for "work" directory in path hierarchy
-                if "work" in app_state.shotpath:
-                    working_dir = app_state.shotpath.split("work")[0] + "work"
-                else:
-                    # Use shotpath as working dir
-                    working_dir = app_state.shotpath
-            else:
-                # Last resort: use render directory
-                working_dir = render_dir
-
-        metadata = create_ayon_metadata(
+        # Use the single-file metadata function (handles FBX, GLB, images, etc.)
+        print("[AYON Publish] Creating metadata...")
+        metadata = create_ayon_metadata_single_file(
             project_name=app_state.jobname,
-            render_name=full_product_name,
-            start_frame=start_frame,
-            end_frame=end_frame,
-            renders_path=render_dir,
+            file_path=file_path,
+            product_name=full_product_name,
+            product_type=product_type,
             folder_path=folder_path,
             task=task,
             user=app_state.user,
-            output_subdirectory="",
-            working_dir=working_dir,
-            render_file=filename
+            variant=variant if variant else "",
+            comment=comment if comment else ""
         )
 
-        # Add AYON-standard fields
-        metadata['productType'] = product_type  # AYON standard field
-        metadata['productName'] = full_product_name  # AYON standard field
-        metadata['variant'] = variant if variant else ""  # AYON standard field
-        metadata['family'] = product_type  # AYON family = product type
-
-        # Add comment if provided
-        if comment:
-            metadata['comment'] = comment
-
-        # Write metadata file
+        # Write metadata file next to the source file
+        print("[AYON Publish] Writing metadata file...")
         metadata_filename = f"ayon_comfyui_{full_product_name}.json"
-        metadata_path = os.path.join(working_dir, metadata_filename)  # Use the working_dir we determined above
+        metadata_path = os.path.join(render_dir, metadata_filename)
 
         print(f"[AYON Publish] Writing metadata to: {metadata_path}")
         metadata_path = write_metadata_file(metadata, metadata_path)
@@ -216,15 +190,23 @@ def publish_comfyui_asset_to_ayon(
         success = False
         if use_farm:
             # Submit to Deadline
+            print("[AYON Publish] Submitting to Deadline farm...")
+            from ayon_service import submit_ayon_publish_to_deadline
+
+            filename = os.path.basename(file_path)
             job_id = submit_ayon_publish_to_deadline(
+                project_name=app_state.jobname,
+                render_name=full_product_name,
+                render_file=filename,
                 metadata_path=metadata_path,
-                job_name=f"Publish_ComfyUI_{product_name}",
-                priority=50,
-                pool="luma",
-                group="processing_group"
+                folder_path=folder_path,
+                task=task,
+                user=app_state.user,
+                build_job_id=None
             )
 
             if job_id:
+                print(f"[AYON Publish] Successfully submitted to Deadline: {job_id}")
                 QMessageBox.information(
                     parent_widget,
                     "Published to Farm",
@@ -236,6 +218,7 @@ def publish_comfyui_asset_to_ayon(
                 )
                 success = True
             else:
+                print("[AYON Publish] Failed to submit to Deadline")
                 QMessageBox.critical(
                     parent_widget,
                     "Publish Failed",
@@ -243,6 +226,7 @@ def publish_comfyui_asset_to_ayon(
                 )
         else:
             # Publish locally
+            print("[AYON Publish] Publishing to AYON locally...")
             result = publish_to_ayon_local(
                 metadata_path=metadata_path,
                 project_name=app_state.jobname,
@@ -252,6 +236,7 @@ def publish_comfyui_asset_to_ayon(
             )
 
             if result:
+                print("[AYON Publish] Successfully published to AYON")
                 QMessageBox.information(
                     parent_widget,
                     "Published Successfully",
@@ -262,6 +247,7 @@ def publish_comfyui_asset_to_ayon(
                 )
                 success = True
             else:
+                print("[AYON Publish] Failed to publish to AYON")
                 QMessageBox.critical(
                     parent_widget,
                     "Publish Failed",

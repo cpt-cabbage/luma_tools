@@ -294,8 +294,6 @@ class LumaShotTools(QtWidgets.QWidget):
 
             # Connect cross-tab signals
             tab_instance.signals.log_message.connect(self._append_log)
-            tab_instance.signals.show_loading.connect(self._on_tab_show_loading)
-            tab_instance.signals.hide_loading.connect(self._on_tab_hide_loading)
             tab_instance.signals.request_attention.connect(
                 lambda ti=tab_instance: self._on_tab_request_attention(ti)
             )
@@ -343,18 +341,6 @@ class LumaShotTools(QtWidgets.QWidget):
             if len(clean_msg) > 80:
                 clean_msg = clean_msg[:77] + "..."
             self.last_log_label.setText(clean_msg)
-
-    @QtCore.Slot(str)
-    def _on_tab_show_loading(self, message):
-        """Show loading overlay when requested by a tab."""
-        if hasattr(self, 'animator'):
-            self.animator.show_loading("Loading", message)
-
-    @QtCore.Slot()
-    def _on_tab_hide_loading(self):
-        """Hide loading overlay when requested by a tab."""
-        if hasattr(self, 'animator'):
-            self.animator.hide_loading()
 
     def start_status_spinner(self):
         """Start the status bar spinner to indicate a background operation."""

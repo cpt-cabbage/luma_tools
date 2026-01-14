@@ -14,8 +14,6 @@ class TabSignals(QtCore.QObject):
     log_message = QtCore.Signal(str)
     status_update = QtCore.Signal(str)
     settings_changed = QtCore.Signal()
-    show_loading = QtCore.Signal(str)  # message
-    hide_loading = QtCore.Signal()
     request_attention = QtCore.Signal()  # Request pulsing glow on tab
 
 
@@ -129,14 +127,6 @@ class BaseTab(ABC):
     def set_status(self, message: str):
         """Emit a status update signal."""
         self.signals.status_update.emit(message)
-
-    def show_loading(self, message: str = "Loading..."):
-        """Show loading overlay with message."""
-        self.signals.show_loading.emit(message)
-
-    def hide_loading(self):
-        """Hide loading overlay."""
-        self.signals.hide_loading.emit()
 
     def get_widget(self, name: str):
         """

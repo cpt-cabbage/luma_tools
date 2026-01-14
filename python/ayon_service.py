@@ -156,6 +156,142 @@ def convert_to_ayon_folder_path(filesystem_path, project_name):
     return path
 
 
+def create_ayon_metadata_single_file(
+    project_name: str,
+    file_path: str,
+    product_name: str,
+    product_type: str,
+    folder_path: str,
+    task: str,
+    user: str,
+    variant: str = "",
+    comment: str = "",
+    project_code: str = None,
+    task_type: str = None
+) -> dict:
+    """
+    Create AYON metadata JSON for publishing a single file (FBX, GLB, image, etc.).
+
+    This is distinct from create_ayon_metadata which handles EXR sequences.
+
+    Args:
+        project_name: AYON project name
+        file_path: Full path to the file being published
+        product_name: Product name (e.g., "myModel")
+        product_type: AYON product type (model, image, animation, etc.)
+        folder_path: AYON folder path (e.g., "/shots/seq01/sh0010")
+        task: Task name
+        user: Username
+        variant: Optional variant name
+        comment: Optional comment
+        project_code: Optional project code (defaults to project_name)
+        task_type: Optional task type
+
+    Returns:
+        dict: Metadata dictionary ready for AYON publish
+    """
+    logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
+
+    # Normalize path
+    file_path = file_path.replace("\\", "/")
+    staging_dir = os.path.dirname(file_path)
+    filename = os.path.basename(file_path)
+    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+
+    # Use defaults if not provided
+    if project_code is None:
+        if AYON_AVAILABLE:
+            try:
+                project_entity = get_project(project_name)
+                project_code = project_entity.get("code", project_name)
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Could not get project code from AYON: {e}")
+                project_code = project_name
+        else:
+            project_code = project_name
+
+    if task_type is None:
+        task_type = TASK_TYPE_MAP.get(task.lower(), task.capitalize())
+
+    # Determine families based on product type
+    families = [product_type]
+
+    # Add review tag for certain types
+    review_types = {"image", "render", "plate", "review"}
+    has_review = product_type in review_types
+
+    # Build representation
+    representation = {
+        "name": ext,
+        "ext": ext,
+        "files": filename,  # Single file, not a list
+        "stagingDir": staging_dir,
+    }
+
+    # Add colorspace for image types
+    if ext in ["exr", "png", "jpg", "jpeg", "tif", "tiff"]:
+        representation["colorspaceData"] = {
+            "colorspace": AYON_COLORSPACE,
+            "config": {
+                "path": get_ocio_config(),
+                "template": get_ocio_config()
+            },
+            "display": AYON_DISPLAY,
+            "view": AYON_VIEW
+        }
+        if has_review:
+            representation["tags"] = ["review"]
+
+    # Pre-populate site info
+    representation["site"] = {
+        "name": "studio",
+        "provider": "local_drive"
+    }
+
+    # Create instance data
+    instance_data = {
+        "productName": product_name,
+        "productType": product_type,
+        "family": product_type,
+        "families": families,
+        "folderPath": folder_path,
+        "task": task,
+        "host": "luma_tools",
+        "source": file_path,
+        "representations": [representation],
+        "farm": False,
+        "comment": comment,
+        "variant": variant,
+        "version": 1,
+        "anatomyData": {
+            "project": {"name": project_name, "code": project_code},
+            "folder": {"name": os.path.basename(folder_path)},
+            "task": {"name": task, "type": task_type},
+        }
+    }
+
+    # Add frame info only for sequences/animations
+    if product_type in ["render", "plate", "animation"]:
+        instance_data["frameStart"] = 1001
+        instance_data["frameEnd"] = 1001
+        instance_data["fps"] = AYON_DEFAULT_FPS
+
+    # Create publish job data
+    publish_job = {
+        "folderPath": folder_path,
+        "source": file_path,
+        "user": user,
+        "intent": None,
+        "comment": comment,
+        "job": {},
+        "version": 1,
+        "instances": [instance_data]
+    }
+
+    return publish_job
+
+
 def create_ayon_metadata(
     project_name,
     render_name,
