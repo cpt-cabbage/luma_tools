@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.43
+- More publishing fixes
+
 ## Version 0.42
 - Fixing bundle name
 

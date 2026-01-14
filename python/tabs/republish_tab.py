@@ -215,8 +215,6 @@ class RePublishTab(BaseTab):
 
     def _on_publish_clicked(self):
         """Handle publish to AYON button click."""
-        from ui_components import StatusColors
-
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.animate_button_click(self.ui.RePublishPublish)
 
@@ -235,170 +233,180 @@ class RePublishTab(BaseTab):
             parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
             product_name = parts[0] if parts else base.replace("#", "").strip(".")
 
-        # Show status bar progress (no overlay so user can still interact)
-        self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
-            "📦 AYON: Preparing files for publish...",
-            StatusColors.INFO
+        # Disable button during processing
+        self.ui.RePublishPublish.setEnabled(False)
+
+        # Start worker thread
+        from resources.ui.workers import Worker
+        worker = Worker(
+            self._publish_worker,
+            task,
+            use_farm,
+            product_name
+        )
+        worker.signals.result.connect(self._on_publish_complete)
+        worker.signals.error.connect(self._on_publish_error)
+        worker.signals.progress.connect(self._on_publish_progress)
+        QThreadPool.globalInstance().start(worker)
+
+        # Show initial status
+        self.set_status("Preparing files for publish...")
+
+    def _publish_worker(self, task, use_farm, product_name, progress_callback):
+        """Worker thread function for publishing to AYON."""
+        import shutil
+        from ayon.service import (
+            convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
+            publish_to_ayon_local, submit_ayon_publish_to_deadline
         )
 
-        try:
-            import shutil
+        # Get render path information
+        seq = self.app_state.republish_selected_render
+        first_frame = seq.frame(self.app_state.republish_startframe)
+        source_dir = os.path.dirname(first_frame)
 
-            # Get render path information
-            seq = self.app_state.republish_selected_render
-            first_frame = seq.frame(self.app_state.republish_startframe)
-            source_dir = os.path.dirname(first_frame)
+        # Determine staging directory - use "publish" subdirectory in the shot's render path
+        base_render_path = self.app_state.republish_searchpath
+        staging_subdir = "publish"  # Standard publish staging directory
+        staging_dir = os.path.join(base_render_path, staging_subdir)
 
-            # Determine staging directory - use "publish" subdirectory in the shot's render path
-            # This follows AYON's expected structure
-            base_render_path = self.app_state.republish_searchpath
-            staging_subdir = "publish"  # Standard publish staging directory
-            staging_dir = os.path.join(base_render_path, staging_subdir)
+        # Create staging directory if it doesn't exist
+        os.makedirs(staging_dir, exist_ok=True)
 
-            # Create staging directory if it doesn't exist
-            os.makedirs(staging_dir, exist_ok=True)
+        # Copy EXR files to staging directory
+        progress_callback(10, "Copying EXR files to publish folder...")
 
-            # Copy EXR files to staging directory
-            self.main_window.animator.update_status_animated(
-                "📦 AYON: Copying EXR files to publish folder...",
-                StatusColors.INFO
-            )
+        copied_files = []
+        total_frames = self.app_state.republish_endframe - self.app_state.republish_startframe + 1
 
-            copied_files = []
-            total_frames = self.app_state.republish_endframe - self.app_state.republish_startframe + 1
+        for i, frame_num in enumerate(range(self.app_state.republish_startframe, self.app_state.republish_endframe + 1)):
+            # Get source file path
+            source_file = seq.frame(frame_num)
 
-            for i, frame_num in enumerate(range(self.app_state.republish_startframe, self.app_state.republish_endframe + 1)):
-                # Get source file path
-                source_file = seq.frame(frame_num)
+            # Get destination file path
+            dest_file = os.path.join(staging_dir, os.path.basename(source_file))
 
-                # Get destination file path
-                dest_file = os.path.join(staging_dir, os.path.basename(source_file))
+            # Copy file
+            if os.path.exists(source_file):
+                shutil.copy2(source_file, dest_file)
+                copied_files.append(os.path.basename(dest_file))
 
-                # Copy file
-                if os.path.exists(source_file):
-                    shutil.copy2(source_file, dest_file)
-                    copied_files.append(os.path.basename(dest_file))
+                # Update progress every 10 frames or on last frame
+                if (i + 1) % 10 == 0 or i == total_frames - 1:
+                    # Use 10-70% for copying
+                    progress_pct = 10 + int((i + 1) / total_frames * 60)
+                    progress_callback(progress_pct, f"Copying files... {i + 1}/{total_frames}")
+            else:
+                print(f"Warning: Source file not found: {source_file}")
 
-                    # Update progress every 10 frames or on last frame
-                    if (i + 1) % 10 == 0 or i == total_frames - 1:
-                        progress_pct = int((i + 1) / total_frames * 50)  # Use first 50% for copying
-                        self.main_window.animator.update_status_animated(
-                            f"📦 AYON: Copying files... {i + 1}/{total_frames}",
-                            StatusColors.INFO
-                        )
-                else:
-                    self.log(f"Warning: Source file not found: {source_file}")
+        if not copied_files:
+            raise Exception("No files were copied to staging directory")
 
-            if not copied_files:
-                raise Exception("No files were copied to staging directory")
+        print(f"Copied {len(copied_files)} EXR files to {staging_dir}")
 
-            self.log(f"Copied {len(copied_files)} EXR files to {staging_dir}")
-            render_dir = staging_dir
+        # Get the base filename pattern for the sequence
+        base_name = seq.basename()
+        frame_padding = len(seq.frameSet().frameRange().split("-")[0])
+        render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
 
-            # Get the base filename pattern for the sequence
-            base_name = seq.basename()
-            frame_padding = len(seq.frameSet().frameRange().split("-")[0])
-            render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
+        # Extract project and shot from searchpath
+        folder_path = convert_to_ayon_folder_path(self.app_state.shotpath, self.app_state.jobname)
 
-            # Determine folder path from searchpath
-            from ayon.service import (
-                convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
-                publish_to_ayon_local, submit_ayon_publish_to_deadline
-            )
+        # Create metadata
+        progress_callback(75, "Creating AYON metadata...")
+        metadata = create_ayon_metadata(
+            project_name=self.app_state.jobname,
+            render_name=product_name,
+            start_frame=self.app_state.republish_startframe,
+            end_frame=self.app_state.republish_endframe,
+            renders_path=base_render_path,
+            folder_path=folder_path,
+            task=task,
+            user=self.app_state.user,
+            output_subdirectory=staging_subdir,
+            working_dir=self.app_state.working_dir,
+            render_file=render_file
+        )
 
-            # Extract project and shot from searchpath
-            folder_path = convert_to_ayon_folder_path(self.app_state.shotpath, self.app_state.jobname)
+        # Write metadata file to staging directory
+        metadata_filename = f"ayon_{product_name}.json"
+        metadata_path = os.path.join(staging_dir, metadata_filename)
+        metadata_path = write_metadata_file(metadata, metadata_path)
 
-            # Update status
-            self.main_window.animator.update_status_animated(
-                "📦 AYON: Creating metadata...",
-                StatusColors.INFO
-            )
+        if not metadata_path:
+            raise Exception("Failed to write metadata file")
 
-            # Create metadata - use base_render_path as renders_path and staging_subdir as output_subdirectory
-            metadata = create_ayon_metadata(
+        # Publish
+        progress_callback(85, f"{'Submitting to farm' if use_farm else 'Publishing locally'}...")
+
+        if use_farm:
+            # Submit to Deadline with correct signature
+            job_id = submit_ayon_publish_to_deadline(
                 project_name=self.app_state.jobname,
                 render_name=product_name,
-                start_frame=self.app_state.republish_startframe,
-                end_frame=self.app_state.republish_endframe,
-                renders_path=base_render_path,
+                render_file=render_file,
+                metadata_path=metadata_path,
                 folder_path=folder_path,
                 task=task,
                 user=self.app_state.user,
-                output_subdirectory=staging_subdir,
-                working_dir=self.app_state.working_dir,
-                render_file=render_file
+                build_job_id=None
             )
 
-            # Write metadata file to staging directory
-            metadata_filename = f"ayon_{product_name}.json"
-            metadata_path = os.path.join(staging_dir, metadata_filename)
-            metadata_path = write_metadata_file(metadata, metadata_path)
+            if not job_id:
+                raise Exception("Failed to submit to Deadline")
 
-            if not metadata_path:
-                raise Exception("Failed to write metadata file")
-
-            self.main_window.animator.update_status_animated(
-                f"📦 AYON: {'Submitting to farm' if use_farm else 'Publishing locally'}...",
-                StatusColors.INFO
+            progress_callback(100, "Publish job submitted to farm")
+            return {"success": True, "message": f"Published to farm! Job ID: {job_id}", "job_id": job_id}
+        else:
+            # Publish locally with correct arguments
+            success = publish_to_ayon_local(
+                metadata_path,
+                self.app_state.jobname,
+                folder_path,
+                task,
+                self.app_state.user
             )
 
-            # Publish
-            if use_farm:
-                # Submit to Deadline with correct signature
-                job_id = submit_ayon_publish_to_deadline(
-                    project_name=self.app_state.jobname,
-                    render_name=product_name,
-                    render_file=render_file,
-                    metadata_path=metadata_path,
-                    folder_path=folder_path,
-                    task=task,
-                    user=self.app_state.user,
-                    build_job_id=None
-                )
+            if not success:
+                raise Exception("Local publish failed")
 
-                if job_id:
-                    success_msg = f"Published to farm! Job ID: {job_id}"
-                    self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
-                    self.main_window.stop_status_spinner()
-                    self.main_window.animator.update_status_animated(
-                        f"✅ AYON: {success_msg}",
-                        StatusColors.SUCCESS
-                    )
-                    self.main_window.animator.show_success("Published to farm!")
-                else:
-                    raise Exception("Failed to submit to Deadline")
-            else:
-                # Publish locally with correct arguments
-                success = publish_to_ayon_local(
-                    metadata_path,
-                    self.app_state.jobname,
-                    folder_path,
-                    task,
-                    self.app_state.user
-                )
+            progress_callback(100, "Published successfully")
+            return {"success": True, "message": f"Published: {product_name}"}
 
-                if success:
-                    success_msg = f"Published: {product_name}"
-                    self.ui.RePublishStatusLabel.setText(f"Status: {success_msg}")
-                    self.main_window.stop_status_spinner()
-                    self.main_window.animator.update_status_animated(
-                        f"✅ AYON: {success_msg}",
-                        StatusColors.SUCCESS
-                    )
-                    self.main_window.animator.show_success("Published successfully!")
-                else:
-                    raise Exception("Local publish failed")
+    def _on_publish_progress(self, progress, message):
+        """Handle progress updates from worker."""
+        self.set_status(message)
 
-        except Exception as e:
-            error_msg = f"Publish failed: {str(e)}"
-            self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
-            self.main_window.stop_status_spinner()
+    def _on_publish_complete(self, result):
+        """Handle successful publish completion."""
+        from ui_components import StatusColors
+
+        self.ui.RePublishPublish.setEnabled(True)
+        self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
+
+        if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(
-                f"AYON: {error_msg}",
+                f"✅ AYON: {result['message']}",
+                StatusColors.SUCCESS
+            )
+            self.main_window.animator.show_success(result['message'])
+
+    def _on_publish_error(self, error_tuple):
+        """Handle publish errors."""
+        from ui_components import StatusColors
+
+        exc_type, exc_value, exc_traceback = error_tuple
+        error_msg = f"Publish failed: {str(exc_value)}"
+
+        self.ui.RePublishPublish.setEnabled(True)
+        self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
+
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.update_status_animated(
+                f"❌ AYON: {error_msg}",
                 StatusColors.ERROR
             )
-            self.log(f"Publish error: {e}")
-            import traceback
-            traceback.print_exc()
+
+        self.log(f"Publish error: {exc_value}")
+        import traceback
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
