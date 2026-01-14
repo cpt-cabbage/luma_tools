@@ -78,16 +78,32 @@ Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 | `model_viewer.py` | Enhanced 3D viewer with textures, skeletons, and animation playback |
 | `model_thumbnail_service.py` | Multi-format 3D thumbnail generation |
 | `model_thumbnail_renderer.py` | Subprocess renderer for 3D thumbnails |
-| `glb_viewer.py` | (Legacy) Basic 3D viewer, superseded by model_viewer |
+| `gallery_prewarm.py` | Pre-loads gallery data during splash screen |
+| `ayon_publisher_integration.py` | Standard AYON Publisher UI integration |
 
 ### ComfyUI Integration
 
 | Module | Purpose |
 |--------|---------|
-| `comfyui_service.py` | Workflow manipulation, editable node extraction, Deadline submission |
-| `comfyui_runner.py` | Farm worker script that launches ComfyUI and executes workflows |
-| `comfyui_client.py` | Lightweight client for server mode (persistent ComfyUI) |
+| `comfyui_service.py` | Main entry: Deadline submission, orchestration |
+| `comfyui_node_configs.py` | `EDITABLE_NODE_CONFIGS`, `WIDGET_MAPPINGS` for node types |
+| `comfyui_workflow.py` | Load/save workflows, format conversion (UI ↔ API) |
+| `comfyui_editable.py` | Extract editable nodes from workflows (`EditableNode` dataclass) |
+| `comfyui_modifier.py` | Modify workflow parameters (seeds, prompts, images) |
+| `comfyui_utils.py` | Shared utilities for server communication |
+| `comfyui_runner.py` | Farm worker script that executes workflows |
+| `comfyui_client.py` | Lightweight client for persistent server mode |
 | `comfyui_server.py` | Server management for persistent ComfyUI instances |
+| `comfyui_ayon_publisher.py` | Publish ComfyUI outputs to AYON with validation |
+
+### AYON Plugins (python/ayon_plugins/)
+
+| Module | Purpose |
+|--------|---------|
+| `validators/base.py` | Base validator class and `InstanceData` dataclass |
+| `validators/validate_file_exists.py` | Validates file presence before publish |
+| `validators/validate_file_format.py` | Validates file format against product type |
+| `validators/validate_naming_convention.py` | Validates naming conventions |
 
 ### UI Components (resources/ui/)
 
@@ -222,7 +238,7 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 5. Submit to Deadline - each frame is a different seed
 6. `comfyui_runner.py` executes on farm workers
 
-**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`. See `EDITABLE_NODE_CONFIGS` in `comfyui_service.py` for widget mappings.
+**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`, `Trellis2ExportMesh`, `UltraShapeSaveGLB`, `Load3D`. See `EDITABLE_NODE_CONFIGS` in `comfyui_node_configs.py` for widget mappings.
 
 **Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `config.py` for the full list.
 

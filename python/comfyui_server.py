@@ -15,13 +15,6 @@ Features:
 
 Usage:
     python comfyui_server.py --comfyui-path "C:/ComfyUI" --port 8188
-
-The server exposes these endpoints (proxied from ComfyUI):
-    GET  /health          - Server health check
-    GET  /system_stats    - ComfyUI system stats
-    POST /prompt          - Submit workflow
-    GET  /queue           - Queue status
-    GET  /history/{id}    - Execution history
 """
 
 import sys
@@ -37,6 +30,9 @@ import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
+# Import shared utilities
+from comfyui_utils import check_server_health, wait_for_server
+
 
 # Server state
 server_state = {
@@ -51,9 +47,8 @@ server_state = {
     'cache_models': False,
     'cache_dir': None,
     'comfyui_path': None,
-    # Restart support - stores startup config
     'restart_requested': False,
-    'startup_config': None,  # Stores args for restart
+    'startup_config': None,
 }
 
 
@@ -61,11 +56,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     """Simple HTTP handler for health checks and status."""
 
     def log_message(self, format, *args):
-        """Suppress default logging."""
         pass
 
     def do_GET(self):
-        """Handle GET requests."""
         if self.path == '/health':
             self._handle_health()
         elif self.path == '/status':
@@ -74,14 +67,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_error(404, 'Not Found')
 
     def do_POST(self):
-        """Handle POST requests."""
         if self.path == '/restart':
             self._handle_restart()
         else:
             self.send_error(404, 'Not Found')
 
     def _handle_restart(self):
-        """Signal a full ComfyUI restart."""
         print("\n" + "=" * 60)
         print("RESTART REQUESTED via API")
         print("=" * 60)
@@ -92,12 +83,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         response = {
             'status': 'restart_initiated',
-            'message': 'ComfyUI restart has been initiated. Wait for server to become ready again.',
+            'message': 'ComfyUI restart has been initiated.',
         }
         self.wfile.write(json.dumps(response).encode())
 
     def _handle_health(self):
-        """Return health status."""
         if server_state['is_ready']:
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -116,13 +106,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'not_ready'}).encode())
 
     def _handle_status(self):
-        """Return detailed status."""
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
 
         uptime = int(time.time() - server_state['start_time']) if server_state['start_time'] else 0
-
         response = {
             'is_ready': server_state['is_ready'],
             'comfyui_port': server_state['comfyui_port'],
@@ -172,7 +160,7 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
                 elapsed = int(time.time() - start_time)
                 print(f"ComfyUI ready after {elapsed}s")
                 return True
-        except urllib.error.URLError as e:
+        except urllib.error.URLError:
             elapsed = int(time.time() - start_time)
             status = f"Waiting... ({elapsed}s)"
             if status != last_status:
@@ -187,28 +175,17 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
     return False
 
 
-def check_comfyui_health(port: int) -> bool:
-    """Check if ComfyUI is still healthy."""
-    url = f"http://127.0.0.1:{port}/system_stats"
-    try:
-        req = urllib.request.urlopen(url, timeout=10)
-        return req.status == 200
-    except Exception:
-        return False
-
-
 def health_monitor_thread(port: int):
     """Background thread to monitor ComfyUI health."""
     while not server_state['shutdown_requested']:
-        time.sleep(30)  # Check every 30 seconds
+        time.sleep(30)
 
         if server_state['is_ready']:
-            healthy = check_comfyui_health(port)
+            healthy = check_server_health(port=port)
             server_state['last_health_check'] = datetime.now().isoformat()
 
             if not healthy:
                 print("WARNING: ComfyUI health check failed!")
-                # Check if process is still alive
                 if server_state['comfyui_process']:
                     ret = server_state['comfyui_process'].poll()
                     if ret is not None:
@@ -217,24 +194,12 @@ def health_monitor_thread(port: int):
 
 
 def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
-    """Check if required ComfyUI packages are installed.
-
-    Args:
-        python_exe: Path to Python executable
-        comfyui_path: Path to ComfyUI installation
-
-    Returns:
-        Tuple of (success: bool, missing_packages: list, error_message: str)
-    """
-    # Required packages for ComfyUI 0.3.27+
-    required_packages = [
-        'comfyui-frontend-package',
-    ]
+    """Check if required ComfyUI packages are installed."""
+    required_packages = ['comfyui-frontend-package']
 
     missing = []
     for package in required_packages:
         try:
-            # Use pip show to check if package is installed
             result = subprocess.run(
                 [python_exe, '-m', 'pip', 'show', package],
                 capture_output=True,
@@ -250,12 +215,8 @@ def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
         requirements_path = os.path.join(comfyui_path, 'requirements.txt')
         error_msg = (
             f"Missing required ComfyUI packages: {', '.join(missing)}\n\n"
-            f"Since ComfyUI v0.3.27+, the frontend is distributed as separate pip packages.\n\n"
-            f"To fix, run one of the following:\n\n"
-            f"  Option 1 - Install all requirements:\n"
-            f"    {python_exe} -m pip install -r \"{requirements_path}\"\n\n"
-            f"  Option 2 - Install specific packages:\n"
-            f"    {python_exe} -m pip install {' '.join(missing)}"
+            f"To fix, run:\n"
+            f"  {python_exe} -m pip install -r \"{requirements_path}\"\n"
         )
         return False, missing, error_msg
 
@@ -265,50 +226,22 @@ def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
 def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
                   mode: str = "embedded", python_path: str = None,
                   skip_dep_check: bool = False) -> subprocess.Popen:
-    """Start ComfyUI process.
-
-    Args:
-        comfyui_path: Path to ComfyUI installation
-        port: Port for ComfyUI server
-        extra_args: Additional command line arguments
-        mode: 'embedded' for portable install, 'portable' for venv-based install
-              (e.g., comfy-cli), 'standalone' for system install
-        python_path: Path to Python executable (required for standalone mode)
-        skip_dep_check: Skip dependency check (useful for embedded mode)
-    """
+    """Start ComfyUI process."""
     if mode == "embedded":
-        # Embedded/portable mode: python_embeded folder alongside ComfyUI
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
         main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
     elif mode == "portable":
-        # Portable mode: venv-based install from various installers
-        # Check for different venv and main.py locations used by different installers
         venv_locations = [
-            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),  # comfy-cli
-            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),  # some installers use .venv
+            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),
+            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),
         ]
         main_py_locations = [
-            os.path.join(comfyui_path, "ComfyUI", "main.py"),  # comfy-cli structure
+            os.path.join(comfyui_path, "ComfyUI", "main.py"),
         ]
 
-        python_exe = None
-        for venv_path in venv_locations:
-            if os.path.exists(venv_path):
-                python_exe = venv_path
-                break
-        if not python_exe:
-            # Default to venv if none found (will error later with helpful message)
-            python_exe = venv_locations[0]
-
-        main_py = None
-        for main_path in main_py_locations:
-            if os.path.exists(main_path):
-                main_py = main_path
-                break
-        if not main_py:
-            main_py = main_py_locations[0]
+        python_exe = next((p for p in venv_locations if os.path.exists(p)), venv_locations[0])
+        main_py = next((p for p in main_py_locations if os.path.exists(p)), main_py_locations[0])
     else:
-        # Standalone mode: use provided Python path
         if not python_path:
             raise ValueError("Python path required for standalone mode")
         python_exe = python_path
@@ -316,11 +249,9 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
 
     if not os.path.exists(python_exe):
         raise FileNotFoundError(f"Python not found: {python_exe}")
-
     if not os.path.exists(main_py):
         raise FileNotFoundError(f"ComfyUI main.py not found: {main_py}")
 
-    # Check dependencies for standalone mode (embedded typically has everything bundled)
     if mode == "standalone" and not skip_dep_check:
         print("Checking ComfyUI dependencies...")
         success, missing, error_msg = check_comfyui_dependencies(python_exe, comfyui_path)
@@ -337,8 +268,6 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     if extra_args:
         cmd.extend(extra_args)
 
-    # Set working directory to where main.py is located
-    # This ensures custom_nodes are found correctly
     working_dir = os.path.dirname(main_py)
 
     print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
@@ -358,10 +287,7 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
 
 
 def stream_comfyui_output(process: subprocess.Popen):
-    """Stream ComfyUI output to console and detect model loads for caching."""
-    # Track models being loaded for background caching
-    current_model_path = None
-
+    """Stream ComfyUI output to console."""
     try:
         for line in process.stdout:
             line = line.rstrip()
@@ -369,27 +295,10 @@ def stream_comfyui_output(process: subprocess.Popen):
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 print(f"[{timestamp}] [ComfyUI] {line}", flush=True)
 
-                # Track job completion
                 if "Prompt executed in" in line:
                     server_state['jobs_completed'] += 1
-                    # After job completes, cache any models that were loaded
-                    if server_state.get('cache_models') and current_model_path:
-                        trigger_background_cache(current_model_path)
-                        current_model_path = None
-
                 elif "Error" in line and "node" in line.lower():
                     server_state['jobs_failed'] += 1
-
-                # Detect model loading - cache it after job completes
-                # ComfyUI logs like: "Loading model from: /path/to/model.safetensors"
-                elif "Loading" in line and ("model" in line.lower() or "checkpoint" in line.lower()):
-                    # Try to extract path from common log formats
-                    if ":" in line:
-                        parts = line.split(":", 1)
-                        if len(parts) > 1:
-                            potential_path = parts[1].strip()
-                            if os.path.exists(potential_path):
-                                current_model_path = potential_path
 
     except Exception as e:
         print(f"Output stream error: {e}")
@@ -398,66 +307,6 @@ def stream_comfyui_output(process: subprocess.Popen):
         if ret is not None:
             print(f"ComfyUI process exited with code {ret}")
             server_state['is_ready'] = False
-
-
-def trigger_background_cache(model_path: str):
-    """Trigger background caching of a model after job completion."""
-    cache_dir = server_state.get('cache_dir')
-    if not cache_dir:
-        return
-
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.path.insert(0, script_dir)
-        from comfyui_model_cache import cache_model_background
-
-        print(f"Triggering background cache for: {os.path.basename(model_path)}")
-        cache_model_background(model_path, cache_dir)
-
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"Background cache trigger failed: {e}")
-
-
-def setup_lazy_model_cache(comfyui_path: str, cache_dir: str = None) -> str:
-    """
-    Set up lazy model caching for the server.
-
-    Creates a config that tells ComfyUI to:
-    1. Check local cache first (fast if model is there from previous job)
-    2. Fall back to network if not cached
-
-    Returns:
-        Path to extra_model_paths.yaml config, or None if setup failed
-    """
-    if cache_dir is None:
-        import os as os_module
-        cache_dir = os_module.path.join(
-            os_module.environ.get('TEMP', 'C:/temp'),
-            'comfyui_model_cache'
-        )
-
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.path.insert(0, script_dir)
-        from comfyui_model_cache import setup_model_cache_for_comfyui
-
-        print(f"\n{'='*60}")
-        print("Model Cache: Setting up lazy caching for server")
-        print(f"Cache dir: {cache_dir}")
-        print("First load uses network, cached for subsequent loads")
-        print(f"{'='*60}")
-
-        config_path = setup_model_cache_for_comfyui(comfyui_path, cache_dir)
-        return config_path
-
-    except ImportError:
-        print("Model caching module not available")
-        return None
-    except Exception as e:
-        print(f"Model cache setup failed: {e}")
-        return None
 
 
 def restart_comfyui():
@@ -471,11 +320,9 @@ def restart_comfyui():
     print("RESTARTING COMFYUI")
     print("=" * 60)
 
-    # Mark as not ready during restart
     server_state['is_ready'] = False
     server_state['restart_requested'] = False
 
-    # Terminate existing process
     if server_state['comfyui_process']:
         print("Terminating existing ComfyUI process...")
         server_state['comfyui_process'].terminate()
@@ -487,10 +334,8 @@ def restart_comfyui():
             server_state['comfyui_process'].kill()
             server_state['comfyui_process'].wait()
 
-    # Small delay to ensure port is released
     time.sleep(2)
 
-    # Start new process with same config
     try:
         process = start_comfyui(
             config['comfyui_path'],
@@ -498,16 +343,14 @@ def restart_comfyui():
             config['extra_args'],
             mode=config['mode'],
             python_path=config['python_path'],
-            skip_dep_check=True  # Already validated on first start
+            skip_dep_check=True
         )
         server_state['comfyui_process'] = process
         server_state['start_time'] = time.time()
 
-        # Start output streaming thread for new process
         output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
         output_thread.start()
 
-        # Wait for new instance to be ready
         if wait_for_comfyui(config['port'], timeout=300):
             server_state['is_ready'] = True
             print("\n" + "=" * 60)
@@ -544,140 +387,46 @@ def shutdown(signum=None, frame=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Persistent ComfyUI Server',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    # Start server with default settings
-    python comfyui_server.py --comfyui-path "C:/ComfyUI"
+    parser = argparse.ArgumentParser(description='Persistent ComfyUI Server')
 
-    # Start on custom port with extra model paths
-    python comfyui_server.py --comfyui-path "C:/ComfyUI" --port 8189 \\
-        --extra-model-paths "D:/models"
-
-    # Run with specific input/output directories
-    python comfyui_server.py --comfyui-path "C:/ComfyUI" \\
-        --input-directory "W:/project/inputs" \\
-        --output-directory "W:/project/outputs"
-        """
-    )
-
-    parser.add_argument('--comfyui-path', required=True,
-                        help='Path to ComfyUI installation')
-    parser.add_argument('--port', type=int, default=8188,
-                        help='Port for ComfyUI server (default: 8188)')
-    parser.add_argument('--health-port', type=int, default=None,
-                        help='Port for health check server (default: ComfyUI port + 1000)')
-    parser.add_argument('--input-directory', default=None,
-                        help='Default input directory for ComfyUI')
-    parser.add_argument('--output-directory', default=None,
-                        help='Default output directory for ComfyUI')
-    parser.add_argument('--extra-model-paths', default=None,
-                        help='Extra model paths config file')
-    parser.add_argument('--cache-models', action='store_true',
-                        help='Enable lazy model caching (cache first, network fallback)')
-    parser.add_argument('--cache-dir', default=None,
-                        help='Local directory for model cache (default: TEMP/comfyui_model_cache)')
-    parser.add_argument('--lowvram', action='store_true',
-                        help='Enable low VRAM mode')
-    parser.add_argument('--gpu-only', action='store_true',
-                        help='Run everything on GPU')
-    parser.add_argument('--fast', action='store_true',
-                        help='Enable --fast flag for faster execution (may reduce quality)')
-    parser.add_argument('--fp16-accumulation', action='store_true',
-                        help='Enable --fp16-accumulation for faster FP16 math')
+    parser.add_argument('--comfyui-path', required=True, help='Path to ComfyUI installation')
+    parser.add_argument('--port', type=int, default=8188, help='Port for ComfyUI server')
+    parser.add_argument('--health-port', type=int, default=None, help='Port for health check server')
+    parser.add_argument('--input-directory', default=None, help='Default input directory')
+    parser.add_argument('--output-directory', default=None, help='Default output directory')
+    parser.add_argument('--extra-model-paths', default=None, help='Extra model paths config file')
+    parser.add_argument('--lowvram', action='store_true', help='Enable low VRAM mode')
+    parser.add_argument('--gpu-only', action='store_true', help='Run everything on GPU')
+    parser.add_argument('--fast', action='store_true', help='Enable --fast flag')
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
-                        help='ComfyUI installation mode: embedded (python_embeded), portable (venv), or standalone')
-    parser.add_argument('--python-path', default=None,
-                        help='Path to Python executable (required for standalone mode)')
-    parser.add_argument('--skip-dep-check', action='store_true',
-                        help='Skip dependency check for standalone mode')
+                        help='ComfyUI installation mode')
+    parser.add_argument('--python-path', default=None, help='Path to Python executable')
+    parser.add_argument('--skip-dep-check', action='store_true', help='Skip dependency check')
 
     args = parser.parse_args()
 
-    # Setup signal handlers
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    # Build extra args for ComfyUI
     extra_args = []
     if args.input_directory:
         extra_args.extend(['--input-directory', args.input_directory])
     if args.output_directory:
         extra_args.extend(['--output-directory', args.output_directory])
-
-    # Set up lazy model caching if requested
-    # This generates a config that checks local cache first, then network
-    # Also stores settings in server_state for background caching after jobs
-    model_cache_config = None
-    if args.cache_models:
-        cache_dir = args.cache_dir or os.path.join(
-            os.environ.get('TEMP', 'C:/temp'),
-            'comfyui_model_cache'
-        )
-        model_cache_config = setup_lazy_model_cache(args.comfyui_path, cache_dir)
-
-        # Store in server_state for background caching after each job
-        server_state['cache_models'] = True
-        server_state['cache_dir'] = cache_dir
-        server_state['comfyui_path'] = args.comfyui_path
-        if model_cache_config:
-            extra_args.extend(['--extra-model-paths-config', model_cache_config])
-    elif args.extra_model_paths:
+    if args.extra_model_paths:
         extra_args.extend(['--extra-model-paths-config', args.extra_model_paths])
-
     if args.lowvram:
         extra_args.append('--lowvram')
     if args.gpu_only:
         extra_args.append('--gpu-only')
-
-    # Check fast mode: CLI flag overrides, otherwise check global settings
-    use_fast_mode = args.fast
-    use_fp16_accumulation = getattr(args, 'fp16_accumulation', False)
-
-    if not use_fast_mode or not use_fp16_accumulation:
-        # Try to read from global settings
-        try:
-            from settings_manager import get_comfyui_fast_mode, get_comfyui_fp16_accumulation
-            if not use_fast_mode:
-                use_fast_mode = get_comfyui_fast_mode()
-            if not use_fp16_accumulation:
-                use_fp16_accumulation = get_comfyui_fp16_accumulation()
-        except Exception:
-            # settings_manager may fail if AYON env vars aren't set (config.py dependency)
-            # Try reading global settings JSON directly as fallback
-            try:
-                import json
-                settings_paths = [
-                    os.path.join(os.path.dirname(__file__), "..", "global_settings", "global_settings.json"),
-                    os.path.join(os.path.expanduser("~"), ".luma_tools", "settings.json"),
-                ]
-                for settings_path in settings_paths:
-                    settings_path = os.path.normpath(settings_path)
-                    if os.path.exists(settings_path):
-                        with open(settings_path, 'r') as f:
-                            settings = json.load(f)
-                        if not use_fast_mode:
-                            use_fast_mode = settings.get("comfyui_fast_mode", False)
-                        if not use_fp16_accumulation:
-                            use_fp16_accumulation = settings.get("comfyui_fp16_accumulation", False)
-                        break
-            except Exception as e:
-                print(f"Note: Could not read global settings: {e}")
-
-    if use_fast_mode:
+    if args.fast:
         extra_args.append('--fast')
         print("Fast mode enabled (--fast)")
-    # Note: --fp16-accumulation is not a valid ComfyUI flag (removed)
-    # The fp16_accumulation setting is kept for potential future use
 
-    # Validate standalone mode requirements
     if args.mode == "standalone" and not args.python_path:
         print("ERROR: --python-path is required for standalone mode")
         sys.exit(1)
 
-    # Initialize state
     server_state['comfyui_port'] = args.port
     server_state['start_time'] = time.time()
 
@@ -692,7 +441,6 @@ Examples:
     print(f"Started: {datetime.now().isoformat()}")
     print("=" * 60)
 
-    # Store startup config for restart support
     server_state['startup_config'] = {
         'comfyui_path': args.comfyui_path,
         'port': args.port,
@@ -701,7 +449,6 @@ Examples:
         'python_path': args.python_path,
     }
 
-    # Start ComfyUI
     try:
         process = start_comfyui(
             args.comfyui_path, args.port, extra_args,
@@ -713,11 +460,9 @@ Examples:
         print(f"ERROR: Failed to start ComfyUI: {e}")
         sys.exit(1)
 
-    # Start output streaming thread
     output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
     output_thread.start()
 
-    # Wait for ComfyUI to be ready
     if not wait_for_comfyui(args.port, timeout=3000):
         print("ERROR: ComfyUI failed to start")
         shutdown()
@@ -729,11 +474,9 @@ Examples:
     print(f"ComfyUI API: http://127.0.0.1:{args.port}")
     print("=" * 60 + "\n")
 
-    # Start health monitor
     health_thread = threading.Thread(target=health_monitor_thread, args=(args.port,), daemon=True)
     health_thread.start()
 
-    # Start health check HTTP server (optional)
     health_port = args.health_port or (args.port + 1000)
     try:
         health_server = HTTPServer(('0.0.0.0', health_port), HealthCheckHandler)
@@ -743,26 +486,20 @@ Examples:
     except Exception as e:
         print(f"Warning: Could not start health check server on port {health_port}: {e}")
 
-    # Keep main thread alive, monitoring process health
     try:
         while not server_state['shutdown_requested']:
-            # Check for restart request
             if server_state['restart_requested']:
                 if restart_comfyui():
-                    # Update local process reference
                     process = server_state['comfyui_process']
                 else:
                     print("ERROR: Restart failed, server will exit")
                     break
 
-            # Check if ComfyUI process is still alive
             ret = process.poll()
             if ret is not None:
                 print(f"ERROR: ComfyUI process exited unexpectedly with code {ret}")
                 server_state['is_ready'] = False
-
-                # Optionally restart ComfyUI here
-                print("Server will exit. Use a process manager to restart if needed.")
+                print("Server will exit.")
                 break
 
             time.sleep(5)

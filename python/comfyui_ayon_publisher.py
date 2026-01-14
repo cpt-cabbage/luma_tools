@@ -2,11 +2,65 @@
 ComfyUI AYON Publisher for Luma Tools.
 
 Handles publishing ComfyUI-generated images and 3D models to AYON.
+Includes Phase 2 AYON integration with validators.
 """
 
 import os
-from typing import Optional
+from typing import Optional, List, Tuple
 from PySide2.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox, QMessageBox
+
+
+def _run_publish_validators(
+    file_path: str,
+    product_type: str,
+    product_name: str,
+    variant: str,
+    parent_widget=None
+) -> Tuple[bool, str]:
+    """
+    Run AYON validators before publishing.
+
+    Args:
+        file_path: Path to file being published
+        product_type: AYON product type (model, image, etc.)
+        product_name: Product name
+        variant: Optional variant
+        parent_widget: Parent widget for error dialogs
+
+    Returns:
+        Tuple of (passed, error_message)
+    """
+    try:
+        from ayon_plugins.validators import run_validators, InstanceData
+
+        instance = InstanceData(
+            source_file=file_path,
+            product_type=product_type,
+            product_name=product_name,
+            variant=variant,
+        )
+
+        all_passed, results = run_validators(instance)
+
+        if not all_passed:
+            # Collect failure messages
+            failures = [r for r in results if not r.passed]
+            error_lines = []
+            for failure in failures:
+                error_lines.append(f"• {failure.validator}: {failure.message}")
+                if failure.details:
+                    # Indent details
+                    error_lines.append(f"  {failure.details[:200]}")
+
+            error_msg = "\n".join(error_lines)
+            return False, error_msg
+
+        return True, ""
+
+    except ImportError as e:
+        # Validators not available - log but continue (graceful degradation)
+        print(f"[AYON Publish] Validators not available: {e}")
+        return True, ""
 
 
 def publish_comfyui_asset_to_ayon(
@@ -18,6 +72,7 @@ def publish_comfyui_asset_to_ayon(
     Publish a ComfyUI-generated asset (image or 3D model) to AYON.
 
     Shows a dialog to collect publishing metadata from the user.
+    Runs validators before publishing to catch errors early.
 
     Args:
         file_path: Path to the file to publish
@@ -63,6 +118,19 @@ def publish_comfyui_asset_to_ayon(
         task = dialog.get_task()
         use_farm = dialog.get_use_farm()
         comment = dialog.get_comment()
+
+        # Run validators before proceeding (Phase 2 AYON integration)
+        validators_passed, validator_error = _run_publish_validators(
+            file_path, product_type, product_name, variant, parent_widget
+        )
+
+        if not validators_passed:
+            QMessageBox.warning(
+                parent_widget,
+                "Validation Failed",
+                f"Publishing cannot proceed due to validation errors:\n\n{validator_error}"
+            )
+            return False
 
         # Build full product name with variant (AYON standard)
         if variant:
