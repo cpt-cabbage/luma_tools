@@ -238,15 +238,63 @@ class RePublishTab(BaseTab):
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
         self.main_window.animator.update_status_animated(
-            "📦 AYON: Preparing metadata...",
+            "📦 AYON: Preparing files for publish...",
             StatusColors.INFO
         )
 
         try:
+            import shutil
+
             # Get render path information
             seq = self.app_state.republish_selected_render
             first_frame = seq.frame(self.app_state.republish_startframe)
-            render_dir = os.path.dirname(first_frame)
+            source_dir = os.path.dirname(first_frame)
+
+            # Determine staging directory - use "publish" subdirectory in the shot's render path
+            # This follows AYON's expected structure
+            base_render_path = self.app_state.republish_searchpath
+            staging_subdir = "publish"  # Standard publish staging directory
+            staging_dir = os.path.join(base_render_path, staging_subdir)
+
+            # Create staging directory if it doesn't exist
+            os.makedirs(staging_dir, exist_ok=True)
+
+            # Copy EXR files to staging directory
+            self.main_window.animator.update_status_animated(
+                "📦 AYON: Copying EXR files to publish folder...",
+                StatusColors.INFO
+            )
+
+            copied_files = []
+            total_frames = self.app_state.republish_endframe - self.app_state.republish_startframe + 1
+
+            for i, frame_num in enumerate(range(self.app_state.republish_startframe, self.app_state.republish_endframe + 1)):
+                # Get source file path
+                source_file = seq.frame(frame_num)
+
+                # Get destination file path
+                dest_file = os.path.join(staging_dir, os.path.basename(source_file))
+
+                # Copy file
+                if os.path.exists(source_file):
+                    shutil.copy2(source_file, dest_file)
+                    copied_files.append(os.path.basename(dest_file))
+
+                    # Update progress every 10 frames or on last frame
+                    if (i + 1) % 10 == 0 or i == total_frames - 1:
+                        progress_pct = int((i + 1) / total_frames * 50)  # Use first 50% for copying
+                        self.main_window.animator.update_status_animated(
+                            f"📦 AYON: Copying files... {i + 1}/{total_frames}",
+                            StatusColors.INFO
+                        )
+                else:
+                    self.log(f"Warning: Source file not found: {source_file}")
+
+            if not copied_files:
+                raise Exception("No files were copied to staging directory")
+
+            self.log(f"Copied {len(copied_files)} EXR files to {staging_dir}")
+            render_dir = staging_dir
 
             # Get the base filename pattern for the sequence
             base_name = seq.basename()
@@ -262,34 +310,30 @@ class RePublishTab(BaseTab):
             # Extract project and shot from searchpath
             folder_path = convert_to_ayon_folder_path(self.app_state.shotpath, self.app_state.jobname)
 
-            # Create metadata
+            # Update status
+            self.main_window.animator.update_status_animated(
+                "📦 AYON: Creating metadata...",
+                StatusColors.INFO
+            )
+
+            # Create metadata - use base_render_path as renders_path and staging_subdir as output_subdirectory
             metadata = create_ayon_metadata(
                 project_name=self.app_state.jobname,
                 render_name=product_name,
                 start_frame=self.app_state.republish_startframe,
                 end_frame=self.app_state.republish_endframe,
-                renders_path=render_dir,
+                renders_path=base_render_path,
                 folder_path=folder_path,
                 task=task,
                 user=self.app_state.user,
-                output_subdirectory="",
+                output_subdirectory=staging_subdir,
                 working_dir=self.app_state.working_dir,
                 render_file=render_file
             )
 
-            # Write metadata file to working directory
-            metadata_filename = f"ayon_{render_file}_{product_name}.json"
-
-            # Use working_dir if available, otherwise use temp directory
-            if self.app_state.working_dir:
-                metadata_dir = self.app_state.working_dir
-            else:
-                # Fall back to temp directory when working_dir is not set (e.g., custom path mode)
-                import tempfile
-                metadata_dir = tempfile.gettempdir()
-                self.log(f"Using temp directory for metadata: {metadata_dir}")
-
-            metadata_path = os.path.join(metadata_dir, metadata_filename)
+            # Write metadata file to staging directory
+            metadata_filename = f"ayon_{product_name}.json"
+            metadata_path = os.path.join(staging_dir, metadata_filename)
             metadata_path = write_metadata_file(metadata, metadata_path)
 
             if not metadata_path:
@@ -302,14 +346,16 @@ class RePublishTab(BaseTab):
 
             # Publish
             if use_farm:
-                # Submit to Deadline
+                # Submit to Deadline with correct signature
                 job_id = submit_ayon_publish_to_deadline(
+                    project_name=self.app_state.jobname,
+                    render_name=product_name,
+                    render_file=render_file,
                     metadata_path=metadata_path,
-                    job_name=f"Publish_{product_name}",
-                    priority=50,
-                    pool="",
-                    group="",
-                    dependency_job_id=None
+                    folder_path=folder_path,
+                    task=task,
+                    user=self.app_state.user,
+                    build_job_id=None
                 )
 
                 if job_id:

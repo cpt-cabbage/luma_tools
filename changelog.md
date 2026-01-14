@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.42
+- Fixing bundle name
+
 ## Version 0.41
 - Ayon Fixes
 

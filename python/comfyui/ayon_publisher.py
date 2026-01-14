@@ -11,6 +11,9 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QMessageBox
 )
+from PySide6.QtCore import QThreadPool
+
+from resources.ui.workers import Worker
 
 
 def _run_publish_validators(
@@ -225,34 +228,86 @@ def publish_comfyui_asset_to_ayon(
                     "Failed to submit job to Deadline."
                 )
         else:
-            # Publish locally
+            # Publish locally using Worker thread to avoid freezing UI
             print("[AYON Publish] Publishing to AYON locally...")
-            result = publish_to_ayon_local(
-                metadata_path=metadata_path,
-                project_name=app_state.jobname,
-                folder_path=folder_path,
-                task=task,
-                user=app_state.user
-            )
 
-            if result:
-                print("[AYON Publish] Successfully published to AYON")
-                QMessageBox.information(
-                    parent_widget,
-                    "Published Successfully",
-                    f"Successfully published to AYON.\n\n"
-                    f"Product Type: {product_type}\n"
-                    f"Product: {full_product_name}\n"
-                    f"Task: {task}"
-                )
-                success = True
-            else:
-                print("[AYON Publish] Failed to publish to AYON")
+            # Create a progress dialog to show while publishing
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+
+            progress_dialog = QProgressDialog(
+                "Publishing to AYON...\n\nThis may take a moment.",
+                None,  # No cancel button
+                0, 0,  # Indeterminate progress
+                parent_widget
+            )
+            progress_dialog.setWindowTitle("Publishing")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+
+            # Variables to capture result
+            publish_result = {"success": False, "error": None}
+
+            def publish_worker():
+                """Worker function to publish to AYON."""
+                try:
+                    result = publish_to_ayon_local(
+                        metadata_path=metadata_path,
+                        project_name=app_state.jobname,
+                        folder_path=folder_path,
+                        task=task,
+                        user=app_state.user
+                    )
+                    publish_result["success"] = result
+                    return result
+                except Exception as e:
+                    publish_result["error"] = str(e)
+                    raise
+
+            def on_publish_complete(result):
+                """Handle successful publish completion."""
+                progress_dialog.close()
+
+                if result:
+                    print("[AYON Publish] Successfully published to AYON")
+                    QMessageBox.information(
+                        parent_widget,
+                        "Published Successfully",
+                        f"Successfully published to AYON.\n\n"
+                        f"Product Type: {product_type}\n"
+                        f"Product: {full_product_name}\n"
+                        f"Task: {task}"
+                    )
+                else:
+                    print("[AYON Publish] Failed to publish to AYON")
+                    QMessageBox.critical(
+                        parent_widget,
+                        "Publish Failed",
+                        "AYON publish command failed. Check logs for details."
+                    )
+
+            def on_publish_error(error_tuple):
+                """Handle publish error."""
+                progress_dialog.close()
+                error_msg = str(error_tuple[1]) if len(error_tuple) > 1 else "Unknown error"
+                print(f"[AYON Publish] Error: {error_msg}")
                 QMessageBox.critical(
                     parent_widget,
-                    "Publish Failed",
-                    "AYON publish command failed. Check logs for details."
+                    "Publish Error",
+                    f"Failed to publish to AYON:\n\n{error_msg}"
                 )
+
+            # Create and start worker
+            worker = Worker(publish_worker)
+            worker.signals.result.connect(on_publish_complete)
+            worker.signals.error.connect(on_publish_error)
+            QThreadPool.globalInstance().start(worker)
+
+            # Return True to indicate publish was initiated
+            # (actual result will be shown in callbacks)
+            success = True
 
         return success
 
