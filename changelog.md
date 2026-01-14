@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4
+- Migrate UI components from PySide2 to PySide6
+
 ## Version 0.28
 - Add unified model loader supporting FBX, OBJ, USD, GLB, GLTF formats - Implement lazy loading for gallery thumbnails with batched loading - Add multi-workflow models with individual settings and editable nodes - Improve metadata caching and batch loading for better performance - Update UI components with tooltip lazy loading and placeholder caching - Add server restart functionality for persistent ComfyUI mode - Refactor GLB-specific modules to unified model handling - Update dependencies and clean up cache files
 

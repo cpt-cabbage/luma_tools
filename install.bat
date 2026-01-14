@@ -77,22 +77,150 @@ echo Removing pause from launchers...
 powershell -Command "(Get-Content '%TARGET%\luma_tools.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools.bat'"
 powershell -Command "(Get-Content '%TARGET%\luma_tools_standalone.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools_standalone.bat'"
 
-REM Copy Python files (root)
-echo Copying Python files...
-xcopy "%SOURCE%\python\*.py" "%TARGET%\python\" /Y /Q
+REM ============================================================================
+REM CLEAN OLD PYTHON FILES FROM PREVIOUS STRUCTURE
+REM ============================================================================
+
+echo Cleaning old Python files from production...
+
+REM Remove old monolithic Python files from root (pre-restructure)
+if exist "%TARGET%\python\la_shot_tools.py" (
+    echo Removing old la_shot_tools.py...
+    del /Q "%TARGET%\python\la_shot_tools.py"
+)
+if exist "%TARGET%\python\config.py" (
+    echo Removing old config.py...
+    del /Q "%TARGET%\python\config.py"
+)
+if exist "%TARGET%\python\state_manager.py" (
+    echo Removing old state_manager.py...
+    del /Q "%TARGET%\python\state_manager.py"
+)
+if exist "%TARGET%\python\settings_manager.py" (
+    echo Removing old settings_manager.py...
+    del /Q "%TARGET%\python\settings_manager.py"
+)
+if exist "%TARGET%\python\utils.py" (
+    echo Removing old utils.py...
+    del /Q "%TARGET%\python\utils.py"
+)
+
+REM Clean old tab files (if any exist in root before modular structure)
+for %%f in (
+    pass_builder_tab.py
+    mp4_maker_tab.py
+    republish_tab.py
+    shot_cleaner_tab.py
+    comfyui_tab.py
+    comfyui_gallery_tab.py
+    settings_tab.py
+    logs_tab.py
+) do (
+    if exist "%TARGET%\python\%%f" (
+        echo Removing old %%f...
+        del /Q "%TARGET%\python\%%f"
+    )
+)
+
+REM Remove old service files from root
+for %%f in (
+    pass_builder.py
+    render_service.py
+    mp4_maker.py
+    scan_service.py
+    cleanup_service.py
+    file_operations.py
+) do (
+    if exist "%TARGET%\python\%%f" (
+        echo Removing old %%f...
+        del /Q "%TARGET%\python\%%f"
+    )
+)
+
+echo Old files cleaned.
+echo.
+
+REM ============================================================================
+REM COPY NEW DOMAIN-BASED PYTHON PACKAGES
+REM ============================================================================
+
+REM Copy Python core module
+echo Copying Python core module...
+xcopy "%SOURCE%\python\core\*.py" "%TARGET%\python\core\" /Y /Q /I
 if errorlevel 1 (
-    echo ERROR: Failed to copy Python files
+    echo ERROR: Failed to copy Python core module
+    pause
+    exit /b 1
+)
+
+REM Copy Python ayon module
+echo Copying Python ayon module...
+xcopy "%SOURCE%\python\ayon\*.py" "%TARGET%\python\ayon\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python ayon module
+    pause
+    exit /b 1
+)
+
+REM Copy Python ayon validators
+echo Copying Python ayon validators...
+xcopy "%SOURCE%\python\ayon\validators\*.py" "%TARGET%\python\ayon\validators\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python ayon validators
+    pause
+    exit /b 1
+)
+
+REM Copy Python comfyui module
+echo Copying Python comfyui module...
+xcopy "%SOURCE%\python\comfyui\*.py" "%TARGET%\python\comfyui\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python comfyui module
+    pause
+    exit /b 1
+)
+
+REM Copy Python models module
+echo Copying Python models module...
+xcopy "%SOURCE%\python\models\*.py" "%TARGET%\python\models\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python models module
+    pause
+    exit /b 1
+)
+
+REM Copy Python services module
+echo Copying Python services module...
+xcopy "%SOURCE%\python\services\*.py" "%TARGET%\python\services\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python services module
     pause
     exit /b 1
 )
 
 REM Copy Python tabs module
 echo Copying Python tabs module...
-xcopy "%SOURCE%\python\tabs\*.py" "%TARGET%\python\tabs\" /Y /Q
+xcopy "%SOURCE%\python\tabs\*.py" "%TARGET%\python\tabs\" /Y /Q /I
 if errorlevel 1 (
     echo ERROR: Failed to copy Python tabs module
     pause
     exit /b 1
+)
+
+REM Copy Python ui module (shared UI components)
+echo Copying Python ui module...
+xcopy "%SOURCE%\python\ui\*.py" "%TARGET%\python\ui\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Python ui module
+    pause
+    exit /b 1
+)
+
+REM Copy Python libs (external binaries like Assimp DLL)
+echo Copying Python libs...
+xcopy "%SOURCE%\python\libs\*.*" "%TARGET%\python\libs\" /Y /Q /I /S
+if errorlevel 1 (
+    echo WARNING: Failed to copy Python libs (may not exist)
 )
 
 REM Copy UI resources (root)

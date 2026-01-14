@@ -73,7 +73,7 @@ def get_ocio_config():
 
 def get_ayon_bundle():
     """Get AYON bundle name from environment."""
-    return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "production")
+    return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "LUMA-PRODUCTION-Bundle-2025-12-08-02")
 
 
 def _safe_glob(pattern):
