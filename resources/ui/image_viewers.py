@@ -595,7 +595,7 @@ class EmbeddedImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui_service import get_image_metadata
+            from comfyui.service import get_image_metadata
             metadata = get_image_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
@@ -618,7 +618,7 @@ class EmbeddedImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui_service import get_image_metadata
+            from comfyui.service import get_image_metadata
             metadata = get_image_metadata(output_dir, filename)
             if metadata:
                 self.copy_settings_requested.emit(metadata)
@@ -910,7 +910,7 @@ class FullscreenImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui_service import get_image_metadata
+            from comfyui.service import get_image_metadata
             metadata = get_image_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
@@ -932,7 +932,7 @@ class FullscreenImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui_service import get_image_metadata
+            from comfyui.service import get_image_metadata
             metadata = get_image_metadata(output_dir, filename)
             if metadata:
                 self.copy_settings_requested.emit(metadata)

@@ -116,7 +116,7 @@ class PollingMixin:
     def _poll_iterate_job(self):
         """Poll the iterate job status."""
         from ui_components import Worker
-        from comfyui_service import poll_deadline_job_status
+        from comfyui.service import poll_deadline_job_status
 
         job_id = self.app_state.comfyui_current_job_id
         if not job_id:
@@ -198,7 +198,7 @@ class PollingMixin:
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
         from ui_components import StatusColors
-        from comfyui_service import get_job_output_files, cleanup_job_temp_files
+        from comfyui.service import get_job_output_files, cleanup_job_temp_files
 
         elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
         elapsed_str = format_elapsed_time(elapsed)
@@ -321,7 +321,7 @@ class PollingMixin:
     def _poll_batch_jobs(self):
         """Poll all pending batch jobs and collect results before updating status."""
         from ui_components import Worker
-        from comfyui_service import poll_deadline_job_status
+        from comfyui.service import poll_deadline_job_status
 
         if not self._batch_pending_jobs:
             self._stop_batch_polling()
@@ -440,7 +440,7 @@ class PollingMixin:
     def _on_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion - cleanup and refresh gallery."""
         from ui_components import StatusColors
-        from comfyui_service import cleanup_job_temp_files
+        from comfyui.service import cleanup_job_temp_files
 
         self._stop_batch_polling()
 
@@ -493,7 +493,7 @@ class PollingMixin:
     def _on_cancel_jobs_clicked(self):
         """Handle cancel jobs button click."""
         from ui_components import Worker, StatusColors
-        from comfyui_service import cancel_deadline_jobs
+        from comfyui.service import cancel_deadline_jobs
 
         job_ids = []
 

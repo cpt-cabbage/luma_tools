@@ -135,7 +135,7 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        from settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails
+        from core.settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails
 
         # Auto-extract textures checkbox
         if hasattr(self.ui, 'AutoExtractTextures'):
@@ -147,8 +147,8 @@ class SettingsTab(BaseTab):
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
-        from settings_manager import get_default_passes
-        from config import REQUIRED_PASSES, DEFAULT_PASSES
+        from core.settings_manager import get_default_passes
+        from core.config import REQUIRED_PASSES, DEFAULT_PASSES
 
         self.ui.DefaultPassesList.clear()
 
@@ -181,7 +181,7 @@ class SettingsTab(BaseTab):
 
     def _load_global_settings_ui(self):
         """Load global settings into the settings UI."""
-        from settings_manager import (
+        from core.settings_manager import (
             get_global_settings_path, get_comfyui_mode, get_comfyui_path,
             get_comfyui_python_path, get_comfyui_network_output_path,
             get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout,
@@ -231,7 +231,7 @@ class SettingsTab(BaseTab):
 
     def _load_admin_users_ui(self):
         """Load admin users list."""
-        from settings_manager import get_admin_users
+        from core.settings_manager import get_admin_users
 
         self.ui.AdminUsersList.clear()
         for user in get_admin_users():
@@ -303,7 +303,7 @@ class SettingsTab(BaseTab):
 
     def _on_remove_pass_clicked(self):
         """Remove selected pass from the default passes list."""
-        from config import REQUIRED_PASSES
+        from core.config import REQUIRED_PASSES
 
         selected_items = self.ui.DefaultPassesList.selectedItems()
         if not selected_items:
@@ -329,16 +329,16 @@ class SettingsTab(BaseTab):
         )
 
         if reply == QMessageBox.Yes:
-            from config import DEFAULT_PASSES
-            from settings_manager import set_default_passes
+            from core.config import DEFAULT_PASSES
+            from core.settings_manager import set_default_passes
             set_default_passes(DEFAULT_PASSES.copy())
             self.log("Reset to default passes")
             self._load_default_passes_ui()
 
     def _on_save_settings_clicked(self):
         """Save user settings."""
-        from config import REQUIRED_PASSES
-        from settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails
+        from core.config import REQUIRED_PASSES
+        from core.settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails
 
         # Collect selected passes
         selected_passes = []
@@ -377,7 +377,7 @@ class SettingsTab(BaseTab):
         if reply == QMessageBox.Yes:
             try:
                 # Clear model thumbnail cache
-                from model_thumbnail_service import get_model_thumbnail_service
+                from models.thumbnail_service import get_model_thumbnail_service
                 service = get_model_thumbnail_service()
                 service.clear_cache()
                 self.log("Cleared model thumbnail cache")
@@ -451,7 +451,7 @@ class SettingsTab(BaseTab):
 
     def _on_save_global_settings(self):
         """Save all global settings."""
-        from settings_manager import (
+        from core.settings_manager import (
             set_global_settings_path, set_comfyui_mode, set_comfyui_path,
             set_comfyui_python_path, set_comfyui_network_output_path,
             set_comfyui_fast_mode, set_comfyui_fp16_accumulation,
@@ -512,7 +512,7 @@ class SettingsTab(BaseTab):
 
     def _on_add_admin_user(self):
         """Add an admin user."""
-        from settings_manager import add_admin_user
+        from core.settings_manager import add_admin_user
 
         username, ok = QtWidgets.QInputDialog.getText(
             self.main_window, "Add Admin User", "Enter username:",
@@ -526,7 +526,7 @@ class SettingsTab(BaseTab):
 
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
-        from settings_manager import remove_admin_user
+        from core.settings_manager import remove_admin_user
         from PySide2.QtWidgets import QMessageBox
 
         selected_items = self.ui.AdminUsersList.selectedItems()
@@ -560,7 +560,7 @@ class SettingsTab(BaseTab):
 
     def _load_restricted_tabs_ui(self):
         """Load restricted tabs settings into the checkboxes."""
-        from settings_manager import get_restricted_tabs
+        from core.settings_manager import get_restricted_tabs
 
         restricted = get_restricted_tabs()
 
@@ -581,7 +581,7 @@ class SettingsTab(BaseTab):
 
     def _save_restricted_tabs_settings(self):
         """Save restricted tabs settings from the checkboxes."""
-        from settings_manager import set_restricted_tabs
+        from core.settings_manager import set_restricted_tabs
 
         restricted = []
 

@@ -21,7 +21,7 @@ luma_tools_standalone.bat       # Without shot context (standalone mode)
 
 # Direct Python (ensure venv is activated)
 python\venv\Scripts\activate.bat
-python python/luma_tools.py
+python python/core/luma_tools.py
 
 # Deploy to production location
 install.bat                     # Copies files to L:\tools\_studio_tools\luma_tools
@@ -32,96 +32,107 @@ The batch files activate the venv and launch with `start /B` to run in backgroun
 **Command Line Arguments:**
 The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
 
-## Project Structure
+## Project Structure (Domain-Based Organization)
 
-### Core Modules (python/)
+The codebase is organized into domain-specific packages for clarity and maintainability:
 
-| Module | Purpose |
-|--------|---------|
-| `luma_tools.py` | Main window class (`LumaShotTools`), UI event handlers, entry point |
-| `state_manager.py` | Thread-safe global state (`app_state` singleton with RLock) |
-| `config.py` | Configuration with dynamic path resolution from environment variables |
-| `settings_manager.py` | User settings (~/.luma_tools/) and global settings persistence |
-| `utils.py` | Utilities: `get_trailing_number`, `remove_after`, `update_path_version`, `scan_exr_sequences`, `normalize_path` |
+```
+python/
+├── core/                    # Core infrastructure
+│   ├── luma_tools.py        # Main window, entry point
+│   ├── config.py            # Configuration and path resolution
+│   ├── state_manager.py     # Thread-safe global state
+│   ├── settings_manager.py  # User/global settings with registry pattern
+│   ├── utils.py             # General utilities
+│   └── import_utils.py      # Safe import utilities
+│
+├── comfyui/                 # ComfyUI AI image generation
+│   ├── service.py           # Main orchestration, Deadline submission
+│   ├── workflow.py          # Load/save, format conversion
+│   ├── editable.py          # Extract editable nodes
+│   ├── modifier.py          # Modify workflow parameters
+│   ├── node_configs.py      # Node type configurations
+│   ├── utils.py             # Server communication utilities
+│   ├── runner.py            # Farm worker script
+│   ├── client.py            # Persistent server mode client
+│   ├── server.py            # Server management
+│   └── ayon_publisher.py    # AYON publishing integration
+│
+├── models/                  # 3D model handling
+│   ├── loader.py            # Universal 3D loader (GLB, FBX, OBJ, USD)
+│   ├── viewer.py            # 3D viewer with textures/skeletons/animation
+│   ├── animation_utils.py   # Animation interpolation utilities
+│   ├── thumbnail_service.py # Multi-format thumbnail generation
+│   └── thumbnail_renderer.py # Subprocess thumbnail renderer
+│
+├── ayon/                    # AYON publishing integration
+│   ├── service.py           # AYON/Deadline integration, Strategy Pattern
+│   ├── publisher_integration.py # Standard AYON Publisher UI
+│   └── validators/          # Validation plugins
+│       ├── base.py
+│       ├── validate_file_exists.py
+│       ├── validate_file_format.py
+│       └── validate_naming_convention.py
+│
+├── services/                # General service layer
+│   ├── pass_builder.py      # Pass building orchestration (OIIO)
+│   ├── render_service.py    # Pass detection from EXR
+│   ├── mp4_maker.py         # FFmpeg-based MP4 generation
+│   ├── scan_service.py      # Directory scanning
+│   ├── cleanup_service.py   # File cleanup
+│   ├── thumbnail_service.py # EXR thumbnail generation
+│   ├── file_operations.py   # File utilities
+│   └── deadline_utils.py    # Deadline job submission helper
+│
+├── tabs/                    # UI tabs (modular tab system)
+│   ├── base_tab.py          # Abstract base class with TabSignals
+│   ├── pass_builder_tab.py  # Render scanning and pass building
+│   ├── mp4_maker_tab.py     # MP4 generation
+│   ├── republish_tab.py     # Re-publishing renders
+│   ├── shot_cleaner_tab.py  # Cleanup tool
+│   ├── comfyui_tab.py       # ComfyUI workflow execution
+│   ├── comfyui_gallery_tab.py # Gallery view for outputs
+│   ├── comfyui_polling.py   # Polling mixin for ComfyUI
+│   ├── settings_tab.py      # Settings UI
+│   └── logs_tab.py          # Log output viewer
+│
+├── ui/                      # Shared UI components
+│   ├── spell_checker.py     # PyEnchant spell checking widget
+│   └── gallery_prewarm.py   # Pre-load gallery data
+│
+└── libs/                    # External binaries (Assimp DLL)
+```
 
-### Modular Tab System (python/tabs/)
+### Import Conventions
 
-Each tab is a self-contained module inheriting from `BaseTab`:
+With the domain-based structure, imports follow these patterns:
 
-| Module | Purpose |
-|--------|---------|
-| `base_tab.py` | Abstract base class with `TabSignals` for cross-tab communication |
-| `pass_builder_tab.py` | Render scanning and pass building |
-| `mp4_maker_tab.py` | MP4 generation from EXR sequences |
-| `republish_tab.py` | Re-publishing renders to AYON |
-| `shot_cleaner_tab.py` | Cleanup for renders/USD/HIP files |
-| `comfyui_tab.py` | ComfyUI workflow execution |
-| `comfyui_gallery_tab.py` | Gallery view for ComfyUI outputs |
-| `settings_tab.py` | User and global settings |
-| `logs_tab.py` | Log output viewer |
+```python
+# Core modules
+from core.config import OIIO_PATH, FFMPEG_PATH
+from core.settings_manager import get_comfyui_path, save_user_settings
+from core.state_manager import app_state
+from core.utils import normalize_path
+from core.import_utils import safe_import
 
-Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
+# ComfyUI modules
+from comfyui.service import submit_comfyui_to_deadline
+from comfyui.workflow import load_workflow
+from comfyui.node_configs import EDITABLE_NODE_CONFIGS
 
-### Service Layer
+# Model modules
+from models.loader import load_3d_model
+from models.animation_utils import lerp, slerp, interpolate_bone_animation
 
-| Module | Purpose |
-|--------|---------|
-| `ayon_service.py` | AYON/Deadline integration with Strategy Pattern (`FarmPublishStrategy`, `LocalPublishStrategy`) |
-| `pass_builder.py` | Pass building orchestration using OIIO |
-| `render_service.py` | Pass detection from EXR files using OpenImageIO |
-| `mp4_maker.py` | FFmpeg-based MP4 generation from EXR sequences |
-| `scan_service.py` | Directory scanning with `DirectoryScanner` class |
-| `cleanup_service.py` | File cleanup for renders/USD/HIP files |
-| `file_operations.py` | File utilities (find renders, normalize paths) |
-| `thumbnail_service.py` | EXR thumbnail generation with OIIO and caching |
-| `model_loader.py` | Universal 3D model loader (GLB, FBX, OBJ, USD) using Open3D/trimesh |
-| `model_viewer.py` | Enhanced 3D viewer with textures, skeletons, and animation playback |
-| `model_thumbnail_service.py` | Multi-format 3D thumbnail generation |
-| `model_thumbnail_renderer.py` | Subprocess renderer for 3D thumbnails |
-| `gallery_prewarm.py` | Pre-loads gallery data during splash screen |
-| `ayon_publisher_integration.py` | Standard AYON Publisher UI integration |
+# AYON modules
+from ayon.service import create_ayon_metadata
+from ayon.validators.base import BaseValidator
 
-### ComfyUI Integration
-
-| Module | Purpose |
-|--------|---------|
-| `comfyui_service.py` | Main entry: Deadline submission, orchestration |
-| `comfyui_node_configs.py` | `EDITABLE_NODE_CONFIGS`, `WIDGET_MAPPINGS` for node types |
-| `comfyui_workflow.py` | Load/save workflows, format conversion (UI ↔ API) |
-| `comfyui_editable.py` | Extract editable nodes from workflows (`EditableNode` dataclass) |
-| `comfyui_modifier.py` | Modify workflow parameters (seeds, prompts, images) |
-| `comfyui_utils.py` | Shared utilities for server communication |
-| `comfyui_runner.py` | Farm worker script that executes workflows |
-| `comfyui_client.py` | Lightweight client for persistent server mode |
-| `comfyui_server.py` | Server management for persistent ComfyUI instances |
-| `comfyui_ayon_publisher.py` | Publish ComfyUI outputs to AYON with validation |
-
-### AYON Plugins (python/ayon_plugins/)
-
-| Module | Purpose |
-|--------|---------|
-| `validators/base.py` | Base validator class and `InstanceData` dataclass |
-| `validators/validate_file_exists.py` | Validates file presence before publish |
-| `validators/validate_file_format.py` | Validates file format against product type |
-| `validators/validate_naming_convention.py` | Validates naming conventions |
-
-### UI Components (resources/ui/)
-
-| File | Purpose |
-|------|---------|
-| `ui_components.py` | Worker class, animations, inline spinners, status colors |
-| `splash_screen.py` | Animated loading splash screen |
-| `icons.py` | `IconManager` for SVG icons, `TAB_COLORS` theme constants |
-| `main_window.ui` | Qt Designer main window UI file |
-| `tabs/*.ui` | Individual tab UI files (e.g., `pass_builder.ui`) |
-| `la_shottools_ui.ui` | Legacy monolithic UI file (backup) |
-| `la_shot_tools_styles.qss` | Custom Qt stylesheet |
-
-### Additional Python Modules (python/)
-
-| Module | Purpose |
-|--------|---------|
-| `spell_checker.py` | PyEnchant-based `SpellCheckTextEdit` widget, `is_spell_check_available()` |
+# Service modules
+from services.pass_builder import PassBuilder
+from services.render_service import detect_passes
+from services.mp4_maker import generate_mp4
+```
 
 ## Architecture Patterns
 
@@ -181,10 +192,6 @@ QThreadPool.globalInstance().start(worker)
 - Progress callback receives: `(int: percentage, str: message)`
 - Use `report_progress(callback, progress, message)` utility for consistent progress reporting
 
-**Additional Threading Utilities:**
-- `ThreadedOperation` - Wrapper class for cleaner worker management
-- `LogStream` - Custom QObject in `luma_tools.py` that redirects stdout/stderr to the Log tab via signals (all `print()` output appears in Log tab)
-
 ### Progress and Status Reporting (Critical)
 
 **IMPORTANT:** All progress feedback must use the main window status bar ONLY. Never create separate QProgressDialog, loading overlays, or custom progress widgets.
@@ -198,23 +205,25 @@ self.set_status("Processing files...")
 self.log("Operation completed")
 ```
 
-**For Non-Tab Functions:**
-If a function is called from outside a tab context (e.g., `comfyui_ayon_publisher.py`):
-- Use simple `print()` for console output (appears in Log tab)
-- Update status bar via `parent_widget.statusBar().showMessage()` if parent has status bar
-- Do NOT create QProgressDialog, loading overlays, or custom progress windows
-- Keep operations fast or run in background workers
+### Settings System with Registry Pattern
 
-### Strategy Pattern for Publishing
+Two-tier settings managed by `core/settings_manager.py` using a registry pattern:
 
-`ayon_service.py` implements farm vs local publishing:
-- `PublishStrategy` (ABC) - Base strategy interface
-- `FarmPublishStrategy` - Submits to Deadline farm
-- `LocalPublishStrategy` - Publishes directly
+**Settings Registry:**
+```python
+SETTINGS_REGISTRY = {
+    "comfyui_path": SettingDef("comfyui_path", default=r"L:\...", scope="global"),
+    "comfyui_mode": SettingDef("comfyui_mode", "embedded", "global", validator=...),
+    # ... all settings defined once
+}
 
-### Settings System
+# Generic getters/setters
+value = get_setting("comfyui_path")
+set_setting("comfyui_mode", "standalone")
 
-Two-tier settings managed by `settings_manager.py`:
+# Backward-compatible aliases
+get_comfyui_path = lambda: get_setting("comfyui_path")
+```
 
 **User Settings** (`~/.luma_tools/settings.json`):
 - Default passes, ComfyUI text presets, tab order, last browse directories
@@ -222,9 +231,16 @@ Two-tier settings managed by `settings_manager.py`:
 **Global Settings** (shared network path):
 - ComfyUI workflow presets, ComfyUI installation path/mode
 
+### Strategy Pattern for Publishing
+
+`ayon/service.py` implements farm vs local publishing:
+- `PublishStrategy` (ABC) - Base strategy interface
+- `FarmPublishStrategy` - Submits to Deadline farm
+- `LocalPublishStrategy` - Publishes directly
+
 ## Configuration
 
-### Dynamic Path Resolution (config.py)
+### Dynamic Path Resolution (core/config.py)
 
 Tool paths are resolved dynamically from environment variables:
 - `AYON_LAUNCHER_LOCAL_DIR` - Base path for OIIO, FFmpeg
@@ -249,23 +265,23 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 
 ## Key Workflows
 
-### ComfyUI Workflow (New)
+### ComfyUI Workflow
 
 1. Select workflow preset from global settings
 2. Workflow scanned for `_editable` suffix nodes (dynamic UI generated)
 3. Select input images (batch processing supported)
 4. Configure editable parameters (prompts, seeds, etc.)
 5. Submit to Deadline - each frame is a different seed
-6. `comfyui_runner.py` executes on farm workers
+6. `comfyui/runner.py` executes on farm workers
 
-**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`, `Trellis2ExportMesh`, `UltraShapeSaveGLB`, `Load3D`. See `EDITABLE_NODE_CONFIGS` in `comfyui_node_configs.py` for widget mappings.
+**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`, `Trellis2ExportMesh`, `UltraShapeSaveGLB`, `Load3D`. See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py` for widget mappings.
 
-**Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `config.py` for the full list.
+**Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `core/config.py` for the full list.
 
 ### Pass Building
 
-1. Scan renders via `find_renders()` from `file_operations.py`
-2. Detect passes using `detect_passes()` from `render_service.py`
+1. Scan renders via `find_renders()` from `services/file_operations.py`
+2. Detect passes using `detect_passes()` from `services/render_service.py`
 3. Build using `PassBuilder.build_passes()` (OIIO local or Deadline)
 4. Publish to AYON using appropriate strategy
 
@@ -273,7 +289,7 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 
 1. Scan renders from denoised/raw/custom paths
 2. Configure quality and burn-in options
-3. Generate via `mp4_maker.py` using FFmpeg
+3. Generate via `services/mp4_maker.py` using FFmpeg
 
 ## Development
 
@@ -290,24 +306,6 @@ powershell -Command "& 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tool
 # CORRECT - PowerShell for simple commands
 powershell -Command "Remove-Item -Force 'path\to\file'"
 powershell -Command "Test-Path 'path\to\file'"
-```
-
-**What NOT to do:**
-```bash
-# WRONG - cd /d is cmd.exe syntax, doesn't work in bash
-cd /d "l:\path" && python script.py
-
-# WRONG - Direct Windows paths get mangled
-l:\path\python.exe script.py
-
-# WRONG - cmd /c often hangs or doesn't capture output properly
-cmd /c "python script.py"
-```
-
-**For inline Python code**, write to a temp file first, then execute:
-```bash
-# Write test script, then run it
-powershell -Command "& 'path\to\python.exe' 'path\to\test_script.py'"
 ```
 
 ### Debugging
@@ -330,8 +328,8 @@ powershell -Command "& 'path\to\python.exe' 'path\to\test_script.py'"
 
 ### Adding New Features
 
-1. Create service module in `python/` if needed
-2. Add configuration to `config.py`
+1. Create service module in appropriate domain package (`services/`, `comfyui/`, `models/`, etc.)
+2. Add configuration to `core/config.py`
 3. For new tab: Follow "Adding a new tab" steps in Architecture section
 4. For long operations: Wrap in Worker, submit to QThreadPool
 5. Use `set_status()` to update status bar, `print()` for logging
@@ -345,13 +343,13 @@ powershell -Command "& 'path\to\python.exe' 'path\to\test_script.py'"
 ### AYON Publishing
 
 **For single files (FBX, GLB, images):**
-Use `create_ayon_metadata_single_file()` in `ayon_service.py` - handles single files without frame sequences.
+Use `create_ayon_metadata_single_file()` in `ayon/service.py` - handles single files without frame sequences.
 
 **For EXR sequences:**
-Use `create_ayon_metadata()` in `ayon_service.py` - handles frame sequences with proper file lists.
+Use `create_ayon_metadata()` in `ayon/service.py` - handles frame sequences with proper file lists.
 
-**Validators (Phase 2 AYON Integration):**
-Located in `python/ayon_plugins/validators/`:
+**Validators:**
+Located in `python/ayon/validators/`:
 - `ValidateFileExists` - Checks file presence
 - `ValidateFileFormat` - Validates extension against product type
 - `ValidateNamingConvention` - Validates product/variant names
@@ -388,10 +386,35 @@ Use `convert_to_ayon_folder_path()` for path conversion.
 
 **Path Handling:**
 - Windows uses backslashes, AYON uses forward slashes
-- Use `normalize_path()` from utils to standardize
+- Use `normalize_path()` from `core.utils` to standardize
 
 **ComfyUI Workflow Formats:**
 - UI/nodes format has `nodes` array with `widgets_values`
 - API format has node IDs as keys with `inputs` dict
 - Use `is_api_format(workflow)` to detect format type
-- `comfyui_service.py` converts between formats automatically
+- `comfyui/service.py` converts between formats automatically
+
+## Utility Functions
+
+**Shared UI Utilities (`resources/ui/small_widgets.py`):**
+- `show_popup_menu()` - Display popup menu below button with optional submenus
+- `browse_directory()` - Directory browser with last-used memory
+- `browse_file()` - File browser with last-used memory
+
+**Safe Imports (`core/import_utils.py`):**
+```python
+from core.import_utils import safe_import, safe_import_multiple
+
+# Single import
+Usd, USD_AVAILABLE = safe_import("pxr", "Usd")
+
+# Multiple imports
+(Usd, Sdf, UsdGeom), USD_AVAILABLE = safe_import_multiple("pxr", "Usd", "Sdf", "UsdGeom")
+```
+
+**Animation Utilities (`models/animation_utils.py`):**
+- `lerp()` - Linear interpolation
+- `slerp()` - Spherical linear interpolation (quaternions)
+- `quaternion_to_matrix()` - Convert quaternion to 4x4 matrix
+- `compose_transform()` - Build transform from position/rotation/scale
+- `interpolate_bone_animation()` - Sample bone animation at time

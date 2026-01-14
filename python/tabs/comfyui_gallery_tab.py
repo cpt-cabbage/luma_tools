@@ -109,7 +109,7 @@ class ComfyUIGalleryTab(BaseTab):
         data that was pre-scanned during the splash screen.
         """
         try:
-            from gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
+            from ui.gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
 
             cache = get_prewarm_cache()
             if cache and cache.get('items'):
@@ -230,7 +230,7 @@ class ComfyUIGalleryTab(BaseTab):
         from ui_components import Worker
 
         try:
-            from gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
+            from ui.gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
 
             cache = get_prewarm_cache()
             if cache and cache.get('items'):
@@ -257,7 +257,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _enrich_prewarm_items(self, items):
         """Enrich pre-warmed items with workflow metadata (runs on worker thread)."""
-        from comfyui_service import get_workflow_preset_for_files
+        from comfyui.service import get_workflow_preset_for_files
 
         # Group items by directory for batch metadata loading
         items_by_dir = {}  # dir_path -> [item, ...]
@@ -353,7 +353,7 @@ class ComfyUIGalleryTab(BaseTab):
         Returns:
             list: Sorted list of usernames (folder names in network output path)
         """
-        from settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_comfyui_network_output_path
 
         network_path = get_comfyui_network_output_path()
         if not network_path or not os.path.isdir(network_path):
@@ -508,7 +508,7 @@ class ComfyUIGalleryTab(BaseTab):
         Returns:
             str: Full path to user's gallery folder, or empty string if not configured.
         """
-        from settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_comfyui_network_output_path
 
         network_path = get_comfyui_network_output_path()
         if network_path:
@@ -599,7 +599,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _browse_custom_folder(self):
         """Browse for a custom gallery folder."""
-        from settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
 
         current_path = self._custom_path or get_last_browse_directory("comfyui_gallery")
 
@@ -685,7 +685,7 @@ class ComfyUIGalleryTab(BaseTab):
                 # Get workflow presets if metadata loading is enabled
                 workflow_map = {}
                 if load_metadata:
-                    from comfyui_service import get_workflow_preset_for_files
+                    from comfyui.service import get_workflow_preset_for_files
                     filenames = [f[0] for f in file_list]
                     try:
                         workflow_map = get_workflow_preset_for_files(dir_path, filenames)

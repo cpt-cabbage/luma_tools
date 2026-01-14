@@ -219,7 +219,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
 
     @staticmethod
     def _get_tooltip_data(output_dir, image_path):
-        from comfyui_service import get_model_note
+        from comfyui.service import get_model_note
         filename = os.path.basename(image_path)
         note = get_model_note(output_dir, filename)
         return (filename, note)
@@ -302,7 +302,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
     def _get_metadata(self):
         if self._cached_metadata is None:
             try:
-                from comfyui_service import get_image_metadata
+                from comfyui.service import get_image_metadata
                 filename = os.path.basename(self.image_path)
                 self._cached_metadata = get_image_metadata(self.output_dir, filename) or {}
             except Exception as e:
@@ -514,7 +514,7 @@ class GLBThumbnailWidget(QWidget):
 
     @staticmethod
     def _get_tooltip_data(output_dir, model_path):
-        from comfyui_service import get_model_note
+        from comfyui.service import get_model_note
         filename = os.path.basename(model_path)
         note = get_model_note(output_dir, filename)
         return (filename, note)
@@ -531,7 +531,7 @@ class GLBThumbnailWidget(QWidget):
 
     def _load_thumbnail(self):
         try:
-            from model_thumbnail_service import get_model_thumbnail_service
+            from models.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             cached = service.get_cached_thumbnail(self.model_path)
             if cached and not cached.isNull():
@@ -548,7 +548,7 @@ class GLBThumbnailWidget(QWidget):
         if self._thumbnail_loading:
             return
         try:
-            from model_thumbnail_service import get_model_thumbnail_service
+            from models.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             if service.is_pending(self.model_path):
                 return
@@ -566,14 +566,14 @@ class GLBThumbnailWidget(QWidget):
             self._thumbnail_loading = False
 
     def _generate_thumbnail_sync(self):
-        from model_thumbnail_service import get_model_thumbnail_service
+        from models.thumbnail_service import get_model_thumbnail_service
         service = get_model_thumbnail_service()
         return service.generate_thumbnail_sync(self.model_path)
 
     def _on_thumbnail_generated(self, pixmap):
         self._thumbnail_loading = False
         try:
-            from model_thumbnail_service import get_model_thumbnail_service
+            from models.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             service.set_pending(self.model_path, False)
         except Exception:
@@ -586,7 +586,7 @@ class GLBThumbnailWidget(QWidget):
     def _on_thumbnail_error(self, error_msg, traceback_str):
         self._thumbnail_loading = False
         try:
-            from model_thumbnail_service import get_model_thumbnail_service
+            from models.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             service.set_pending(self.model_path, False)
         except Exception:

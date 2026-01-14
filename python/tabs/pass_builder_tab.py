@@ -79,8 +79,8 @@ class PassBuilderTab(BaseTab):
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
-        from utils import update_path_version
-        from file_operations import find_renders
+        from core.utils import update_path_version
+        from services.file_operations import find_renders
 
         self.ui.RendersList.clear()
         self.ui.Passes.clear()
@@ -106,7 +106,7 @@ class PassBuilderTab(BaseTab):
     def _on_render_selection_changed(self):
         """Update passes when selected render changes."""
         import os
-        from render_service import get_pass_file_path
+        from services.render_service import get_pass_file_path
 
         sel0 = self.ui.RendersList.currentRow()
         if sel0 < 0 or sel0 >= len(self.app_state.renders):
@@ -128,7 +128,7 @@ class PassBuilderTab(BaseTab):
 
     def _detect_passes(self, render_file):
         """Detect passes in render file with spinner animation - runs on background thread."""
-        from render_service import detect_passes
+        from services.render_service import detect_passes
         from ui_components import Worker
 
         self.ui.Passes.clear()
@@ -138,7 +138,7 @@ class PassBuilderTab(BaseTab):
 
         def on_result(channels):
             """Called when pass detection completes."""
-            from settings_manager import get_all_default_passes
+            from core.settings_manager import get_all_default_passes
 
             # Hide spinner
             self.passes_spinner.stop()
@@ -179,8 +179,8 @@ class PassBuilderTab(BaseTab):
 
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
-        from render_service import load_pass_config
-        from settings_manager import get_all_default_passes
+        from services.render_service import load_pass_config
+        from core.settings_manager import get_all_default_passes
 
         selectedpasses = load_pass_config(passes_file)
         self.log(f"Loaded passes from file: {selectedpasses}")
@@ -193,9 +193,9 @@ class PassBuilderTab(BaseTab):
 
     def _on_build_passes_clicked(self):
         """Build passes for the selected render."""
-        from pass_builder import pass_builder
-        from render_service import save_pass_config
-        from settings_manager import get_all_default_passes
+        from services.pass_builder import pass_builder
+        from services.render_service import save_pass_config
+        from core.settings_manager import get_all_default_passes
         from ui_components import Worker, StatusColors
 
         # Get selected passes from the list

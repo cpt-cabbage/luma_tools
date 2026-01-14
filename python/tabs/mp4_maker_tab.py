@@ -91,7 +91,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Browse for custom directory containing image sequences."""
-        from settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
 
         default_dir = get_last_browse_directory("mp4_custom")
         if not default_dir:
@@ -114,7 +114,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
-        from utils import update_path_version, scan_exr_sequences
+        from core.utils import update_path_version, scan_exr_sequences
 
         self.ui.MP4RendersList.clear()
 
@@ -175,7 +175,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_render_selection_changed(self):
         """Update MP4 state when selected render changes."""
-        from mp4_maker import get_output_filename
+        from services.mp4_maker import get_output_filename
 
         sel0 = self.ui.MP4RendersList.currentRow()
         if sel0 < 0 or sel0 >= len(self.app_state.mp4_renders):
@@ -208,8 +208,8 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_output(self):
         """Browse for MP4 output location."""
-        from settings_manager import get_last_browse_directory, set_last_browse_directory
-        from mp4_maker import get_output_filename
+        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from services.mp4_maker import get_output_filename
 
         # Get current render name for default filename
         sel0 = self.ui.MP4RendersList.currentRow()
@@ -250,7 +250,7 @@ class MP4MakerTab(BaseTab):
     def _on_generate_clicked(self):
         """Generate MP4 from selected render - runs on background thread."""
         from ui_components import Worker, StatusColors
-        from mp4_maker import generate_mp4
+        from services.mp4_maker import generate_mp4
 
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()

@@ -117,7 +117,7 @@ class BaseEditDialog(QDialog):
     def _load_note(self):
         """Load existing note for this item."""
         try:
-            from comfyui_service import get_model_note
+            from comfyui.service import get_model_note
             filename = os.path.basename(self.item_path)
             note = get_model_note(self.output_dir, filename)
             self.note_edit.setPlainText(note)
@@ -127,7 +127,7 @@ class BaseEditDialog(QDialog):
     def _save_note(self):
         """Save the note and close the dialog."""
         try:
-            from comfyui_service import set_model_note
+            from comfyui.service import set_model_note
             filename = os.path.basename(self.item_path)
             note = self.note_edit.toPlainText()
             if set_model_note(self.output_dir, filename, note):

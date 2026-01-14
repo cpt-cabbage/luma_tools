@@ -22,7 +22,13 @@
       "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -m py_compile:*)",
       "Bash(\"l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\":*)",
       "Bash(powershell -Command:*)",
-      "Bash(l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)"
+      "Bash(l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)",
+      "Bash(git add:*)",
+      "Bash(git mv luma_tools.py core/)",
+      "Bash(git mv config.py core/)",
+      "Bash(git mv state_manager.py core/)",
+      "Bash(git mv settings_manager.py core/)",
+      "Bash(git mv utils.py core/)"
     ],
     "deny": [],
     "ask": []

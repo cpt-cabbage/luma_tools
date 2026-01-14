@@ -42,7 +42,7 @@ class ShotCleanerTab(BaseTab):
 
     def _setup_scanner(self):
         """Setup the directory scanner."""
-        from scan_service import DirectoryScanner
+        from services.scan_service import DirectoryScanner
 
         self.scanner = DirectoryScanner(self.app_state.lookdev_dir)
 
@@ -149,7 +149,7 @@ class ShotCleanerTab(BaseTab):
     def _on_clean_files_clicked(self):
         """Handle cleanup button click."""
         from ui_components import StatusColors
-        from cleanup_service import cleanup_renders, cleanup_usd, cleanup_hip_backups
+        from services.cleanup_service import cleanup_renders, cleanup_usd, cleanup_hip_backups
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.animate_button_click(self.ui.CleanFiles)

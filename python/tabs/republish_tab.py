@@ -87,7 +87,7 @@ class RePublishTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Handle custom path browse button click for rePublish."""
-        from settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
 
         default_path = get_last_browse_directory("republish_custom")
         if not default_path:
@@ -111,7 +111,7 @@ class RePublishTab(BaseTab):
 
     def _on_scan_renders_clicked(self):
         """Scan for renders to republish based on selected source type."""
-        from utils import update_path_version, scan_exr_sequences
+        from core.utils import update_path_version, scan_exr_sequences
 
         # Update searchpath with current version
         current_ver = self.ui.RePublishCurrentVer.value()
@@ -254,7 +254,7 @@ class RePublishTab(BaseTab):
             render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
 
             # Determine folder path from searchpath
-            from ayon_service import (
+            from ayon.service import (
                 convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
                 publish_to_ayon_local, submit_ayon_publish_to_deadline
             )
