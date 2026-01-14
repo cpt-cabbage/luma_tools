@@ -215,7 +215,7 @@ class RePublishTab(BaseTab):
 
     def _on_publish_clicked(self):
         """Handle publish to AYON button click."""
-        from ui_components import StatusColors
+        from resources.ui.styles import StatusColors
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.animate_button_click(self.ui.RePublishPublish)
@@ -246,7 +246,7 @@ class RePublishTab(BaseTab):
         )
 
         # Start worker thread
-        from ui_components import Worker
+        from resources.ui.workers import Worker
         worker = Worker(
             self._publish_worker,
             task,
@@ -412,7 +412,7 @@ class RePublishTab(BaseTab):
 
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
-        from ui_components import StatusColors
+        from resources.ui.styles import StatusColors
         self.main_window.animator.update_status_animated(
             f"📦 AYON: {message}",
             StatusColors.INFO
@@ -420,7 +420,7 @@ class RePublishTab(BaseTab):
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
-        from ui_components import StatusColors
+        from resources.ui.styles import StatusColors
 
         self.ui.RePublishPublish.setEnabled(True)
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
@@ -436,7 +436,7 @@ class RePublishTab(BaseTab):
 
     def _on_publish_error(self, error_tuple):
         """Handle publish errors."""
-        from ui_components import StatusColors
+        from resources.ui.styles import StatusColors
 
         exc_type, exc_value, exc_traceback = error_tuple
         error_msg = f"Publish failed: {str(exc_value)}"

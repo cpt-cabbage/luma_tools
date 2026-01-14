@@ -388,44 +388,18 @@ class EmbeddedImageViewer(QWidget):
             print(f"  MODEL_LOADER_AVAILABLE: {MODEL_LOADER_AVAILABLE}")
 
             if is_viewer_available():
-                # Configure OpenGL surface format before widget creation to prevent window flashing
-                from PySide6.QtGui import QSurfaceFormat
-                fmt = QSurfaceFormat()
-                fmt.setDepthBufferSize(24)
-                fmt.setStencilBufferSize(8)
-                fmt.setVersion(2, 1)  # OpenGL 2.1
-                fmt.setProfile(QSurfaceFormat.NoProfile)
-                fmt.setSamples(4)  # 4x MSAA
-                fmt.setSwapBehavior(QSurfaceFormat.DoubleBuffer)
-                QSurfaceFormat.setDefaultFormat(fmt)
+                # OpenGL format is already configured globally at app startup
+                # Just create the widget - it will use the pre-configured format
+                self.glb_viewer = ModelViewerWidget()
+                self.image_stack.addWidget(self.glb_viewer)
 
-                # Block updates on parent window during OpenGL widget creation
-                parent_window = self.window()
-                if parent_window:
-                    parent_window.setUpdatesEnabled(False)
+                self._has_glb_viewer = True
+                self._use_pyvista_viewer = False
+                print(f"✓ Using model_viewer GLB viewer")
+                self._glb_viewer_initialized = True
 
-                try:
-                    # Create the OpenGL widget
-                    self.glb_viewer = ModelViewerWidget()
-
-                    # Add to stack (will be hidden until set as current)
-                    self.image_stack.addWidget(self.glb_viewer)
-
-                    self._has_glb_viewer = True
-                    self._use_pyvista_viewer = False
-                    print(f"✓ Using model_viewer GLB viewer")
-                    self._glb_viewer_initialized = True
-
-                    if callback:
-                        callback(True)
-                finally:
-                    # Re-enable updates
-                    if parent_window:
-                        parent_window.setUpdatesEnabled(True)
-                        # Process pending events to ensure smooth rendering
-                        from PySide6.QtCore import QCoreApplication
-                        QCoreApplication.processEvents()
-
+                if callback:
+                    callback(True)
                 return
             else:
                 print(f"✗ Model viewer not available - one or more requirements missing")

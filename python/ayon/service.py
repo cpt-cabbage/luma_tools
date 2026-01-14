@@ -551,27 +551,66 @@ def publish_to_ayon_local(
     print(f"Executing AYON publish locally: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
+        # Use Popen for real-time output streaming
+        process = subprocess.Popen(
             cmd,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,  # Line buffered
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
-        print(f"AYON Publish STDOUT: {result.stdout}")
-        if result.stderr:
-            print(f"AYON Publish STDERR: {result.stderr}")
+        # Stream output in real-time
+        stdout_lines = []
+        stderr_lines = []
 
-        if result.returncode == 0:
+        # Read stdout line by line and detect key progress messages
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                break
+            line = line.rstrip()
+            if line:
+                # Log with prefix for clarity
+                print(f"AYON: {line}")
+                stdout_lines.append(line)
+
+                # Detect key progress stages for better feedback
+                if "ExtractReview" in line and "Processing" in line:
+                    print("  → Extracting review files...")
+                elif "IntegrateAsset" in line:
+                    print("  → Integrating assets into AYON...")
+                elif "Successfully" in line or "success" in line.lower():
+                    print("  ✓ Operation successful")
+                elif "Failed" in line or "ERROR" in line:
+                    print(f"  ✗ Error detected: {line}")
+
+        # Wait for process to complete and get stderr
+        process.wait()
+        stderr_output = process.stderr.read()
+        if stderr_output:
+            print(f"AYON Publish STDERR: {stderr_output}")
+            stderr_lines = stderr_output.splitlines()
+
+        # Check return code
+        if process.returncode == 0:
             print('AYON Publish Local Process Successful')
             return True
         else:
-            print(f'AYON Publish Local Process Failed with code {result.returncode}')
+            print(f'AYON Publish Local Process Failed with code {process.returncode}')
+            # Print last few lines for debugging
+            if stdout_lines:
+                print("Last stdout lines:")
+                for line in stdout_lines[-10:]:
+                    print(f"  {line}")
             return False
 
     except Exception as e:
         print(f'AYON Publish Local Process Failed: {e}')
+        import traceback
+        traceback.print_exc()
         return False
 
 

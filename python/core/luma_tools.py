@@ -99,6 +99,22 @@ if app is None:
 from PySide6.QtGui import QImageReader
 QImageReader.setAllocationLimit(2048)  # 2GB in megabytes
 
+# Configure OpenGL surface format globally before any OpenGL widgets are created
+# This prevents window flashing when 3D viewer initializes
+try:
+    from PySide6.QtGui import QSurfaceFormat
+    fmt = QSurfaceFormat()
+    fmt.setDepthBufferSize(24)
+    fmt.setStencilBufferSize(8)
+    fmt.setVersion(2, 1)  # OpenGL 2.1
+    fmt.setProfile(QSurfaceFormat.NoProfile)
+    fmt.setSamples(4)  # 4x MSAA
+    fmt.setSwapBehavior(QSurfaceFormat.DoubleBuffer)
+    QSurfaceFormat.setDefaultFormat(fmt)
+    print("OpenGL surface format configured")
+except Exception as e:
+    print(f"Warning: Could not configure OpenGL surface format: {e}")
+
 # Apply stylesheet
 apply_stylesheet(app)
 
@@ -635,13 +651,36 @@ def main():
         except Exception as e:
             print(f"Warning: Could not set prewarm cache: {e}")
 
-        # Skip 3D viewer pre-initialization - it's slow and provides minimal benefit
-        # The viewer will initialize on-demand when first needed
-        splash.update_progress(78, "Loading", "Finalizing...")
+        # Pre-initialize 3D viewer in background to prevent window flashing later
+        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
         app.processEvents()
 
+        try:
+            # Add python directory to path
+            import sys
+            import os
+            python_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+            if python_dir not in sys.path:
+                sys.path.insert(0, python_dir)
+
+            # Try to create viewer widget in background
+            from models.viewer import is_viewer_available
+            if is_viewer_available():
+                from models.viewer import ModelViewerWidget
+                # Create a hidden instance - this will initialize OpenGL context
+                # The gallery will create its own instances later, but they'll be faster
+                # because the OpenGL context is already set up
+                _temp_viewer = ModelViewerWidget()
+                _temp_viewer.hide()  # Keep it hidden
+                # Don't delete it yet - keep it alive to maintain the context
+                print("3D viewer pre-initialized successfully")
+            else:
+                print("3D viewer not available (missing dependencies)")
+        except Exception as e:
+            print(f"Warning: Could not pre-initialize 3D viewer: {e}")
+
         # Create main window
-        splash.update_progress(80, "Loading", "Creating main window...")
+        splash.update_progress(88, "Loading", "Creating main window...")
         app.processEvents()
 
         window = LumaShotTools()
