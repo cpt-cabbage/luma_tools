@@ -11,6 +11,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QFileDialog
 
 from .base_tab import BaseTab
+from resources.ui.styles import StatusColors
 
 
 class RePublishTab(BaseTab):
@@ -231,8 +232,6 @@ class RePublishTab(BaseTab):
 
     def _on_publish_clicked(self):
         """Handle publish to AYON button click."""
-        from resources.ui.styles import StatusColors
-
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.animate_button_click(self.ui.RePublishPublish)
 
@@ -428,7 +427,6 @@ class RePublishTab(BaseTab):
 
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
-        from resources.ui.styles import StatusColors
         self.main_window.animator.update_status_animated(
             f"📦 AYON: {message}",
             StatusColors.INFO
@@ -436,8 +434,6 @@ class RePublishTab(BaseTab):
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
-        from resources.ui.styles import StatusColors
-
         self.ui.RePublishPublish.setEnabled(True)
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
@@ -452,8 +448,6 @@ class RePublishTab(BaseTab):
 
     def _on_publish_error(self, error_tuple):
         """Handle publish errors."""
-        from resources.ui.styles import StatusColors
-
         exc_type, exc_value, exc_traceback = error_tuple
         error_msg = f"Publish failed: {str(exc_value)}"
 

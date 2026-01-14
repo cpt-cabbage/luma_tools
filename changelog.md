@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.47
+- Prevent initialization of restricted tabs entirely - Enable republish tab in standalone mode with custom directory selection - Pre-initialize 3D viewer only for admin users to prevent flashing
+
 ## Version 0.46
 - Switch AYON publish to real-time output streaming with progress detection - Configure OpenGL surface format globally to prevent window flashing - Pre-initialize 3D viewer in background for faster loading - Update broken import paths
 

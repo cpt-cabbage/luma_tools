@@ -36,6 +36,24 @@ The application uses a Windows named mutex (`Global\\LumaToolsSingleInstance`) t
 **Command Line Arguments:**
 The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
 
+## Deployment
+
+The `install.bat` script handles deployment to production with automated version management:
+
+```bash
+install.bat  # Deploys to L:\tools\_studio_tools\luma_tools
+```
+
+**What it does:**
+1. Prompts for version increment (big update: +0.1, small update: +0.01)
+2. Auto-increments version in `version.json`
+3. Optionally updates `changelog.md` from last git commit
+4. Copies all files to production location
+5. Updates paths in global_settings.json (dev → production)
+6. Removes 'pause' from production launchers for silent execution
+
+**Version tracking:** Version is stored in `version.json` and displayed in Settings tab. Changelog entries are auto-generated from git commit messages during deployment.
+
 ## Project Structure (Domain-Based Organization)
 
 The codebase is organized into domain-specific packages for clarity and maintainability:
@@ -242,6 +260,13 @@ get_comfyui_path = lambda: get_setting("comfyui_path")
 - ComfyUI workflow presets, ComfyUI installation path/mode
 - Tab restrictions (`restricted_tabs`) - controls which tabs are hidden from users
   - Maps restrict_key to permission flags via `TAB_RESTRICTION_MAP` in settings_manager.py
+  - Restricted tabs are prevented from initializing entirely (including UI pre-loading) to avoid performance impact
+  - When a tab is restricted, it's hidden unless the user has the corresponding permission
+
+**Global Settings Location:**
+- Development: `L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/global_settings/global_settings.json`
+- Production: `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json`
+- Paths are automatically updated during deployment by `install.bat`
 
 ### Strategy Pattern for Publishing
 
@@ -274,6 +299,20 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 | Default FPS | 25.0 |
 | Deadline Pool | luma |
 | Deadline Group | processing_group |
+
+### Environment Variables
+
+The application uses these environment variables (set automatically by batch launchers):
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| AYON_LAUNCHER_LOCAL_DIR | AYON installation path for OIIO/FFmpeg | OS-specific (see config.py) |
+| DEADLINE_PATH | Deadline installation path | `C:\Program Files\Thinkbox\Deadline10\bin` (Windows) |
+| BUILTIN_OCIO_ROOT | OCIO config location | From AYON environment |
+| AYON_DEFAULT_SETTINGS_VARIANT | AYON bundle name | `LUMA-PRODUCTION-Bundle-2025-12-08-02` |
+| PYTHONPATH | Python module search path | Set by batch files to include `python/` and `resources/ui/` |
+
+**Standalone Mode:** When AYON environment is unavailable, the app runs in standalone mode with limited functionality (no OIIO/FFmpeg-dependent features).
 
 ## Key Workflows
 
@@ -311,7 +350,8 @@ No build process - runs directly from source. Venv location: `python/venv/`
 
 - Python 3.10+
 - PySide6 (Qt6) - upgraded from PySide2 for NumPy 2.x compatibility and macOS support
-- Install dependencies: `pip install -r requirements.txt`
+- **Virtual environment is pre-configured** in `python/venv/`
+- To reinstall dependencies: `python\venv\Scripts\activate.bat && pip install -r requirements.txt`
 
 **Key dependencies:**
 - PySide6 >= 6.6.0 (Qt6 GUI framework)
@@ -321,6 +361,14 @@ No build process - runs directly from source. Venv location: `python/venv/`
 - PyOpenGL >= 3.1.0 (3D viewer rendering)
 - numpy >= 1.26.4, scipy >= 1.15.3 (NumPy 2.x compatible)
 - pyenchant >= 3.3.0 (Spell checking for text prompts)
+
+### Testing
+
+**Important:** This project currently has no test suite. When making changes:
+- Test manually using both launcher modes (context and standalone)
+- Verify tab functionality after modifying core components
+- Test with and without AYON environment variables set
+- Verify UI changes in Qt Designer preview and running application
 
 ### Running Python Scripts on Windows (Claude Code)
 
@@ -333,6 +381,18 @@ powershell -Command "& 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tool
 # CORRECT - PowerShell for simple commands
 powershell -Command "Remove-Item -Force 'path\to\file'"
 powershell -Command "Test-Path 'path\to\file'"
+```
+
+**File Operations:**
+```bash
+# Check if file exists
+powershell -Command "Test-Path 'path\to\file'"
+
+# Delete file
+powershell -Command "Remove-Item -Force 'path\to\file'"
+
+# List directory contents
+powershell -Command "Get-ChildItem 'path\to\directory'"
 ```
 
 ### Debugging
