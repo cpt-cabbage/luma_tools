@@ -69,6 +69,10 @@ sys.path.append(os.path.join(PROJECT_ROOT, "resources", "ui"))
 import warnings
 warnings.filterwarnings("ignore", message=".*NumPy.*")
 
+# Disable QtWebEngine sandbox when running from network paths
+# (Chromium sandbox doesn't work with UNC/network paths)
+os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+
 # PySide6 imports
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt
@@ -541,7 +545,7 @@ class LumaShotTools(QtWidgets.QWidget):
         border_color.setAlpha(100)
         painter.setBrush(bg_color)
         painter.setPen(QPen(border_color, 2))
-        painter.drawRoundedRect(self.rect(), LoadingStyles.BORDER_RADIUS, LoadingStyles.BORDER_RADIUS)
+        painter.drawRoundedRect(self.rect(), 0, 0)
 
     def resizeEvent(self, event):
         """Handle window resize to update tab widths."""
@@ -657,43 +661,35 @@ def main():
         except Exception as e:
             print(f"Warning: Could not set prewarm cache: {e}")
 
-        # Pre-initialize 3D viewer in background to prevent window flashing later
-        # Only initialize for admin users (gallery tab is admin-only)
-        if app_state.is_admin:
-            splash.update_progress(78, "Loading", "Initializing 3D viewer...")
-            app.processEvents()
+        # Pre-initialize Three.js viewer during splash to avoid window flicker
+        # WebEngine initialization can cause visual glitches if done later
+        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
+        app.processEvents()
 
-            try:
-                # Add python directory to path
-                import sys
-                import os
-                python_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-                if python_dir not in sys.path:
-                    sys.path.insert(0, python_dir)
-
-                # Try to create viewer widget in background
-                from models.viewer import is_viewer_available
-                if is_viewer_available():
-                    from models.viewer import ModelViewerWidget
-                    # Create a hidden instance - this will initialize OpenGL context
-                    # The gallery will create its own instances later, but they'll be faster
-                    # because the OpenGL context is already set up
-                    _temp_viewer = ModelViewerWidget()
-                    _temp_viewer.hide()  # Keep it hidden
-                    # Don't delete it yet - keep it alive to maintain the context
-                    print("3D viewer pre-initialized successfully")
-                else:
-                    print("3D viewer not available (missing dependencies)")
-            except Exception as e:
-                print(f"Warning: Could not pre-initialize 3D viewer: {e}")
-        else:
-            print("Skipping 3D viewer initialization for non-admin user")
+        _threejs_prewarm_viewer = None
+        try:
+            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available
+            if is_threejs_viewer_available():
+                # Create prewarm viewer with DontShowOnScreen attribute to prevent flashing
+                _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
+                # Give WebEngine time to fully initialize
+                import time
+                for _ in range(10):
+                    app.processEvents()
+                    time.sleep(0.05)
+                print("Three.js viewer pre-initialized successfully")
+        except Exception as e:
+            print(f"Warning: Could not pre-initialize Three.js viewer: {e}")
 
         # Create main window
         splash.update_progress(88, "Loading", "Creating main window...")
         app.processEvents()
 
         window = LumaShotTools()
+
+        # Store pre-warmed viewer on window to keep WebEngine alive
+        if _threejs_prewarm_viewer is not None:
+            window._threejs_prewarm_viewer = _threejs_prewarm_viewer
 
         splash.update_progress(95, "Loading", "Finalizing...")
         app.processEvents()

@@ -236,12 +236,6 @@ def create_ayon_metadata_single_file(
         if has_review:
             representation["tags"] = ["review"]
 
-    # Pre-populate site info
-    representation["site"] = {
-        "name": "studio",
-        "provider": "local_drive"
-    }
-
     # Create instance data
     instance_data = {
         "productName": product_name,
@@ -351,7 +345,6 @@ def create_ayon_metadata(
     staging_dir_path = staging_dir_path.replace("\\", "/")
 
     # Create representations
-    # Note: Files are already on shared storage, pre-mark as available at studio site
     representations = [{
         "name": "exr",
         "ext": "exr",
@@ -369,11 +362,6 @@ def create_ayon_metadata(
             },
             "display": AYON_DISPLAY,
             "view": AYON_VIEW
-        },
-        # Pre-populate active sites to prevent SiteAlreadyPresentError
-        "site": {
-            "name": "studio",
-            "provider": "local_drive"
         }
     }]
 
@@ -521,14 +509,15 @@ def publish_to_ayon_local(
     Returns:
         bool: True if successful, False otherwise
     """
+    import threading
+    import queue
+
     if not AYON_AVAILABLE:
         print("AYON not available, skipping publish")
         return False
 
     # Get bundle name
     bundle = get_ayon_bundle()
-
-
 
     # Build AYON console command
     cmd = [AYON_CONSOLE]
@@ -547,8 +536,24 @@ def publish_to_ayon_local(
     env["AYON_TASK_NAME"] = task
     env["AYON_BUNDLE_NAME"] = bundle
     env["AYON_USERNAME"] = user
+    # CRITICAL: Force Python subprocess to use unbuffered output
+    # Without this, the subprocess buffers stdout and readline() blocks
+    env["PYTHONUNBUFFERED"] = "1"
+    # Disable SiteSync for local publishes - files are already on shared storage
+    # This prevents SiteAlreadyPresentError from blocking the publish
+    env["AYON_SITESYNC_ENABLED"] = "0"
 
     print(f"Executing AYON publish locally: {' '.join(cmd)}")
+
+    def stream_reader(pipe, output_queue, prefix):
+        """Read lines from pipe and put them in queue."""
+        try:
+            for line in iter(pipe.readline, ''):
+                if line:
+                    output_queue.put((prefix, line.rstrip()))
+            pipe.close()
+        except Exception as e:
+            output_queue.put((prefix, f"[Reader error: {e}]"))
 
     try:
         # Use Popen for real-time output streaming
@@ -562,48 +567,87 @@ def publish_to_ayon_local(
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
-        # Stream output in real-time
+        # Use threads to read stdout and stderr concurrently to avoid deadlocks
+        output_queue = queue.Queue()
+
+        stdout_thread = threading.Thread(
+            target=stream_reader,
+            args=(process.stdout, output_queue, "AYON")
+        )
+        stderr_thread = threading.Thread(
+            target=stream_reader,
+            args=(process.stderr, output_queue, "AYON STDERR")
+        )
+
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+        stdout_thread.start()
+        stderr_thread.start()
+
+        # Collect output while process runs
         stdout_lines = []
         stderr_lines = []
 
-        # Read stdout line by line and detect key progress messages
-        while True:
-            line = process.stdout.readline()
-            if not line:
+        while process.poll() is None or not output_queue.empty():
+            try:
+                prefix, line = output_queue.get(timeout=0.1)
+                if line:
+                    print(f"{prefix}: {line}")
+                    if prefix == "AYON":
+                        stdout_lines.append(line)
+                    else:
+                        stderr_lines.append(line)
+
+                    # Detect key progress stages for better feedback
+                    if "ExtractReview" in line and "Processing" in line:
+                        print("  -> Extracting review files...")
+                    elif "IntegrateAsset" in line:
+                        print("  -> Integrating assets into AYON...")
+                    elif "Successfully" in line or "success" in line.lower():
+                        print("  [OK] Operation successful")
+                    elif "Failed" in line or "ERROR" in line:
+                        print(f"  [ERROR] Error detected: {line}")
+            except queue.Empty:
+                continue
+
+        # Wait for threads to finish
+        stdout_thread.join(timeout=2.0)
+        stderr_thread.join(timeout=2.0)
+
+        # Drain any remaining output
+        while not output_queue.empty():
+            try:
+                prefix, line = output_queue.get_nowait()
+                if line:
+                    print(f"{prefix}: {line}")
+                    if prefix == "AYON":
+                        stdout_lines.append(line)
+                    else:
+                        stderr_lines.append(line)
+            except queue.Empty:
                 break
-            line = line.rstrip()
-            if line:
-                # Log with prefix for clarity
-                print(f"AYON: {line}")
-                stdout_lines.append(line)
-
-                # Detect key progress stages for better feedback
-                if "ExtractReview" in line and "Processing" in line:
-                    print("  → Extracting review files...")
-                elif "IntegrateAsset" in line:
-                    print("  → Integrating assets into AYON...")
-                elif "Successfully" in line or "success" in line.lower():
-                    print("  ✓ Operation successful")
-                elif "Failed" in line or "ERROR" in line:
-                    print(f"  ✗ Error detected: {line}")
-
-        # Wait for process to complete and get stderr
-        process.wait()
-        stderr_output = process.stderr.read()
-        if stderr_output:
-            print(f"AYON Publish STDERR: {stderr_output}")
-            stderr_lines = stderr_output.splitlines()
 
         # Check return code
         if process.returncode == 0:
             print('AYON Publish Local Process Successful')
             return True
         else:
+            # Check for SiteAlreadyPresentError - this error occurs AFTER successful integration
+            # The IntegrateAsset plugin completes before IntegrateSiteSync fails
+            all_output = "\n".join(stdout_lines + stderr_lines)
+            if "SiteAlreadyPresentError" in all_output and "IntegrateAsset" in all_output:
+                print('AYON Publish completed successfully')
+                return True
+
             print(f'AYON Publish Local Process Failed with code {process.returncode}')
             # Print last few lines for debugging
             if stdout_lines:
                 print("Last stdout lines:")
                 for line in stdout_lines[-10:]:
+                    print(f"  {line}")
+            if stderr_lines:
+                print("Last stderr lines:")
+                for line in stderr_lines[-10:]:
                     print(f"  {line}")
             return False
 

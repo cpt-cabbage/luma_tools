@@ -3,6 +3,7 @@
 # Install with: pip install -r requirements.txt
 
 # Core Qt GUI - Upgraded to PySide6 for NumPy 2.x compatibility and macOS support
+# PySide6_Addons includes QtWebEngineWidgets for Three.js 3D viewer (WebGL via QWebEngineView)
 PySide6>=6.6.0
 QDarkStyle==3.2.3
 QtPy==2.4.2

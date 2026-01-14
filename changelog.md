@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.49
+- More import fixes
+
+## Version 0.48
+- Fix style imports
+
 ## Version 0.47
 - Prevent initialization of restricted tabs entirely - Enable republish tab in standalone mode with custom directory selection - Pre-initialize 3D viewer only for admin users to prevent flashing
 

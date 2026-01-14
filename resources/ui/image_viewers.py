@@ -228,10 +228,9 @@ class EmbeddedImageViewer(QWidget):
         self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
         self.image_stack.addWidget(self.image_view)
 
-        # 2. 3D Model Viewer - Lazy initialization
+        # 2. 3D Model Viewer (Three.js) - Lazy initialization
         self._has_glb_viewer = None
         self.glb_viewer = None
-        self._use_pyvista_viewer = False
         self._glb_viewer_initialized = False
 
         # 3. Video Player
@@ -368,10 +367,7 @@ class EmbeddedImageViewer(QWidget):
         QTimer.singleShot(100, lambda: self._do_init_glb_viewer(callback))
 
     def _do_init_glb_viewer(self, callback=None):
-        """Actually initialize the GLB viewer widget (called after short delay)."""
-        # Don't use worker thread - Qt widgets must be created on main thread
-        # Just check availability and create widget directly
-
+        """Initialize the Three.js 3D viewer widget."""
         # Add python directory to path if needed
         import sys
         import os
@@ -381,61 +377,23 @@ class EmbeddedImageViewer(QWidget):
             sys.path.insert(0, python_dir)
 
         try:
-            from models.viewer import ModelViewerWidget, is_viewer_available, OPENGL_AVAILABLE, PYOPENGL_AVAILABLE, MODEL_LOADER_AVAILABLE
-            print(f"3D Viewer availability check:")
-            print(f"  OPENGL_AVAILABLE: {OPENGL_AVAILABLE}")
-            print(f"  PYOPENGL_AVAILABLE: {PYOPENGL_AVAILABLE}")
-            print(f"  MODEL_LOADER_AVAILABLE: {MODEL_LOADER_AVAILABLE}")
-
-            if is_viewer_available():
-                # OpenGL format is already configured globally at app startup
-                # Just create the widget - it will use the pre-configured format
-                self.glb_viewer = ModelViewerWidget()
+            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available
+            if is_threejs_viewer_available():
+                self.glb_viewer = ThreeJSViewerWidget()
+                self.glb_viewer.loadError.connect(self._on_3d_load_error)
                 self.image_stack.addWidget(self.glb_viewer)
-
                 self._has_glb_viewer = True
-                self._use_pyvista_viewer = False
-                print(f"✓ Using model_viewer GLB viewer")
+                print(f"✓ Using Three.js 3D viewer (WebGL)")
                 self._glb_viewer_initialized = True
-
                 if callback:
                     callback(True)
                 return
             else:
-                print(f"✗ Model viewer not available - one or more requirements missing")
+                print(f"✗ Three.js viewer not available - PySide6 WebEngine may be missing")
         except Exception as e:
-            print(f"✗ Model viewer import failed: {e}")
+            print(f"✗ Three.js viewer failed: {e}")
             import traceback
             traceback.print_exc()
-
-        try:
-            from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
-            if is_pyvista_available():
-                self.glb_viewer = PyVistaGLBViewerWidget()
-                self.image_stack.addWidget(self.glb_viewer)
-                self._has_glb_viewer = True
-                self._use_pyvista_viewer = True
-                print(f"Using pyvista GLB viewer")
-                self._glb_viewer_initialized = True
-                if callback:
-                    callback(True)
-                return
-        except Exception as e:
-            print(f"PyVista GLB viewer not available: {e}")
-
-        try:
-            from glb_viewer import GLBViewerWidget
-            self.glb_viewer = GLBViewerWidget()
-            self.image_stack.addWidget(self.glb_viewer)
-            self._has_glb_viewer = True
-            self._use_pyvista_viewer = False
-            print(f"Using opengl GLB viewer")
-            self._glb_viewer_initialized = True
-            if callback:
-                callback(True)
-            return
-        except Exception as e:
-            print(f"OpenGL GLB viewer not available: {e}")
 
         # No viewer available
         self._has_glb_viewer = False
@@ -525,51 +483,19 @@ class EmbeddedImageViewer(QWidget):
         self._update_info()
 
     def _load_3d_model(self, media_path):
-        """Load a 3D model into the viewer."""
-        if (self.keep_camera_checkbox.isChecked() and
-            self.glb_viewer and hasattr(self.glb_viewer, 'get_camera_state')):
-            self._saved_camera_state = self.glb_viewer.get_camera_state()
-        else:
-            self._saved_camera_state = None
+        """Load a 3D model into the Three.js viewer."""
+        if not self.glb_viewer:
+            self.message_label.setText("3D viewer not available")
+            self.image_stack.setCurrentWidget(self.message_label)
+            return
 
-        self.message_label.setText(f"Loading 3D model...\n{os.path.basename(media_path)}")
-        self.image_stack.setCurrentWidget(self.message_label)
+        # Three.js viewer loads files directly via WebGL
+        self.glb_viewer.load_file(media_path)
+        self.image_stack.setCurrentWidget(self.glb_viewer)
+        self.glb_viewer.setFocus()
 
-        try:
-            from models.viewer import ModelLoaderWorker
-            loader = ModelLoaderWorker(media_path)
-            loader.signals.finished.connect(self._on_model_loaded)
-            loader.signals.error.connect(self._on_model_error)
-            QThreadPool.globalInstance().start(loader)
-        except ImportError:
-            if self._use_pyvista_viewer:
-                from glb_viewer_pyvista import PyVistaModelLoaderWorker
-                loader = PyVistaModelLoaderWorker(media_path)
-            else:
-                from glb_viewer import ModelLoaderWorker
-                loader = ModelLoaderWorker(media_path)
-            loader.signals.finished.connect(self._on_model_loaded)
-            loader.signals.error.connect(self._on_model_error)
-            QThreadPool.globalInstance().start(loader)
-
-    def _on_model_loaded(self, model_data):
-        """Handle successful 3D model loading."""
-        if self.glb_viewer:
-            try:
-                self.glb_viewer.set_model_data(model_data)
-                if self._saved_camera_state and hasattr(self.glb_viewer, 'set_camera_state'):
-                    self.glb_viewer.set_camera_state(self._saved_camera_state)
-                self.image_stack.setCurrentWidget(self.glb_viewer)
-                self.glb_viewer.setFocus()
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                error_msg = f"Failed to display 3D model:\n{str(e)}"
-                self.message_label.setText(f"Error Loading 3D Model\n\n{error_msg}")
-                self.image_stack.setCurrentWidget(self.message_label)
-
-    def _on_model_error(self, error_msg):
-        """Handle 3D model loading error."""
+    def _on_3d_load_error(self, error_msg):
+        """Handle 3D model loading error from Three.js viewer."""
         self.message_label.setText(f"Error Loading 3D Model\n\n{error_msg}")
         self.image_stack.setCurrentWidget(self.message_label)
 

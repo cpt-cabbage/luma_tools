@@ -647,31 +647,18 @@ class GLBThumbnailWidget(QWidget):
         menu.exec_(self.mapToGlobal(pos))
 
     def _open_viewer(self):
+        """Open the 3D model in a Three.js viewer dialog."""
         parent_window = None
         for widget in QApplication.topLevelWidgets():
             if widget.isVisible() and hasattr(widget, 'windowTitle'):
                 parent_window = widget
                 break
         try:
-            from models.viewer import ModelViewerDialog, is_viewer_available
-            if is_viewer_available():
-                dialog = ModelViewerDialog(self.model_path, parent_window)
-                dialog.exec()
-                return
-        except ImportError:
-            pass
-        try:
-            from glb_viewer_pyvista import PyVistaGLBViewerDialog, is_pyvista_available
-            if is_pyvista_available():
-                dialog = PyVistaGLBViewerDialog(self.model_path, parent_window)
+            from models.threejs_viewer import ThreeJSViewerDialog, is_threejs_viewer_available
+            if is_threejs_viewer_available():
+                dialog = ThreeJSViewerDialog(self.model_path, parent_window)
                 dialog.show()
                 return
-        except ImportError:
-            pass
-        try:
-            from glb_viewer import GLBViewerDialog
-            dialog = GLBViewerDialog(self.model_path, parent_window)
-            dialog.exec()
         except Exception as e:
             print(f"Error opening 3D viewer: {e}")
 

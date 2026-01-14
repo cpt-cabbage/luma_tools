@@ -256,22 +256,23 @@ class RePublishTab(BaseTab):
         # Show status bar progress
         self.main_window.start_status_spinner()
         self.main_window.animator.update_status_animated(
-            "📦 AYON: Preparing files for publish...",
+            "AYON: Preparing files for publish...",
             StatusColors.INFO
         )
 
-        # Start worker thread
+        # Start worker thread - store reference to prevent garbage collection
         from ui_components import Worker
-        worker = Worker(
+        self._publish_worker_ref = Worker(
             self._publish_worker,
             task,
             use_farm,
             product_name
         )
-        worker.signals.result.connect(self._on_publish_complete)
-        worker.signals.error.connect(self._on_publish_error)
-        worker.signals.progress.connect(self._on_publish_progress)
-        QThreadPool.globalInstance().start(worker)
+        self._publish_worker_ref.signals.result.connect(self._on_publish_complete)
+        self._publish_worker_ref.signals.error.connect(self._on_publish_error)
+        self._publish_worker_ref.signals.progress.connect(self._on_publish_progress)
+        self._publish_worker_ref.signals.finished.connect(self._on_publish_finished)
+        QThreadPool.globalInstance().start(self._publish_worker_ref)
 
     def _publish_worker(self, task, use_farm, product_name, progress_callback):
         """Worker thread function for publishing to AYON."""
@@ -428,7 +429,7 @@ class RePublishTab(BaseTab):
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
         self.main_window.animator.update_status_animated(
-            f"📦 AYON: {message}",
+            f"AYON: {message}",
             StatusColors.INFO
         )
 
@@ -441,27 +442,34 @@ class RePublishTab(BaseTab):
         self.main_window.stop_status_spinner()
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(
-                f"✅ AYON: {result['message']}",
+                f"AYON: {result['message']}",
                 StatusColors.SUCCESS
             )
             self.main_window.animator.show_success(result['message'])
 
-    def _on_publish_error(self, error_tuple):
+    def _on_publish_error(self, error_msg, traceback_str):
         """Handle publish errors."""
-        exc_type, exc_value, exc_traceback = error_tuple
-        error_msg = f"Publish failed: {str(exc_value)}"
+        full_error_msg = f"Publish failed: {error_msg}"
 
         self.ui.RePublishPublish.setEnabled(True)
-        self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
+        self.ui.RePublishStatusLabel.setText(f"Status: {full_error_msg}")
 
         # Stop spinner and show error
         self.main_window.stop_status_spinner()
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(
-                f"❌ AYON: {error_msg}",
+                f"AYON: {full_error_msg}",
                 StatusColors.ERROR
             )
 
-        self.log(f"Publish error: {exc_value}")
-        import traceback
-        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        self.log(f"Publish error: {error_msg}")
+        if traceback_str:
+            print(traceback_str)
+
+    def _on_publish_finished(self):
+        """Handle worker finished - ensures cleanup happens."""
+        # Re-enable button and stop spinner as fallback
+        self.ui.RePublishPublish.setEnabled(True)
+        self.main_window.stop_status_spinner()
+        # Clear worker reference
+        self._publish_worker_ref = None
