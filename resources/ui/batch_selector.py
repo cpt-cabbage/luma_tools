@@ -4,7 +4,7 @@ Batch image selection widget.
 Provides a widget for selecting multiple images with drag-and-drop support.
 """
 import os
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QListWidget, QListWidgetItem, QFileDialog, QApplication
@@ -89,7 +89,7 @@ class BatchImageSelector(QWidget):
                 background-color: #4a9eff;
             }
         """)
-        self.image_list.setIconSize(Qt.QSize(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE))
+        self.image_list.setIconSize(QSize(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE))
         self.image_list.hide()
 
         drop_layout.addWidget(self.image_list)
@@ -171,6 +171,10 @@ class BatchImageSelector(QWidget):
         """Set the selected images."""
         self.clear_images()
         self.add_images(paths)
+
+    def set_last_browse_dir(self, directory):
+        """Set the last browse directory."""
+        self._last_browse_dir = directory
 
     def dragEnterEvent(self, event):
         """Handle drag enter."""

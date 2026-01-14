@@ -215,6 +215,8 @@ class RePublishTab(BaseTab):
 
     def _on_publish_clicked(self):
         """Handle publish to AYON button click."""
+        from ui_components import StatusColors
+
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.animate_button_click(self.ui.RePublishPublish)
 
@@ -236,8 +238,15 @@ class RePublishTab(BaseTab):
         # Disable button during processing
         self.ui.RePublishPublish.setEnabled(False)
 
+        # Show status bar progress
+        self.main_window.start_status_spinner()
+        self.main_window.animator.update_status_animated(
+            "📦 AYON: Preparing files for publish...",
+            StatusColors.INFO
+        )
+
         # Start worker thread
-        from resources.ui.workers import Worker
+        from ui_components import Worker
         worker = Worker(
             self._publish_worker,
             task,
@@ -249,12 +258,8 @@ class RePublishTab(BaseTab):
         worker.signals.progress.connect(self._on_publish_progress)
         QThreadPool.globalInstance().start(worker)
 
-        # Show initial status
-        self.set_status("Preparing files for publish...")
-
     def _publish_worker(self, task, use_farm, product_name, progress_callback):
         """Worker thread function for publishing to AYON."""
-        import shutil
         from ayon.service import (
             convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
             publish_to_ayon_local, submit_ayon_publish_to_deadline
@@ -265,44 +270,33 @@ class RePublishTab(BaseTab):
         first_frame = seq.frame(self.app_state.republish_startframe)
         source_dir = os.path.dirname(first_frame)
 
-        # Determine staging directory - use "publish" subdirectory in the shot's render path
-        base_render_path = self.app_state.republish_searchpath
-        staging_subdir = "publish"  # Standard publish staging directory
-        staging_dir = os.path.join(base_render_path, staging_subdir)
+        # AYON publishes from work folder to publish folder automatically
+        # We just need to point metadata to the correct staging directory (source_dir)
 
-        # Create staging directory if it doesn't exist
-        os.makedirs(staging_dir, exist_ok=True)
+        # Determine base render path and output subdirectory
+        # Example source_dir: "V:/project/shots/.../work/lighting/img/renders/v001/for_comp"
+        # We need:
+        #   renders_path = "V:/project/shots/.../work/lighting/img/renders/v001"
+        #   output_subdirectory = "for_comp"
 
-        # Copy EXR files to staging directory
-        progress_callback(10, "Copying EXR files to publish folder...")
+        source_basename = os.path.basename(source_dir)
 
-        copied_files = []
-        total_frames = self.app_state.republish_endframe - self.app_state.republish_startframe + 1
+        # Check if we're in a subdirectory (for_comp, denoised, raw, etc.)
+        if source_basename in ['for_comp', 'denoised', 'raw']:
+            # We're in a subdirectory
+            base_render_path = os.path.dirname(source_dir)
+            output_subdirectory = source_basename
+        else:
+            # We're directly in the version folder
+            base_render_path = source_dir
+            output_subdirectory = ""
 
-        for i, frame_num in enumerate(range(self.app_state.republish_startframe, self.app_state.republish_endframe + 1)):
-            # Get source file path
-            source_file = seq.frame(frame_num)
+        # Debug logging
+        print(f"Source directory: {source_dir}")
+        print(f"Base render path: {base_render_path}")
+        print(f"Output subdirectory: {output_subdirectory}")
 
-            # Get destination file path
-            dest_file = os.path.join(staging_dir, os.path.basename(source_file))
-
-            # Copy file
-            if os.path.exists(source_file):
-                shutil.copy2(source_file, dest_file)
-                copied_files.append(os.path.basename(dest_file))
-
-                # Update progress every 10 frames or on last frame
-                if (i + 1) % 10 == 0 or i == total_frames - 1:
-                    # Use 10-70% for copying
-                    progress_pct = 10 + int((i + 1) / total_frames * 60)
-                    progress_callback(progress_pct, f"Copying files... {i + 1}/{total_frames}")
-            else:
-                print(f"Warning: Source file not found: {source_file}")
-
-        if not copied_files:
-            raise Exception("No files were copied to staging directory")
-
-        print(f"Copied {len(copied_files)} EXR files to {staging_dir}")
+        progress_callback(50, "Preparing metadata for AYON publish...")
 
         # Get the base filename pattern for the sequence
         base_name = seq.basename()
@@ -323,14 +317,14 @@ class RePublishTab(BaseTab):
             folder_path=folder_path,
             task=task,
             user=self.app_state.user,
-            output_subdirectory=staging_subdir,
+            output_subdirectory=output_subdirectory,
             working_dir=self.app_state.working_dir,
             render_file=render_file
         )
 
-        # Write metadata file to staging directory
+        # Write metadata file to source directory
         metadata_filename = f"ayon_{product_name}.json"
-        metadata_path = os.path.join(staging_dir, metadata_filename)
+        metadata_path = os.path.join(source_dir, metadata_filename)
         metadata_path = write_metadata_file(metadata, metadata_path)
 
         if not metadata_path:
@@ -375,7 +369,11 @@ class RePublishTab(BaseTab):
 
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
-        self.set_status(message)
+        from ui_components import StatusColors
+        self.main_window.animator.update_status_animated(
+            f"📦 AYON: {message}",
+            StatusColors.INFO
+        )
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
@@ -384,6 +382,8 @@ class RePublishTab(BaseTab):
         self.ui.RePublishPublish.setEnabled(True)
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
+        # Stop spinner and show success
+        self.main_window.stop_status_spinner()
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(
                 f"✅ AYON: {result['message']}",
@@ -401,6 +401,8 @@ class RePublishTab(BaseTab):
         self.ui.RePublishPublish.setEnabled(True)
         self.ui.RePublishStatusLabel.setText(f"Status: {error_msg}")
 
+        # Stop spinner and show error
+        self.main_window.stop_status_spinner()
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(
                 f"❌ AYON: {error_msg}",

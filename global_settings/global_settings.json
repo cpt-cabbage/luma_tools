@@ -14,7 +14,12 @@
           "note": "",
           "iteratable": true,
           "full_restart": false,
-          "node_overrides": {}
+          "node_overrides": {
+            "Negative Prompt_editable": {
+              "enabled": false,
+              "default_value": ""
+            }
+          }
         },
         "High Quality": {
           "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511_HQ.json",
@@ -86,7 +91,8 @@
     "neill.vermaak",
     "mark.zimmer",
     "bruce.mclaren",
-    "christophe.leyder"
+    "christophe.leyder",
+    "craig.portnoy"
   ],
   "comfyui_network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
   "comfyui_use_user_subfolder": true,

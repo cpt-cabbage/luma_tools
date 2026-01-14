@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.44
+- Bugfixes
+
 ## Version 0.43
 - More publishing fixes
 
