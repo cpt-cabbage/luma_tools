@@ -11,7 +11,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QFileDialog
 
 from .base_tab import BaseTab
-from resources.ui.styles import StatusColors
+from ui_components import StatusColors
 
 
 class RePublishTab(BaseTab):
@@ -261,7 +261,7 @@ class RePublishTab(BaseTab):
         )
 
         # Start worker thread
-        from resources.ui.workers import Worker
+        from ui_components import Worker
         worker = Worker(
             self._publish_worker,
             task,
