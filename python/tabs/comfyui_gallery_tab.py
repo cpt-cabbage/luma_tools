@@ -282,69 +282,6 @@ class ComfyUIGalleryTab(BaseTab):
 
         return items
 
-    def _start_background_precache(self):
-        """Start background pre-caching of other users' galleries."""
-        # DISABLED: Pre-caching was causing UI freezes by overwhelming QThreadPool
-        # The cache will be populated on-demand when user switches to another user
-        return
-
-        # Only run once per session
-        if getattr(self, '_precache_started', False):
-            return
-        self._precache_started = True
-
-        if self._source_mode != "network":
-            return
-
-        # Get list of other users to pre-cache
-        other_users = [u for u in self._available_users if u != self._selected_user]
-        if not other_users:
-            return
-
-        # Start pre-caching each user's gallery in the background
-        for username in other_users:
-            self._precache_user(username)
-
-    def _precache_user(self, username):
-        """Pre-cache a single user's gallery in the background."""
-        from ui_components import Worker
-
-        # Skip if already cached or in progress
-        if username in self._user_cache or username in self._precache_in_progress:
-            return
-
-        user_path = self._get_network_user_path(username)
-        if not user_path:
-            return
-
-        self._precache_in_progress.add(username)
-
-        # Use lightweight scan for precaching (skip metadata loading)
-        worker = Worker(self._scan_directory_lightweight, user_path)
-        worker.signals.result.connect(lambda items, u=username: self._on_precache_complete(u, items))
-        worker.signals.error.connect(lambda msg, tb, u=username: self._on_precache_error(u, msg))
-        QThreadPool.globalInstance().start(worker)
-
-    def _on_precache_complete(self, username, items):
-        """Handle completion of background pre-cache for a user."""
-        self._precache_in_progress.discard(username)
-
-        if items:
-            # Normalize items format
-            if items and isinstance(items[0], tuple):
-                items = [{'path': item[0], 'mtime': item[1], 'type': item[2] if len(item) > 2 else 'image',
-                          'name': os.path.basename(item[0]).lower(), 'workflow': ''} for item in items]
-            elif items and not isinstance(items[0], dict):
-                items = [{'path': p, 'mtime': 0, 'type': 'image', 'name': os.path.basename(p).lower(),
-                          'workflow': ''} for p in items]
-
-            self._user_cache[username] = items
-            self.log(f"[Gallery] Pre-cached {len(items)} items for user: {username}")
-
-    def _on_precache_error(self, username, msg):
-        """Handle pre-cache error for a user."""
-        self._precache_in_progress.discard(username)
-        # Silently ignore - pre-caching is best-effort
 
     def _update_sort_button_text(self):
         """Update the sort button text to show current selection."""
@@ -713,10 +650,14 @@ class ComfyUIGalleryTab(BaseTab):
         self.ui.GalleryStatus.setText("Scanning...")
         print(f"[TIMING] _on_refresh worker started: {(time.perf_counter()-_t0)*1000:.1f}ms")
 
-    def _scan_directory(self, output_dir):
-        """Scan directory recursively for image and 3D model files (runs on worker thread)."""
-        from comfyui_service import get_workflow_preset_for_files
+    def _scan_directory(self, output_dir, load_metadata=True, bundle_pairs=True):
+        """Scan directory recursively for image and 3D model files (runs on worker thread).
 
+        Args:
+            output_dir: Directory to scan
+            load_metadata: If True, load workflow metadata from JSON files (slower but complete)
+            bundle_pairs: If True, detect and bundle _view/_export file pairs
+        """
         items = []
 
         # Check if directory exists (can be slow on network paths)
@@ -724,13 +665,11 @@ class ComfyUIGalleryTab(BaseTab):
             return items
 
         # Use module-level constants for supported extensions
-        image_extensions = IMAGE_EXTENSIONS
         model_extensions = MODEL_EXTENSIONS
         supported_extensions = SUPPORTED_EXTENSIONS
 
         try:
             # First pass: collect all files grouped by directory
-            # This allows us to batch load metadata per directory
             files_by_dir = {}  # dir_path -> [(filename, full_path, mtime, file_type), ...]
 
             for root, dirs, files in os.walk(output_dir):
@@ -748,16 +687,19 @@ class ComfyUIGalleryTab(BaseTab):
                             files_by_dir[root] = []
                         files_by_dir[root].append((filename, full_path, mtime, file_type))
 
-            # Second pass: batch load metadata per directory and create items
+            # Second pass: load metadata and create items
             for dir_path, file_list in files_by_dir.items():
-                # Get workflow presets for all files in this directory at once
-                filenames = [f[0] for f in file_list]
-                try:
-                    workflow_map = get_workflow_preset_for_files(dir_path, filenames)
-                except Exception:
-                    workflow_map = {}
+                # Get workflow presets if metadata loading is enabled
+                workflow_map = {}
+                if load_metadata:
+                    from comfyui_service import get_workflow_preset_for_files
+                    filenames = [f[0] for f in file_list]
+                    try:
+                        workflow_map = get_workflow_preset_for_files(dir_path, filenames)
+                    except Exception:
+                        pass
 
-                # Build items dict for bundling detection
+                # Build items dict
                 items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
                     items_dict[filename] = {
@@ -768,106 +710,63 @@ class ComfyUIGalleryTab(BaseTab):
                         'workflow': workflow_map.get(filename, '')
                     }
 
-                # Detect and bundle _view/_export pairs
-                bundled_files = set()
-                for filename in list(items_dict.keys()):
-                    # Skip if already bundled
-                    if filename in bundled_files:
-                        continue
+                # Detect and bundle _view/_export pairs if enabled
+                if bundle_pairs:
+                    bundled_files = set()
+                    for filename in list(items_dict.keys()):
+                        if filename in bundled_files:
+                            continue
 
-                    base_name = None
-                    view_file = None
-                    export_file = None
+                        base_name = None
+                        view_file = None
+                        export_file = None
 
-                    # Check if this is a _view or _export file
-                    if '_view' in filename:
-                        # Extract base name (everything before _view.ext)
-                        parts = filename.rsplit('_view', 1)
-                        if len(parts) == 2:
-                            base_name = parts[0]
-                            ext_part = parts[1]
-                            view_file = filename
-                            # Look for corresponding _export file
-                            export_candidate = f"{base_name}_export{ext_part}"
-                            if export_candidate in items_dict:
-                                export_file = export_candidate
-                    elif '_export' in filename:
-                        # Extract base name (everything before _export.ext)
-                        parts = filename.rsplit('_export', 1)
-                        if len(parts) == 2:
-                            base_name = parts[0]
-                            ext_part = parts[1]
-                            export_file = filename
-                            # Look for corresponding _view file
-                            view_candidate = f"{base_name}_view{ext_part}"
-                            if view_candidate in items_dict:
-                                view_file = view_candidate
+                        # Check if this is a _view or _export file
+                        if '_view' in filename:
+                            parts = filename.rsplit('_view', 1)
+                            if len(parts) == 2:
+                                base_name = parts[0]
+                                ext_part = parts[1]
+                                view_file = filename
+                                export_candidate = f"{base_name}_export{ext_part}"
+                                if export_candidate in items_dict:
+                                    export_file = export_candidate
+                        elif '_export' in filename:
+                            parts = filename.rsplit('_export', 1)
+                            if len(parts) == 2:
+                                base_name = parts[0]
+                                ext_part = parts[1]
+                                export_file = filename
+                                view_candidate = f"{base_name}_view{ext_part}"
+                                if view_candidate in items_dict:
+                                    view_file = view_candidate
 
-                    # If we found a pair, create a bundled item
-                    if base_name and view_file and export_file:
-                        bundled_files.add(view_file)
-                        bundled_files.add(export_file)
+                        # If we found a pair, create a bundled item
+                        if base_name and view_file and export_file:
+                            bundled_files.add(view_file)
+                            bundled_files.add(export_file)
 
-                        # Use view file for display, export file for operations
-                        view_item = items_dict[view_file]
-                        export_item = items_dict[export_file]
+                            view_item = items_dict[view_file]
+                            export_item = items_dict[export_file]
 
-                        items.append({
-                            'path': view_item['path'],  # Show NPZ in viewer
-                            'export_path': export_item['path'],  # Use FBX for export/publish
-                            'mtime': max(view_item['mtime'], export_item['mtime']),
-                            'type': view_item['type'],
-                            'name': view_item['name'],
-                            'workflow': view_item['workflow'],
-                            'is_bundled': True
-                        })
-                    else:
-                        # Single file (not part of a pair)
-                        if filename not in bundled_files:
-                            items.append(items_dict[filename])
+                            items.append({
+                                'path': view_item['path'],
+                                'export_path': export_item['path'],
+                                'mtime': max(view_item['mtime'], export_item['mtime']),
+                                'type': view_item['type'],
+                                'name': view_item['name'],
+                                'workflow': view_item['workflow'],
+                                'is_bundled': True
+                            })
+                        else:
+                            if filename not in bundled_files:
+                                items.append(items_dict[filename])
+                else:
+                    # No bundling - just add all items
+                    items.extend(items_dict.values())
+
         except Exception as e:
             print(f"Error scanning gallery directory: {e}")
-
-        return items
-
-    def _scan_directory_lightweight(self, output_dir):
-        """Lightweight directory scan that skips metadata loading (for precaching).
-
-        This is faster than _scan_directory because it doesn't load workflow metadata,
-        which requires JSON file I/O. The workflow field is left empty and can be
-        enriched later if needed.
-        """
-        items = []
-
-        if not os.path.isdir(output_dir):
-            return items
-
-        # Use module-level constants for supported extensions
-        image_extensions = IMAGE_EXTENSIONS
-        model_extensions = MODEL_EXTENSIONS
-        supported_extensions = SUPPORTED_EXTENSIONS
-
-        try:
-            for root, dirs, files in os.walk(output_dir):
-                for filename in files:
-                    ext = os.path.splitext(filename)[1].lower()
-                    if ext in supported_extensions:
-                        full_path = os.path.join(root, filename)
-                        try:
-                            mtime = os.path.getmtime(full_path)
-                        except OSError:
-                            continue
-                        file_type = 'model' if ext in model_extensions else 'image'
-
-                        items.append({
-                            'path': full_path,
-                            'mtime': mtime,
-                            'type': file_type,
-                            'name': filename.lower(),
-                            'workflow': ''  # Skip metadata loading for speed
-                        })
-        except Exception as e:
-            print(f"Error in lightweight gallery scan: {e}")
 
         return items
 
