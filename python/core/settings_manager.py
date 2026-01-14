@@ -69,19 +69,20 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "tab_order": SettingDef("tab_order", [], "user"),
     "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
     "generate_3d_thumbnails": SettingDef("generate_3d_thumbnails", True, "user"),
-    # Global Settings
-    "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery", "settings"], "global"),
+    "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
+    # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
+    "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery"], "global"),
 }
 
 # Default constants (for external reference)
 DEFAULT_COMFYUI_TIMEOUT = 3600
 DEFAULT_SERVER_NOT_FOUND_WAIT = 300
-DEFAULT_RESTRICTED_TABS = ["comfyui", "comfyui_gallery", "settings"]
+DEFAULT_RESTRICTED_TABS = ["comfyui", "comfyui_gallery"]  # Settings is admin-only, not in restricted list
 
 TAB_RESTRICTION_MAP = {
     "comfyui": "RestrictComfyUI",
     "comfyui_gallery": "RestrictComfyUIGallery",
-    "settings": "RestrictSettings",
+    # Settings tab is admin-only, not configurable
     "passbuilder": "RestrictPassBuilder",
     "mp4maker": "RestrictMP4Maker",
     "republish": "RestrictRePublish",
@@ -199,7 +200,11 @@ def load_global_settings() -> Dict[str, Any]:
     if _global_settings_cache is not None:
         return _global_settings_cache.copy()
 
-    default_settings = {"comfyui_workflow_presets": {}, "admin_users": ["christophe.leyder"]}
+    default_settings = {
+        "comfyui_workflow_presets": {},
+        "admin_users": ["christophe.leyder"],  # Admins: full access (all tabs including Settings)
+        "sup_users": [],  # Supervisors: can see ComfyUI and Gallery tabs (not Settings)
+    }
     settings_file = _get_global_settings_file()
 
     if not os.path.exists(settings_file):
@@ -605,7 +610,9 @@ def get_workflow_config(name: str, selected_workflow: Optional[str] = None) -> O
 
 
 # ============================================================================
-# ADMIN USER MANAGEMENT (Global)
+# USER ROLE MANAGEMENT (Global)
+# Admins: Full access (all tabs including Settings)
+# Supervisors (Sups): Can see ComfyUI and Gallery tabs (not Settings)
 # ============================================================================
 
 def get_admin_users() -> List[str]:
@@ -613,11 +620,28 @@ def get_admin_users() -> List[str]:
     return _global_settings.get("admin_users", [])
 
 
+def get_sup_users() -> List[str]:
+    """Get the list of supervisor users from global settings."""
+    return _global_settings.get("sup_users", [])
+
+
 def is_admin_user(username: str) -> bool:
     """Check if a username is in the admin list (case-insensitive)."""
     if not username:
         return False
     return username.lower() in [u.lower() for u in get_admin_users()]
+
+
+def is_sup_user(username: str) -> bool:
+    """Check if a username is in the supervisor list (case-insensitive)."""
+    if not username:
+        return False
+    return username.lower() in [u.lower() for u in get_sup_users()]
+
+
+def has_elevated_access(username: str) -> bool:
+    """Check if a username has any elevated access (admin or sup)."""
+    return is_admin_user(username) or is_sup_user(username)
 
 
 def add_admin_user(username: str):
@@ -644,6 +668,32 @@ def remove_admin_user(username: str):
     if len(settings["admin_users"]) < len(original_list):
         save_global_settings(settings)
         print(f"Removed admin user: {username}")
+
+
+def add_sup_user(username: str):
+    """Add a user to the supervisor list."""
+    if not username:
+        return
+    settings = load_global_settings()
+    if "sup_users" not in settings:
+        settings["sup_users"] = []
+    existing_lower = [u.lower() for u in settings["sup_users"]]
+    if username.lower() not in existing_lower:
+        settings["sup_users"].append(username)
+        save_global_settings(settings)
+        print(f"Added supervisor user: {username}")
+
+
+def remove_sup_user(username: str):
+    """Remove a user from the supervisor list."""
+    settings = load_global_settings()
+    if "sup_users" not in settings:
+        return
+    original_list = settings["sup_users"]
+    settings["sup_users"] = [u for u in original_list if u.lower() != username.lower()]
+    if len(settings["sup_users"]) < len(original_list):
+        save_global_settings(settings)
+        print(f"Removed supervisor user: {username}")
 
 
 # ============================================================================

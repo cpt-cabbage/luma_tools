@@ -73,6 +73,9 @@ warnings.filterwarnings("ignore", message=".*NumPy.*")
 # (Chromium sandbox doesn't work with UNC/network paths)
 os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
+# Chromium flags to prevent GPU process window flash during initialization
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--in-process-gpu"
+
 # PySide6 imports
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt
@@ -305,8 +308,14 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_class = tab_config['class']
             restrict_key = tab_config['restrict_key']
 
-            # Skip ComfyUI and Gallery tabs for non-admin users (don't even initialize them)
-            if not app_state.is_admin and restrict_key in ['comfyui', 'comfyui_gallery']:
+            # Skip ComfyUI and Gallery tabs for users without elevated access
+            # Admins and Supervisors can access these tabs
+            if not app_state.has_elevated_access and restrict_key in ['comfyui', 'comfyui_gallery']:
+                print(f"Skipping initialization of '{restrict_key}' tab for regular user")
+                continue
+
+            # Skip settings tab for non-admin users (settings is admin-only)
+            if not app_state.is_admin and restrict_key == 'settings':
                 print(f"Skipping initialization of '{restrict_key}' tab for non-admin user")
                 continue
 
@@ -460,19 +469,28 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tab_widget.setCurrentIndex(0)
 
     def _check_admin_status(self):
-        """Check if current user is an admin."""
-        # Refresh and check admin status (property auto-computes from settings)
+        """Check if current user is an admin or supervisor."""
+        # Refresh and check role status (property auto-computes from settings)
         app_state.refresh_admin_status()
 
         if app_state.is_admin:
-            print(f"User '{app_state.user}' is an admin")
+            print(f"User '{app_state.user}' is an admin (full access)")
+        elif app_state.is_sup:
+            print(f"User '{app_state.user}' is a supervisor (ComfyUI/Gallery access)")
         else:
-            print(f"User '{app_state.user}' is not an admin")
+            print(f"User '{app_state.user}' is a regular user")
 
     def _hide_restricted_tabs(self):
-        """Hide tabs that are restricted for non-admin users."""
+        """Hide tabs that are restricted based on user role.
+
+        Role-based access:
+        - Admins: Full access (all tabs including Settings)
+        - Supervisors: Can see ComfyUI and Gallery tabs (but not Settings)
+        - Regular users: Cannot see any restricted tabs
+        """
         from core.settings_manager import get_restricted_tabs
 
+        # Admins can see all tabs
         if app_state.is_admin:
             return
 
@@ -482,9 +500,15 @@ class LumaShotTools(QtWidgets.QWidget):
 
         for i in range(self.tab_widget.count() - 1, -1, -1):
             widget = self.tab_widget.widget(i)
-            if widget.objectName() in restricted:
+            tab_name = widget.objectName()
+
+            # Supervisors can see restricted tabs (except settings, which is handled at init)
+            if app_state.is_sup and tab_name in ['comfyui', 'comfyui_gallery']:
+                continue
+
+            if tab_name in restricted:
                 self.tab_widget.removeTab(i)
-                print(f"Hidden restricted tab: {widget.objectName()}")
+                print(f"Hidden restricted tab: {tab_name}")
 
     def _hide_standalone_incompatible_tabs(self):
         """Hide tabs that require shot context in standalone mode."""
@@ -666,20 +690,9 @@ def main():
         splash.update_progress(78, "Loading", "Initializing 3D viewer...")
         app.processEvents()
 
+        # NOTE: QWebEngineView prewarm moved to AFTER window creation but BEFORE window.show()
+        # The view must be added to a layout before showing the window to prevent flash
         _threejs_prewarm_viewer = None
-        try:
-            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available
-            if is_threejs_viewer_available():
-                # Create prewarm viewer with DontShowOnScreen attribute to prevent flashing
-                _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
-                # Give WebEngine time to fully initialize
-                import time
-                for _ in range(10):
-                    app.processEvents()
-                    time.sleep(0.05)
-                print("Three.js viewer pre-initialized successfully")
-        except Exception as e:
-            print(f"Warning: Could not pre-initialize Three.js viewer: {e}")
 
         # Create main window
         splash.update_progress(88, "Loading", "Creating main window...")
@@ -687,9 +700,35 @@ def main():
 
         window = LumaShotTools()
 
-        # Store pre-warmed viewer on window to keep WebEngine alive
-        if _threejs_prewarm_viewer is not None:
-            window._threejs_prewarm_viewer = _threejs_prewarm_viewer
+        # Pre-initialize 3D viewer AFTER window creation but BEFORE window.show()
+        # CRITICAL: QWebEngineView must be added to a layout before showing window
+        # to prevent Chromium's GPU process from creating a visible window flash.
+        # Just creating it floating in memory is NOT enough - it must be in widget hierarchy.
+        splash.update_progress(92, "Loading", "Initializing 3D viewer...")
+        app.processEvents()
+        try:
+            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
+            if is_threejs_viewer_available():
+                _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
+
+                # CRITICAL: Add to window's layout hierarchy (hidden) BEFORE show()
+                # This is what prevents the window flash - being in a layout matters
+                _threejs_prewarm_viewer.hide()
+                window.layout().addWidget(_threejs_prewarm_viewer)
+
+                # Store globally - will be retrieved and reparented by gallery later
+                set_prewarm_viewer(_threejs_prewarm_viewer)
+
+                # Wait for viewer to initialize
+                import time
+                start_time = time.time()
+                timeout = 3.0
+                while not _threejs_prewarm_viewer._viewer_ready and (time.time() - start_time) < timeout:
+                    app.processEvents()
+                    time.sleep(0.05)
+                print(f"Three.js viewer pre-initialized in {time.time() - start_time:.2f}s")
+        except Exception as e:
+            print(f"Warning: Could not pre-initialize Three.js viewer: {e}")
 
         splash.update_progress(95, "Loading", "Finalizing...")
         app.processEvents()

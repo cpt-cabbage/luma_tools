@@ -84,6 +84,9 @@
         window.setViewMode = function(mode) {
             if (window._setViewModeImpl) window._setViewModeImpl(mode);
         };
+        window.setCameraDistance = function(dist) {
+            if (window._setCameraDistanceImpl) window._setCameraDistanceImpl(dist);
+        };
     </script>
 
     <!-- Import map for Three.js ES modules -->
@@ -124,6 +127,7 @@
         let gridHelper = null;
         let skeletonHelper = null;
         let initComplete = false;  // Track if Three.js init is done
+        let cameraDistance = 3.5;  // Default camera distance (configurable via settings)
 
         // Initialize scene
         function init() {
@@ -228,6 +232,55 @@
             renderer.render(scene, camera);
         }
 
+        // Dispose of a Three.js object and all its children (geometries, materials, textures)
+        function disposeObject(obj) {
+            if (!obj) return;
+
+            // Recursively dispose children first
+            if (obj.children) {
+                while (obj.children.length > 0) {
+                    disposeObject(obj.children[0]);
+                    obj.remove(obj.children[0]);
+                }
+            }
+
+            // Dispose geometry
+            if (obj.geometry) {
+                obj.geometry.dispose();
+            }
+
+            // Dispose material(s)
+            if (obj.material) {
+                if (Array.isArray(obj.material)) {
+                    obj.material.forEach(mat => disposeMaterial(mat));
+                } else {
+                    disposeMaterial(obj.material);
+                }
+            }
+
+            // Dispose skeleton
+            if (obj.skeleton) {
+                obj.skeleton.dispose();
+            }
+        }
+
+        // Dispose a material and its textures
+        function disposeMaterial(material) {
+            if (!material) return;
+
+            // Dispose all texture properties
+            const textureProps = ['map', 'normalMap', 'roughnessMap', 'metalnessMap',
+                                  'aoMap', 'emissiveMap', 'bumpMap', 'displacementMap',
+                                  'alphaMap', 'envMap', 'lightMap', 'specularMap'];
+            textureProps.forEach(prop => {
+                if (material[prop]) {
+                    material[prop].dispose();
+                }
+            });
+
+            material.dispose();
+        }
+
         // Load 3D model implementation
         function loadModelImpl(url) {
             console.log('Loading model:', url);
@@ -235,17 +288,20 @@
             document.getElementById('loading').querySelector('div:last-child').textContent = 'Loading model...';
             document.getElementById('error').style.display = 'none';
 
-            // Clear existing model
+            // Clear existing model - MUST dispose resources to free GPU memory
             if (currentModel) {
+                disposeObject(currentModel);
                 scene.remove(currentModel);
                 currentModel = null;
             }
             if (skeletonHelper) {
+                skeletonHelper.dispose();
                 scene.remove(skeletonHelper);
                 skeletonHelper = null;
             }
             if (mixer) {
                 mixer.stopAllAction();
+                mixer.uncacheRoot(mixer.getRoot());
                 mixer = null;
             }
             animations = [];
@@ -299,20 +355,30 @@
                         }
                     });
 
-                    // Center and scale model
+                    // Get original bounds before any transforms
                     const box = new THREE.Box3().setFromObject(model);
                     const center = box.getCenter(new THREE.Vector3());
                     const size = box.getSize(new THREE.Vector3());
                     const maxDim = Math.max(size.x, size.y, size.z);
 
-                    // Center the model
-                    model.position.sub(center);
-                    model.position.y += size.y / 2;
+                    // Normalize scale - target max dimension of ~2 units
+                    const targetSize = 2.0;
+                    const scaleFactor = maxDim > 0 ? targetSize / maxDim : 1.0;
+                    model.scale.multiplyScalar(scaleFactor);
 
-                    // Adjust camera
-                    const distance = maxDim * 2;
-                    camera.position.set(distance, distance * 0.7, distance);
-                    controls.target.set(0, size.y / 2, 0);
+                    // Scale the positioning values (simpler than recomputing bounds)
+                    const scaledMinY = box.min.y * scaleFactor;
+                    const scaledCenterX = center.x * scaleFactor;
+                    const scaledCenterZ = center.z * scaleFactor;
+                    const scaledSizeY = size.y * scaleFactor;
+
+                    // Center horizontally, put bottom at ground level
+                    model.position.set(-scaledCenterX, -scaledMinY, -scaledCenterZ);
+
+                    // Adjust camera to look at vertical center of model
+                    const visualCenterY = scaledSizeY / 2;
+                    camera.position.set(cameraDistance, cameraDistance * 0.5, cameraDistance);
+                    controls.target.set(0, visualCenterY, 0);
                     controls.update();
 
                     // Setup animation mixer
@@ -418,6 +484,11 @@
             applyViewMode();
         }
 
+        // Set camera distance for model loading
+        function setCameraDistanceImpl(dist) {
+            cameraDistance = dist;
+        }
+
         function applyViewMode() {
             if (!currentModel) return;
 
@@ -459,6 +530,7 @@
         window._stopAnimationImpl = stopAnimationImpl;
         window._setAnimationTimeImpl = setAnimationTimeImpl;
         window._setViewModeImpl = setViewModeImpl;
+        window._setCameraDistanceImpl = setCameraDistanceImpl;
 
         // Setup QWebChannel bridge
         if (typeof QWebChannel !== 'undefined') {

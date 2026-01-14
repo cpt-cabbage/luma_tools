@@ -81,9 +81,7 @@
   "admin_users": [
     "neill.vermaak",
     "mark.zimmer",
-    "bruce.mclaren",
-    "christophe.leyder",
-    "craig.portnoy"
+    "christophe.leyder"
   ],
   "comfyui_network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
   "comfyui_use_user_subfolder": true,
@@ -96,5 +94,9 @@
   ],
   "comfyui_timeout": 600,
   "comfyui_server_not_found_behavior": "wait",
-  "comfyui_server_wait_timeout": 3600
+  "comfyui_server_wait_timeout": 3600,
+  "sup_users": [
+    "bruce.mclaren",
+    "craig.portnoy"
+  ]
 }

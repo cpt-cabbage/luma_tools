@@ -89,6 +89,12 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'RemoveAdminUserButton'):
             self.ui.RemoveAdminUserButton.clicked.connect(self._on_remove_admin_user)
 
+        # Supervisor user management
+        if hasattr(self.ui, 'AddSupUserButton'):
+            self.ui.AddSupUserButton.clicked.connect(self._on_add_sup_user)
+        if hasattr(self.ui, 'RemoveSupUserButton'):
+            self.ui.RemoveSupUserButton.clicked.connect(self._on_remove_sup_user)
+
     def initialize(self):
         """Initialize settings tab."""
         # ComfyUI mode options
@@ -104,6 +110,7 @@ class SettingsTab(BaseTab):
         self._load_user_settings_ui()
         self._load_global_settings_ui()
         self._load_admin_users_ui()
+        self._load_sup_users_ui()
         self._load_restricted_tabs_ui()
 
     def _load_version_ui(self):
@@ -135,7 +142,7 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        from core.settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails
+        from core.settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails, get_setting
 
         # Auto-extract textures checkbox
         if hasattr(self.ui, 'AutoExtractTextures'):
@@ -144,6 +151,10 @@ class SettingsTab(BaseTab):
         # Generate 3D thumbnails checkbox
         if hasattr(self.ui, 'Generate3DThumbnails'):
             self.ui.Generate3DThumbnails.setChecked(get_generate_3d_thumbnails())
+
+        # 3D Viewer zoom distance
+        if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
+            self.ui.Viewer3DZoomSpinBox.setValue(get_setting("viewer_3d_zoom_distance"))
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -230,12 +241,26 @@ class SettingsTab(BaseTab):
         self._update_server_wait_visibility()
 
     def _load_admin_users_ui(self):
-        """Load admin users list."""
+        """Load admin users list (settings access only)."""
         from core.settings_manager import get_admin_users
+
+        if not hasattr(self.ui, 'AdminUsersList'):
+            return
 
         self.ui.AdminUsersList.clear()
         for user in get_admin_users():
             self.ui.AdminUsersList.addItem(user)
+
+    def _load_sup_users_ui(self):
+        """Load supervisor users list (full access)."""
+        from core.settings_manager import get_sup_users
+
+        if not hasattr(self.ui, 'SupUsersList'):
+            return
+
+        self.ui.SupUsersList.clear()
+        for user in get_sup_users():
+            self.ui.SupUsersList.addItem(user)
 
     def _update_comfyui_mode_button_text(self):
         """Update the ComfyUI mode button text to show current selection."""
@@ -338,7 +363,7 @@ class SettingsTab(BaseTab):
     def _on_save_settings_clicked(self):
         """Save user settings."""
         from core.config import REQUIRED_PASSES
-        from core.settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails
+        from core.settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails, set_setting
 
         # Collect selected passes
         selected_passes = []
@@ -360,6 +385,10 @@ class SettingsTab(BaseTab):
         # Save generate 3D thumbnails setting
         if hasattr(self.ui, 'Generate3DThumbnails'):
             set_generate_3d_thumbnails(self.ui.Generate3DThumbnails.isChecked())
+
+        # Save 3D viewer zoom setting
+        if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
+            set_setting("viewer_3d_zoom_distance", self.ui.Viewer3DZoomSpinBox.value())
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
@@ -554,6 +583,53 @@ class SettingsTab(BaseTab):
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.show_success(f"Removed admin user: {username}")
 
+    def _on_add_sup_user(self):
+        """Add a supervisor user."""
+        from core.settings_manager import add_sup_user
+
+        username, ok = QtWidgets.QInputDialog.getText(
+            self.main_window, "Add Supervisor", "Enter username:",
+            QtWidgets.QLineEdit.Normal
+        )
+        if ok and username:
+            username = username.strip().lower()
+            add_sup_user(username)
+            self._load_sup_users_ui()
+            self.log(f"Added supervisor user: {username}")
+
+    def _on_remove_sup_user(self):
+        """Remove selected supervisor user."""
+        from core.settings_manager import remove_sup_user
+        from PySide6.QtWidgets import QMessageBox
+
+        if not hasattr(self.ui, 'SupUsersList'):
+            return
+
+        selected_items = self.ui.SupUsersList.selectedItems()
+        if not selected_items:
+            self.log("No supervisor user selected for removal")
+            return
+
+        username = selected_items[0].text()
+
+        # Warn if removing self
+        if username.lower() == self.app_state.user.lower():
+            reply = QMessageBox.warning(
+                self.main_window,
+                "Remove Yourself?",
+                "You are about to remove yourself from the supervisor list.\n"
+                "You will lose access to supervisor features after restarting.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        remove_sup_user(username)
+        self._load_sup_users_ui()
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_success(f"Removed supervisor: {username}")
+
     # =========================================================================
     # RESTRICTED TABS
     # =========================================================================
@@ -564,11 +640,10 @@ class SettingsTab(BaseTab):
 
         restricted = get_restricted_tabs()
 
-        # Map tab names to checkboxes
+        # Map tab names to checkboxes (Settings is admin-only, not configurable here)
         checkbox_map = {
             "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
             "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
-            "settings": getattr(self.ui, 'RestrictSettings', None),
             "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
             "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
             "republish": getattr(self.ui, 'RestrictRePublish', None),
@@ -585,11 +660,10 @@ class SettingsTab(BaseTab):
 
         restricted = []
 
-        # Map checkboxes to tab names
+        # Map checkboxes to tab names (Settings is admin-only, not configurable here)
         checkbox_map = {
             "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
             "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
-            "settings": getattr(self.ui, 'RestrictSettings', None),
             "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
             "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
             "republish": getattr(self.ui, 'RestrictRePublish', None),

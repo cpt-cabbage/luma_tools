@@ -34,6 +34,24 @@ class ViewMode(Enum):
     WIREFRAME = "wireframe"
 
 
+# Global pre-warmed viewer instance (initialized during splash)
+_prewarm_viewer = None
+
+
+def set_prewarm_viewer(viewer):
+    """Store a pre-warmed viewer instance for later reuse."""
+    global _prewarm_viewer
+    _prewarm_viewer = viewer
+
+
+def get_prewarm_viewer():
+    """Get and consume the pre-warmed viewer instance (one-time use)."""
+    global _prewarm_viewer
+    viewer = _prewarm_viewer
+    _prewarm_viewer = None
+    return viewer
+
+
 class ThreeJSBridge(QObject):
     """
     Bridge for Python <-> JavaScript communication via QWebChannel.
@@ -137,6 +155,12 @@ class ThreeJSBridge(QObject):
             js_code = f"setAnimationTime({time_normalized});"
             self._web_view.page().runJavaScript(js_code)
 
+    def set_camera_distance(self, distance: float):
+        """Set the default camera distance for model loading."""
+        if self._web_view:
+            js_code = f"setCameraDistance({distance});"
+            self._web_view.page().runJavaScript(js_code)
+
 
 class ThreeJSViewerWidget(QWidget):
     """
@@ -160,18 +184,14 @@ class ThreeJSViewerWidget(QWidget):
 
         self._is_prewarm = prewarm
 
-        # For prewarm widgets, set attribute to prevent showing on screen
-        if prewarm:
-            self.setAttribute(Qt.WA_DontShowOnScreen, True)
-
         # Create layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create web view - hide initially to prevent flashing
+        # Create web view - always start hidden
         self._web_view = QWebEngineView()
         self._web_view.setStyleSheet("background: #1e1e1e;")
-        self._web_view.hide()  # Start hidden
+        self._web_view.hide()
         layout.addWidget(self._web_view)
 
         # Enable WebGL and local file access
@@ -207,6 +227,11 @@ class ThreeJSViewerWidget(QWidget):
 
         # Set minimum size
         self.setMinimumSize(400, 300)
+
+        # For prewarm: force native window creation now (during splash)
+        # This ensures all GPU/rendering initialization happens while splash covers screen
+        if prewarm:
+            self._web_view.winId()  # Forces native window handle creation
 
     def _load_viewer(self):
         """Load the Three.js viewer HTML."""
@@ -293,9 +318,9 @@ class ThreeJSViewerWidget(QWidget):
         Args:
             file_path: Path to the 3D model file
         """
-        # Show the web view when loading is requested (shows loading state)
-        if not self._is_prewarm:
-            self._web_view.show()
+        # Don't show web view here - wait until viewer is fully ready
+        # to prevent window flashing during WebEngine initialization.
+        # The web view will be shown in _on_viewer_ready().
 
         if self._viewer_ready:
             self._do_load_model(file_path)
@@ -334,6 +359,16 @@ class ThreeJSViewerWidget(QWidget):
         """Stop the current animation."""
         if self._viewer_ready:
             self._bridge.stop_animation()
+
+    def set_camera_distance(self, distance: float):
+        """
+        Set the default camera distance for model loading.
+
+        Args:
+            distance: Camera distance (lower = closer zoom)
+        """
+        if self._viewer_ready:
+            self._bridge.set_camera_distance(distance)
 
     def set_animation_time(self, time_normalized: float):
         """

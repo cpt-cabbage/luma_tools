@@ -20,6 +20,8 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
     double_clicked = Signal()
     zoom_changed = Signal(str)
     ZOOM_LEVELS = ["Fit", "100%", "50%", "25%", "10%"]
+    MIN_ZOOM = 0.10  # Minimum zoom level (10%)
+    MAX_ZOOM = 10.0  # Maximum zoom level (1000%)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,6 +77,16 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
         zoom_in_factor = 1.15
         zoom_out_factor = 1 / zoom_in_factor
         zoom_factor = zoom_in_factor if event.angleDelta().y() > 0 else zoom_out_factor
+
+        # Check zoom limits before applying
+        current_scale = self.transform().m11()
+        new_scale = current_scale * zoom_factor
+
+        if new_scale < self.MIN_ZOOM:
+            zoom_factor = self.MIN_ZOOM / current_scale
+        elif new_scale > self.MAX_ZOOM:
+            zoom_factor = self.MAX_ZOOM / current_scale
+
         self.scale(zoom_factor, zoom_factor)
         current_scale = self.transform().m11() * 100
         self._current_zoom = f"{int(current_scale)}%"
@@ -118,6 +130,12 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
         else:
             super().mouseDoubleClickEvent(event)
 
+    def resizeEvent(self, event):
+        """Re-fit image when resized if in Fit mode."""
+        super().resizeEvent(event)
+        if self._current_zoom == "Fit" and self._pixmap_item.pixmap() and not self._pixmap_item.pixmap().isNull():
+            self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+
 
 class EmbeddedImageViewer(QWidget):
     """
@@ -129,10 +147,12 @@ class EmbeddedImageViewer(QWidget):
     - Home/End: Jump to first/last image
     - C: Copy prompt to clipboard (if available)
     - S: Copy settings to ComfyUI tab (if available)
+    - Delete: Delete current image
     """
     closed = Signal()
     view_fullscreen = Signal(str, int)
     copy_settings_requested = Signal(dict)
+    image_deleted = Signal(str)  # Emitted when an image is deleted (path)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
@@ -333,13 +353,24 @@ class EmbeddedImageViewer(QWidget):
 
         info_layout.addWidget(self.publish_to_ayon_btn)
 
+        # Delete button
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setFixedHeight(25)
+        self.delete_btn.setStyleSheet("""
+            QPushButton { background-color: #dc2626; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; }
+            QPushButton:hover { background-color: #ef4444; }
+        """)
+        self.delete_btn.setToolTip("Delete current file (Del)")
+        self.delete_btn.clicked.connect(self._delete_current_image)
+        info_layout.addWidget(self.delete_btn)
+
         self._3d_textured_mode = False
         self._current_3d_path = None
         self._saved_camera_state = None
 
         info_layout.addStretch()
 
-        help_label = QLabel("Navigate | Esc Back | C Copy Prompt")
+        help_label = QLabel("Navigate | Esc Back | C Prompt | Del Delete")
         help_label.setStyleSheet("color: #555555; font-size: 10px;")
         info_layout.addWidget(help_label)
 
@@ -377,13 +408,21 @@ class EmbeddedImageViewer(QWidget):
             sys.path.insert(0, python_dir)
 
         try:
-            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available
+            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, get_prewarm_viewer
             if is_threejs_viewer_available():
+                # The prewarm viewer was initialized in main window layout before window.show()
+                # to warm up the Chromium GPU thread. We do NOT reparent it (causes rendering issues).
+                # Instead, create a fresh viewer - it won't flash because the GPU is already warm.
+                # Just consume the prewarm reference to mark it as used.
+                _ = get_prewarm_viewer()  # Consume prewarm (stays in main window, keeps GPU warm)
+
+                # Create fresh viewer - GPU thread is already initialized, no flash expected
                 self.glb_viewer = ThreeJSViewerWidget()
+                print(f"✓ Created Three.js 3D viewer (GPU pre-warmed)")
                 self.glb_viewer.loadError.connect(self._on_3d_load_error)
+                self.glb_viewer.modelLoaded.connect(self._on_3d_model_loaded)
                 self.image_stack.addWidget(self.glb_viewer)
                 self._has_glb_viewer = True
-                print(f"✓ Using Three.js 3D viewer (WebGL)")
                 self._glb_viewer_initialized = True
                 if callback:
                     callback(True)
@@ -489,8 +528,24 @@ class EmbeddedImageViewer(QWidget):
             self.image_stack.setCurrentWidget(self.message_label)
             return
 
+        # Show loading message while model loads
+        self.message_label.setText("Loading 3D model...")
+        self.image_stack.setCurrentWidget(self.message_label)
+
+        # Set camera distance from user settings before loading
+        try:
+            from core.settings_manager import get_setting
+            zoom_distance = get_setting("viewer_3d_zoom_distance")
+            self.glb_viewer.set_camera_distance(zoom_distance)
+        except Exception:
+            pass  # Use default if settings unavailable
+
         # Three.js viewer loads files directly via WebGL
+        # Switch to viewer only after model is loaded (via modelLoaded signal)
         self.glb_viewer.load_file(media_path)
+
+    def _on_3d_model_loaded(self, path):
+        """Handle successful 3D model load - switch to the viewer."""
         self.image_stack.setCurrentWidget(self.glb_viewer)
         self.glb_viewer.setFocus()
 
@@ -638,8 +693,49 @@ class EmbeddedImageViewer(QWidget):
             self._copy_settings()
         elif key == Qt.Key_F:
             self._on_fullscreen()
+        elif key == Qt.Key_Delete:
+            self._delete_current_image()
         else:
             super().keyPressEvent(event)
+
+    def _delete_current_image(self):
+        """Delete the current image file after confirmation."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Delete File",
+            f"Are you sure you want to delete:\n{filename}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                os.remove(image_path)
+                deleted_path = image_path
+                self.image_paths.pop(self.current_index)
+
+                if not self.image_paths:
+                    self.image_deleted.emit(deleted_path)
+                    self._on_back()
+                    return
+
+                if self.current_index >= len(self.image_paths):
+                    self.current_index = len(self.image_paths) - 1
+
+                self._load_current_image()
+                self.image_deleted.emit(deleted_path)
+                self.filename_label.setText(f"Deleted: {filename}")
+                QTimer.singleShot(1500, self._update_info)
+
+            except Exception as e:
+                QMessageBox.warning(self, "Delete Error", f"Failed to delete file:\n{str(e)}")
 
     def _show_context_menu(self, pos):
         if not self.image_paths:
@@ -661,6 +757,11 @@ class EmbeddedImageViewer(QWidget):
 
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Delete (Del)")
+        delete_action.triggered.connect(self._delete_current_image)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
 
@@ -689,9 +790,11 @@ class FullscreenImageViewer(QWidget):
     - Space: Toggle filename display
     - C: Copy prompt to clipboard (if available)
     - S: Copy settings to ComfyUI tab (if available)
+    - Delete: Delete current file
     """
     closed = Signal()
     copy_settings_requested = Signal(dict)
+    image_deleted = Signal(str)  # Emitted when a file is deleted (path)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
@@ -760,7 +863,7 @@ class FullscreenImageViewer(QWidget):
         self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
         info_layout.addWidget(self.zoom_combo)
 
-        self.help_label = QLabel("Navigate | Esc Close | Space Toggle Info | C Copy Prompt")
+        self.help_label = QLabel("Navigate | Esc Close | Space Info | C Prompt | Del Delete")
         self.help_label.setStyleSheet("color: #666666; font-size: 10px; margin-left: 20px;")
         info_layout.addWidget(self.help_label)
 
@@ -929,8 +1032,49 @@ class FullscreenImageViewer(QWidget):
             self._copy_prompt()
         elif key == Qt.Key_S:
             self._copy_settings()
+        elif key == Qt.Key_Delete:
+            self._delete_current_image()
         else:
             super().keyPressEvent(event)
+
+    def _delete_current_image(self):
+        """Delete the current file after confirmation."""
+        if not self.image_paths:
+            return
+
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Delete File",
+            f"Are you sure you want to delete:\n{filename}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                os.remove(image_path)
+                deleted_path = image_path
+                self.image_paths.pop(self.current_index)
+
+                if not self.image_paths:
+                    self.image_deleted.emit(deleted_path)
+                    self.close()
+                    return
+
+                if self.current_index >= len(self.image_paths):
+                    self.current_index = len(self.image_paths) - 1
+
+                self._load_current_image()
+                self.image_deleted.emit(deleted_path)
+                self.filename_label.setText(f"Deleted: {filename}")
+                QTimer.singleShot(1500, self._update_info)
+
+            except Exception as e:
+                QMessageBox.warning(self, "Delete Error", f"Failed to delete file:\n{str(e)}")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -968,6 +1112,11 @@ class FullscreenImageViewer(QWidget):
 
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Delete (Del)")
+        delete_action.triggered.connect(self._delete_current_image)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
 

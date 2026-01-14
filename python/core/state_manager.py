@@ -102,13 +102,15 @@ class ApplicationState:
         # Thread synchronization lock (reentrant for nested calls)
         self._lock = threading.RLock()
 
-        # Admin status (cached) - handled specially, not via descriptor
+        # Role status (cached) - handled specially, not via descriptor
         self._is_admin = None
+        self._is_sup = None
 
     @property
     def is_admin(self):
         """
         Check if the current user is an admin.
+        Admins have full access to all tabs including Settings.
         Thread-safe with caching to avoid repeated file reads.
 
         Returns:
@@ -120,10 +122,38 @@ class ApplicationState:
                 self._is_admin = is_admin_user(self._user)
             return self._is_admin
 
+    @property
+    def is_sup(self):
+        """
+        Check if the current user is a supervisor.
+        Supervisors can see ComfyUI and Gallery tabs (but not Settings).
+        Thread-safe with caching to avoid repeated file reads.
+
+        Returns:
+            bool: True if current user is a supervisor
+        """
+        with self._lock:
+            if self._is_sup is None:
+                from core.settings_manager import is_sup_user
+                self._is_sup = is_sup_user(self._user)
+            return self._is_sup
+
+    @property
+    def has_elevated_access(self):
+        """
+        Check if the current user has any elevated access (admin or sup).
+        Thread-safe with caching.
+
+        Returns:
+            bool: True if current user is an admin or supervisor
+        """
+        return self.is_admin or self.is_sup
+
     def refresh_admin_status(self):
-        """Force refresh of admin status (call after admin list changes)."""
+        """Force refresh of admin and supervisor status (call after role list changes)."""
         with self._lock:
             self._is_admin = None
+            self._is_sup = None
 
     def has_shot_context(self):
         """Check if shot context is available (job, shot, shotpath)."""
