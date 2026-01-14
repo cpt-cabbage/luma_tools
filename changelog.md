@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.46
+- Switch AYON publish to real-time output streaming with progress detection - Configure OpenGL surface format globally to prevent window flashing - Pre-initialize 3D viewer in background for faster loading - Update broken import paths
+
 ## Version 0.45
 - Refactor republish tab to publish directly from work folder without copying files - Add status spinner and animated updates during AYON publish process - Update global settings with new user and node overrides - Fix batch selector import and add last browse directory method
 

@@ -53,6 +53,14 @@ class RePublishTab(BaseTab):
         ]
         self._update_task_button_text()
 
+        # In standalone mode, only allow custom directory selection
+        if self.app_state.standalone_mode:
+            self.ui.RePublishUseForComp.setEnabled(False)
+            self.ui.RePublishUseRaw.setEnabled(False)
+            self.ui.RePublishUseCustom.setChecked(True)
+            self.ui.RePublishBrowseCustomPath.setEnabled(True)
+            print("Republish tab: Standalone mode - only custom directory selection allowed")
+
     def _update_task_button_text(self):
         """Update the task button text to show current selection."""
         self.ui.RePublishTaskButton.setText(f"Task: {self._task}")
@@ -113,16 +121,21 @@ class RePublishTab(BaseTab):
         """Scan for renders to republish based on selected source type."""
         from core.utils import update_path_version, scan_exr_sequences
 
-        # Update searchpath with current version
+        # In standalone mode, only custom path is allowed
+        if self.app_state.standalone_mode and not self.ui.RePublishUseCustom.isChecked():
+            self.ui.RePublishStatusLabel.setText("Status: Use custom directory in standalone mode")
+            return
+
+        # Update searchpath with current version (skip in standalone mode if using custom)
         current_ver = self.ui.RePublishCurrentVer.value()
-        if self.app_state.republish_searchpath:
+        if not self.app_state.standalone_mode and self.app_state.republish_searchpath:
             self.app_state.republish_searchpath = update_path_version(
                 self.app_state.republish_searchpath, current_ver
             )
             self.ui.RePublishRenderPath.setText(self.app_state.republish_searchpath)
 
         # Update "For Comp" label if output_subdirectory is set
-        if self.app_state.output_subdirectory:
+        if not self.app_state.standalone_mode and self.app_state.output_subdirectory:
             self.ui.RePublishUseForComp.setText(f"Denoised ({self.app_state.output_subdirectory.title()})")
 
         # Clear previous list
@@ -142,7 +155,10 @@ class RePublishTab(BaseTab):
             search_path = self.app_state.republish_custom_path
 
         if not search_path or not os.path.exists(search_path):
-            self.ui.RePublishStatusLabel.setText("Status: Invalid path")
+            if self.app_state.standalone_mode:
+                self.ui.RePublishStatusLabel.setText("Status: Please browse for a directory")
+            else:
+                self.ui.RePublishStatusLabel.setText("Status: Invalid path")
             return
 
         # Find EXR sequences using scan_exr_sequences

@@ -301,6 +301,11 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_class = tab_config['class']
             restrict_key = tab_config['restrict_key']
 
+            # Skip ComfyUI and Gallery tabs for non-admin users (don't even initialize them)
+            if not app_state.is_admin and restrict_key in ['comfyui', 'comfyui_gallery']:
+                print(f"Skipping initialization of '{restrict_key}' tab for non-admin user")
+                continue
+
             # Create tab instance
             tab_instance = tab_class(self, app_state)
 
@@ -482,7 +487,8 @@ class LumaShotTools(QtWidgets.QWidget):
         if not app_state.standalone_mode:
             return
 
-        standalone_incompatible = ['passbuilder', 'republish', 'shotcleaner']
+        # Republish tab is allowed in standalone mode (uses custom directory selection)
+        standalone_incompatible = ['passbuilder', 'shotcleaner']
 
         for i in range(self.tab_widget.count() - 1, -1, -1):
             widget = self.tab_widget.widget(i)
@@ -652,32 +658,36 @@ def main():
             print(f"Warning: Could not set prewarm cache: {e}")
 
         # Pre-initialize 3D viewer in background to prevent window flashing later
-        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
-        app.processEvents()
+        # Only initialize for admin users (gallery tab is admin-only)
+        if app_state.is_admin:
+            splash.update_progress(78, "Loading", "Initializing 3D viewer...")
+            app.processEvents()
 
-        try:
-            # Add python directory to path
-            import sys
-            import os
-            python_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-            if python_dir not in sys.path:
-                sys.path.insert(0, python_dir)
+            try:
+                # Add python directory to path
+                import sys
+                import os
+                python_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+                if python_dir not in sys.path:
+                    sys.path.insert(0, python_dir)
 
-            # Try to create viewer widget in background
-            from models.viewer import is_viewer_available
-            if is_viewer_available():
-                from models.viewer import ModelViewerWidget
-                # Create a hidden instance - this will initialize OpenGL context
-                # The gallery will create its own instances later, but they'll be faster
-                # because the OpenGL context is already set up
-                _temp_viewer = ModelViewerWidget()
-                _temp_viewer.hide()  # Keep it hidden
-                # Don't delete it yet - keep it alive to maintain the context
-                print("3D viewer pre-initialized successfully")
-            else:
-                print("3D viewer not available (missing dependencies)")
-        except Exception as e:
-            print(f"Warning: Could not pre-initialize 3D viewer: {e}")
+                # Try to create viewer widget in background
+                from models.viewer import is_viewer_available
+                if is_viewer_available():
+                    from models.viewer import ModelViewerWidget
+                    # Create a hidden instance - this will initialize OpenGL context
+                    # The gallery will create its own instances later, but they'll be faster
+                    # because the OpenGL context is already set up
+                    _temp_viewer = ModelViewerWidget()
+                    _temp_viewer.hide()  # Keep it hidden
+                    # Don't delete it yet - keep it alive to maintain the context
+                    print("3D viewer pre-initialized successfully")
+                else:
+                    print("3D viewer not available (missing dependencies)")
+            except Exception as e:
+                print(f"Warning: Could not pre-initialize 3D viewer: {e}")
+        else:
+            print("Skipping 3D viewer initialization for non-admin user")
 
         # Create main window
         splash.update_progress(88, "Loading", "Creating main window...")

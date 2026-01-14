@@ -64,7 +64,7 @@
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Animation/la_Hy_Motion.json",
       "description": "",
       "iteratable": false,
-      "note": "Text to Anmation",
+      "note": "Text to Anmation (Luma tools can't view skeleton data only yet so import it somewhere else)",
       "full_restart": false,
       "node_overrides": {
         "HY-Motion Export FBX_editable": {
@@ -72,15 +72,6 @@
           "default_value": ""
         }
       },
-      "is_multi": false
-    },
-    "pop": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2509.json",
-      "description": "",
-      "iteratable": true,
-      "note": "",
-      "full_restart": false,
-      "node_overrides": {},
       "is_multi": false
     }
   },
