@@ -624,20 +624,14 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_refresh(self):
         """Refresh the gallery with images from the current directory."""
-        import time
-        _t0 = time.perf_counter()
-        print(f"[TIMING] _on_refresh START")
-
         from ui_components import Worker
 
         # Skip if scan already in progress
         if self._scan_in_progress:
-            print(f"[TIMING] _on_refresh SKIP (scan in progress)")
             return
 
         if not self._current_path:
             self.ui.GalleryStatus.setText("Invalid directory")
-            print(f"[TIMING] _on_refresh SKIP (no path)")
             return
 
         # Run scan on worker thread (includes isdir check)
@@ -648,7 +642,6 @@ class ComfyUIGalleryTab(BaseTab):
         QThreadPool.globalInstance().start(worker)
 
         self.ui.GalleryStatus.setText("Scanning...")
-        print(f"[TIMING] _on_refresh worker started: {(time.perf_counter()-_t0)*1000:.1f}ms")
 
     def _scan_directory(self, output_dir, load_metadata=True, bundle_pairs=True):
         """Scan directory recursively for image and 3D model files (runs on worker thread).
@@ -781,10 +774,6 @@ class ComfyUIGalleryTab(BaseTab):
         Args:
             items: List of dicts with keys: path, mtime, type, name, workflow
         """
-        import time
-        _t0 = time.perf_counter()
-        print(f"[TIMING] _on_scan_complete START with {len(items) if items else 0} items")
-
         self._scan_in_progress = False
 
         # Handle legacy format (tuples or plain paths)
@@ -803,7 +792,6 @@ class ComfyUIGalleryTab(BaseTab):
         current_items = set(file_paths)
         new_items = current_items - self._known_items
 
-        print(f"[TIMING] _on_scan_complete data prep: {(time.perf_counter()-_t0)*1000:.1f}ms")
         self.log(f"[Gallery] Scan complete: {len(file_paths)} items, {len(new_items)} new")
 
         if self._initial_scan_done and new_items:
@@ -819,11 +807,9 @@ class ComfyUIGalleryTab(BaseTab):
         # Update known items
         self._known_items = current_items
 
-        # Start background pre-caching of other users on first scan
+        # Mark initial scan as done
         if not self._initial_scan_done:
-            self._initial_scan_done = True  # Set BEFORE scheduling to prevent duplicates
-            # Delay pre-caching slightly to let the UI settle first
-            QTimer.singleShot(1000, self._start_background_precache)
+            self._initial_scan_done = True
 
         # Sort items based on current sort mode
         sorted_items = self._sort_items(items)
@@ -860,22 +846,15 @@ class ComfyUIGalleryTab(BaseTab):
         Args:
             items: List of item dicts (already sorted)
         """
-        import time
-        _t0 = time.perf_counter()
-        print(f"[TIMING] _display_items START with {len(items)} items")
-
         # Clear existing thumbnails and widget cache
         # Keep updates disabled - _create_all_widgets will re-enable when done
         container = self.ui.galleryThumbnailContainer
         container.setUpdatesEnabled(False)
 
-        widget_count = self._flow_layout.count()
         while self._flow_layout.count():
             item = self._flow_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
-        print(f"[TIMING] _display_items cleared {widget_count} widgets: {(time.perf_counter()-_t0)*1000:.1f}ms")
 
         # Reset widget cache
         self._widget_cache = {}
@@ -945,10 +924,6 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _create_all_widgets(self):
         """Create thumbnail widgets in batches to avoid blocking the UI."""
-        import time
-        self._widget_create_start_time = time.perf_counter()
-        print(f"[TIMING] _create_all_widgets START")
-
         if not hasattr(self, '_pending_items') or not self._pending_items:
             # Re-enable updates since we're not creating anything
             self.ui.galleryThumbnailContainer.setUpdatesEnabled(True)
@@ -967,23 +942,13 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _create_widget_batch(self):
         """Create a batch of widgets, then schedule the next batch."""
-        import time
-        _batch_start = time.perf_counter()
-
         from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
 
         container = self.ui.galleryThumbnailContainer
 
         if not hasattr(self, '_pending_items') or self._widget_create_index >= len(self._pending_items):
             # All widgets created - re-enable updates and trigger layout
-            total_time = (time.perf_counter() - self._widget_create_start_time) * 1000
-            print(f"[TIMING] _create_widget_batch ALL DONE widget creation: {total_time:.1f}ms")
-
-            # This can be slow - triggers layout recalculation for all widgets
-            _layout_start = time.perf_counter()
             container.setUpdatesEnabled(True)
-            layout_time = (time.perf_counter() - _layout_start) * 1000
-            print(f"[TIMING] setUpdatesEnabled(True) layout recalc: {layout_time:.1f}ms")
 
             # Trigger initial lazy load after layout settles
             QTimer.singleShot(50, self._load_visible_thumbnails)
@@ -1027,8 +992,6 @@ class ComfyUIGalleryTab(BaseTab):
             self._flow_layout.addWidget(thumbnail)
 
         self._widget_create_index = end_index
-        batch_time = (time.perf_counter() - _batch_start) * 1000
-        print(f"[TIMING] _create_widget_batch {end_index}/{len(self._pending_items)}: {batch_time:.1f}ms")
 
         # Schedule next batch with small delay to keep UI responsive
         QTimer.singleShot(10, self._create_widget_batch)

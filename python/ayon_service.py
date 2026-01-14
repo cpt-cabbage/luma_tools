@@ -111,18 +111,11 @@ def submit_oiio_to_deadline(
         deadline_command.append('-prop')
         deadline_command.append(f'JobDependencies={parent_job_id}')
 
-    result = subprocess.run(deadline_command, capture_output=True, text=True)
-    result_output = result.stdout.strip()
-    print("Deadline submission result: " + result_output)
+    from deadline_utils import submit_deadline_job
 
-    # Extract job ID from output
-    buildjobid = None
-    for line in result_output.split('\n'):
-        if 'JobID=' in line:
-            buildjobid = line.split('=')[-1].strip()
-            break
-
-    print(f"Passes Build Deadline Job ID: {buildjobid}")
+    buildjobid = submit_deadline_job(deadline_command)
+    if buildjobid:
+        print(f"Passes Build Deadline Job ID: {buildjobid}")
     return buildjobid
 
 

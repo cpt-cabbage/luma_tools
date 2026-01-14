@@ -151,34 +151,13 @@ def submit_comfyui_to_deadline_server_mode(
     print(f"Frames: 1-{generation_count} (each frame = different seed)")
     print(f"Server URL: {server_url}")
 
-    try:
-        result = subprocess.run(
-            deadline_command,
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-        result_output = result.stdout.strip()
-        print(f"Deadline submission result: {result_output}")
+    from deadline_utils import submit_deadline_job
 
-        if result.returncode != 0:
-            print(f"Deadline submission error: {result.stderr}")
-            return None
+    job_id = submit_deadline_job(deadline_command, "[Server Mode]")
+    if job_id:
+        print(f"ComfyUI Deadline Job ID (server mode): {job_id}")
 
-        job_id = None
-        for line in result_output.split('\n'):
-            if 'JobID=' in line:
-                job_id = line.split('=')[-1].strip()
-                break
-
-        if job_id:
-            print(f"ComfyUI Deadline Job ID (server mode): {job_id}")
-
-        return job_id
-
-    except Exception as e:
-        print(f"Error submitting to Deadline: {e}")
-        return None
+    return job_id
 
 
 def submit_comfyui_to_deadline(
@@ -324,34 +303,13 @@ ExitCodeTreatedAsFailure=1-255
 
     deadline_command = [DEADLINE_PATH, job_info_path, plugin_info_path]
 
-    try:
-        result = subprocess.run(
-            deadline_command,
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-        result_output = result.stdout.strip()
-        print(f"Deadline submission result: {result_output}")
+    from deadline_utils import submit_deadline_job
 
-        if result.returncode != 0:
-            print(f"Deadline submission error: {result.stderr}")
-            return None
+    job_id = submit_deadline_job(deadline_command)
+    if job_id:
+        print(f"ComfyUI Deadline Job ID: {job_id}")
 
-        job_id = None
-        for line in result_output.split('\n'):
-            if 'JobID=' in line:
-                job_id = line.split('=')[-1].strip()
-                break
-
-        if job_id:
-            print(f"ComfyUI Deadline Job ID: {job_id}")
-
-        return job_id
-
-    except Exception as e:
-        print(f"Error submitting to Deadline: {e}")
-        return None
+    return job_id
 
 
 def _collect_batch_images(editable_values: Optional[Dict[int, Dict[str, Any]]]) -> Tuple[List[str], int]:
