@@ -22,7 +22,7 @@ def safe_import(module_path: str, attr: Optional[str] = None) -> Tuple[Optional[
     Examples:
         >>> Usd, USD_AVAILABLE = safe_import("pxr", "Usd")
         >>> o3d, OPEN3D_AVAILABLE = safe_import("open3d")
-        >>> QOpenGLWidget, GL_AVAILABLE = safe_import("PySide2.QtWidgets", "QOpenGLWidget")
+        >>> QOpenGLWidget, GL_AVAILABLE = safe_import("PySide6.QtWidgets", "QOpenGLWidget")
     """
     try:
         module = importlib.import_module(module_path)

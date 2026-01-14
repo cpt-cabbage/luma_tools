@@ -8,13 +8,13 @@ import os
 import random
 import time
 
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import Qt, QTimer, QThreadPool
-from PySide2.QtWidgets import (
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt, QTimer, QThreadPool
+from PySide6.QtWidgets import (
     QMenu, QMessageBox, QInputDialog, QDialog, QVBoxLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QFileDialog
 )
-from PySide2.QtGui import QPixmap
+from PySide6.QtGui import QPixmap
 
 from .base_tab import BaseTab
 from .comfyui_polling import PollingMixin
@@ -951,7 +951,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         layout.addLayout(buttons_layout)
 
-        result = dialog.exec_()
+        result = dialog.exec()
 
         # Handle delete (custom return code 2)
         if result == 2:
@@ -1420,7 +1420,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         dialog.setTextValue("")
         dialog.setWindowModality(Qt.WindowModal)
 
-        if dialog.exec_() == QInputDialog.Accepted:
+        if dialog.exec() == QInputDialog.Accepted:
             name = dialog.textValue().strip()
             if not name:
                 self.main_window.animator.show_error("Preset name cannot be empty")

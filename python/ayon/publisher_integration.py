@@ -7,7 +7,7 @@ Houdini, Blender, and other DCCs. Uses AYON's standardized publishing API.
 
 import os
 from typing import Optional, List, Dict
-from PySide2.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 # Check if AYON is available
 try:
@@ -268,8 +268,8 @@ def show_product_type_selector(file_path: str, parent=None):
     Returns:
         tuple: (product_type, variant) or (None, None) if cancelled
     """
-    from PySide2.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel
-    from PySide2.QtWidgets import QComboBox, QLineEdit, QPushButton
+    from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel
+    from PySide6.QtWidgets import QComboBox, QLineEdit, QPushButton
 
     dialog = QDialog(parent)
     dialog.setWindowTitle("Select Product Type")
@@ -358,6 +358,6 @@ def show_product_type_selector(file_path: str, parent=None):
 
     layout.addLayout(button_layout)
 
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         return (type_combo.currentText(), variant_edit.text().strip())
     return (None, None)

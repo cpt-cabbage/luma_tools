@@ -4,8 +4,8 @@ Pass Builder tab module for Luma Tools.
 Handles render scanning, pass detection, and pass building functionality.
 """
 
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import Qt, QThreadPool
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt, QThreadPool
 
 from .base_tab import BaseTab
 
@@ -57,7 +57,7 @@ class PassBuilderTab(BaseTab):
 
     def _on_build_type_button_clicked(self):
         """Show popup menu with build type options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
 

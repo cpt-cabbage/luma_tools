@@ -6,9 +6,9 @@ Handles republishing renders to AYON.
 
 import os
 
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import QThreadPool
-from PySide2.QtWidgets import QFileDialog
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import QThreadPool
+from PySide6.QtWidgets import QFileDialog
 
 from .base_tab import BaseTab
 
@@ -59,7 +59,7 @@ class RePublishTab(BaseTab):
 
     def _on_task_button_clicked(self):
         """Show popup menu with task options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
 
@@ -279,7 +279,17 @@ class RePublishTab(BaseTab):
 
             # Write metadata file to working directory
             metadata_filename = f"ayon_{render_file}_{product_name}.json"
-            metadata_path = os.path.join(self.app_state.working_dir, metadata_filename)
+
+            # Use working_dir if available, otherwise use temp directory
+            if self.app_state.working_dir:
+                metadata_dir = self.app_state.working_dir
+            else:
+                # Fall back to temp directory when working_dir is not set (e.g., custom path mode)
+                import tempfile
+                metadata_dir = tempfile.gettempdir()
+                self.log(f"Using temp directory for metadata: {metadata_dir}")
+
+            metadata_path = os.path.join(metadata_dir, metadata_filename)
             metadata_path = write_metadata_file(metadata, metadata_path)
 
             if not metadata_path:

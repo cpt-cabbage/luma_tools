@@ -18,17 +18,17 @@ from enum import Enum
 
 import numpy as np
 
-from PySide2.QtCore import Qt, Signal, QPoint, QTimer, QRunnable, QObject, QThreadPool
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QPoint, QTimer, QRunnable, QObject, QThreadPool
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
     QLabel, QFrame, QSizePolicy, QMessageBox, QStackedWidget,
     QSlider, QComboBox, QCheckBox
 )
-from PySide2.QtGui import QColor, QMouseEvent, QWheelEvent, QKeyEvent, QImage, QPixmap
+from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent, QKeyEvent, QImage, QPixmap
 
 try:
-    from PySide2.QtWidgets import QOpenGLWidget
-    from PySide2.QtGui import QOpenGLContext, QSurfaceFormat
+    from PySide6.QtWidgets import QOpenGLWidget
+    from PySide6.QtGui import QOpenGLContext, QSurfaceFormat
     OPENGL_AVAILABLE = True
 except ImportError:
     OPENGL_AVAILABLE = False
@@ -1334,7 +1334,7 @@ class ModelViewerDialog(QDialog):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            from PySide2.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self,
                 "Publish Error",

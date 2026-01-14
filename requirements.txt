@@ -2,9 +2,8 @@
 # Python 3.10+ required
 # Install with: pip install -r requirements.txt
 
-# Core Qt GUI
-PySide2==5.15.2.1
-shiboken2==5.15.2.1
+# Core Qt GUI - Upgraded to PySide6 for NumPy 2.x compatibility and macOS support
+PySide6>=6.6.0
 QDarkStyle==3.2.3
 QtPy==2.4.2
 

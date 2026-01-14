@@ -42,7 +42,7 @@ except ImportError as e:
 
 # Try to import Qt for processEvents
 
-from PySide2.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 
 
@@ -456,8 +456,19 @@ def write_metadata_file(metadata_dict, output_path):
     """
     logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
 
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # Validate output_path
+    if not output_path or not output_path.strip():
+        raise ValueError("Output path cannot be empty")
+
+    # Get directory path
+    dir_path = os.path.dirname(output_path)
+
+    # Ensure directory exists (handle case where dirname returns empty string for filename-only paths)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    else:
+        # If no directory in path, use current working directory
+        output_path = os.path.join(os.getcwd(), output_path)
 
     # Write metadata
     try:

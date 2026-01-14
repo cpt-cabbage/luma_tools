@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Tuple
 from datetime import datetime
 
-from PySide2.QtCore import QObject, Signal, QSize
-from PySide2.QtGui import QPixmap, QImage
+from PySide6.QtCore import QObject, Signal, QSize
+from PySide6.QtGui import QPixmap, QImage
 
 import core.config as config
 
@@ -471,8 +471,8 @@ def create_placeholder_thumbnail(
     Returns:
         QPixmap placeholder
     """
-    from PySide2.QtGui import QColor, QPainter, QBrush
-    from PySide2.QtCore import Qt
+    from PySide6.QtGui import QColor, QPainter, QBrush
+    from PySide6.QtCore import Qt
 
     pixmap = QPixmap(width, height)
     pixmap.fill(QColor(color))

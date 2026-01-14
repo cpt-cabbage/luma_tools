@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import Optional, Dict
 
-from PySide2.QtGui import QPixmap
+from PySide6.QtGui import QPixmap
 
 # ============================================================================
 # CONFIGURATION

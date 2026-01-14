@@ -6,14 +6,15 @@ Falls back gracefully if PyEnchant is not available.
 """
 
 import re
-from PySide2.QtCore import Qt
-from PySide2.QtGui import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import (
     QSyntaxHighlighter,
     QTextCharFormat,
     QColor,
     QTextCursor,
+    QAction,  # Qt6: QAction moved from QtWidgets to QtGui
 )
-from PySide2.QtWidgets import QTextEdit, QMenu, QAction
+from PySide6.QtWidgets import QTextEdit, QMenu
 
 # Try to import enchant, gracefully degrade if not available
 try:

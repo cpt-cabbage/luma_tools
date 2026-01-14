@@ -6,8 +6,8 @@ Displays generated images and 3D models from ComfyUI in a gallery view.
 
 import os
 
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import Qt, QTimer, QThreadPool
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt, QTimer, QThreadPool
 
 from .base_tab import BaseTab
 
@@ -292,7 +292,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_sort_button_clicked(self):
         """Show popup menu with sort options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
 
@@ -411,7 +411,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_user_button_clicked(self):
         """Show popup menu with user options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
         current_user = self.app_state.user
@@ -1214,8 +1214,8 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _show_viewer_loading(self):
         """Show a loading indicator with spinner while the viewer is being created."""
-        from PySide2.QtWidgets import QLabel, QWidget, QVBoxLayout
-        from PySide2.QtCore import Qt
+        from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout
+        from PySide6.QtCore import Qt
         from ui_components import SpinnerWidget
 
         # Create a temporary loading widget if not exists
@@ -1343,7 +1343,7 @@ class ComfyUIGalleryTab(BaseTab):
         if result is None:
             return
 
-        from PySide2.QtCore import QFileSystemWatcher
+        from PySide6.QtCore import QFileSystemWatcher
 
         output_dir, dirs_to_watch = result
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Luma Tools is a VFX shot management application for the Luma Animation pipeline. It's a Windows-based PySide2 GUI application that handles:
+Luma Tools is a VFX shot management application for the Luma Animation pipeline. It's a Windows-based PySide6 GUI application that handles:
 - Render pass management and building
 - AYON publishing (local and farm-based)
 - Deadline farm job submission
@@ -19,8 +19,9 @@ Luma Tools is a VFX shot management application for the Luma Animation pipeline.
 luma_tools.bat                  # With shot context args passed through
 luma_tools_standalone.bat       # Without shot context (standalone mode)
 
-# Direct Python (ensure venv is activated)
+# Direct Python (ensure venv is activated and PYTHONPATH is set)
 python\venv\Scripts\activate.bat
+set PYTHONPATH=%CD%\python;%CD%\resources\ui;%PYTHONPATH%
 python python/core/luma_tools.py
 
 # Deploy to production location
@@ -28,6 +29,9 @@ install.bat                     # Copies files to L:\tools\_studio_tools\luma_to
 ```
 
 The batch files activate the venv and launch with `start /B` to run in background. The console window is hidden by the Python code itself using Windows API (`ctypes.windll`).
+
+**Single Instance Enforcement:**
+The application uses a Windows named mutex (`Global\\LumaToolsSingleInstance`) to ensure only one instance runs at a time. If a second instance is launched, it finds and focuses the existing window instead of starting a new one.
 
 **Command Line Arguments:**
 The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
@@ -168,13 +172,19 @@ class MyTab(BaseTab):
 **Adding a new tab:**
 1. Create `python/tabs/my_tab.py` inheriting from `BaseTab`
 2. Create `resources/ui/tabs/my_tab.ui` in Qt Designer
-3. Register in `python/tabs/__init__.py` by adding to `TAB_CONFIG`
+3. Import the tab class in `python/tabs/__init__.py`
+4. Register in `TAB_CONFIG` with format: `{'class': MyTab, 'restrict_key': 'mytab'}`
+   - The `restrict_key` is used for tab access control via global settings
+   - Restricted tabs won't appear unless user has permission
 
 ### Threading Model (Critical)
 
-Uses Qt's QThreadPool + QRunnable pattern:
+Uses Qt's QThreadPool + QRunnable pattern. The `Worker` class is defined in `resources/ui/workers.py`:
 
 ```python
+from resources.ui.workers import Worker
+from PySide6.QtCore import QThreadPool
+
 worker = Worker(some_function, arg1, arg2)
 worker.signals.result.connect(handle_result)
 worker.signals.error.connect(handle_error)
@@ -230,6 +240,8 @@ get_comfyui_path = lambda: get_setting("comfyui_path")
 
 **Global Settings** (shared network path):
 - ComfyUI workflow presets, ComfyUI installation path/mode
+- Tab restrictions (`restricted_tabs`) - controls which tabs are hidden from users
+  - Maps restrict_key to permission flags via `TAB_RESTRICTION_MAP` in settings_manager.py
 
 ### Strategy Pattern for Publishing
 
@@ -294,6 +306,21 @@ OIIO_PATH = glob.glob(OIIO_ROOT)[0]
 ## Development
 
 No build process - runs directly from source. Venv location: `python/venv/`
+
+### Requirements
+
+- Python 3.10+
+- PySide6 (Qt6) - upgraded from PySide2 for NumPy 2.x compatibility and macOS support
+- Install dependencies: `pip install -r requirements.txt`
+
+**Key dependencies:**
+- PySide6 >= 6.6.0 (Qt6 GUI framework)
+- open3d >= 0.18.0 (3D model loading with bundled Assimp)
+- trimesh >= 4.10.1 (Fallback 3D loader)
+- usd-core >= 25.11 (USD format support)
+- PyOpenGL >= 3.1.0 (3D viewer rendering)
+- numpy >= 1.26.4, scipy >= 1.15.3 (NumPy 2.x compatible)
+- pyenchant >= 3.3.0 (Spell checking for text prompts)
 
 ### Running Python Scripts on Windows (Claude Code)
 
@@ -393,6 +420,21 @@ Use `convert_to_ayon_folder_path()` for path conversion.
 - API format has node IDs as keys with `inputs` dict
 - Use `is_api_format(workflow)` to detect format type
 - `comfyui/service.py` converts between formats automatically
+
+## UI Components Organization
+
+The `resources/ui/` directory contains modularized UI components (recently refactored from monolithic `ui_components.py`):
+
+- **workers.py** - Threading utilities (`Worker`, `WorkerSignals`)
+- **styles.py** - Styling constants and themes
+- **spinners.py** - Loading animations and progress indicators
+- **effects.py** - Visual effects and animations
+- **notifications.py** - Toast notifications and status banners
+- **layouts.py** - Custom layout implementations
+- **dialogs.py** - Edit dialogs and forms
+- **batch_selector.py** - Image selection widgets
+- **small_widgets.py** - Miscellaneous UI components (`show_popup_menu()`, `browse_directory()`, `browse_file()`)
+- **image_viewers.py** - Image and model viewing widgets
 
 ## Utility Functions
 

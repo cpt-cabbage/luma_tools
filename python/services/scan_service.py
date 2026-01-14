@@ -1,5 +1,5 @@
 import os
-from PySide2.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal
 from core.utils import get_trailing_number, remove_after, get_folder_size
 from services.file_operations import (
     fast_scandir,

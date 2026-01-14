@@ -6,9 +6,9 @@ Handles MP4 generation from EXR sequences.
 
 import os
 
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import QThreadPool, QTimer
-from PySide2.QtWidgets import QFileDialog
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import QThreadPool, QTimer
+from PySide6.QtWidgets import QFileDialog
 
 from .base_tab import BaseTab
 
@@ -63,7 +63,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_quality_button_clicked(self):
         """Show popup menu with quality options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
 

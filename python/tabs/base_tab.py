@@ -6,7 +6,7 @@ Provides a common interface for tab initialization, UI loading, and signal conne
 
 import os
 from abc import ABC, abstractmethod
-from PySide2 import QtCore, QtWidgets, QtUiTools
+from PySide6 import QtCore, QtWidgets, QtUiTools
 
 
 class TabSignals(QtCore.QObject):

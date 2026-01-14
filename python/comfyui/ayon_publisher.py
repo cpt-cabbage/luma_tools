@@ -7,7 +7,7 @@ Includes Phase 2 AYON integration with validators.
 
 import os
 from typing import Optional, List, Tuple
-from PySide2.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QMessageBox
 )
@@ -116,7 +116,7 @@ def publish_comfyui_asset_to_ayon(
 
         # Show publish dialog to get metadata
         dialog = ComfyUIPublishDialog(file_path, app_state, parent_widget)
-        if dialog.exec_() != QDialog.Accepted:
+        if dialog.exec() != QDialog.Accepted:
             return False  # User cancelled
 
         # Get publish options from dialog

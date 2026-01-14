@@ -6,9 +6,9 @@ Handles user settings (local) and global settings management.
 
 import os
 import json
-from PySide2 import QtWidgets, QtCore
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 
 from .base_tab import BaseTab
 
@@ -131,7 +131,7 @@ class SettingsTab(BaseTab):
         button_box.accepted.connect(dialog.accept)
         layout.addWidget(button_box)
 
-        dialog.exec_()
+        dialog.exec()
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
@@ -246,7 +246,7 @@ class SettingsTab(BaseTab):
 
     def _on_comfyui_mode_button_clicked(self):
         """Show popup menu with ComfyUI mode options."""
-        from PySide2.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self.main_window)
 
@@ -527,7 +527,7 @@ class SettingsTab(BaseTab):
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
         from core.settings_manager import remove_admin_user
-        from PySide2.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:

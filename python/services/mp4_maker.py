@@ -20,7 +20,7 @@ from core.utils import normalize_path
 from ui_components import report_progress
 # Try to import Qt for processEvents
 try:
-    from PySide2.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 except ImportError:
     QApplication = None
 

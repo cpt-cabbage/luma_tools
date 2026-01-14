@@ -5,10 +5,10 @@ Provides mixin classes for iterate and batch mode polling.
 """
 import os
 import time
-from PySide2.QtCore import QTimer, QThreadPool
-from PySide2.QtWidgets import QMessageBox
-from PySide2.QtGui import QPixmap
-from PySide2.QtCore import Qt
+from PySide6.QtCore import QTimer, QThreadPool
+from PySide6.QtWidgets import QMessageBox
+from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt
 
 
 def format_elapsed_time(seconds):

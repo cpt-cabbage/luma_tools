@@ -248,7 +248,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     print(f"OIIO args template: {oiio_args}")
 
     # Import Qt for event processing
-    from PySide2.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
 
     for frame_num in range(start_frame, end_frame + 1):

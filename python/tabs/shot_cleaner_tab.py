@@ -6,8 +6,8 @@ Handles cleanup of renders, USD files, and HIP backups.
 
 import os
 
-from PySide2 import QtWidgets
-from PySide2.QtCore import Qt, QThreadPool
+from PySide6 import QtWidgets
+from PySide6.QtCore import Qt, QThreadPool
 
 from .base_tab import BaseTab
 

@@ -65,15 +65,15 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.append(os.path.join(PROJECT_ROOT, "python"))
 sys.path.append(os.path.join(PROJECT_ROOT, "resources", "ui"))
 
-# Suppress NumPy compatibility warnings from PySide2/shiboken2
+# Suppress NumPy compatibility warnings from PySide6/shiboken6
 import warnings
 warnings.filterwarnings("ignore", message=".*NumPy.*")
 
-# PySide2 imports
-from PySide2 import QtCore, QtWidgets
-from PySide2.QtCore import Qt
-from PySide2.QtGui import QIcon, QPainter, QColor, QPen
-from PySide2.QtWidgets import QApplication, QTabBar
+# PySide6 imports
+from PySide6 import QtCore, QtWidgets
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon, QPainter, QColor, QPen
+from PySide6.QtWidgets import QApplication, QTabBar
 
 # Import UI components
 from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager, InlineSpinner
@@ -93,6 +93,11 @@ app_state.initialize_from_args(sys.argv)
 app = QApplication.instance()
 if app is None:
     app = QApplication(sys.argv)
+
+# Qt6: Increase image allocation limit for large render images
+# Default is 256MB, increase to 2GB for VFX work with large EXR/PNG files
+from PySide6.QtGui import QImageReader
+QImageReader.setAllocationLimit(2048)  # 2GB in megabytes
 
 # Apply stylesheet
 apply_stylesheet(app)
@@ -492,7 +497,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _disable_scroll_wheel_on_inputs(self):
         """Disable scroll wheel on combo boxes and spin boxes to prevent accidental changes."""
-        from PySide2.QtWidgets import QComboBox, QSpinBox, QDoubleSpinBox
+        from PySide6.QtWidgets import QComboBox, QSpinBox, QDoubleSpinBox
 
         for combo in self.findChildren(QComboBox):
             combo.wheelEvent = lambda e: e.ignore()
@@ -591,7 +596,7 @@ def main():
                 gallery_data['done'] = True
 
         # Start worker thread for gallery scanning
-        from PySide2.QtCore import QThreadPool, QRunnable
+        from PySide6.QtCore import QThreadPool, QRunnable
 
         class ScanWorker(QRunnable):
             def run(self):
@@ -630,23 +635,10 @@ def main():
         except Exception as e:
             print(f"Warning: Could not set prewarm cache: {e}")
 
-        # Pre-initialize OpenGL/3D viewer to avoid delay on first model view
-        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
+        # Skip 3D viewer pre-initialization - it's slow and provides minimal benefit
+        # The viewer will initialize on-demand when first needed
+        splash.update_progress(78, "Loading", "Finalizing...")
         app.processEvents()
-        try:
-            from models.viewer import is_viewer_available
-            if is_viewer_available():
-                from PySide2.QtWidgets import QOpenGLWidget
-                # Create a tiny hidden OpenGL widget to trigger driver initialization
-                _gl_prewarm = QOpenGLWidget()
-                _gl_prewarm.setFixedSize(1, 1)
-                _gl_prewarm.show()
-                app.processEvents()
-                _gl_prewarm.hide()
-                _gl_prewarm.deleteLater()
-                del _gl_prewarm
-        except Exception as e:
-            print(f"Note: 3D viewer pre-init skipped: {e}")
 
         # Create main window
         splash.update_progress(80, "Loading", "Creating main window...")
@@ -666,7 +658,7 @@ def main():
         window.enable_log_redirect()
 
         # Run the application
-        sys.exit(app.exec_())
+        sys.exit(app.exec())
     except Exception as e:
         print(f"ERROR in main: {e}")
         traceback.print_exc()
