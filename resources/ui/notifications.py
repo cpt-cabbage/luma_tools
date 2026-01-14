@@ -3,8 +3,8 @@ Notification and banner widgets.
 
 Provides toast notifications and status banners for user feedback.
 """
-from PySide2.QtCore import Qt, QTimer, QPropertyAnimation
-from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QGraphicsOpacityEffect
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QGraphicsOpacityEffect
 
 
 class ToastNotification(QWidget):

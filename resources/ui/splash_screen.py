@@ -1,6 +1,6 @@
-from PySide2.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QThreadPool
-from PySide2.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
-from PySide2.QtGui import QPainter, QColor, QPen, QFont, QPixmap
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QThreadPool
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
 import os
 from ui_components import LoadingStyles, Worker, SpinnerWidget
@@ -28,7 +28,7 @@ class SplashScreen(QWidget):
 
     def center_on_screen(self):
         """Center the splash screen on the screen."""
-        from PySide2.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         screen = QApplication.primaryScreen().geometry()
         size = self.geometry()
         self.move(
@@ -163,7 +163,7 @@ class SplashScreen(QWidget):
             init_callback: A function that will be called on a background thread.
                           Should return the main window.
         """
-        from PySide2.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         def progress_update(progress, message):
             """Update progress from worker thread."""

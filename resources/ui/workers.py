@@ -4,8 +4,8 @@ Threading utilities for background operations.
 Provides QThread workers for running functions without blocking the GUI.
 """
 import traceback
-from PySide2.QtCore import QObject, Signal, QRunnable, QThreadPool, Slot
-from PySide2.QtWidgets import QApplication
+from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, Slot
+from PySide6.QtWidgets import QApplication
 
 
 class WorkerSignals(QObject):

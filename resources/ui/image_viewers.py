@@ -4,13 +4,13 @@ Image viewer widgets for the gallery.
 Contains embedded and fullscreen viewers with support for images, 3D models, and videos.
 """
 import os
-from PySide2.QtCore import Qt, QTimer, Signal, QThreadPool
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool
+from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
     QMenu, QComboBox, QApplication
 )
-from PySide2 import QtWidgets
-from PySide2.QtGui import QPixmap
+from PySide6 import QtWidgets
+from PySide6.QtGui import QPixmap
 
 from workers import Worker
 
@@ -23,7 +23,7 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        from PySide2.QtGui import QPainter
+        from PySide6.QtGui import QPainter
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QtWidgets.QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QtWidgets.QGraphicsView.AnchorUnderMouse)
@@ -236,12 +236,13 @@ class EmbeddedImageViewer(QWidget):
 
         # 3. Video Player
         try:
-            from PySide2.QtMultimedia import QMediaPlayer
-            from PySide2.QtMultimediaWidgets import QVideoWidget
+            from PySide6.QtMultimedia import QMediaPlayer
+            from PySide6.QtMultimediaWidgets import QVideoWidget
 
             self.video_widget = QVideoWidget()
             self.video_widget.setStyleSheet("background-color: #000000;")
-            self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+            # Qt6: QMediaPlayer constructor changed, no flags needed
+            self.media_player = QMediaPlayer(self)
             self.media_player.setVideoOutput(self.video_widget)
             self.image_stack.addWidget(self.video_widget)
             self._has_video_player = True
@@ -361,56 +362,57 @@ class EmbeddedImageViewer(QWidget):
         self.message_label.setText("Initializing 3D viewer...")
         self.image_stack.setCurrentWidget(self.message_label)
 
-        def init_viewer():
-            try:
-                from model_viewer import ModelViewerWidget, is_viewer_available
-                if is_viewer_available():
-                    return ('model_viewer', ModelViewerWidget)
-            except Exception as e:
-                print(f"Model viewer not available: {e}")
-
-            try:
-                from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
-                if is_pyvista_available():
-                    return ('pyvista', PyVistaGLBViewerWidget)
-            except Exception as e:
-                print(f"PyVista GLB viewer not available: {e}")
-
-            try:
-                from glb_viewer import GLBViewerWidget
-                return ('opengl', GLBViewerWidget)
-            except Exception as e:
-                print(f"OpenGL GLB viewer not available: {e}")
-
-            return (None, None)
-
-        def on_init_complete(result):
-            viewer_type, widget_class = result
-            self._glb_viewer_initialized = True
-
-            if widget_class:
-                self.glb_viewer = widget_class()
+        # Don't use worker thread - Qt widgets must be created on main thread
+        # Just check availability and create widget directly
+        try:
+            from models.viewer import ModelViewerWidget, is_viewer_available
+            if is_viewer_available():
+                self.glb_viewer = ModelViewerWidget()
                 self.image_stack.addWidget(self.glb_viewer)
                 self._has_glb_viewer = True
-                self._use_pyvista_viewer = (viewer_type == 'pyvista')
-                print(f"Using {viewer_type} GLB viewer")
-            else:
-                self._has_glb_viewer = False
+                self._use_pyvista_viewer = False
+                print(f"Using model_viewer GLB viewer")
+                self._glb_viewer_initialized = True
+                if callback:
+                    callback(True)
+                return
+        except Exception as e:
+            print(f"Model viewer not available: {e}")
 
-            if callback:
-                callback(self._has_glb_viewer)
+        try:
+            from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
+            if is_pyvista_available():
+                self.glb_viewer = PyVistaGLBViewerWidget()
+                self.image_stack.addWidget(self.glb_viewer)
+                self._has_glb_viewer = True
+                self._use_pyvista_viewer = True
+                print(f"Using pyvista GLB viewer")
+                self._glb_viewer_initialized = True
+                if callback:
+                    callback(True)
+                return
+        except Exception as e:
+            print(f"PyVista GLB viewer not available: {e}")
 
-        def on_init_error(error, traceback):
-            print(f"GLB viewer init error: {error}")
+        try:
+            from glb_viewer import GLBViewerWidget
+            self.glb_viewer = GLBViewerWidget()
+            self.image_stack.addWidget(self.glb_viewer)
+            self._has_glb_viewer = True
+            self._use_pyvista_viewer = False
+            print(f"Using opengl GLB viewer")
             self._glb_viewer_initialized = True
-            self._has_glb_viewer = False
             if callback:
-                callback(False)
+                callback(True)
+            return
+        except Exception as e:
+            print(f"OpenGL GLB viewer not available: {e}")
 
-        worker = Worker(init_viewer)
-        worker.signals.result.connect(on_init_complete)
-        worker.signals.error.connect(on_init_error)
-        QThreadPool.globalInstance().start(worker)
+        # No viewer available
+        self._has_glb_viewer = False
+        self._glb_viewer_initialized = True
+        if callback:
+            callback(False)
 
     def _load_current_image(self):
         """Load and display the current media (image, 3D model, or video)."""
@@ -457,8 +459,8 @@ class EmbeddedImageViewer(QWidget):
                 self.keep_camera_checkbox.hide()
                 self._current_3d_path = None
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
-                    from PySide2.QtMultimedia import QMediaContent
-                    from PySide2.QtCore import QUrl
+                    from PySide6.QtMultimedia import QMediaContent
+                    from PySide6.QtCore import QUrl
 
                     media_content = QMediaContent(QUrl.fromLocalFile(media_path))
                     self.media_player.setMedia(media_content)
@@ -505,7 +507,7 @@ class EmbeddedImageViewer(QWidget):
         self.image_stack.setCurrentWidget(self.message_label)
 
         try:
-            from model_viewer import ModelLoaderWorker
+            from models.viewer import ModelLoaderWorker
             loader = ModelLoaderWorker(media_path)
             loader.signals.finished.connect(self._on_model_loaded)
             loader.signals.error.connect(self._on_model_error)
@@ -651,7 +653,7 @@ class EmbeddedImageViewer(QWidget):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            from PySide2.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(parent_window, "Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}")
 
     def keyPressEvent(self, event):

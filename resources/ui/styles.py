@@ -4,8 +4,8 @@ Style constants and stylesheet utilities for the UI.
 Provides unified styling for loading screens, status indicators, and themes.
 """
 import os
-from PySide2.QtCore import QFile, QTextStream
-from PySide2.QtGui import QColor, QFont
+from PySide6.QtCore import QFile, QTextStream
+from PySide6.QtGui import QColor, QFont
 
 
 class LoadingStyles:

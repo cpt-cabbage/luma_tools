@@ -3,8 +3,8 @@ Custom layout classes.
 
 Provides specialized layouts like FlowLayout for flexible widget arrangement.
 """
-from PySide2.QtCore import Qt, QRect, QSize, QPoint
-from PySide2.QtWidgets import QLayout, QStyle, QSizePolicy
+from PySide6.QtCore import Qt, QRect, QSize, QPoint
+from PySide6.QtWidgets import QLayout, QStyle, QSizePolicy
 
 
 class FlowLayout(QLayout):

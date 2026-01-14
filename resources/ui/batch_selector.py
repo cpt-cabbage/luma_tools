@@ -4,12 +4,12 @@ Batch image selection widget.
 Provides a widget for selecting multiple images with drag-and-drop support.
 """
 import os
-from PySide2.QtCore import Qt, Signal
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QListWidget, QListWidgetItem, QFileDialog, QApplication
 )
-from PySide2.QtGui import QPixmap, QIcon
+from PySide6.QtGui import QPixmap, QIcon
 
 
 class BatchImageSelector(QWidget):

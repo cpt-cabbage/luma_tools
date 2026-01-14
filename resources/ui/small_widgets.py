@@ -4,8 +4,8 @@ Small reusable UI widgets and utilities.
 Contains simple widgets and helper functions used across the application.
 """
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QWidget, QGroupBox, QListWidget, QListWidgetItem, QMenu, QPushButton, QFileDialog
 )
 

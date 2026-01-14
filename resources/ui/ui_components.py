@@ -14,12 +14,12 @@ The actual implementations are in:
 - small_widgets.py: Simple widgets (CollapsibleSection, etc.)
 """
 import os
-from PySide2.QtCore import Qt, QTimer, Signal, QThreadPool, QFile, QTextStream
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool, QFile, QTextStream
+from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
     QMenu, QDialog, QComboBox, QApplication
 )
-from PySide2.QtGui import QPainter, QColor, QPen, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPen, QPixmap
 
 # Re-export from submodules (absolute imports since resources/ui is in path)
 from workers import Worker, WorkerSignals, ThreadedOperation, report_progress
@@ -246,8 +246,8 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
 
     @staticmethod
     def _load_image_data(image_path):
-        from PySide2.QtGui import QImage
-        from PySide2.QtCore import QBuffer, QIODevice
+        from PySide6.QtGui import QImage
+        from PySide6.QtCore import QBuffer, QIODevice
         image = QImage(image_path)
         if image.isNull():
             return None
@@ -357,7 +357,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
             print(f"Error opening folder: {e}")
 
     def _delete_item(self):
-        from PySide2.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         filename = os.path.basename(self.image_path)
         parent_window = None
         for widget in QApplication.topLevelWidgets():
@@ -404,7 +404,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
                     parent_window = widget
                     break
             dialog = EditItemDialog(self.image_path, self.output_dir, parent_window)
-            if dialog.exec_() == QDialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self._tooltip_loaded = False
                 self._load_tooltip_async()
         except Exception as e:
@@ -653,10 +653,10 @@ class GLBThumbnailWidget(QWidget):
                 parent_window = widget
                 break
         try:
-            from model_viewer import ModelViewerDialog, is_viewer_available
+            from models.viewer import ModelViewerDialog, is_viewer_available
             if is_viewer_available():
                 dialog = ModelViewerDialog(self.model_path, parent_window)
-                dialog.exec_()
+                dialog.exec()
                 return
         except ImportError:
             pass
@@ -671,7 +671,7 @@ class GLBThumbnailWidget(QWidget):
         try:
             from glb_viewer import GLBViewerDialog
             dialog = GLBViewerDialog(self.model_path, parent_window)
-            dialog.exec_()
+            dialog.exec()
         except Exception as e:
             print(f"Error opening 3D viewer: {e}")
 
@@ -687,7 +687,7 @@ class GLBThumbnailWidget(QWidget):
         clipboard.setText(self.model_path)
 
     def _delete_model(self):
-        from PySide2.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         filename = os.path.basename(self.model_path)
         parent_window = None
         for widget in QApplication.topLevelWidgets():
@@ -717,7 +717,7 @@ class GLBThumbnailWidget(QWidget):
                     parent_window = widget
                     break
             dialog = EditModelDialog(self.model_path, self.output_dir, parent_window)
-            dialog.exec_()
+            dialog.exec()
         except Exception as e:
             print(f"Error opening edit model dialog: {e}")
 

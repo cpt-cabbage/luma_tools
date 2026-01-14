@@ -3,12 +3,12 @@ UI animation and visual effect utilities.
 
 Provides animations, tab glow effects, and visual feedback.
 """
-from PySide2.QtCore import (
+from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect,
     QSequentialAnimationGroup, QObject, QRectF, Signal
 )
-from PySide2.QtWidgets import QGraphicsOpacityEffect
-from PySide2.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush
+from PySide6.QtWidgets import QGraphicsOpacityEffect
+from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush
 
 
 class TabGlowEffect(QObject):

@@ -4,9 +4,9 @@ Provides SVG icon loading with color tinting support.
 """
 
 import os
-from PySide2.QtCore import Qt, QSize
-from PySide2.QtGui import QIcon, QPixmap, QPainter, QColor, QImage
-from PySide2.QtSvg import QSvgRenderer
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage
+from PySide6.QtSvg import QSvgRenderer
 
 
 # Icon directory path

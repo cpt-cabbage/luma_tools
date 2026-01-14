@@ -4,8 +4,8 @@ Dialog widgets for editing gallery items.
 Provides dialogs for editing notes on images and 3D models.
 """
 import os
-from PySide2.QtCore import Qt
-from PySide2.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit
 )
 

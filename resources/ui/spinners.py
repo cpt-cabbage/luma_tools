@@ -3,9 +3,9 @@ Spinner and loading animation widgets.
 
 Provides various loading indicators for background operations.
 """
-from PySide2.QtCore import Qt, QTimer, QRectF
-from PySide2.QtWidgets import QWidget
-from PySide2.QtGui import QPainter, QColor, QPen
+from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QPainter, QColor, QPen
 
 from styles import LoadingStyles
 
