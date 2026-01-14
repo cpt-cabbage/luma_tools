@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.41
+- Ayon Fixes
+
 ## Version 0.4
 - Migrate UI components from PySide2 to PySide6
 
