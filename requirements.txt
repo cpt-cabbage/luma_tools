@@ -36,19 +36,32 @@ scipy>=1.15.3
 pillow>=12.1.0
 imageio>=2.37.2
 
-# 3D model support
-trimesh>=4.10.1
-networkx>=3.4.2
-freetype-py>=2.5.1
+# =============================================================================
+# 3D Model Support
+# =============================================================================
 
-# OpenGL rendering
+# Primary loader - bundles Assimp, supports FBX, GLB, OBJ, DAE, STL, PLY, etc.
+open3d>=0.18.0
+
+# Fallback loader for GLB/GLTF/OBJ (native support, no external dependencies)
+trimesh>=4.10.1
+networkx>=3.4.2  # trimesh dependency
+freetype-py>=2.5.1  # trimesh dependency
+
+# OpenGL rendering for 3D viewer
 PyOpenGL>=3.1.0
 PyOpenGL-accelerate>=3.1.10
-pyrender>=0.1.45
-pyglet>=1.5.31
 
-# USD support
+# USD support (for USD/USDA/USDC/USDZ files)
 usd-core>=25.11
 
-# Spell checking (optional - for text prompts)
+# Optional: PyAssimp (requires native Assimp library to be installed separately)
+# Uncomment if you have Assimp installed system-wide:
+# pyassimp>=4.1.4
+
+# =============================================================================
+# Optional Features
+# =============================================================================
+
+# Spell checking for text prompts
 pyenchant>=3.3.0

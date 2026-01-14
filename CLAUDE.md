@@ -78,7 +78,6 @@ Tab registration in `python/tabs/__init__.py` via `TAB_CONFIG` list.
 | `model_viewer.py` | Enhanced 3D viewer with textures, skeletons, and animation playback |
 | `model_thumbnail_service.py` | Multi-format 3D thumbnail generation |
 | `model_thumbnail_renderer.py` | Subprocess renderer for 3D thumbnails |
-| `glb_thumbnail_service.py` | (Deprecated) Redirects to model_thumbnail_service |
 | `glb_viewer.py` | (Legacy) Basic 3D viewer, superseded by model_viewer |
 
 ### ComfyUI Integration

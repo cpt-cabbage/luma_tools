@@ -135,11 +135,15 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        from settings_manager import get_auto_extract_textures
+        from settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails
 
         # Auto-extract textures checkbox
         if hasattr(self.ui, 'AutoExtractTextures'):
             self.ui.AutoExtractTextures.setChecked(get_auto_extract_textures())
+
+        # Generate 3D thumbnails checkbox
+        if hasattr(self.ui, 'Generate3DThumbnails'):
+            self.ui.Generate3DThumbnails.setChecked(get_generate_3d_thumbnails())
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -334,7 +338,7 @@ class SettingsTab(BaseTab):
     def _on_save_settings_clicked(self):
         """Save user settings."""
         from config import REQUIRED_PASSES
-        from settings_manager import set_default_passes, set_auto_extract_textures
+        from settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails
 
         # Collect selected passes
         selected_passes = []
@@ -352,6 +356,10 @@ class SettingsTab(BaseTab):
         # Save auto-extract textures setting
         if hasattr(self.ui, 'AutoExtractTextures'):
             set_auto_extract_textures(self.ui.AutoExtractTextures.isChecked())
+
+        # Save generate 3D thumbnails setting
+        if hasattr(self.ui, 'Generate3DThumbnails'):
+            set_generate_3d_thumbnails(self.ui.Generate3DThumbnails.isChecked())
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)

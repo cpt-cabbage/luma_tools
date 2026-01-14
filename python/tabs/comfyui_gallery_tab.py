@@ -595,6 +595,15 @@ class ComfyUIGalleryTab(BaseTab):
             self._current_path = self._custom_path
             self.ui.GallerySourceToggle.setText("Custom Folder")
 
+        # Create gallery directory if it doesn't exist (network mode only)
+        if self._current_path and self._source_mode == "network":
+            if not os.path.isdir(self._current_path):
+                try:
+                    os.makedirs(self._current_path, exist_ok=True)
+                    self.log(f"[Gallery] Created gallery directory: {self._current_path}")
+                except Exception as e:
+                    self.log(f"[Gallery] Warning: Could not create gallery directory: {self._current_path} - {e}")
+
         # Only reset image tracking when path actually changes
         if reset_tracking and old_path != self._current_path:
             self.log(f"[Gallery] Path changed from {old_path} to {self._current_path} - resetting tracking")
@@ -748,14 +757,74 @@ class ComfyUIGalleryTab(BaseTab):
                 except Exception:
                     workflow_map = {}
 
+                # Build items dict for bundling detection
+                items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
-                    items.append({
+                    items_dict[filename] = {
                         'path': full_path,
                         'mtime': mtime,
                         'type': file_type,
                         'name': filename.lower(),
                         'workflow': workflow_map.get(filename, '')
-                    })
+                    }
+
+                # Detect and bundle _view/_export pairs
+                bundled_files = set()
+                for filename in list(items_dict.keys()):
+                    # Skip if already bundled
+                    if filename in bundled_files:
+                        continue
+
+                    base_name = None
+                    view_file = None
+                    export_file = None
+
+                    # Check if this is a _view or _export file
+                    if '_view' in filename:
+                        # Extract base name (everything before _view.ext)
+                        parts = filename.rsplit('_view', 1)
+                        if len(parts) == 2:
+                            base_name = parts[0]
+                            ext_part = parts[1]
+                            view_file = filename
+                            # Look for corresponding _export file
+                            export_candidate = f"{base_name}_export{ext_part}"
+                            if export_candidate in items_dict:
+                                export_file = export_candidate
+                    elif '_export' in filename:
+                        # Extract base name (everything before _export.ext)
+                        parts = filename.rsplit('_export', 1)
+                        if len(parts) == 2:
+                            base_name = parts[0]
+                            ext_part = parts[1]
+                            export_file = filename
+                            # Look for corresponding _view file
+                            view_candidate = f"{base_name}_view{ext_part}"
+                            if view_candidate in items_dict:
+                                view_file = view_candidate
+
+                    # If we found a pair, create a bundled item
+                    if base_name and view_file and export_file:
+                        bundled_files.add(view_file)
+                        bundled_files.add(export_file)
+
+                        # Use view file for display, export file for operations
+                        view_item = items_dict[view_file]
+                        export_item = items_dict[export_file]
+
+                        items.append({
+                            'path': view_item['path'],  # Show NPZ in viewer
+                            'export_path': export_item['path'],  # Use FBX for export/publish
+                            'mtime': max(view_item['mtime'], export_item['mtime']),
+                            'type': view_item['type'],
+                            'name': view_item['name'],
+                            'workflow': view_item['workflow'],
+                            'is_bundled': True
+                        })
+                    else:
+                        # Single file (not part of a pair)
+                        if filename not in bundled_files:
+                            items.append(items_dict[filename])
         except Exception as e:
             print(f"Error scanning gallery directory: {e}")
 

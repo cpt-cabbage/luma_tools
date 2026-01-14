@@ -1180,3 +1180,27 @@ def set_auto_extract_textures(enabled):
     settings["auto_extract_textures"] = enabled
     save_user_settings(settings)
     print(f"Set auto extract textures to: {enabled}")
+
+
+def get_generate_3d_thumbnails():
+    """
+    Get whether to generate thumbnails for 3D objects in the gallery.
+
+    Returns:
+        bool: True if 3D thumbnail generation is enabled
+    """
+    settings = load_user_settings()
+    return settings.get("generate_3d_thumbnails", True)
+
+
+def set_generate_3d_thumbnails(enabled):
+    """
+    Set whether to generate thumbnails for 3D objects in the gallery.
+
+    Args:
+        enabled: True to enable 3D thumbnail generation
+    """
+    settings = load_user_settings()
+    settings["generate_3d_thumbnails"] = enabled
+    save_user_settings(settings)
+    print(f"Set generate 3D thumbnails to: {enabled}")

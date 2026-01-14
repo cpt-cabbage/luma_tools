@@ -640,6 +640,24 @@ def main():
         except Exception as e:
             print(f"Warning: Could not set prewarm cache: {e}")
 
+        # Pre-initialize OpenGL/3D viewer to avoid delay on first model view
+        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
+        app.processEvents()
+        try:
+            from model_viewer import is_viewer_available
+            if is_viewer_available():
+                from PySide2.QtWidgets import QOpenGLWidget
+                # Create a tiny hidden OpenGL widget to trigger driver initialization
+                _gl_prewarm = QOpenGLWidget()
+                _gl_prewarm.setFixedSize(1, 1)
+                _gl_prewarm.show()
+                app.processEvents()
+                _gl_prewarm.hide()
+                _gl_prewarm.deleteLater()
+                del _gl_prewarm
+        except Exception as e:
+            print(f"Note: 3D viewer pre-init skipped: {e}")
+
         # Create main window
         splash.update_progress(80, "Loading", "Creating main window...")
         app.processEvents()

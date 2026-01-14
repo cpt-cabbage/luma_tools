@@ -2255,6 +2255,55 @@ class EmbeddedImageViewer(QWidget):
         self.keep_camera_checkbox.hide()  # Hidden by default, shown for 3D models
         info_layout.addWidget(self.keep_camera_checkbox)
 
+        # Publish to AYON button (for all media types)
+        self.publish_to_ayon_btn = QPushButton("Publish to AYON")
+        self.publish_to_ayon_btn.setFixedHeight(25)
+        self.publish_to_ayon_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 0 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #14ce94;
+            }
+            QPushButton:disabled {
+                background-color: #3c414b;
+                color: #6b6f78;
+            }
+        """)
+        self.publish_to_ayon_btn.clicked.connect(self._publish_to_ayon)
+
+        # Check if AYON is available and not in standalone mode
+        try:
+            from state_manager import get_app_state
+            from ayon_service import AYON_AVAILABLE
+            app_state = get_app_state()
+            is_standalone = app_state.standalone_mode
+
+            print(f"[Gallery Viewer] AYON_AVAILABLE={AYON_AVAILABLE}, standalone_mode={is_standalone}")
+
+            if is_standalone or not AYON_AVAILABLE:
+                self.publish_to_ayon_btn.setEnabled(False)
+                if is_standalone:
+                    self.publish_to_ayon_btn.setToolTip("AYON publishing is not available in standalone mode")
+                else:
+                    self.publish_to_ayon_btn.setToolTip("AYON is not available")
+            else:
+                self.publish_to_ayon_btn.setToolTip("Publish this asset to AYON")
+        except Exception as e:
+            print(f"[Gallery Viewer] Error checking AYON availability: {e}")
+            import traceback
+            traceback.print_exc()
+            self.publish_to_ayon_btn.setEnabled(False)
+            self.publish_to_ayon_btn.setToolTip("AYON is not available")
+
+        info_layout.addWidget(self.publish_to_ayon_btn)
+
         self._3d_textured_mode = False  # Track current mode
         self._current_3d_path = None  # Track current 3D model path
         self._saved_camera_state = None  # Store camera state for preservation
@@ -2306,7 +2355,15 @@ class EmbeddedImageViewer(QWidget):
 
         def init_viewer():
             """Initialize viewer in background thread (import heavy modules)."""
-            # Try PyVista first (better PBR support)
+            # Try new unified model viewer first (supports textures, skeletons, animations)
+            try:
+                from model_viewer import ModelViewerWidget, is_viewer_available
+                if is_viewer_available():
+                    return ('model_viewer', ModelViewerWidget)
+            except Exception as e:
+                print(f"Model viewer not available: {e}")
+
+            # Fallback to PyVista (better PBR support)
             try:
                 from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
                 if is_pyvista_available():
@@ -2314,7 +2371,7 @@ class EmbeddedImageViewer(QWidget):
             except Exception as e:
                 print(f"PyVista GLB viewer not available: {e}")
 
-            # Fallback to OpenGL viewer
+            # Fallback to basic OpenGL viewer
             try:
                 from glb_viewer import GLBViewerWidget
                 return ('opengl', GLBViewerWidget)
@@ -2368,9 +2425,10 @@ class EmbeddedImageViewer(QWidget):
             if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player:
                 self.media_player.stop()
 
-            # Handle 3D models (.glb, .gltf)
-            if ext in ('.glb', '.gltf'):
-                # Show texture toggle button and keep camera checkbox
+            # Handle 3D models (all supported formats)
+            MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae', '.stl', '.ply'}
+            if ext in MODEL_EXTENSIONS:
+                # Show texture toggle button and keep camera checkbox for 3D models
                 self.texture_toggle_btn.show()
                 if hasattr(self, 'keep_camera_checkbox'):
                     self.keep_camera_checkbox.show()
@@ -2404,7 +2462,7 @@ class EmbeddedImageViewer(QWidget):
 
             # Handle videos (.mp4, .mov, .avi, .webm)
             elif ext in ('.mp4', '.mov', '.avi', '.webm'):
-                # Hide 3D controls for videos
+                # Hide 3D-specific controls for videos
                 self.texture_toggle_btn.hide()
                 if hasattr(self, 'keep_camera_checkbox'):
                     self.keep_camera_checkbox.hide()
@@ -2468,17 +2526,21 @@ class EmbeddedImageViewer(QWidget):
         self.message_label.setText(f"Loading 3D model...\n{os.path.basename(media_path)}")
         self.image_stack.setCurrentWidget(self.message_label)
 
-        # Use PyVista's direct import for best PBR support
-        if self._use_pyvista_viewer:
-            from glb_viewer_pyvista import PyVistaModelLoaderWorker
-            loader = PyVistaModelLoaderWorker(media_path)
+        # Use the unified model loader (works with all formats)
+        try:
+            from model_viewer import ModelLoaderWorker
+            loader = ModelLoaderWorker(media_path)
             loader.signals.finished.connect(self._on_model_loaded)
             loader.signals.error.connect(self._on_model_error)
             QThreadPool.globalInstance().start(loader)
-        else:
-            # Fallback to OpenGL loader
-            from glb_viewer import ModelLoaderWorker
-            loader = ModelLoaderWorker(media_path)
+        except ImportError:
+            # Fallback to legacy loaders
+            if self._use_pyvista_viewer:
+                from glb_viewer_pyvista import PyVistaModelLoaderWorker
+                loader = PyVistaModelLoaderWorker(media_path)
+            else:
+                from glb_viewer import ModelLoaderWorker
+                loader = ModelLoaderWorker(media_path)
             loader.signals.finished.connect(self._on_model_loaded)
             loader.signals.error.connect(self._on_model_error)
             QThreadPool.globalInstance().start(loader)
@@ -2575,7 +2637,7 @@ class EmbeddedImageViewer(QWidget):
         """Show a static textured render of the 3D model."""
         try:
             # Use the thumbnail service to generate a high-res textured render
-            from glb_thumbnail_service import get_glb_thumbnail_service
+            from model_thumbnail_service import get_model_thumbnail_service
             import trimesh
             from PIL import Image
             import numpy as np
@@ -2590,7 +2652,7 @@ class EmbeddedImageViewer(QWidget):
             
             # Create a simple textured render
             # For now, show a message that textured mode uses the thumbnail
-            service = get_glb_thumbnail_service()
+            service = get_model_thumbnail_service()
             pixmap = service.get_cached_thumbnail(model_path)
             
             if pixmap and not pixmap.isNull():
@@ -2612,14 +2674,18 @@ class EmbeddedImageViewer(QWidget):
     
     def _show_wireframe_view(self, model_path):
         """Show the interactive wireframe OpenGL view."""
-        # Reload the model in the GLB viewer
+        # Reload the model in the 3D viewer
         if hasattr(self, '_has_glb_viewer') and self._has_glb_viewer and self.glb_viewer:
-            from glb_viewer import ModelLoaderWorker
             from PySide2.QtCore import QThreadPool
-            
+
             self.message_label.setText(f"Loading 3D model...\n{os.path.basename(model_path)}")
             self.image_stack.setCurrentWidget(self.message_label)
-            
+
+            try:
+                from model_viewer import ModelLoaderWorker
+            except ImportError:
+                from glb_viewer import ModelLoaderWorker
+
             loader = ModelLoaderWorker(model_path)
             loader.signals.finished.connect(self._on_model_loaded)
             loader.signals.error.connect(self._on_model_error)
@@ -3155,6 +3221,7 @@ class GalleryThumbnailWidget(QWidget):
     deleted = Signal(str)  # Emits the image path when deleted
     viewed = Signal(str)  # Emits when item has been viewed (no longer new)
     THUMBNAIL_SIZE = (150, 150)
+    _placeholder_cache = {}  # Class-level cache for placeholder pixmaps
 
     def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
@@ -3164,9 +3231,10 @@ class GalleryThumbnailWidget(QWidget):
         self._is_new = is_new  # New item that hasn't been viewed yet
         self._cached_metadata = None
         self._thumbnail_loaded = False  # Track if thumbnail has been loaded
+        self._tooltip_loaded = False  # Defer tooltip loading
         self._setup_ui()
-        # Don't load thumbnail yet - wait for visibility check (lazy loading)
-        self._update_tooltip()
+        # Set basic tooltip immediately, full tooltip loaded lazily
+        self.setToolTip(os.path.basename(image_path))
 
     def _setup_ui(self):
         """Set up the widget UI."""
@@ -3247,6 +3315,36 @@ class GalleryThumbnailWidget(QWidget):
         if not self._thumbnail_loaded:
             self._thumbnail_loaded = True
             self._load_thumbnail_async()
+        # Also load tooltip lazily when thumbnail becomes visible (async to avoid blocking)
+        if not self._tooltip_loaded:
+            self._tooltip_loaded = True
+            self._load_tooltip_async()
+
+    def _load_tooltip_async(self):
+        """Load tooltip data asynchronously to avoid blocking UI."""
+        worker = Worker(self._get_tooltip_data, self.output_dir, self.image_path)
+        worker.signals.result.connect(self._on_tooltip_loaded)
+        worker.signals.error.connect(lambda msg, tb: None)  # Silently ignore errors
+        QThreadPool.globalInstance().start(worker)
+
+    @staticmethod
+    def _get_tooltip_data(output_dir, image_path):
+        """Get tooltip data on worker thread."""
+        from comfyui_service import get_model_note
+        filename = os.path.basename(image_path)
+        note = get_model_note(output_dir, filename)
+        return (filename, note)
+
+    def _on_tooltip_loaded(self, data):
+        """Handle tooltip data loaded from worker thread."""
+        filename, note = data
+        tooltip_parts = [filename]
+        if note:
+            tooltip_parts.append(f"\nNote: {note}")
+            self.note_indicator.show()
+        else:
+            self.note_indicator.hide()
+        self.setToolTip("\n".join(tooltip_parts))
 
     def _load_thumbnail_async(self):
         """Load the thumbnail image asynchronously."""
@@ -3305,7 +3403,11 @@ class GalleryThumbnailWidget(QWidget):
         self.thumbnail_label.setPixmap(self._create_placeholder("!"))
 
     def _create_placeholder(self, text):
-        """Create a placeholder pixmap with text."""
+        """Create a placeholder pixmap with text (cached)."""
+        # Use class-level cache to avoid creating identical pixmaps repeatedly
+        if text in GalleryThumbnailWidget._placeholder_cache:
+            return GalleryThumbnailWidget._placeholder_cache[text]
+
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#3c414b"))
 
@@ -3319,6 +3421,7 @@ class GalleryThumbnailWidget(QWidget):
         painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
         painter.end()
 
+        GalleryThumbnailWidget._placeholder_cache[text] = pixmap
         return pixmap
 
     def mousePressEvent(self, event):
@@ -3381,6 +3484,43 @@ class GalleryThumbnailWidget(QWidget):
 
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path())
+
+        menu.addSeparator()
+
+        # Publish to AYON action
+        publish_action = menu.addAction("Publish to AYON")
+
+        # Check if AYON is available and not in standalone mode
+        is_enabled = True
+        tooltip_text = "Publish this image to AYON"
+
+        try:
+            from state_manager import get_app_state
+            from ayon_service import AYON_AVAILABLE
+
+            app_state = get_app_state()
+            is_standalone = app_state.standalone_mode
+
+            # Debug logging
+            print(f"[Context Menu] AYON_AVAILABLE={AYON_AVAILABLE}, standalone_mode={is_standalone}")
+
+            if is_standalone:
+                is_enabled = False
+                tooltip_text = "AYON publishing is not available in standalone mode"
+            elif not AYON_AVAILABLE:
+                is_enabled = False
+                tooltip_text = "AYON is not available"
+
+        except Exception as e:
+            print(f"[Context Menu] Error checking AYON availability: {e}")
+            import traceback
+            traceback.print_exc()
+            is_enabled = False
+            tooltip_text = "AYON publishing is unavailable"
+
+        publish_action.setEnabled(is_enabled)
+        publish_action.setToolTip(tooltip_text)
+        publish_action.triggered.connect(self._publish_to_ayon)
 
         menu.addSeparator()
 
@@ -3507,26 +3647,37 @@ class GalleryThumbnailWidget(QWidget):
             import traceback
             traceback.print_exc()
 
-    def _update_tooltip(self):
-        """Update the widget tooltip with item info including note."""
+    def _publish_to_ayon(self):
+        """Publish this image to AYON."""
+        # Find the main window for dialogs
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
         try:
-            from comfyui_service import get_model_note
-            filename = os.path.basename(self.image_path)
-            note = get_model_note(self.output_dir, filename)
+            from comfyui_ayon_publisher import publish_comfyui_asset_to_ayon
 
-            # Build tooltip
-            tooltip_parts = [filename]
-            if note:
-                tooltip_parts.append(f"\nNote: {note}")
-                self.note_indicator.show()
-            else:
-                self.note_indicator.hide()
+            # Call the publisher with output_dir for metadata lookup
+            success = publish_comfyui_asset_to_ayon(
+                file_path=self.image_path,
+                parent_widget=parent_window,
+                output_dir=self.output_dir
+            )
 
-            self.setToolTip("\n".join(tooltip_parts))
+            if success:
+                print(f"Successfully published image to AYON: {self.image_path}")
+
         except Exception as e:
-            print(f"Error updating tooltip: {e}")
-            self.note_indicator.hide()
-
+            import traceback
+            traceback.print_exc()
+            from PySide2.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                parent_window,
+                "Publish Error",
+                f"Failed to publish image to AYON:\n\n{str(e)}"
+            )
 
 class EditItemDialog(QDialog):
     """
@@ -3795,6 +3946,7 @@ class GLBThumbnailWidget(QWidget):
     deleted = Signal(str)  # Emits the model path when deleted
     viewed = Signal(str)  # Emits when item has been viewed (no longer new)
     THUMBNAIL_SIZE = (150, 150)
+    _placeholder_cache = {}  # Class-level cache for placeholder pixmaps
 
     def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
@@ -3804,10 +3956,11 @@ class GLBThumbnailWidget(QWidget):
         self._is_new = is_new  # New item that hasn't been viewed yet
         self._thumbnail_loading = False
         self._thumbnail_loaded = False  # Track if thumbnail load has been triggered
+        self._tooltip_loaded = False  # Defer tooltip loading
         self._cached_metadata = None
         self._setup_ui()
-        # Don't load thumbnail yet - wait for visibility check (lazy loading)
-        self._update_tooltip()
+        # Set basic tooltip immediately, full tooltip loaded lazily
+        self.setToolTip(os.path.basename(model_path))
 
     def _setup_ui(self):
         """Set up the widget UI."""
@@ -3895,13 +4048,43 @@ class GLBThumbnailWidget(QWidget):
         if not self._thumbnail_loaded:
             self._thumbnail_loaded = True
             self._load_thumbnail()
+        # Also load tooltip lazily when thumbnail becomes visible (async to avoid blocking)
+        if not self._tooltip_loaded:
+            self._tooltip_loaded = True
+            self._load_tooltip_async()
+
+    def _load_tooltip_async(self):
+        """Load tooltip data asynchronously to avoid blocking UI."""
+        worker = Worker(self._get_tooltip_data, self.output_dir, self.model_path)
+        worker.signals.result.connect(self._on_tooltip_loaded)
+        worker.signals.error.connect(lambda msg, tb: None)  # Silently ignore errors
+        QThreadPool.globalInstance().start(worker)
+
+    @staticmethod
+    def _get_tooltip_data(output_dir, model_path):
+        """Get tooltip data on worker thread."""
+        from comfyui_service import get_model_note
+        filename = os.path.basename(model_path)
+        note = get_model_note(output_dir, filename)
+        return (filename, note)
+
+    def _on_tooltip_loaded(self, data):
+        """Handle tooltip data loaded from worker thread."""
+        filename, note = data
+        tooltip_parts = [filename]
+        if note:
+            tooltip_parts.append(f"\nNote: {note}")
+            self.note_indicator.show()
+        else:
+            self.note_indicator.hide()
+        self.setToolTip("\n".join(tooltip_parts))
 
     def _load_thumbnail(self):
         """Load or generate the thumbnail asynchronously."""
         # First, try to load from cache (instant)
         try:
-            from glb_thumbnail_service import get_glb_thumbnail_service
-            service = get_glb_thumbnail_service()
+            from model_thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
             cached = service.get_cached_thumbnail(self.model_path)
             if cached and not cached.isNull():
                 self.thumbnail_label.setPixmap(cached.scaled(
@@ -3924,8 +4107,8 @@ class GLBThumbnailWidget(QWidget):
 
         # Check if already pending in service
         try:
-            from glb_thumbnail_service import get_glb_thumbnail_service
-            service = get_glb_thumbnail_service()
+            from model_thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
             if service.is_pending(self.model_path):
                 return
             service.set_pending(self.model_path, True)
@@ -3951,8 +4134,8 @@ class GLBThumbnailWidget(QWidget):
 
     def _generate_thumbnail_sync(self):
         """Generate thumbnail synchronously (runs on worker thread via subprocess)."""
-        from glb_thumbnail_service import get_glb_thumbnail_service
-        service = get_glb_thumbnail_service()
+        from model_thumbnail_service import get_model_thumbnail_service
+        service = get_model_thumbnail_service()
         # This uses subprocess to render, avoiding OpenGL conflicts with Qt
         return service.generate_thumbnail_sync(self.model_path)
 
@@ -3961,8 +4144,8 @@ class GLBThumbnailWidget(QWidget):
         self._thumbnail_loading = False
         # Clear pending state
         try:
-            from glb_thumbnail_service import get_glb_thumbnail_service
-            service = get_glb_thumbnail_service()
+            from model_thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
             service.set_pending(self.model_path, False)
         except Exception:
             pass
@@ -3979,15 +4162,19 @@ class GLBThumbnailWidget(QWidget):
         self._thumbnail_loading = False
         # Clear pending state
         try:
-            from glb_thumbnail_service import get_glb_thumbnail_service
-            service = get_glb_thumbnail_service()
+            from model_thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
             service.set_pending(self.model_path, False)
         except Exception:
             pass
         print(f"GLB thumbnail error: {error_msg}")
 
     def _create_placeholder(self, text):
-        """Create a placeholder pixmap with text and 3D icon."""
+        """Create a placeholder pixmap with text and 3D icon (cached)."""
+        # Use class-level cache to avoid creating identical pixmaps repeatedly
+        if text in GLBThumbnailWidget._placeholder_cache:
+            return GLBThumbnailWidget._placeholder_cache[text]
+
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
 
@@ -4026,6 +4213,7 @@ class GLBThumbnailWidget(QWidget):
         painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 30, Qt.AlignCenter, text)
         painter.end()
 
+        GLBThumbnailWidget._placeholder_cache[text] = pixmap
         return pixmap
 
     def mousePressEvent(self, event):
@@ -4097,6 +4285,43 @@ class GLBThumbnailWidget(QWidget):
         # Extract textures action
         extract_textures_action = menu.addAction("Extract Textures...")
         extract_textures_action.triggered.connect(self._extract_textures)
+
+        menu.addSeparator()
+
+        # Publish to AYON action
+        publish_action = menu.addAction("Publish to AYON")
+
+        # Check if AYON is available and not in standalone mode
+        is_enabled = True
+        tooltip_text = "Publish this 3D model to AYON"
+
+        try:
+            from state_manager import get_app_state
+            from ayon_service import AYON_AVAILABLE
+
+            app_state = get_app_state()
+            is_standalone = app_state.standalone_mode
+
+            # Debug logging
+            print(f"[Context Menu] AYON_AVAILABLE={AYON_AVAILABLE}, standalone_mode={is_standalone}")
+
+            if is_standalone:
+                is_enabled = False
+                tooltip_text = "AYON publishing is not available in standalone mode"
+            elif not AYON_AVAILABLE:
+                is_enabled = False
+                tooltip_text = "AYON is not available"
+
+        except Exception as e:
+            print(f"[Context Menu] Error checking AYON availability: {e}")
+            import traceback
+            traceback.print_exc()
+            is_enabled = False
+            tooltip_text = "AYON publishing is unavailable"
+
+        publish_action.setEnabled(is_enabled)
+        publish_action.setToolTip(tooltip_text)
+        publish_action.triggered.connect(self._publish_to_ayon)
 
         menu.addSeparator()
 
@@ -4194,26 +4419,6 @@ class GLBThumbnailWidget(QWidget):
             import traceback
             traceback.print_exc()
 
-    def _update_tooltip(self):
-        """Update the widget tooltip with model info including note."""
-        try:
-            from comfyui_service import get_model_note
-            filename = os.path.basename(self.model_path)
-            note = get_model_note(self.output_dir, filename)
-
-            # Build tooltip
-            tooltip_parts = [filename]
-            if note:
-                tooltip_parts.append(f"\nNote: {note}")
-                self.note_indicator.show()
-            else:
-                self.note_indicator.hide()
-
-            self.setToolTip("\n".join(tooltip_parts))
-        except Exception as e:
-            print(f"Error updating tooltip: {e}")
-            self.note_indicator.hide()
-
     def _open_viewer(self):
         """Open the 3D model viewer dialog."""
         from PySide2.QtWidgets import QApplication
@@ -4225,7 +4430,17 @@ class GLBThumbnailWidget(QWidget):
                 parent_window = widget
                 break
 
-        # Try PyVista viewer first (better PBR support)
+        # Try the new unified model viewer first (supports textures, skeletons, animations)
+        try:
+            from model_viewer import ModelViewerDialog, is_viewer_available
+            if is_viewer_available():
+                dialog = ModelViewerDialog(self.model_path, parent_window)
+                dialog.exec_()
+                return
+        except ImportError as e:
+            print(f"Model viewer not available: {e}")
+
+        # Fallback to PyVista viewer
         try:
             from glb_viewer_pyvista import PyVistaGLBViewerDialog, is_pyvista_available
             if is_pyvista_available():
@@ -4235,7 +4450,7 @@ class GLBThumbnailWidget(QWidget):
         except ImportError as e:
             print(f"PyVista GLB viewer not available: {e}")
 
-        # Fallback to OpenGL viewer
+        # Fallback to basic OpenGL viewer
         try:
             from glb_viewer import GLBViewerDialog
             dialog = GLBViewerDialog(self.model_path, parent_window)
@@ -4263,8 +4478,8 @@ class GLBThumbnailWidget(QWidget):
     def _regenerate_thumbnail(self):
         """Clear cache and regenerate thumbnail."""
         try:
-            from glb_thumbnail_service import get_glb_thumbnail_service
-            service = get_glb_thumbnail_service()
+            from model_thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
             service.clear_cache(self.model_path)
             self.thumbnail_label.setPixmap(self._create_placeholder("3D"))
             self._generate_thumbnail_async()
@@ -4832,6 +5047,38 @@ except Exception as e:
             print(f"Auto-extracted {extracted_count} texture(s) to: {output_dir}")
 
         return extracted_count
+
+    def _publish_to_ayon(self):
+        """Publish this 3D model to AYON."""
+        # Find the main window for dialogs
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        try:
+            from comfyui_ayon_publisher import publish_comfyui_asset_to_ayon
+
+            # Call the publisher with output_dir for metadata lookup
+            success = publish_comfyui_asset_to_ayon(
+                file_path=self.model_path,
+                parent_widget=parent_window,
+                output_dir=self.output_dir
+            )
+
+            if success:
+                print(f"Successfully published model to AYON: {self.model_path}")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            from PySide2.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                parent_window,
+                "Publish Error",
+                f"Failed to publish model to AYON:\n\n{str(e)}"
+            )
 
 
 def enhance_ui(parent_widget):

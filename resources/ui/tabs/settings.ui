@@ -242,6 +242,19 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="Generate3DThumbnails">
+            <property name="toolTip">
+             <string>Generate thumbnail previews for 3D objects in the ComfyUI gallery. Disable this to skip 3D thumbnail generation for faster loading.</string>
+            </property>
+            <property name="text">
+             <string>Generate thumbnails for 3D objects</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
            <layout class="QHBoxLayout" name="thumbnailCacheLayout">
             <item>
              <widget class="QLabel" name="thumbnailCacheLabel">

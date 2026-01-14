@@ -1,7 +1,12 @@
 # Python cache files
-*__pycache__*/*
-*.pyc
-*.pyo
-*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
 python/venv/
+venv/
+env/
+ENV/
 

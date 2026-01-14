@@ -107,6 +107,9 @@
             <property name="styleSheet">
              <string>color: #888888; font-style: italic;</string>
             </property>
+            <property name="visible">
+             <bool>false</bool>
+            </property>
            </widget>
           </item>
          </layout>
@@ -290,9 +293,6 @@
               </property>
               <property name="visible">
                <bool>false</bool>
-              </property>
-              <property name="styleSheet">
-               <string>QPushButton { background-color: #8B0000; } QPushButton:hover { background-color: #A00000; }</string>
               </property>
              </widget>
             </item>

@@ -34,12 +34,19 @@ def get_gallery_output_path() -> Optional[str]:
         username = app_state.user or os.environ.get('USERNAME', 'unknown')
         user_path = os.path.join(network_path, username)
 
-        if os.path.isdir(user_path):
-            return user_path
-        elif os.path.isdir(network_path):
-            return network_path
+        # Create user's gallery folder if it doesn't exist
+        if not os.path.isdir(user_path):
+            try:
+                os.makedirs(user_path, exist_ok=True)
+                print(f"[PreWarm] Created gallery directory: {user_path}")
+            except Exception as e:
+                print(f"[PreWarm] Warning: Could not create gallery directory: {user_path} - {e}")
+                # Fall back to network_path if user folder creation failed
+                if os.path.isdir(network_path):
+                    return network_path
+                return None
 
-        return None
+        return user_path
     except Exception as e:
         print(f"[PreWarm] Error getting gallery path: {e}")
         return None

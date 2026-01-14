@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.28
+- Add unified model loader supporting FBX, OBJ, USD, GLB, GLTF formats - Implement lazy loading for gallery thumbnails with batched loading - Add multi-workflow models with individual settings and editable nodes - Improve metadata caching and batch loading for better performance - Update UI components with tooltip lazy loading and placeholder caching - Add server restart functionality for persistent ComfyUI mode - Refactor GLB-specific modules to unified model handling - Update dependencies and clean up cache files
+
 ## Version 0.26
 - Introduce multi-workflow models allowing multiple workflows per preset with individual settings - Add UI components for workflow selection and notes display in ComfyUI tab - Implement metadata caching and batch loading for improved gallery performance - Update workflow presets structure
 
