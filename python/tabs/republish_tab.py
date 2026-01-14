@@ -303,13 +303,50 @@ class RePublishTab(BaseTab):
         frame_padding = len(seq.frameSet().frameRange().split("-")[0])
         render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
 
-        # Extract project and shot from searchpath
-        folder_path = convert_to_ayon_folder_path(self.app_state.shotpath, self.app_state.jobname)
+        # Extract project name and folder path from the actual source directory
+        # This handles both standard workflow and custom directory selection
+        # Example: V:/LieweHeksie/shots/.../work/... -> project=LieweHeksie, folder=/shots/.../shotname
+
+        # Normalize path for parsing
+        normalized_source = source_dir.replace("\\", "/")
+
+        # Try to extract project name from path
+        path_parts = normalized_source.split("/")
+
+        # Find project name - it's typically after the drive letter and before "shots" or "assets"
+        project_name = self.app_state.jobname  # Default to current project
+        shot_path_for_conversion = None
+
+        for i, part in enumerate(path_parts):
+            if part in ["shots", "assets"] and i > 0:
+                # Project name is the part before shots/assets
+                project_name = path_parts[i - 1]
+                # Build the shot path up to /work
+                if "work" in path_parts:
+                    work_idx = path_parts.index("work")
+                    shot_path_for_conversion = "/".join(path_parts[:work_idx])
+                break
+
+        # If we couldn't extract from path, fall back to app_state
+        if not shot_path_for_conversion:
+            shot_path_for_conversion = self.app_state.shotpath
+            project_name = self.app_state.jobname
+
+        folder_path = convert_to_ayon_folder_path(shot_path_for_conversion, project_name)
+
+        print(f"Detected project: {project_name}")
+        print(f"Detected folder path: {folder_path}")
+
+        # Determine working_dir from the shot path
+        if "work" in shot_path_for_conversion:
+            working_dir = shot_path_for_conversion.split("work")[0] + "work"
+        else:
+            working_dir = self.app_state.working_dir or shot_path_for_conversion
 
         # Create metadata
         progress_callback(75, "Creating AYON metadata...")
         metadata = create_ayon_metadata(
-            project_name=self.app_state.jobname,
+            project_name=project_name,
             render_name=product_name,
             start_frame=self.app_state.republish_startframe,
             end_frame=self.app_state.republish_endframe,
@@ -318,9 +355,15 @@ class RePublishTab(BaseTab):
             task=task,
             user=self.app_state.user,
             output_subdirectory=output_subdirectory,
-            working_dir=self.app_state.working_dir,
+            working_dir=working_dir,
             render_file=render_file
         )
+
+        # Fix farm flag based on publish mode
+        # create_ayon_metadata() sets "farm": True by default, but for local publish we need False
+        if not use_farm and "instances" in metadata and len(metadata["instances"]) > 0:
+            metadata["instances"][0]["farm"] = False
+            print(f"Set farm flag to False for local publish")
 
         # Write metadata file to source directory
         metadata_filename = f"ayon_{product_name}.json"
@@ -336,7 +379,7 @@ class RePublishTab(BaseTab):
         if use_farm:
             # Submit to Deadline with correct signature
             job_id = submit_ayon_publish_to_deadline(
-                project_name=self.app_state.jobname,
+                project_name=project_name,
                 render_name=product_name,
                 render_file=render_file,
                 metadata_path=metadata_path,
@@ -355,7 +398,7 @@ class RePublishTab(BaseTab):
             # Publish locally with correct arguments
             success = publish_to_ayon_local(
                 metadata_path,
-                self.app_state.jobname,
+                project_name,
                 folder_path,
                 task,
                 self.app_state.user

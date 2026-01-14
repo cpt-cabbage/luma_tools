@@ -318,7 +318,7 @@ class EmbeddedImageViewer(QWidget):
 
         try:
             from state_manager import get_app_state
-            from ayon_service import AYON_AVAILABLE
+            from ayon.service import AYON_AVAILABLE
             app_state = get_app_state()
             is_standalone = app_state.standalone_mode
 
@@ -327,7 +327,8 @@ class EmbeddedImageViewer(QWidget):
                 self.publish_to_ayon_btn.setToolTip("AYON publishing is not available" if not AYON_AVAILABLE else "Not available in standalone mode")
             else:
                 self.publish_to_ayon_btn.setToolTip("Publish this asset to AYON")
-        except Exception:
+        except Exception as e:
+            print(f"Warning: Could not initialize AYON button: {e}")
             self.publish_to_ayon_btn.setEnabled(False)
             self.publish_to_ayon_btn.setToolTip("AYON is not available")
 
@@ -362,22 +363,76 @@ class EmbeddedImageViewer(QWidget):
         self.message_label.setText("Initializing 3D viewer...")
         self.image_stack.setCurrentWidget(self.message_label)
 
+        # Use QTimer to defer initialization so UI can update
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self._do_init_glb_viewer(callback))
+
+    def _do_init_glb_viewer(self, callback=None):
+        """Actually initialize the GLB viewer widget (called after short delay)."""
         # Don't use worker thread - Qt widgets must be created on main thread
         # Just check availability and create widget directly
+
+        # Add python directory to path if needed
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        python_dir = os.path.join(os.path.dirname(current_dir), 'python')
+        if python_dir not in sys.path:
+            sys.path.insert(0, python_dir)
+
         try:
-            from models.viewer import ModelViewerWidget, is_viewer_available
+            from models.viewer import ModelViewerWidget, is_viewer_available, OPENGL_AVAILABLE, PYOPENGL_AVAILABLE, MODEL_LOADER_AVAILABLE
+            print(f"3D Viewer availability check:")
+            print(f"  OPENGL_AVAILABLE: {OPENGL_AVAILABLE}")
+            print(f"  PYOPENGL_AVAILABLE: {PYOPENGL_AVAILABLE}")
+            print(f"  MODEL_LOADER_AVAILABLE: {MODEL_LOADER_AVAILABLE}")
+
             if is_viewer_available():
-                self.glb_viewer = ModelViewerWidget()
-                self.image_stack.addWidget(self.glb_viewer)
-                self._has_glb_viewer = True
-                self._use_pyvista_viewer = False
-                print(f"Using model_viewer GLB viewer")
-                self._glb_viewer_initialized = True
-                if callback:
-                    callback(True)
+                # Configure OpenGL surface format before widget creation to prevent window flashing
+                from PySide6.QtGui import QSurfaceFormat
+                fmt = QSurfaceFormat()
+                fmt.setDepthBufferSize(24)
+                fmt.setStencilBufferSize(8)
+                fmt.setVersion(2, 1)  # OpenGL 2.1
+                fmt.setProfile(QSurfaceFormat.NoProfile)
+                fmt.setSamples(4)  # 4x MSAA
+                fmt.setSwapBehavior(QSurfaceFormat.DoubleBuffer)
+                QSurfaceFormat.setDefaultFormat(fmt)
+
+                # Block updates on parent window during OpenGL widget creation
+                parent_window = self.window()
+                if parent_window:
+                    parent_window.setUpdatesEnabled(False)
+
+                try:
+                    # Create the OpenGL widget
+                    self.glb_viewer = ModelViewerWidget()
+
+                    # Add to stack (will be hidden until set as current)
+                    self.image_stack.addWidget(self.glb_viewer)
+
+                    self._has_glb_viewer = True
+                    self._use_pyvista_viewer = False
+                    print(f"✓ Using model_viewer GLB viewer")
+                    self._glb_viewer_initialized = True
+
+                    if callback:
+                        callback(True)
+                finally:
+                    # Re-enable updates
+                    if parent_window:
+                        parent_window.setUpdatesEnabled(True)
+                        # Process pending events to ensure smooth rendering
+                        from PySide6.QtCore import QCoreApplication
+                        QCoreApplication.processEvents()
+
                 return
+            else:
+                print(f"✗ Model viewer not available - one or more requirements missing")
         except Exception as e:
-            print(f"Model viewer not available: {e}")
+            print(f"✗ Model viewer import failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         try:
             from glb_viewer_pyvista import PyVistaGLBViewerWidget, is_pyvista_available
@@ -526,11 +581,18 @@ class EmbeddedImageViewer(QWidget):
     def _on_model_loaded(self, model_data):
         """Handle successful 3D model loading."""
         if self.glb_viewer:
-            self.glb_viewer.set_model_data(model_data)
-            if self._saved_camera_state and hasattr(self.glb_viewer, 'set_camera_state'):
-                self.glb_viewer.set_camera_state(self._saved_camera_state)
-            self.image_stack.setCurrentWidget(self.glb_viewer)
-            self.glb_viewer.setFocus()
+            try:
+                self.glb_viewer.set_model_data(model_data)
+                if self._saved_camera_state and hasattr(self.glb_viewer, 'set_camera_state'):
+                    self.glb_viewer.set_camera_state(self._saved_camera_state)
+                self.image_stack.setCurrentWidget(self.glb_viewer)
+                self.glb_viewer.setFocus()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                error_msg = f"Failed to display 3D model:\n{str(e)}"
+                self.message_label.setText(f"Error Loading 3D Model\n\n{error_msg}")
+                self.image_stack.setCurrentWidget(self.message_label)
 
     def _on_model_error(self, error_msg):
         """Handle 3D model loading error."""

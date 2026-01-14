@@ -27,8 +27,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent, QKeyEvent, QImage, QPixmap
 
 try:
-    from PySide6.QtWidgets import QOpenGLWidget
-    from PySide6.QtGui import QOpenGLContext, QSurfaceFormat
+    from PySide6.QtOpenGLWidgets import QOpenGLWidget
+    from PySide6.QtGui import QSurfaceFormat, QOpenGLContext
     OPENGL_AVAILABLE = True
 except ImportError:
     OPENGL_AVAILABLE = False
@@ -397,7 +397,7 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
 
             # Clear old textures
             for tex_id in self._textures.values():
-                glDeleteTextures(1, [tex_id])
+                glDeleteTextures([tex_id])
             self._textures.clear()
 
             # Load embedded textures
