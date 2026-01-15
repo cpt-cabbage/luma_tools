@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.2
+- Make Daddy Mark Happy.
+- Improve UI and flow in republish tab
+- Convert source selector to dropdown button
+- Make product name field read-only
+
 ## Version 0.4.1.1
 - Add Publish to Current AYON Task toggle checkbox to rePublish tab that allows users to publish custom selected renders to their current AYON task instead of the path string.
 

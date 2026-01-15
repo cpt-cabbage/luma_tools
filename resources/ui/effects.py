@@ -280,6 +280,9 @@ class UIAnimations:
         self.redirect_to_splash = False
         self.splash_screen = None
 
+        # Track buttons with "ready" styling applied
+        self._ready_buttons = {}  # button -> original_style
+
     def setup_animations(self):
         """Setup all animations for the UI."""
         self._setup_button_hover_effects()
@@ -380,20 +383,53 @@ class UIAnimations:
         QTimer.singleShot(350, lambda: self._cleanup_animation(fade_anim))
 
     def pulse_button(self, button):
-        """Create a pulsing effect to draw attention to a button."""
+        """
+        Highlight a button as 'ready' with blue styling.
+        The styling persists until the button is clicked.
+        """
+        # Skip if already styled as ready
+        if button in self._ready_buttons:
+            return
+
+        # Store original style
         original_style = button.styleSheet()
+        self._ready_buttons[button] = original_style
 
-        def pulse_on():
-            button.setStyleSheet(
-                original_style +
-                "background-color: #5cadff; border: 2px solid #4a9eff;"
-            )
-            QTimer.singleShot(300, pulse_off)
+        # Apply ready styling
+        button.setStyleSheet(
+            original_style +
+            "background-color: #5cadff; border: 2px solid #4a9eff;"
+        )
 
-        def pulse_off():
-            button.setStyleSheet(original_style)
+        # Connect to clicked signal to reset styling
+        def on_clicked():
+            self._reset_button_style(button)
 
-        pulse_on()
+        button._ready_connection = button.clicked.connect(on_clicked)
+
+    def _reset_button_style(self, button):
+        """Reset a button's style back to its original state."""
+        if button not in self._ready_buttons:
+            return
+
+        # Restore original style
+        original_style = self._ready_buttons.pop(button)
+        button.setStyleSheet(original_style)
+
+        # Disconnect the click handler
+        if hasattr(button, '_ready_connection'):
+            try:
+                button.clicked.disconnect(button._ready_connection)
+            except (RuntimeError, TypeError):
+                pass  # Connection already disconnected
+            delattr(button, '_ready_connection')
+
+    def clear_button_ready(self, button):
+        """
+        Manually clear the 'ready' styling from a button.
+        Use this when conditions change and the button should no longer be highlighted.
+        """
+        self._reset_button_style(button)
 
     def fade_in_widget(self, widget, duration=300):
         """Fade in a widget."""

@@ -273,6 +273,10 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
     print(f"Working directory: {working_dir}")
 
+    # Set up environment with UTF-8 encoding for proper Unicode handling
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -280,6 +284,7 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         text=True,
         bufsize=1,
         cwd=working_dir,
+        env=env,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     )
 
