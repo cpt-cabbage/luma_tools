@@ -172,10 +172,11 @@ class PassBuilderTab(BaseTab):
             self.ui.BuildPasses.setEnabled(False)
 
         # Create worker and run on background thread
-        worker = Worker(detect_passes, render_file)
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(worker)
+        # Store as instance attribute to prevent garbage collection
+        self._detect_passes_worker = Worker(detect_passes, render_file)
+        self._detect_passes_worker.signals.result.connect(on_result)
+        self._detect_passes_worker.signals.error.connect(on_error)
+        QThreadPool.globalInstance().start(self._detect_passes_worker)
 
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
@@ -254,7 +255,8 @@ class PassBuilderTab(BaseTab):
             )
             self.main_window.animator.show_error(f"Build failed: {error_msg}")
 
-        worker = Worker(do_build)
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(worker)
+        # Store as instance attribute to prevent garbage collection
+        self._build_worker = Worker(do_build)
+        self._build_worker.signals.result.connect(on_result)
+        self._build_worker.signals.error.connect(on_error)
+        QThreadPool.globalInstance().start(self._build_worker)

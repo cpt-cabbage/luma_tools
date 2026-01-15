@@ -336,7 +336,8 @@ class MP4MakerTab(BaseTab):
             self.log(traceback_str)
 
         # Create worker and run MP4 generation on background thread
-        worker = Worker(
+        # Store as instance attribute to prevent garbage collection
+        self._mp4_worker = Worker(
             generate_mp4,
             input_pattern,
             self.app_state.mp4_output_path,
@@ -345,7 +346,7 @@ class MP4MakerTab(BaseTab):
             quality_index=quality_index,
             burn_in_timecode=burn_in_timecode
         )
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        worker.signals.progress.connect(on_progress)
-        QThreadPool.globalInstance().start(worker)
+        self._mp4_worker.signals.result.connect(on_result)
+        self._mp4_worker.signals.error.connect(on_error)
+        self._mp4_worker.signals.progress.connect(on_progress)
+        QThreadPool.globalInstance().start(self._mp4_worker)

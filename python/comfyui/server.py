@@ -49,6 +49,10 @@ server_state = {
     'comfyui_path': None,
     'restart_requested': False,
     'startup_config': None,
+    'crash_count': 0,
+    'last_crash_time': None,
+    'max_crash_restarts': 5,
+    'crash_cooldown_seconds': 60,
 }
 
 
@@ -120,6 +124,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             'jobs_failed': server_state['jobs_failed'],
             'start_time': server_state['start_time'],
             'last_health_check': server_state['last_health_check'],
+            'crash_count': server_state['crash_count'],
+            'last_crash_time': server_state['last_crash_time'],
+            'max_crash_restarts': server_state['max_crash_restarts'],
         }
         self.wfile.write(json.dumps(response, default=str).encode())
 
@@ -177,6 +184,9 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
 
 def health_monitor_thread(port: int):
     """Background thread to monitor ComfyUI health."""
+    consecutive_failures = 0
+    max_consecutive_failures = 3  # Trigger restart after 3 consecutive failures
+
     while not server_state['shutdown_requested']:
         time.sleep(30)
 
@@ -184,13 +194,23 @@ def health_monitor_thread(port: int):
             healthy = check_server_health(port=port)
             server_state['last_health_check'] = datetime.now().isoformat()
 
-            if not healthy:
-                print("WARNING: ComfyUI health check failed!")
+            if healthy:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                print(f"WARNING: ComfyUI health check failed ({consecutive_failures}/{max_consecutive_failures})")
+
                 if server_state['comfyui_process']:
                     ret = server_state['comfyui_process'].poll()
                     if ret is not None:
                         print(f"ERROR: ComfyUI process died with exit code {ret}")
                         server_state['is_ready'] = False
+                        # Main loop will handle crash recovery
+                    elif consecutive_failures >= max_consecutive_failures:
+                        # Process is running but not responding - request restart
+                        print("ComfyUI unresponsive after multiple health checks, requesting restart...")
+                        server_state['restart_requested'] = True
+                        consecutive_failures = 0
 
 
 def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
@@ -314,15 +334,19 @@ def stream_comfyui_output(process: subprocess.Popen):
             server_state['is_ready'] = False
 
 
-def restart_comfyui():
-    """Restart the ComfyUI process using stored startup config."""
+def restart_comfyui(reason: str = "manual"):
+    """Restart the ComfyUI process using stored startup config.
+
+    Args:
+        reason: Why the restart is happening (manual, crash, health_check)
+    """
     config = server_state.get('startup_config')
     if not config:
         print("ERROR: No startup config available for restart")
         return False
 
     print("\n" + "=" * 60)
-    print("RESTARTING COMFYUI")
+    print(f"RESTARTING COMFYUI (reason: {reason})")
     print("=" * 60)
 
     server_state['is_ready'] = False
@@ -372,6 +396,68 @@ def restart_comfyui():
         return False
 
 
+def handle_crash_recovery(exit_code: int) -> bool:
+    """Handle ComfyUI crash with automatic recovery.
+
+    Args:
+        exit_code: The exit code from the crashed process
+
+    Returns:
+        True if recovery was successful, False if we should give up
+    """
+    server_state['crash_count'] += 1
+    server_state['last_crash_time'] = datetime.now().isoformat()
+
+    print("\n" + "!" * 60)
+    print(f"COMFYUI CRASHED (exit code: {exit_code})")
+    print(f"Crash count: {server_state['crash_count']}/{server_state['max_crash_restarts']}")
+    print("!" * 60)
+
+    # Check if crash recovery is disabled
+    if server_state['max_crash_restarts'] <= 0:
+        print("Crash recovery is disabled. Server will exit.")
+        return False
+
+    # Check if we've exceeded max restarts
+    if server_state['crash_count'] > server_state['max_crash_restarts']:
+        print(f"ERROR: Exceeded maximum crash restarts ({server_state['max_crash_restarts']})")
+        print("Server will exit. Manual intervention required.")
+        return False
+
+    # Apply cooldown between restarts to avoid rapid restart loops
+    cooldown = server_state['crash_cooldown_seconds']
+    print(f"Waiting {cooldown}s before restart attempt...")
+
+    # Wait for cooldown, but check for shutdown during wait
+    cooldown_start = time.time()
+    while time.time() - cooldown_start < cooldown:
+        if server_state['shutdown_requested']:
+            return False
+        time.sleep(1)
+
+    # Attempt restart
+    print(f"Attempting automatic restart ({server_state['crash_count']}/{server_state['max_crash_restarts']})...")
+
+    if restart_comfyui(reason="crash"):
+        print("Crash recovery successful!")
+        return True
+    else:
+        print("ERROR: Crash recovery failed")
+        # Don't increment crash count again since restart_comfyui handles its own failures
+        return False
+
+
+def reset_crash_counter():
+    """Reset crash counter after successful uptime period.
+
+    Called when ComfyUI has been running stably to reset the crash counter,
+    allowing the server to handle future crashes.
+    """
+    if server_state['crash_count'] > 0:
+        print(f"Resetting crash counter (was {server_state['crash_count']})")
+        server_state['crash_count'] = 0
+
+
 def shutdown(signum=None, frame=None):
     """Graceful shutdown handler."""
     print("\nShutdown requested...")
@@ -407,6 +493,10 @@ def main():
                         help='ComfyUI installation mode')
     parser.add_argument('--python-path', default=None, help='Path to Python executable')
     parser.add_argument('--skip-dep-check', action='store_true', help='Skip dependency check')
+    parser.add_argument('--max-crash-restarts', type=int, default=5,
+                        help='Max automatic restart attempts after crash (default: 5, 0 to disable)')
+    parser.add_argument('--crash-cooldown', type=int, default=60,
+                        help='Seconds to wait between crash restarts (default: 60)')
 
     args = parser.parse_args()
 
@@ -434,6 +524,8 @@ def main():
 
     server_state['comfyui_port'] = args.port
     server_state['start_time'] = time.time()
+    server_state['max_crash_restarts'] = args.max_crash_restarts
+    server_state['crash_cooldown_seconds'] = args.crash_cooldown
 
     print("=" * 60)
     print("ComfyUI Persistent Server")
@@ -443,6 +535,10 @@ def main():
     print(f"Mode: {args.mode}")
     if args.mode == "standalone":
         print(f"Python Path: {args.python_path}")
+    if args.max_crash_restarts > 0:
+        print(f"Crash Recovery: enabled (max {args.max_crash_restarts} restarts, {args.crash_cooldown}s cooldown)")
+    else:
+        print(f"Crash Recovery: disabled")
     print(f"Started: {datetime.now().isoformat()}")
     print("=" * 60)
 
@@ -491,21 +587,40 @@ def main():
     except Exception as e:
         print(f"Warning: Could not start health check server on port {health_port}: {e}")
 
+    # Track uptime for crash counter reset
+    stable_uptime_threshold = 300  # Reset crash counter after 5 min stable uptime
+    last_stable_check = time.time()
+
     try:
         while not server_state['shutdown_requested']:
+            # Handle manual restart requests
             if server_state['restart_requested']:
-                if restart_comfyui():
+                if restart_comfyui(reason="manual"):
                     process = server_state['comfyui_process']
+                    last_stable_check = time.time()
                 else:
                     print("ERROR: Restart failed, server will exit")
                     break
 
             ret = process.poll()
             if ret is not None:
-                print(f"ERROR: ComfyUI process exited unexpectedly with code {ret}")
+                # ComfyUI crashed or exited unexpectedly
                 server_state['is_ready'] = False
-                print("Server will exit.")
-                break
+
+                if handle_crash_recovery(ret):
+                    # Recovery successful, update process reference
+                    process = server_state['comfyui_process']
+                    last_stable_check = time.time()
+                else:
+                    # Recovery failed or max retries exceeded
+                    print("ERROR: Crash recovery failed, server will exit")
+                    break
+
+            # Reset crash counter after stable uptime period
+            if server_state['is_ready'] and server_state['crash_count'] > 0:
+                if time.time() - last_stable_check > stable_uptime_threshold:
+                    reset_crash_counter()
+                    last_stable_check = time.time()
 
             time.sleep(5)
 

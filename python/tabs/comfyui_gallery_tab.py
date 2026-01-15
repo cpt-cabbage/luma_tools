@@ -54,6 +54,10 @@ class ComfyUIGalleryTab(BaseTab):
         self._watcher_setup_in_progress = False
         self._refresh_timer = None
 
+        # Fallback polling for network paths (QFileSystemWatcher may not work reliably on network)
+        self._poll_timer = None
+        self._poll_interval = 10000  # 10 seconds for network paths
+
         # Source mode: "network" or "custom"
         self._source_mode = "network"
         self._custom_path = ""
@@ -240,11 +244,12 @@ class ComfyUIGalleryTab(BaseTab):
                 clear_prewarm_cache()
 
                 # Enrich items with workflow metadata on worker thread
+                # Store as instance attribute to prevent garbage collection
                 self._scan_in_progress = True
-                worker = Worker(self._enrich_prewarm_items, cache['items'])
-                worker.signals.result.connect(self._on_scan_complete)
-                worker.signals.error.connect(self._on_scan_error)
-                QThreadPool.globalInstance().start(worker)
+                self._prewarm_worker = Worker(self._enrich_prewarm_items, cache['items'])
+                self._prewarm_worker.signals.result.connect(self._on_scan_complete)
+                self._prewarm_worker.signals.error.connect(self._on_scan_error)
+                QThreadPool.globalInstance().start(self._prewarm_worker)
                 return
 
         except ImportError:
@@ -356,7 +361,14 @@ class ComfyUIGalleryTab(BaseTab):
         from core.settings_manager import get_comfyui_network_output_path
 
         network_path = get_comfyui_network_output_path()
-        if not network_path or not os.path.isdir(network_path):
+        print(f"[Gallery] Discovering users in: {network_path}")
+
+        if not network_path:
+            print("[Gallery] No network output path configured")
+            return []
+
+        if not os.path.isdir(network_path):
+            print(f"[Gallery] Network path does not exist or is not accessible: {network_path}")
             return []
 
         users = []
@@ -365,7 +377,9 @@ class ComfyUIGalleryTab(BaseTab):
                 # Only include directories, skip hidden folders
                 if entry.is_dir() and not entry.name.startswith('.'):
                     users.append(entry.name)
-        except Exception:
+            print(f"[Gallery] Found {len(users)} users: {users}")
+        except Exception as e:
+            print(f"[Gallery] Error scanning users: {e}")
             return []
 
         return sorted(users, key=str.lower)
@@ -381,9 +395,10 @@ class ComfyUIGalleryTab(BaseTab):
         self._update_user_selector_visibility()
 
         # Discover other users on worker thread
-        worker = Worker(self._discover_users_sync)
-        worker.signals.result.connect(self._on_users_discovered)
-        QThreadPool.globalInstance().start(worker)
+        # Store as instance attribute to prevent garbage collection before signal fires
+        self._user_discovery_worker = Worker(self._discover_users_sync)
+        self._user_discovery_worker.signals.result.connect(self._on_users_discovered)
+        QThreadPool.globalInstance().start(self._user_discovery_worker)
 
     def _on_users_discovered(self, users):
         """Handle async user discovery completion."""
@@ -395,6 +410,7 @@ class ComfyUIGalleryTab(BaseTab):
 
         self._available_users = users
         self._update_user_button_text()
+        print(f"[Gallery] User discovery complete: {len(users)} users available")
 
     def _update_user_button_text(self):
         """Update the user button text to show current selection."""
@@ -416,16 +432,26 @@ class ComfyUIGalleryTab(BaseTab):
         menu = QMenu(self.main_window)
         current_user = self.app_state.user
 
-        for user in self._available_users:
-            # Add "(You)" suffix for current user
-            if user == current_user:
-                action = menu.addAction(f"{user} (You)")
-            else:
-                action = menu.addAction(user)
-            action.setData(user)
-            if user == self._selected_user:
-                action.setCheckable(True)
-                action.setChecked(True)
+        # Add user options
+        if not self._available_users or len(self._available_users) == 0:
+            no_users = menu.addAction("No other users found")
+            no_users.setEnabled(False)
+        else:
+            for user in self._available_users:
+                # Add "(You)" suffix for current user
+                if user == current_user:
+                    action = menu.addAction(f"{user} (You)")
+                else:
+                    action = menu.addAction(user)
+                action.setData(user)
+                if user == self._selected_user:
+                    action.setCheckable(True)
+                    action.setChecked(True)
+
+        # Add separator and refresh option
+        menu.addSeparator()
+        refresh_action = menu.addAction("Refresh User List")
+        refresh_action.setData("__refresh__")
 
         # Show menu below the button
         action = menu.exec_(self.ui.GalleryUserButton.mapToGlobal(
@@ -433,7 +459,11 @@ class ComfyUIGalleryTab(BaseTab):
         ))
 
         if action and action.data():
-            self._select_user(action.data())
+            if action.data() == "__refresh__":
+                self.log("[Gallery] Refreshing user list...")
+                self._populate_user_selector()
+            else:
+                self._select_user(action.data())
 
     def _select_user(self, new_user):
         """Select a user and update the gallery.
@@ -635,11 +665,12 @@ class ComfyUIGalleryTab(BaseTab):
             return
 
         # Run scan on worker thread (includes isdir check)
+        # Store as instance attribute to prevent garbage collection before signal fires
         self._scan_in_progress = True
-        worker = Worker(self._scan_directory, self._current_path)
-        worker.signals.result.connect(self._on_scan_complete)
-        worker.signals.error.connect(self._on_scan_error)
-        QThreadPool.globalInstance().start(worker)
+        self._scan_worker = Worker(self._scan_directory, self._current_path)
+        self._scan_worker.signals.result.connect(self._on_scan_complete)
+        self._scan_worker.signals.error.connect(self._on_scan_error)
+        QThreadPool.globalInstance().start(self._scan_worker)
 
         self.ui.GalleryStatus.setText("Scanning...")
 
@@ -1091,8 +1122,18 @@ class ComfyUIGalleryTab(BaseTab):
 
         if parts:
             message = f"{' and '.join(parts)} added to Gallery"
+
+            # In-app toast notification
             toast = ToastNotification(message, "success", self.main_window)
             toast.show_toast()
+
+            # System notification when window is not focused (cross-platform via Qt)
+            if not self.main_window.isActiveWindow():
+                self.main_window.show_system_notification(
+                    "Luma Tools - Gallery",
+                    message,
+                    "success"
+                )
 
     def _on_thumbnail_clicked(self, image_path):
         """Handle thumbnail click - open embedded viewer."""
@@ -1317,10 +1358,11 @@ class ComfyUIGalleryTab(BaseTab):
         # Start new watcher if directory is valid (check async to avoid network lag)
         if output_dir:
             # Collect directories async to avoid blocking UI (includes isdir check)
-            worker = Worker(self._collect_watch_directories, output_dir)
-            worker.signals.result.connect(self._on_watch_directories_collected)
-            worker.signals.error.connect(self._on_watcher_setup_error)
-            QThreadPool.globalInstance().start(worker)
+            # Store as instance attribute to prevent garbage collection
+            self._watcher_setup_worker = Worker(self._collect_watch_directories, output_dir)
+            self._watcher_setup_worker.signals.result.connect(self._on_watch_directories_collected)
+            self._watcher_setup_worker.signals.error.connect(self._on_watcher_setup_error)
+            QThreadPool.globalInstance().start(self._watcher_setup_worker)
         else:
             self._watcher_setup_in_progress = False
 
@@ -1356,6 +1398,12 @@ class ComfyUIGalleryTab(BaseTab):
         self._watcher.directoryChanged.connect(self._on_directory_changed)
         self.log(f"Started watching gallery directory: {output_dir} ({len(dirs_to_watch)} folders)")
 
+        # Start polling as fallback for network paths (watcher may not be reliable)
+        if self._is_network_path(output_dir):
+            self._start_network_polling()
+        else:
+            self._stop_network_polling()
+
     def _on_watcher_setup_error(self, msg, tb):
         """Handle watcher setup error."""
         self._watcher_setup_in_progress = False
@@ -1370,3 +1418,50 @@ class ComfyUIGalleryTab(BaseTab):
             self._refresh_timer.timeout.connect(self._on_refresh)
 
         self._refresh_timer.start(500)  # 500ms debounce
+
+    # =========================================================================
+    # NETWORK PATH POLLING FALLBACK
+    # =========================================================================
+
+    def _start_network_polling(self):
+        """Start fallback polling for network paths.
+
+        QFileSystemWatcher may not reliably detect changes on network paths,
+        so we poll periodically as a fallback.
+        """
+        if self._poll_timer is None:
+            self._poll_timer = QTimer(self.main_window)
+            self._poll_timer.timeout.connect(self._on_poll_refresh)
+
+        if not self._poll_timer.isActive():
+            self._poll_timer.start(self._poll_interval)
+            self.log(f"[Gallery] Started network polling (every {self._poll_interval/1000}s)")
+
+    def _stop_network_polling(self):
+        """Stop network polling."""
+        if self._poll_timer and self._poll_timer.isActive():
+            self._poll_timer.stop()
+            self.log("[Gallery] Stopped network polling")
+
+    def _on_poll_refresh(self):
+        """Handle polling timer - refresh gallery silently."""
+        # Skip if already scanning
+        if self._scan_in_progress:
+            return
+        # Don't log every poll to avoid spam
+        self._on_refresh()
+
+    def _is_network_path(self, path):
+        """Check if a path is a network/UNC path.
+
+        Args:
+            path: Path to check
+
+        Returns:
+            bool: True if path is a network path
+        """
+        if not path:
+            return False
+        # UNC paths start with \\\\ or //
+        # Also check for mapped drives that point to network (harder to detect)
+        return path.startswith('\\\\') or path.startswith('//')

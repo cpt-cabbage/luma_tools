@@ -189,6 +189,10 @@ class ComfyUITab(PollingMixin, BaseTab):
         if not workflow_name:
             return
 
+        # Capture current editable values BEFORE clearing widgets
+        # This preserves prompts etc. when switching between workflows
+        self._pending_semantic_values = self._capture_editable_values_by_type()
+
         self._current_selected_workflow = workflow_name
 
         # Get the workflow path for this selection
@@ -1086,6 +1090,27 @@ class ComfyUITab(PollingMixin, BaseTab):
     # EDITABLE NODES
     # =========================================================================
 
+    def _capture_editable_values_by_type(self):
+        """Capture current editable values keyed by widget type and display name.
+
+        Used to preserve values when switching workflows in multi-workflow presets.
+        Returns dict like: {'text/Prompt': 'value', 'text/Negative': 'value2', ...}
+        """
+        values = {}
+        for node_id, container in self._comfyui_dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if node and input_widget:
+                # Create semantic key: widget_type/display_name
+                semantic_key = f"{node.widget_type}/{node.display_name}"
+                if hasattr(input_widget, 'toPlainText'):
+                    values[semantic_key] = input_widget.toPlainText()
+                elif hasattr(input_widget, 'text'):
+                    values[semantic_key] = input_widget.text()
+                elif hasattr(input_widget, 'isChecked'):
+                    values[semantic_key] = input_widget.isChecked()
+        return values
+
     def _refresh_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
         from comfyui.service import extract_editable_nodes
@@ -1162,6 +1187,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Apply any pending editable values from restored state
         self._apply_pending_editable_values()
+
+        # Apply semantic values (for workflow switching within multi-workflow presets)
+        self._apply_semantic_editable_values()
 
     def _find_toggle_widget_by_name(self, condition_name):
         """Find a toggle widget by the condition node name."""
@@ -1351,6 +1379,32 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Clear pending values after applying
         self._pending_editable_values = {}
+
+    def _apply_semantic_editable_values(self):
+        """Apply pending semantic values to newly created widgets.
+
+        Used when switching workflows within a multi-workflow preset to preserve
+        prompt values etc. that match by widget type and display name.
+        """
+        if not hasattr(self, '_pending_semantic_values') or not self._pending_semantic_values:
+            return
+
+        for node_id, container in self._comfyui_dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if node and input_widget:
+                semantic_key = f"{node.widget_type}/{node.display_name}"
+                if semantic_key in self._pending_semantic_values:
+                    value = self._pending_semantic_values[semantic_key]
+                    if hasattr(input_widget, 'setPlainText'):
+                        input_widget.setPlainText(str(value))
+                    elif hasattr(input_widget, 'setText'):
+                        input_widget.setText(str(value))
+                    elif hasattr(input_widget, 'setChecked'):
+                        input_widget.setChecked(bool(value))
+
+        # Clear pending semantic values after applying
+        self._pending_semantic_values = {}
 
     # =========================================================================
     # PROMPT PRESETS

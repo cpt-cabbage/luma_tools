@@ -253,6 +253,9 @@ class LumaShotTools(QtWidgets.QWidget):
         # Disable scroll wheel on combo boxes and spin boxes
         self._disable_scroll_wheel_on_inputs()
 
+        # Setup system tray for notifications
+        self._setup_system_tray()
+
         # Connect tab change signal
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.tabBar().tabMoved.connect(self._on_tab_moved)
@@ -557,6 +560,75 @@ class LumaShotTools(QtWidgets.QWidget):
 
         for spin in self.findChildren(QDoubleSpinBox):
             spin.wheelEvent = lambda e: e.ignore()
+
+    def _setup_system_tray(self):
+        """Setup system tray icon for OS-level notifications."""
+        from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+
+        # Check if system tray is available
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            print("[Tray] System tray not available on this system")
+            self._tray_icon = None
+            return
+
+        self._tray_icon = QSystemTrayIcon(self)
+
+        # Use window icon for tray
+        self._tray_icon.setIcon(self.windowIcon())
+        self._tray_icon.setToolTip(APP_TITLE)
+
+        # Create context menu
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("Show Window")
+        show_action.triggered.connect(self._show_and_activate)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction("Quit")
+        quit_action.triggered.connect(self.close)
+        self._tray_icon.setContextMenu(tray_menu)
+
+        # Handle tray icon activation (double-click)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+
+        # Show tray icon
+        self._tray_icon.show()
+        print("[Tray] System tray icon initialized")
+
+    def _on_tray_activated(self, reason):
+        """Handle tray icon activation."""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._show_and_activate()
+
+    def _show_and_activate(self):
+        """Show and bring window to front."""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def show_system_notification(self, title, message, icon_type="info"):
+        """Show a system notification via the tray icon.
+
+        Args:
+            title: Notification title
+            message: Notification message
+            icon_type: 'info', 'warning', 'critical', or 'success'
+        """
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if not hasattr(self, '_tray_icon') or not self._tray_icon:
+            return
+
+        icon_map = {
+            'info': QSystemTrayIcon.Information,
+            'warning': QSystemTrayIcon.Warning,
+            'critical': QSystemTrayIcon.Critical,
+            'success': QSystemTrayIcon.Information,
+        }
+        icon = icon_map.get(icon_type, QSystemTrayIcon.Information)
+
+        # Show message for 5 seconds
+        self._tray_icon.showMessage(title, message, icon, 5000)
 
     def paintEvent(self, event):
         """Paint the rounded background and border."""

@@ -300,10 +300,11 @@ def publish_comfyui_asset_to_ayon(
                 )
 
             # Create and start worker
-            worker = Worker(publish_worker)
-            worker.signals.result.connect(on_publish_complete)
-            worker.signals.error.connect(on_publish_error)
-            QThreadPool.globalInstance().start(worker)
+            # Store worker on progress_dialog to prevent garbage collection
+            progress_dialog._worker = Worker(publish_worker)
+            progress_dialog._worker.signals.result.connect(on_publish_complete)
+            progress_dialog._worker.signals.error.connect(on_publish_error)
+            QThreadPool.globalInstance().start(progress_dialog._worker)
 
             # Return True to indicate publish was initiated
             # (actual result will be shown in callbacks)

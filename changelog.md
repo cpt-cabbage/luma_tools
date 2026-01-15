@@ -1,7 +1,19 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.8
+- Add automatic crash recovery for ComfyUI persistent server
+- Server now auto-restarts ComfyUI when it crashes (configurable via --max-crash-restarts, --crash-cooldown)
+- Enhanced health monitor triggers restart when ComfyUI becomes unresponsive
+- Crash counter resets after 5 minutes of stable uptime
+- Status endpoint now reports crash count and recovery info
+
+## Version 0.4.1.7
+- Replace hardcoded node type checks with generic handling based on WIDGET_MAPPINGS and EXPORT_NODE_TYPES for better maintainability. 
+- Add output_dir support for export nodes.
+- Improve polling and submission error handling to prevent garbage collection issues.
+
 ## Version 0.4.1.6
--  -Added explicit sys.path manipulation to ensure the script directory is in Python's search path.
+- Added explicit sys.path manipulation to ensure the script directory is in Python's search path.
 
 ## Version 0.4.1.5
 - Rename upload_image_from_server to upload_image_to_server in runner.py

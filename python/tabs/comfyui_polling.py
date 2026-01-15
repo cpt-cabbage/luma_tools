@@ -544,10 +544,11 @@ class PollingMixin:
         self.ui.ComfyUICancelJobs.setEnabled(False)
         self.ui.ComfyUICancelJobs.setText("Cancelling...")
 
-        worker = Worker(cancel_deadline_jobs, job_ids)
-        worker.signals.result.connect(self._on_cancel_complete)
-        worker.signals.error.connect(self._on_cancel_error)
-        QThreadPool.globalInstance().start(worker)
+        # Store as instance attribute to prevent garbage collection
+        self._cancel_worker = Worker(cancel_deadline_jobs, job_ids)
+        self._cancel_worker.signals.result.connect(self._on_cancel_complete)
+        self._cancel_worker.signals.error.connect(self._on_cancel_error)
+        QThreadPool.globalInstance().start(self._cancel_worker)
 
     def _on_cancel_complete(self, result):
         """Handle cancel jobs completion."""

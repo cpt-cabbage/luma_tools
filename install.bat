@@ -28,8 +28,17 @@ echo Update types:
 echo   b = Big update    (0.4 -^> 0.5)
 echo   s = Small update  (0.4 -^> 0.4.1, or 0.4.1 -^> 0.4.2)
 echo   m = Minor update  (0.4.1 -^> 0.4.1.1, or 0.4.1.1 -^> 0.4.1.2)
+echo   n = No version change (skip versioning and changelog)
 echo.
-set /p UPDATE_TYPE="Update type (b/s/m): "
+set /p UPDATE_TYPE="Update type (b/s/m/n): "
+
+REM Skip versioning and changelog if user chose 'n'
+if /i "%UPDATE_TYPE%"=="n" (
+    set NEW_VERSION=%CURRENT_VERSION%
+    echo Skipping version increment and changelog update.
+    echo.
+    goto :skip_versioning
+)
 
 REM Increment version using PowerShell based on update type
 if /i "%UPDATE_TYPE%"=="b" (
@@ -58,7 +67,7 @@ set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
 if /i "%UPDATE_CHANGELOG%"=="y" (
     REM Prepend new version entry to changelog.md (escape single quotes for PowerShell)
     set "COMMIT_MSG_ESCAPED=!COMMIT_MSG:'=''!"
-    powershell -Command "$nl = [char]10; $msg = '!COMMIT_MSG_ESCAPED!'; $msg = $msg -replace ' - ', ($nl + '- '); if (-not $msg.StartsWith('- ')) { $msg = '- ' + $msg }; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    powershell -Command "$nl = [char]10; $msg = '!COMMIT_MSG_ESCAPED!'; $msg = $msg -replace ' -', ($nl + '-'); $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
     echo Changelog updated with: %COMMIT_MSG%
 ) else (
     echo Changelog not updated.
@@ -67,6 +76,8 @@ if /i "%UPDATE_CHANGELOG%"=="y" (
 echo.
 echo Version updated to %NEW_VERSION%
 echo.
+
+:skip_versioning
 
 REM Copy launcher batch files
 echo Copying launchers...

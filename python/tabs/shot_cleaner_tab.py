@@ -130,10 +130,11 @@ class ShotCleanerTab(BaseTab):
         )
 
         # Create worker and run scan on background thread
-        worker = Worker(self.scanner.scan_all)
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(worker)
+        # Store as instance attribute to prevent garbage collection
+        self._scan_worker = Worker(self.scanner.scan_all)
+        self._scan_worker.signals.result.connect(on_result)
+        self._scan_worker.signals.error.connect(on_error)
+        QThreadPool.globalInstance().start(self._scan_worker)
 
     def _deselect_renders_in_comp(self, renders_in_comp):
         """Deselect renders that are in use by comp files."""
