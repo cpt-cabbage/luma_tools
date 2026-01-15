@@ -49,7 +49,7 @@ except ImportError:
         submit_workflow,
         wait_for_completion,
         modify_workflow_seed,
-        upload_image_from_server,
+        upload_image_to_server,
         download_image_from_server,
         move_output_files,
         get_workflow_images,

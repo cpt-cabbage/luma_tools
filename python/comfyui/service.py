@@ -223,10 +223,10 @@ def submit_comfyui_to_deadline(
     utils_script = os.path.join(output_dir, "comfyui_utils.py")
 
     # Copy scripts to output directory for farm access
+    # Always copy to ensure latest version (files are small, no performance impact)
     for src, dst in [(runner_script_source, runner_script), (utils_script_source, utils_script)]:
-        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-            shutil.copy2(src, dst)
-            print(f"Copied {os.path.basename(src)} to: {dst}")
+        shutil.copy2(src, dst)
+        print(f"Copied {os.path.basename(src)} to: {dst}")
 
     input_dir = output_dir
     port = 8188 if use_server_mode else random.randint(8200, 8299)
