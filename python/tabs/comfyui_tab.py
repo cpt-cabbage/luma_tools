@@ -80,6 +80,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Initial validation
         self._validate_inputs()
 
+        # Hide add/edit model buttons from non-admin users
+        if not self.app_state.is_admin:
+            self.ui.ComfyUIAddPreset.setVisible(False)
+            self.ui.ComfyUIEditPreset.setVisible(False)
+
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         self._validate_inputs()

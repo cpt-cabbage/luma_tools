@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.9
+- Introduce system tray icon with notifications for cross-platform alerts
+- Fix worker garbage collection issues in polling, gallery, and other tabs
+- Add network path polling fallback for reliable file watching
+- Preserve editable node values when switching workflows in multi-workflow presets
+- Update install script to support skipping version changes
+
 ## Version 0.4.1.8
 - Add automatic crash recovery for ComfyUI persistent server
 - Server now auto-restarts ComfyUI when it crashes (configurable via --max-crash-restarts, --crash-cooldown)

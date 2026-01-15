@@ -64,7 +64,7 @@
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Animation/la_Hy_Motion.json",
       "description": "",
       "iteratable": false,
-      "note": "Text to Anmation (Luma tools can't view skeleton data only yet so import it somewhere else)",
+      "note": "Text to Anmation",
       "full_restart": false,
       "node_overrides": {
         "HY-Motion Export FBX_editable": {

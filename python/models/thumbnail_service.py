@@ -23,7 +23,7 @@ CACHE_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
 THUMBNAIL_SIZE = 150  # Square thumbnails for gallery
 
 # Path to the renderer script
-RENDERER_SCRIPT = os.path.join(os.path.dirname(__file__), "model_thumbnail_renderer.py")
+RENDERER_SCRIPT = os.path.join(os.path.dirname(__file__), "thumbnail_renderer.py")
 
 # Python executable - use the venv's Python explicitly (sys.executable may point to AYON's Python)
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

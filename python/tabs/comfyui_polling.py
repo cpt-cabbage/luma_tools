@@ -93,7 +93,7 @@ class PollingMixin:
 
         self.log(f"[Iterate] Starting polling for job {job_id}")
         self.log(f"[Iterate] Network output dir: {network_output_dir}")
-        self.log(f"[Iterate] Expected frames: {self._iterate_total_tasks}")
+        self.log(f"[Iterate] Expected jobs: {self._iterate_total_tasks}")
 
         self.main_window.start_status_spinner()
 
@@ -103,7 +103,7 @@ class PollingMixin:
 
         gen_count = self._iterate_total_tasks
         self.main_window.animator.update_status_animated(
-            f"ComfyUI: Submitted {gen_count} frame(s) - Waiting for worker...",
+            f"ComfyUI: Submitted {gen_count} job(s) - Waiting for worker...",
             StatusColors.INFO
         )
 
@@ -151,7 +151,7 @@ class PollingMixin:
 
         if completed_tasks > self._iterate_completed_tasks:
             new_frames = completed_tasks - self._iterate_completed_tasks
-            self.log(f"[Iterate] {new_frames} new frame(s) rendered! ({completed_tasks}/{display_total})")
+            self.log(f"[Iterate] {new_frames} new job(s) rendered! ({completed_tasks}/{display_total})")
             self._iterate_completed_tasks = completed_tasks
             self._refresh_gallery_for_new_frames("[Iterate]")
 
@@ -173,13 +173,13 @@ class PollingMixin:
             eta_str = estimate_remaining_time(completed_tasks, display_total, elapsed)
 
             if status in ("Active", "Rendering"):
-                status_text = f"Rendering frame {completed_tasks + 1}/{display_total}"
+                status_text = f"Rendering job {completed_tasks + 1}/{display_total}"
                 if completed_tasks > 0:
-                    main_status = f"ComfyUI: Frame {completed_tasks}/{display_total} - {elapsed_str} elapsed"
+                    main_status = f"ComfyUI: Job {completed_tasks}/{display_total} - {elapsed_str} elapsed"
                     if eta_str:
                         main_status += f" - ~{eta_str} remaining"
                 else:
-                    main_status = f"ComfyUI: Starting render - {display_total} frame(s)"
+                    main_status = f"ComfyUI: Starting render - {display_total} job(s)"
             elif status in ("Pending", "Queued"):
                 status_text = "Queued, waiting for worker..."
                 main_status = "ComfyUI: Queued - Waiting for available worker..."
@@ -211,7 +211,7 @@ class PollingMixin:
         self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
 
         self.main_window.animator.update_status_animated(
-            f"ComfyUI Complete: {frames} frame(s) in {elapsed_str}",
+            f"ComfyUI Complete: {frames} job(s) in {elapsed_str}",
             StatusColors.SUCCESS
         )
 
@@ -304,12 +304,12 @@ class PollingMixin:
         total_jobs = len(job_ids)
         total_frames = total_jobs * self._batch_generation_count
 
-        self.log(f"[Batch] Starting polling for {total_jobs} job(s), {total_frames} total frame(s)")
+        self.log(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
 
         self.main_window.start_status_spinner()
 
         self.main_window.animator.update_status_animated(
-            f"ComfyUI Batch: {total_jobs} job(s), {total_frames} frame(s) - Waiting for workers...",
+            f"ComfyUI Batch: {total_jobs} submission(s), {total_frames} job(s) - Waiting for workers...",
             StatusColors.INFO
         )
 
@@ -387,7 +387,7 @@ class PollingMixin:
                 prev_completed = self._batch_completed_tasks.get(job_id, 0)
                 if completed_tasks > prev_completed:
                     new_frames = completed_tasks - prev_completed
-                    self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
+                    self.log(f"[Batch] Job {job_id}: {new_frames} new job(s) rendered! ({completed_tasks}/{total_tasks})")
                     self._batch_completed_tasks[job_id] = completed_tasks
                     had_new_frames = True
 
@@ -422,19 +422,19 @@ class PollingMixin:
             failed_count = len(self._batch_failed_jobs)
 
             if failed_count > 0:
-                main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {failed_count} failed, {completed_jobs}/{total_jobs} done"
+                main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs - {failed_count} failed, {completed_jobs}/{total_jobs} done"
                 status_color = StatusColors.WARNING
             elif active_jobs > 0:
                 eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
                 if completed_frames_all > 0:
-                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {active_jobs} rendering"
+                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs - {active_jobs} rendering"
                     if queued_jobs > 0:
                         main_status += f", {queued_jobs} queued"
                     main_status += f" - {elapsed_str}"
                     if eta_str:
                         main_status += f" (~{eta_str} left)"
                 else:
-                    main_status = f"ComfyUI: Starting {total_frames_all} frames - {active_jobs} active, {queued_jobs} queued"
+                    main_status = f"ComfyUI: Starting {total_frames_all} jobs - {active_jobs} active, {queued_jobs} queued"
                 status_color = StatusColors.INFO
             elif queued_jobs > 0:
                 main_status = f"ComfyUI: {queued_jobs} job(s) queued - Waiting for workers..."
@@ -486,15 +486,15 @@ class PollingMixin:
         success_count = total_count - failed_count
 
         if had_failures:
-            self.main_window.animator.show_error(f"ComfyUI: {failed_count}/{total_count} job(s) failed!")
+            self.main_window.animator.show_error(f"ComfyUI: {failed_count}/{total_count} submission(s) failed!")
             self.main_window.animator.update_status_animated(
-                f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} frames in {elapsed_str}",
+                f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} jobs in {elapsed_str}",
                 StatusColors.ERROR
             )
         else:
-            self.main_window.animator.show_success(f"All {total_count} ComfyUI jobs completed!")
+            self.main_window.animator.show_success(f"All {total_count} ComfyUI submissions completed!")
             self.main_window.animator.update_status_animated(
-                f"ComfyUI Complete: {total_frames} frames in {elapsed_str}",
+                f"ComfyUI Complete: {total_frames} jobs in {elapsed_str}",
                 StatusColors.SUCCESS
             )
 
@@ -609,9 +609,9 @@ class PollingMixin:
     # =========================================================================
 
     def _refresh_gallery_for_new_frames(self, log_prefix):
-        """Refresh gallery and request attention for new frames."""
+        """Refresh gallery and request attention for new jobs."""
         gallery_tab = self.main_window.get_tab("comfyui_gallery")
         if gallery_tab:
-            self.log(f"{log_prefix} Triggering gallery refresh and attention for new frames")
+            self.log(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
             gallery_tab._on_refresh()
             gallery_tab.signals.request_attention.emit()

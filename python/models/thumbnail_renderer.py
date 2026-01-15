@@ -7,7 +7,7 @@ Supports both mesh rendering and skeleton visualization for mocap files.
 This script runs as a separate process to avoid OpenGL context conflicts with Qt.
 
 Usage:
-    python model_thumbnail_renderer.py <input_model_path> <output_png_path> [size]
+    python thumbnail_renderer.py <input_model_path> <output_png_path> [size]
 """
 
 import sys
@@ -313,7 +313,7 @@ def render_placeholder_thumbnail(output_path: str, size: int = 150, label: str =
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python model_thumbnail_renderer.py <input_model> <output_png> [size]", file=sys.stderr)
+        print("Usage: python thumbnail_renderer.py <input_model> <output_png> [size]", file=sys.stderr)
         sys.exit(1)
 
     input_path = sys.argv[1]
