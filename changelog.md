@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.3
+- added PYTHONIOENCODING=utf-8 to comfy launch
+- Fix AYON publishing always creating version 1 - now auto-increments to next version
+
 ## Version 0.4.1.2
 - Make Daddy Mark Happy.
 - Improve UI and flow in republish tab

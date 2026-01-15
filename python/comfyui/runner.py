@@ -26,18 +26,34 @@ import threading
 from datetime import datetime
 
 # Import shared utilities
-from comfyui.utils import (
-    WEBSOCKET_AVAILABLE,
-    check_server_health,
-    wait_for_server,
-    submit_workflow,
-    wait_for_completion,
-    modify_workflow_seed,
-    upload_image_to_server,
-    download_image_from_server,
-    move_output_files,
-    get_workflow_images,
-)
+# Try package import first (for development), fall back to local file (for farm execution)
+try:
+    from comfyui.utils import (
+        WEBSOCKET_AVAILABLE,
+        check_server_health,
+        wait_for_server,
+        submit_workflow,
+        wait_for_completion,
+        modify_workflow_seed,
+        upload_image_to_server,
+        download_image_from_server,
+        move_output_files,
+        get_workflow_images,
+    )
+except ImportError:
+    # When running standalone on farm, import from copied utils file
+    from comfyui_utils import (
+        WEBSOCKET_AVAILABLE,
+        check_server_health,
+        wait_for_server,
+        submit_workflow,
+        wait_for_completion,
+        modify_workflow_seed,
+        upload_image_from_server,
+        download_image_from_server,
+        move_output_files,
+        get_workflow_images,
+    )
 
 
 # =============================================================================

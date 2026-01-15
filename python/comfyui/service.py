@@ -217,8 +217,8 @@ def submit_comfyui_to_deadline(
         python_exe = comfyui_python if comfyui_python else "python"
 
     script_dir = os.path.dirname(__file__)
-    runner_script_source = os.path.join(script_dir, "comfyui_runner.py")
-    utils_script_source = os.path.join(script_dir, "comfyui_utils.py")
+    runner_script_source = os.path.join(script_dir, "runner.py")
+    utils_script_source = os.path.join(script_dir, "utils.py")
     runner_script = os.path.join(output_dir, "comfyui_runner.py")
     utils_script = os.path.join(output_dir, "comfyui_utils.py")
 

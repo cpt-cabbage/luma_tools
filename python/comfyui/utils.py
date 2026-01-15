@@ -2,7 +2,7 @@
 ComfyUI Shared Utilities.
 
 Common functions for ComfyUI server communication, workflow handling, and file operations.
-Used by comfyui_client.py, comfyui_runner.py, and comfyui_server.py.
+Used by client.py, runner.py, and server.py.
 """
 
 import sys

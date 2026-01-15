@@ -17,7 +17,12 @@ from core.config import *
 
 # AYON imports
 try:
-    from ayon_api import get_project
+    from ayon_api import (
+        get_project,
+        get_folder_by_path,
+        get_product_by_name,
+        get_last_version_by_product_id,
+    )
     from ayon_core.pipeline import Anatomy
     from ayon_core.pipeline.version_start import get_versioning_start
     from ayon_core.settings import get_project_settings
@@ -149,6 +154,50 @@ def convert_to_ayon_folder_path(filesystem_path, project_name):
     return path
 
 
+def get_next_version(project_name: str, folder_path: str, product_name: str) -> int:
+    """
+    Get the next available version number for a product in AYON.
+
+    Args:
+        project_name: Name of the AYON project
+        folder_path: AYON folder path (e.g., /shots/seq01/sh0010)
+        product_name: Name of the product (e.g., renderMain)
+
+    Returns:
+        int: Next version number (starts from 1 if no versions exist)
+    """
+    if not AYON_AVAILABLE:
+        print("[get_next_version] AYON not available, defaulting to version 1")
+        return 1
+
+    try:
+        # Get the folder entity
+        folder = get_folder_by_path(project_name, folder_path)
+        if not folder:
+            print(f"[get_next_version] Folder not found: {folder_path}, defaulting to version 1")
+            return 1
+
+        # Get the product by name within this folder
+        product = get_product_by_name(project_name, product_name, folder["id"])
+        if not product:
+            print(f"[get_next_version] Product '{product_name}' not found in {folder_path}, starting at version 1")
+            return 1
+
+        # Get the last version of this product
+        last_version = get_last_version_by_product_id(project_name, product["id"])
+        if not last_version:
+            print(f"[get_next_version] No versions found for '{product_name}', starting at version 1")
+            return 1
+
+        next_ver = last_version["version"] + 1
+        print(f"[get_next_version] Found version {last_version['version']}, next version will be {next_ver}")
+        return next_ver
+
+    except Exception as e:
+        print(f"[get_next_version] Error querying versions: {e}, defaulting to version 1")
+        return 1
+
+
 def create_ayon_metadata_single_file(
     project_name: str,
     file_path: str,
@@ -236,6 +285,9 @@ def create_ayon_metadata_single_file(
         if has_review:
             representation["tags"] = ["review"]
 
+    # Get next version number
+    next_version = get_next_version(project_name, folder_path, product_name)
+
     # Create instance data
     instance_data = {
         "productName": product_name,
@@ -250,7 +302,7 @@ def create_ayon_metadata_single_file(
         "farm": False,
         "comment": comment,
         "variant": variant,
-        "version": 1,
+        "version": next_version,
         "anatomyData": {
             "project": {"name": project_name, "code": project_code},
             "folder": {"name": os.path.basename(folder_path)},
@@ -272,7 +324,7 @@ def create_ayon_metadata_single_file(
         "intent": None,
         "comment": comment,
         "job": {},
-        "version": 1,
+        "version": next_version,
         "instances": [instance_data]
     }
 
@@ -365,9 +417,13 @@ def create_ayon_metadata(
         }
     }]
 
+    # Get next version number
+    product_name = render_name.split('.')[0]
+    next_version = get_next_version(project_name, folder_path, product_name)
+
     # Create instance skeleton data
     instance_skeleton_data = {
-        "productName": render_name.split('.')[0],
+        "productName": product_name,
         "productType": AYON_PRODUCT_TYPE,
         "family": AYON_FAMILY,
         "families": ["render", "review"],
@@ -396,15 +452,15 @@ def create_ayon_metadata(
         "multipartExr": True,
         "overrideExistingFrame": None,
         "pixelAspect": 1.0,
-        "productGroup": render_name.split('.')[0],
-        "renderlayer": render_name.split('.')[0],
+        "productGroup": product_name,
+        "renderlayer": product_name,
         "resolutionHeight": AYON_DEFAULT_HEIGHT,
         "resolutionWidth": AYON_DEFAULT_WIDTH,
         "reuseLastVersion": False,
         "review": True,
         "stagingDir_persistent": False,
         "useSequenceForReview": True,
-        "version": 1,
+        "version": next_version,
         "anatomyData": {
             "project": {"name": project_name, "code": project_code},
             "folder": {"name": os.path.basename(folder_path)},
@@ -424,7 +480,7 @@ def create_ayon_metadata(
         "intent": None,
         "comment": "",
         "job": {},
-        "version": 1,
+        "version": next_version,
         "instances": [instance_skeleton_data]
     }
 
