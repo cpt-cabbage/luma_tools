@@ -26,37 +26,21 @@ REM Prompt user for update type
 echo.
 echo Update types:
 echo   b = Big update    (0.4 -^> 0.5)
-echo   s = Small update  (0.4 -^> 0.41)
-echo   m = Minor update  (0.4 -^> 0.4.1, or 0.4.1 -^> 0.4.2)
+echo   s = Small update  (0.4 -^> 0.4.1, or 0.4.1 -^> 0.4.2)
+echo   m = Minor update  (0.4.1 -^> 0.4.1.1, or 0.4.1.1 -^> 0.4.1.2)
 echo.
 set /p UPDATE_TYPE="Update type (b/s/m): "
 
 REM Increment version using PowerShell based on update type
-for /f "usebackq delims=" %%v in (`powershell -Command ^
-    "$v = '%CURRENT_VERSION%'; ^
-    $parts = $v -split '\.'; ^
-    switch ('%UPDATE_TYPE%'.ToLower()) { ^
-        'b' { ^
-            $major = [int]$parts[0]; ^
-            $minor = [math]::Round([decimal]$parts[1] + 0.1, 1); ^
-            if ($minor -ge 10) { $major++; $minor = 0 }; ^
-            '{0}.{1}' -f $major, $minor ^
-        } ^
-        's' { ^
-            $major = [int]$parts[0]; ^
-            $minor = [math]::Round([decimal]$parts[1] + 0.01, 2); ^
-            if ($minor -ge 10) { $major++; $minor = 0 }; ^
-            '{0}.{1}' -f $major, $minor ^
-        } ^
-        'm' { ^
-            if ($parts.Count -eq 2) { ^
-                '{0}.{1}.1' -f $parts[0], $parts[1] ^
-            } else { ^
-                '{0}.{1}.{2}' -f $parts[0], $parts[1], ([int]$parts[2] + 1) ^
-            } ^
-        } ^
-        default { $v } ^
-    }"`) do set NEW_VERSION=%%v
+if /i "%UPDATE_TYPE%"=="b" (
+    for /f "usebackq delims=" %%v in (`powershell -Command "$v='%CURRENT_VERSION%'; $parts=$v.Split('.'); $newMinor=[int]$parts[1]+1; '{0}.{1}' -f $parts[0],$newMinor"`) do set NEW_VERSION=%%v
+) else if /i "%UPDATE_TYPE%"=="s" (
+    for /f "usebackq delims=" %%v in (`powershell -Command "$v='%CURRENT_VERSION%'; $parts=$v.Split('.'); if($parts.Count -eq 2){'{0}.{1}.1' -f $parts[0],$parts[1]}else{'{0}.{1}.{2}' -f $parts[0],$parts[1],([int]$parts[2]+1)}"`) do set NEW_VERSION=%%v
+) else if /i "%UPDATE_TYPE%"=="m" (
+    for /f "usebackq delims=" %%v in (`powershell -Command "$v='%CURRENT_VERSION%'; $parts=$v.Split('.'); if($parts.Count -le 3){$v+'.1'}else{$parts[3]=[int]$parts[3]+1; $parts -join '.'}"`) do set NEW_VERSION=%%v
+) else (
+    set NEW_VERSION=%CURRENT_VERSION%
+)
 echo New version: %NEW_VERSION%
 
 REM Update version.json with new version
@@ -74,7 +58,7 @@ set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
 if /i "%UPDATE_CHANGELOG%"=="y" (
     REM Prepend new version entry to changelog.md (escape single quotes for PowerShell)
     set "COMMIT_MSG_ESCAPED=!COMMIT_MSG:'=''!"
-    powershell -Command "$nl = [char]10; $msg = '!COMMIT_MSG_ESCAPED!'; if (-not $msg.StartsWith('- ')) { $msg = '- ' + $msg }; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    powershell -Command "$nl = [char]10; $msg = '!COMMIT_MSG_ESCAPED!'; $msg = $msg -replace ' - ', ($nl + '- '); if (-not $msg.StartsWith('- ')) { $msg = '- ' + $msg }; $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
     echo Changelog updated with: %COMMIT_MSG%
 ) else (
     echo Changelog not updated.

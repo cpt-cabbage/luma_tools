@@ -167,6 +167,19 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="RePublishUseCurrentTask">
+          <property name="text">
+           <string>Publish to Current AYON Task</string>
+          </property>
+          <property name="toolTip">
+           <string>When enabled, publishes to the current AYON task context instead of inferring from the custom path</string>
+          </property>
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="republishCustomPathSpacer">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>

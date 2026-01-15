@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.1
+- Fix publishing from viewer
+- Fix changelog generation
+
 ## Version 0.4
 - New custom tree.js 3d viewport
 - Improve 3D viewer prewarming to prevent window flashing and add configurable camera distance.

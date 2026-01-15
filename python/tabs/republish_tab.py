@@ -92,6 +92,23 @@ class RePublishTab(BaseTab):
         """Handle rePublish source type radio button changes."""
         is_custom = self.ui.RePublishUseCustom.isChecked()
         self.ui.RePublishBrowseCustomPath.setEnabled(is_custom)
+
+        # Enable "Use Current AYON Task" only when custom path is selected AND we have shot context
+        can_use_current_task = is_custom and self.app_state.has_shot_context()
+        self.ui.RePublishUseCurrentTask.setEnabled(can_use_current_task)
+        if not can_use_current_task:
+            self.ui.RePublishUseCurrentTask.setChecked(False)
+
+        # Update tooltip to explain why it might be disabled
+        if is_custom and not self.app_state.has_shot_context():
+            self.ui.RePublishUseCurrentTask.setToolTip(
+                "Not available - no AYON task context (running in standalone mode)"
+            )
+        else:
+            self.ui.RePublishUseCurrentTask.setToolTip(
+                "When enabled, publishes to the current AYON task context instead of inferring from the custom path"
+            )
+
         self._on_scan_renders_clicked()
 
     def _on_browse_custom_path(self):
@@ -260,13 +277,21 @@ class RePublishTab(BaseTab):
             StatusColors.INFO
         )
 
+        # Check if user wants to use current AYON task context
+        use_current_task = (
+            self.ui.RePublishUseCustom.isChecked() and
+            self.ui.RePublishUseCurrentTask.isChecked() and
+            self.app_state.has_shot_context()
+        )
+
         # Start worker thread - store reference to prevent garbage collection
         from ui_components import Worker
         self._publish_worker_ref = Worker(
             self._publish_worker,
             task,
             use_farm,
-            product_name
+            product_name,
+            use_current_task
         )
         self._publish_worker_ref.signals.result.connect(self._on_publish_complete)
         self._publish_worker_ref.signals.error.connect(self._on_publish_error)
@@ -274,7 +299,7 @@ class RePublishTab(BaseTab):
         self._publish_worker_ref.signals.finished.connect(self._on_publish_finished)
         QThreadPool.globalInstance().start(self._publish_worker_ref)
 
-    def _publish_worker(self, task, use_farm, product_name, progress_callback):
+    def _publish_worker(self, task, use_farm, product_name, use_current_task, progress_callback):
         """Worker thread function for publishing to AYON."""
         from ayon.service import (
             convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
@@ -319,34 +344,43 @@ class RePublishTab(BaseTab):
         frame_padding = len(seq.frameSet().frameRange().split("-")[0])
         render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
 
-        # Extract project name and folder path from the actual source directory
-        # This handles both standard workflow and custom directory selection
-        # Example: V:/LieweHeksie/shots/.../work/... -> project=LieweHeksie, folder=/shots/.../shotname
+        # Determine project name and folder path
+        # Either use current AYON task context or extract from the custom path
 
-        # Normalize path for parsing
-        normalized_source = source_dir.replace("\\", "/")
-
-        # Try to extract project name from path
-        path_parts = normalized_source.split("/")
-
-        # Find project name - it's typically after the drive letter and before "shots" or "assets"
-        project_name = self.app_state.jobname  # Default to current project
-        shot_path_for_conversion = None
-
-        for i, part in enumerate(path_parts):
-            if part in ["shots", "assets"] and i > 0:
-                # Project name is the part before shots/assets
-                project_name = path_parts[i - 1]
-                # Build the shot path up to /work
-                if "work" in path_parts:
-                    work_idx = path_parts.index("work")
-                    shot_path_for_conversion = "/".join(path_parts[:work_idx])
-                break
-
-        # If we couldn't extract from path, fall back to app_state
-        if not shot_path_for_conversion:
-            shot_path_for_conversion = self.app_state.shotpath
+        if use_current_task:
+            # Use current AYON task context directly (user explicitly requested this)
             project_name = self.app_state.jobname
+            shot_path_for_conversion = self.app_state.shotpath
+            print(f"[Use Current Task] Using current AYON context instead of parsing path")
+        else:
+            # Extract project name and folder path from the actual source directory
+            # This handles both standard workflow and custom directory selection
+            # Example: V:/LieweHeksie/shots/.../work/... -> project=LieweHeksie, folder=/shots/.../shotname
+
+            # Normalize path for parsing
+            normalized_source = source_dir.replace("\\", "/")
+
+            # Try to extract project name from path
+            path_parts = normalized_source.split("/")
+
+            # Find project name - it's typically after the drive letter and before "shots" or "assets"
+            project_name = self.app_state.jobname  # Default to current project
+            shot_path_for_conversion = None
+
+            for i, part in enumerate(path_parts):
+                if part in ["shots", "assets"] and i > 0:
+                    # Project name is the part before shots/assets
+                    project_name = path_parts[i - 1]
+                    # Build the shot path up to /work
+                    if "work" in path_parts:
+                        work_idx = path_parts.index("work")
+                        shot_path_for_conversion = "/".join(path_parts[:work_idx])
+                    break
+
+            # If we couldn't extract from path, fall back to app_state
+            if not shot_path_for_conversion:
+                shot_path_for_conversion = self.app_state.shotpath
+                project_name = self.app_state.jobname
 
         folder_path = convert_to_ayon_folder_path(shot_path_for_conversion, project_name)
 
