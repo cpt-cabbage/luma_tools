@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.5
+- Rename upload_image_from_server to upload_image_to_server in runner.py
+- Always copy scripts to output directory in service.py for reliability
+
 ## Version 0.4.1.4
 - Comfy fixes
 

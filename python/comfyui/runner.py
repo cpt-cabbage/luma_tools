@@ -16,6 +16,12 @@ Logs are written to ~/.luma_tools/logs/comfyui_runner_<timestamp>.log
 
 import sys
 import os
+
+# Ensure script directory is in path for standalone farm execution
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
 import json
 import time
 import copy
