@@ -54,8 +54,12 @@ class LogsTab(BaseTab):
     def _append_to_log(self, message: str):
         """Internal method to append a message to the log widget."""
         self.ui.LogOutput.append(message.rstrip())
-        scrollbar = self.ui.LogOutput.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Scroll vertically to bottom to show latest message
+        v_scrollbar = self.ui.LogOutput.verticalScrollBar()
+        v_scrollbar.setValue(v_scrollbar.maximum())
+        # Keep horizontal scroll at left so long lines don't shift view
+        h_scrollbar = self.ui.LogOutput.horizontalScrollBar()
+        h_scrollbar.setValue(0)
 
     def append_log(self, message: str):
         """

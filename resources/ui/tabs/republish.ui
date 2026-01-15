@@ -48,6 +48,22 @@
       <item>
        <layout class="QHBoxLayout" name="republishVersionLayout">
         <item>
+         <widget class="QPushButton" name="RePublishSourceButton">
+          <property name="minimumSize">
+           <size>
+            <width>140</width>
+            <height>28</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Source: For Comp</string>
+          </property>
+          <property name="toolTip">
+           <string>Click to select the render source</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QLabel" name="RePublishVersionLabel">
           <property name="text">
            <string>Version:</string>
@@ -77,37 +93,6 @@
          </widget>
         </item>
         <item>
-         <widget class="QLabel" name="republishSourceTypeLabel">
-          <property name="text">
-           <string>Source:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QRadioButton" name="RePublishUseForComp">
-          <property name="text">
-           <string>For Comp</string>
-          </property>
-          <property name="checked">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QRadioButton" name="RePublishUseRaw">
-          <property name="text">
-           <string>Raw</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QRadioButton" name="RePublishUseCustom">
-          <property name="text">
-           <string>Custom</string>
-          </property>
-         </widget>
-        </item>
-        <item>
          <widget class="QPushButton" name="RePublishBrowseCustomPath">
           <property name="minimumSize">
            <size>
@@ -115,7 +100,7 @@
             <height>28</height>
            </size>
           </property>
-          <property name="enabled">
+          <property name="visible">
            <bool>false</bool>
           </property>
           <property name="text">
@@ -127,15 +112,15 @@
          <widget class="QPushButton" name="RePublishScanRenders">
           <property name="minimumSize">
            <size>
-            <width>100</width>
+            <width>80</width>
             <height>28</height>
            </size>
           </property>
           <property name="toolTip">
-           <string>Scan for render files</string>
+           <string>Rescan</string>
           </property>
           <property name="text">
-           <string>Scan Renders</string>
+           <string>Rescan</string>
           </property>
          </widget>
         </item>
@@ -164,6 +149,9 @@
           <property name="styleSheet">
            <string notr="true">color: #888888; font-size: 9pt;</string>
           </property>
+          <property name="visible">
+           <bool>false</bool>
+          </property>
          </widget>
         </item>
         <item>
@@ -175,6 +163,9 @@
            <string>When enabled, publishes to the current AYON task context instead of inferring from the custom path</string>
           </property>
           <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="visible">
            <bool>false</bool>
           </property>
          </widget>
@@ -265,7 +256,7 @@
         <item>
          <widget class="QCheckBox" name="RePublishUseFarm">
           <property name="text">
-           <string>Publish to Farm (Deadline)</string>
+           <string>Publish on Farm</string>
           </property>
           <property name="checked">
            <bool>false</bool>
@@ -297,6 +288,9 @@
         </item>
         <item>
          <widget class="QLineEdit" name="RePublishProductName">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
           <property name="placeholderText">
            <string>Auto-generated from render name</string>
           </property>

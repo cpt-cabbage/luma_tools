@@ -33,9 +33,7 @@ class RePublishTab(BaseTab):
         """Connect rePublish tab signals."""
         self.ui.RePublishScanRenders.clicked.connect(self._on_scan_renders_clicked)
         self.ui.RePublishCurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
-        self.ui.RePublishUseForComp.toggled.connect(self._on_source_changed)
-        self.ui.RePublishUseRaw.toggled.connect(self._on_source_changed)
-        self.ui.RePublishUseCustom.toggled.connect(self._on_source_changed)
+        self.ui.RePublishSourceButton.clicked.connect(self._on_source_button_clicked)
         self.ui.RePublishBrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.RePublishRendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.RePublishPublish.clicked.connect(self._on_publish_clicked)
@@ -44,6 +42,15 @@ class RePublishTab(BaseTab):
     def initialize(self):
         """Initialize rePublish tab."""
         self.ui.RePublishPublish.setEnabled(False)
+
+        # Source options (label, value)
+        self._source = "for_comp"  # Default
+        self._source_options = [
+            ("For Comp", "for_comp"),
+            ("Raw", "raw"),
+            ("Custom", "custom"),
+        ]
+        self._update_source_button_text()
 
         # Task options
         self._task = "lighting"  # Default
@@ -56,15 +63,55 @@ class RePublishTab(BaseTab):
 
         # In standalone mode, only allow custom directory selection
         if self.app_state.standalone_mode:
-            self.ui.RePublishUseForComp.setEnabled(False)
-            self.ui.RePublishUseRaw.setEnabled(False)
-            self.ui.RePublishUseCustom.setChecked(True)
-            self.ui.RePublishBrowseCustomPath.setEnabled(True)
+            self._source = "custom"
+            self._update_source_button_text()
+            self.ui.RePublishBrowseCustomPath.setVisible(True)
             print("Republish tab: Standalone mode - only custom directory selection allowed")
 
     def _update_task_button_text(self):
         """Update the task button text to show current selection."""
         self.ui.RePublishTaskButton.setText(f"Task: {self._task}")
+
+    def _update_source_button_text(self):
+        """Update the source button text to show current selection."""
+        # Find label for current source value
+        label = next((l for l, v in self._source_options if v == self._source), self._source)
+        # Update with output_subdirectory if available and using for_comp
+        if self._source == "for_comp" and self.app_state.output_subdirectory:
+            label = self.app_state.output_subdirectory.title()
+        self.ui.RePublishSourceButton.setText(f"Source: {label}")
+
+    def _on_source_button_clicked(self):
+        """Show popup menu with source options."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, value in self._source_options:
+            # In standalone mode, only show Custom option
+            if self.app_state.standalone_mode and value != "custom":
+                continue
+
+            # Update label for for_comp if output_subdirectory is set
+            display_label = label
+            if value == "for_comp" and self.app_state.output_subdirectory:
+                display_label = self.app_state.output_subdirectory.title()
+
+            action = menu.addAction(display_label)
+            action.setData(value)
+            if value == self._source:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.RePublishSourceButton.mapToGlobal(
+            self.ui.RePublishSourceButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._source = action.data()
+            self._update_source_button_text()
+            self._on_source_changed()
 
     def _on_task_button_clicked(self):
         """Show popup menu with task options."""
@@ -89,25 +136,31 @@ class RePublishTab(BaseTab):
             self._update_task_button_text()
 
     def _on_source_changed(self):
-        """Handle rePublish source type radio button changes."""
-        is_custom = self.ui.RePublishUseCustom.isChecked()
-        self.ui.RePublishBrowseCustomPath.setEnabled(is_custom)
+        """Handle rePublish source type changes."""
+        is_custom = self._source == "custom"
+
+        # Show/hide browse button and custom path controls based on source type
+        self.ui.RePublishBrowseCustomPath.setVisible(is_custom)
+        self.ui.RePublishCustomPathLabel.setVisible(is_custom)
+        self.ui.RePublishUseCurrentTask.setVisible(is_custom)
+
+        # Hide version spinbox when using custom path (not relevant for custom directories)
+        self.ui.RePublishVersionLabel.setVisible(not is_custom)
+        self.ui.RePublishCurrentVer.setVisible(not is_custom)
 
         # Enable "Use Current AYON Task" only when custom path is selected AND we have shot context
-        can_use_current_task = is_custom and self.app_state.has_shot_context()
-        self.ui.RePublishUseCurrentTask.setEnabled(can_use_current_task)
-        if not can_use_current_task:
-            self.ui.RePublishUseCurrentTask.setChecked(False)
-
-        # Update tooltip to explain why it might be disabled
-        if is_custom and not self.app_state.has_shot_context():
-            self.ui.RePublishUseCurrentTask.setToolTip(
-                "Not available - no AYON task context (running in standalone mode)"
-            )
-        else:
-            self.ui.RePublishUseCurrentTask.setToolTip(
-                "When enabled, publishes to the current AYON task context instead of inferring from the custom path"
-            )
+        if is_custom:
+            can_use_current_task = self.app_state.has_shot_context()
+            self.ui.RePublishUseCurrentTask.setEnabled(can_use_current_task)
+            if not can_use_current_task:
+                self.ui.RePublishUseCurrentTask.setChecked(False)
+                self.ui.RePublishUseCurrentTask.setToolTip(
+                    "Not available - no AYON task context (running in standalone mode)"
+                )
+            else:
+                self.ui.RePublishUseCurrentTask.setToolTip(
+                    "When enabled, publishes to the current AYON task context instead of inferring from the custom path"
+                )
 
         self._on_scan_renders_clicked()
 
@@ -140,7 +193,7 @@ class RePublishTab(BaseTab):
         from core.utils import update_path_version, scan_exr_sequences
 
         # In standalone mode, only custom path is allowed
-        if self.app_state.standalone_mode and not self.ui.RePublishUseCustom.isChecked():
+        if self.app_state.standalone_mode and self._source != "custom":
             self.ui.RePublishStatusLabel.setText("Status: Use custom directory in standalone mode")
             return
 
@@ -152,24 +205,20 @@ class RePublishTab(BaseTab):
             )
             self.ui.RePublishRenderPath.setText(self.app_state.republish_searchpath)
 
-        # Update "For Comp" label if output_subdirectory is set
-        if not self.app_state.standalone_mode and self.app_state.output_subdirectory:
-            self.ui.RePublishUseForComp.setText(f"Denoised ({self.app_state.output_subdirectory.title()})")
-
         # Clear previous list
         self.ui.RePublishRendersList.clear()
         self.app_state.republish_renders = []
 
         # Determine which source to scan
         search_path = ""
-        if self.ui.RePublishUseForComp.isChecked():
+        if self._source == "for_comp":
             if self.app_state.output_subdirectory:
                 search_path = os.path.join(self.app_state.republish_searchpath, self.app_state.output_subdirectory)
             else:
                 search_path = self.app_state.republish_searchpath
-        elif self.ui.RePublishUseRaw.isChecked():
+        elif self._source == "raw":
             search_path = self.app_state.republish_searchpath
-        elif self.ui.RePublishUseCustom.isChecked():
+        elif self._source == "custom":
             search_path = self.app_state.republish_custom_path
 
         if not search_path or not os.path.exists(search_path):
@@ -235,12 +284,11 @@ class RePublishTab(BaseTab):
             f"Frames: {self.app_state.republish_startframe}-{self.app_state.republish_endframe}"
         )
 
-        # Auto-populate product name if empty
-        if not self.ui.RePublishProductName.text():
-            base = seq.basename()
-            parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
-            render_name = parts[0] if parts else base.replace("#", "").strip(".")
-            self.ui.RePublishProductName.setText(render_name)
+        # Set product name from render
+        base = seq.basename()
+        parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
+        render_name = parts[0] if parts else base.replace("#", "").strip(".")
+        self.ui.RePublishProductName.setText(render_name)
 
         # Enable publish button
         self.ui.RePublishPublish.setEnabled(True)
@@ -279,7 +327,7 @@ class RePublishTab(BaseTab):
 
         # Check if user wants to use current AYON task context
         use_current_task = (
-            self.ui.RePublishUseCustom.isChecked() and
+            self._source == "custom" and
             self.ui.RePublishUseCurrentTask.isChecked() and
             self.app_state.has_shot_context()
         )

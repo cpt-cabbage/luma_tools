@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.1
+- Add Publish to Current AYON Task toggle checkbox to rePublish tab that allows users to publish custom selected renders to their current AYON task instead of the path string.
+
 ## Version 0.4.1
 - Fix publishing from viewer
 - Fix changelog generation
