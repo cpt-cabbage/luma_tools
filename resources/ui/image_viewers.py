@@ -658,7 +658,7 @@ class EmbeddedImageViewer(QWidget):
                 break
 
         try:
-            from comfyui_ayon_publisher import publish_comfyui_asset_to_ayon
+            from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
             image_path = self.image_paths[self.current_index]
             success = publish_comfyui_asset_to_ayon(
                 file_path=image_path,

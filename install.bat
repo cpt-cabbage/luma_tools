@@ -24,17 +24,39 @@ echo Current version: %CURRENT_VERSION%
 
 REM Prompt user for update type
 echo.
-set /p BIG_UPDATE="Big Update? (y/n): "
-if /i "%BIG_UPDATE%"=="y" (
-    set INCREMENT=0.1
-    set DECIMALS=1
-) else (
-    set INCREMENT=0.01
-    set DECIMALS=2
-)
+echo Update types:
+echo   b = Big update    (0.4 -^> 0.5)
+echo   s = Small update  (0.4 -^> 0.41)
+echo   m = Minor update  (0.4 -^> 0.4.1, or 0.4.1 -^> 0.4.2)
+echo.
+set /p UPDATE_TYPE="Update type (b/s/m): "
 
-REM Increment version using PowerShell
-for /f "usebackq delims=" %%v in (`powershell -Command "[math]::Round([decimal]'%CURRENT_VERSION%' + %INCREMENT%, %DECIMALS%)"`) do set NEW_VERSION=%%v
+REM Increment version using PowerShell based on update type
+for /f "usebackq delims=" %%v in (`powershell -Command ^
+    "$v = '%CURRENT_VERSION%'; ^
+    $parts = $v -split '\.'; ^
+    switch ('%UPDATE_TYPE%'.ToLower()) { ^
+        'b' { ^
+            $major = [int]$parts[0]; ^
+            $minor = [math]::Round([decimal]$parts[1] + 0.1, 1); ^
+            if ($minor -ge 10) { $major++; $minor = 0 }; ^
+            '{0}.{1}' -f $major, $minor ^
+        } ^
+        's' { ^
+            $major = [int]$parts[0]; ^
+            $minor = [math]::Round([decimal]$parts[1] + 0.01, 2); ^
+            if ($minor -ge 10) { $major++; $minor = 0 }; ^
+            '{0}.{1}' -f $major, $minor ^
+        } ^
+        'm' { ^
+            if ($parts.Count -eq 2) { ^
+                '{0}.{1}.1' -f $parts[0], $parts[1] ^
+            } else { ^
+                '{0}.{1}.{2}' -f $parts[0], $parts[1], ([int]$parts[2] + 1) ^
+            } ^
+        } ^
+        default { $v } ^
+    }"`) do set NEW_VERSION=%%v
 echo New version: %NEW_VERSION%
 
 REM Update version.json with new version
