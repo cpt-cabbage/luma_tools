@@ -146,7 +146,7 @@ class EmbeddedImageViewer(QWidget):
     - Escape or Backspace: Close viewer and return to gallery
     - Home/End: Jump to first/last image
     - C: Copy prompt to clipboard (if available)
-    - S: Copy settings to ComfyUI tab (if available)
+    - S: Apply settings to ComfyUI tab (if available)
     - Delete: Delete current image
     """
     closed = Signal()
@@ -628,7 +628,7 @@ class EmbeddedImageViewer(QWidget):
             print(f"Error copying prompt: {e}")
 
     def _copy_settings(self):
-        """Copy all settings for current image to the ComfyUI tab."""
+        """Apply all settings for current image to the ComfyUI tab."""
         if not self.image_paths:
             return
 
@@ -647,7 +647,7 @@ class EmbeddedImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No settings available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error copying settings: {e}")
+            print(f"Error applying settings: {e}")
 
     def _publish_to_ayon(self):
         """Publish this image to AYON."""
@@ -749,8 +749,8 @@ class EmbeddedImageViewer(QWidget):
 
         menu.addSeparator()
 
-        copy_settings_action = menu.addAction("Copy Settings (S)")
-        copy_settings_action.triggered.connect(self._copy_settings)
+        apply_settings_action = menu.addAction("Apply Settings (S)")
+        apply_settings_action.triggered.connect(self._copy_settings)
 
         copy_prompt_action = menu.addAction("Copy Prompt (C)")
         copy_prompt_action.triggered.connect(self._copy_prompt)
@@ -789,7 +789,7 @@ class FullscreenImageViewer(QWidget):
     - Home/End: Jump to first/last image
     - Space: Toggle filename display
     - C: Copy prompt to clipboard (if available)
-    - S: Copy settings to ComfyUI tab (if available)
+    - S: Apply settings to ComfyUI tab (if available)
     - Delete: Delete current file
     """
     closed = Signal()
@@ -1009,7 +1009,7 @@ class FullscreenImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No settings available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error copying settings: {e}")
+            print(f"Error applying settings: {e}")
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -1104,8 +1104,8 @@ class FullscreenImageViewer(QWidget):
 
         menu.addSeparator()
 
-        copy_settings_action = menu.addAction("Copy Settings (S)")
-        copy_settings_action.triggered.connect(self._copy_settings)
+        apply_settings_action = menu.addAction("Apply Settings (S)")
+        apply_settings_action.triggered.connect(self._copy_settings)
 
         copy_prompt_action = menu.addAction("Copy Prompt (C)")
         copy_prompt_action.triggered.connect(self._copy_prompt)

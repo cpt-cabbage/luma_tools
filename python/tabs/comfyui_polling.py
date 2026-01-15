@@ -134,6 +134,16 @@ class PollingMixin:
 
     def _on_iterate_poll_result(self, result):
         """Handle iterate poll result."""
+        import traceback
+        try:
+            self._on_iterate_poll_result_impl(result)
+        except Exception as e:
+            print(f"ERROR in _on_iterate_poll_result: {e}")
+            traceback.print_exc()
+            self._stop_iterate_polling()
+
+    def _on_iterate_poll_result_impl(self, result):
+        """Implementation of iterate poll result handling."""
         from ui_components import StatusColors
 
         status = result.get("status", "Unknown")
@@ -200,6 +210,17 @@ class PollingMixin:
 
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
+        import traceback
+        try:
+            self._on_iterate_job_completed_impl()
+        except Exception as e:
+            print(f"ERROR in _on_iterate_job_completed: {e}")
+            traceback.print_exc()
+            self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
+            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+
+    def _on_iterate_job_completed_impl(self):
+        """Implementation of iterate job completion."""
         from ui_components import StatusColors
         from comfyui.service import get_job_output_files, cleanup_job_temp_files
 
@@ -359,12 +380,17 @@ class PollingMixin:
 
     def _on_batch_poll_result_collected(self, job_id, result):
         """Collect a single job's poll result, then process all when complete."""
-        self.log(f"[Batch] Poll result collected for {job_id}: {result.get('status', 'Unknown')}, pending={self._batch_poll_pending_results - 1}")
-        self._batch_poll_results[job_id] = result
-        self._batch_poll_pending_results -= 1
+        import traceback
+        try:
+            self.log(f"[Batch] Poll result collected for {job_id}: {result.get('status', 'Unknown')}, pending={self._batch_poll_pending_results - 1}")
+            self._batch_poll_results[job_id] = result
+            self._batch_poll_pending_results -= 1
 
-        if self._batch_poll_pending_results <= 0:
-            self._process_collected_poll_results()
+            if self._batch_poll_pending_results <= 0:
+                self._process_collected_poll_results()
+        except Exception as e:
+            print(f"ERROR in _on_batch_poll_result_collected: {e}")
+            traceback.print_exc()
 
     def _process_collected_poll_results(self):
         """Process all collected poll results and update status bar once."""
@@ -458,6 +484,15 @@ class PollingMixin:
 
     def _on_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion - cleanup and refresh gallery."""
+        import traceback
+        try:
+            self._on_batch_jobs_completed_impl(had_failures)
+        except Exception as e:
+            print(f"ERROR in _on_batch_jobs_completed: {e}")
+            traceback.print_exc()
+
+    def _on_batch_jobs_completed_impl(self, had_failures=False):
+        """Implementation of batch jobs completion."""
         from ui_components import StatusColors
         from comfyui.service import cleanup_job_temp_files
 

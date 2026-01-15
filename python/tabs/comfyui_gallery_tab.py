@@ -805,6 +805,16 @@ class ComfyUIGalleryTab(BaseTab):
         Args:
             items: List of dicts with keys: path, mtime, type, name, workflow
         """
+        import traceback
+        try:
+            self._on_scan_complete_impl(items)
+        except Exception as e:
+            print(f"ERROR in _on_scan_complete: {e}")
+            traceback.print_exc()
+            self._scan_in_progress = False
+
+    def _on_scan_complete_impl(self, items):
+        """Implementation of scan completion handling."""
         self._scan_in_progress = False
 
         # Handle legacy format (tuples or plain paths)
@@ -1042,6 +1052,8 @@ class ComfyUIGalleryTab(BaseTab):
 
         Loads in batches to avoid overwhelming the thread pool.
         """
+        from shiboken6 import isValid
+
         if not hasattr(self, '_widget_cache') or not self._widget_cache:
             return
 
@@ -1065,7 +1077,8 @@ class ComfyUIGalleryTab(BaseTab):
         # Collect widgets that need loading (not already loaded)
         widgets_to_load = []
         for widget in self._widget_cache.values():
-            if not widget or not hasattr(widget, 'load_thumbnail_if_needed'):
+            # Check widget validity (may have been deleted during refresh)
+            if not widget or not isValid(widget) or not hasattr(widget, 'load_thumbnail_if_needed'):
                 continue
             if getattr(widget, '_thumbnail_loaded', False):
                 continue
@@ -1087,13 +1100,18 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _load_thumbnail_batch(self):
         """Load thumbnails one at a time with delays to prevent UI lag."""
+        from shiboken6 import isValid
+
         if not hasattr(self, '_pending_thumbnail_loads'):
             return
         if self._thumbnail_load_index >= len(self._pending_thumbnail_loads):
             return
 
         # Load one widget at a time to stagger worker completions
-        self._pending_thumbnail_loads[self._thumbnail_load_index].load_thumbnail_if_needed()
+        # Check if widget is still valid before accessing it
+        widget = self._pending_thumbnail_loads[self._thumbnail_load_index]
+        if isValid(widget):
+            widget.load_thumbnail_if_needed()
         self._thumbnail_load_index += 1
 
         # Schedule next with delay so workers don't all finish at once

@@ -29,7 +29,7 @@ EDITABLE_NODE_CONFIGS = {
 
     # TRELLIS2 nodes
     'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # Old node
-    'Trellis2ExportMesh': [(0, 'filename_prefix', 'string')],  # New mesh export (glb/obj/etc)
+    'Trellis2ExportMesh': [(1, 'filename_prefix', 'string')],  # New mesh export (glb/obj/etc) - output_dir at 0
     'Trellis2LoadImageWithTransparency': [(0, 'image', 'image')],  # Load image with alpha
 
     # UltraShape nodes
@@ -163,7 +163,7 @@ WIDGET_MAPPINGS = {
         'target_face_num', 'simplify_method', 'fill_holes', 'fill_holes_max_perimeter',
         'texture_alpha_mode', 'dual_contouring_resolution', 'double_side_material', 'remove_floaters'
     ],
-    'Trellis2ExportMesh': ['filename_prefix', 'file_format', 'save_file'],
+    'Trellis2ExportMesh': ['output_dir', 'filename_prefix', 'file_format', 'save_file'],
 
     # Mask nodes
     'InvertMask': [],

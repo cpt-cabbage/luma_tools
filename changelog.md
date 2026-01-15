@@ -1,5 +1,10 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.10
+- Refactor polling terminology from frames to jobs for clarity
+- Hide add/edit model buttons from non-admin users
+- Rename thumbnail renderer script and update references
+
 ## Version 0.4.1.9
 - Introduce system tray icon with notifications for cross-platform alerts
 - Fix worker garbage collection issues in polling, gallery, and other tabs

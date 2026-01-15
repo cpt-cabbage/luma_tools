@@ -36,6 +36,7 @@ from comfyui.workflow import (
     save_workflow,
     is_api_format,
     convert_to_api_format,
+    expand_subgraphs,
 )
 from comfyui.editable import (
     EditableNode,

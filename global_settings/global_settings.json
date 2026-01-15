@@ -39,7 +39,7 @@
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
       "description": "",
       "iteratable": false,
-      "note": "",
+      "note": "- Only one character in the image\n- Must be in the center of the image\n- Clear Difference between fg and bg",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": true,
@@ -72,6 +72,15 @@
           "default_value": ""
         }
       },
+      "is_multi": false
+    },
+    "jon": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2509.json",
+      "description": "",
+      "iteratable": true,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
       "is_multi": false
     }
   },

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMenu, QDialog, QComboBox, QApplication
 )
 from PySide6.QtGui import QPainter, QColor, QPen, QPixmap
+from shiboken6 import isValid
 
 # Re-export from submodules (absolute imports since resources/ui is in path)
 from workers import Worker, WorkerSignals, ThreadedOperation, report_progress
@@ -77,7 +78,7 @@ class MetadataCopyMixin:
             self._show_feedback("Error copying prompt")
 
     def _copy_settings(self):
-        """Copy settings to ComfyUI tab with feedback."""
+        """Apply settings to ComfyUI tab (workflow, seed, editable values)."""
         metadata = self._get_current_metadata()
         if not metadata:
             self._show_feedback("No settings available")
@@ -90,10 +91,10 @@ class MetadataCopyMixin:
         try:
             self.copy_settings_requested.emit(metadata)
             path = getattr(self, 'image_path', getattr(self, 'model_path', 'unknown'))
-            self._show_feedback(f"Settings copied from {os.path.basename(path)}")
+            self._show_feedback(f"Settings applied from {os.path.basename(path)}")
         except Exception as e:
-            print(f"Error copying settings: {e}")
-            self._show_feedback("Error copying settings")
+            print(f"Error applying settings: {e}")
+            self._show_feedback("Error applying settings")
 
     def _copy_path(self, path=None):
         """Copy path to clipboard with feedback."""
@@ -225,6 +226,9 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
         return (filename, note)
 
     def _on_tooltip_loaded(self, data):
+        # Check if widget is still valid (may have been deleted during async load)
+        if not isValid(self):
+            return
         filename, note = data
         tooltip_parts = [filename]
         if note:
@@ -263,6 +267,9 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
         return buffer.data().data()
 
     def _on_thumbnail_loaded(self, image_data):
+        # Check if widget is still valid (may have been deleted during async load)
+        if not isValid(self):
+            return
         if image_data is None:
             self.thumbnail_label.setPixmap(self._create_placeholder("?"))
             return
@@ -274,6 +281,9 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
             self.thumbnail_label.setPixmap(self._create_placeholder("?"))
 
     def _on_thumbnail_error(self):
+        # Check if widget is still valid (may have been deleted during async load)
+        if not isValid(self):
+            return
         self.thumbnail_label.setPixmap(self._create_placeholder("!"))
 
     def _create_placeholder(self, text):
@@ -323,18 +333,37 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
             edit_action.setText("Edit Item (view only)")
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(self._open_folder)
-        menu.addSeparator()
+
+        # View Input option - show the source image used to generate this output
         metadata = self._get_metadata()
+        input_image = metadata.get('input_image')
+        input_path = os.path.join(self.output_dir, input_image) if input_image else None
+        has_input = input_path and os.path.exists(input_path)
+        view_input_action = menu.addAction("View Input")
+        view_input_action.triggered.connect(lambda: self._view_input(input_path))
+        view_input_action.setEnabled(has_input)
+        if not has_input and input_image:
+            view_input_action.setText("View Input (not found)")
+
+        menu.addSeparator()
         has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
-        copy_settings_action = menu.addAction("Copy Settings")
-        copy_settings_action.triggered.connect(self._copy_settings)
-        copy_settings_action.setEnabled(has_settings)
+        apply_settings_action = menu.addAction("Apply Settings")
+        apply_settings_action.triggered.connect(self._copy_settings)
+        apply_settings_action.setEnabled(has_settings)
+        if not has_settings:
+            apply_settings_action.setText("Apply Settings (no metadata)")
         prompt = metadata.get('prompt', '')
         copy_prompt_action = menu.addAction("Copy Prompt")
         copy_prompt_action.triggered.connect(self._copy_prompt)
         copy_prompt_action.setEnabled(bool(prompt))
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(self._copy_path)
+
+        # Publish to AYON
+        menu.addSeparator()
+        publish_action = menu.addAction("Publish to AYON")
+        publish_action.triggered.connect(self._publish_to_ayon)
+
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self._delete_item)
@@ -342,6 +371,19 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
             delete_action.setEnabled(False)
             delete_action.setText("Delete (view only)")
         menu.exec_(self.mapToGlobal(pos))
+
+    def _publish_to_ayon(self):
+        """Publish this image to AYON."""
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+        try:
+            from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
+            publish_comfyui_asset_to_ayon(self.image_path, parent_window, self.output_dir)
+        except Exception as e:
+            print(f"Error publishing to AYON: {e}")
 
     def _open_image(self):
         try:
@@ -355,6 +397,16 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
             subprocess.Popen(f'explorer /select,"{self.image_path}"')
         except Exception as e:
             print(f"Error opening folder: {e}")
+
+    def _view_input(self, input_path):
+        """Open the input image that was used to generate this output."""
+        if not input_path or not os.path.exists(input_path):
+            print(f"Input image not found: {input_path}")
+            return
+        try:
+            os.startfile(input_path)
+        except Exception as e:
+            print(f"Error opening input image: {e}")
 
     def _delete_item(self):
         from PySide6.QtWidgets import QMessageBox
@@ -520,6 +572,9 @@ class GLBThumbnailWidget(QWidget):
         return (filename, note)
 
     def _on_tooltip_loaded(self, data):
+        # Check if widget is still valid (may have been deleted during async load)
+        if not isValid(self):
+            return
         filename, note = data
         tooltip_parts = [filename]
         if note:
@@ -578,6 +633,9 @@ class GLBThumbnailWidget(QWidget):
             service.set_pending(self.model_path, False)
         except Exception:
             pass
+        # Check if widget is still valid (may have been deleted during async load)
+        if not isValid(self):
+            return
         if pixmap and not pixmap.isNull():
             self.thumbnail_label.setPixmap(pixmap.scaled(
                 *self.THUMBNAIL_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -591,6 +649,7 @@ class GLBThumbnailWidget(QWidget):
             service.set_pending(self.model_path, False)
         except Exception:
             pass
+        # Widget may have been deleted during async load - just log the error
         print(f"GLB thumbnail error: {error_msg}")
 
     def _create_placeholder(self, text):
@@ -639,12 +698,31 @@ class GLBThumbnailWidget(QWidget):
         menu.addSeparator()
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(self._copy_path)
+
+        # Publish to AYON
+        menu.addSeparator()
+        publish_action = menu.addAction("Publish to AYON")
+        publish_action.triggered.connect(self._publish_to_ayon)
+
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(self._delete_model)
         if not self._editable:
             delete_action.setEnabled(False)
         menu.exec_(self.mapToGlobal(pos))
+
+    def _publish_to_ayon(self):
+        """Publish this 3D model to AYON."""
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+        try:
+            from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
+            publish_comfyui_asset_to_ayon(self.model_path, parent_window, self.output_dir)
+        except Exception as e:
+            print(f"Error publishing to AYON: {e}")
 
     def _open_viewer(self):
         """Open the 3D model in a Three.js viewer dialog."""

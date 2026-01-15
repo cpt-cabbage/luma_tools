@@ -10,8 +10,109 @@ This is the refactored version using the modular tab system.
 
 import sys
 import os
+import logging
+from datetime import datetime
 
 from core.config import APP_ID, APP_TITLE, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
+
+
+# ============================================================================
+# File Logging Setup (must be early to catch all errors)
+# ============================================================================
+def setup_file_logging():
+    """Setup file-based logging to capture crashes and errors.
+
+    Creates log files in ~/.luma_tools/logs/ with rotation (keeps last 5).
+    Returns the log file path for reference.
+    """
+    # Create logs directory
+    log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create timestamped log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"luma_tools_{timestamp}.log")
+
+    # Setup logging
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+        ]
+    )
+
+    # Create a custom stream that writes to both original stdout AND log file
+    class TeeStream:
+        """Stream that writes to both the original stream and log file."""
+        def __init__(self, original_stream, log_func):
+            self.original = original_stream
+            self.log_func = log_func
+            self.buffer = ""
+
+        def write(self, text):
+            if self.original:
+                self.original.write(text)
+            # Buffer lines for logging
+            self.buffer += text
+            while '\n' in self.buffer:
+                line, self.buffer = self.buffer.split('\n', 1)
+                if line.strip():
+                    self.log_func(line)
+
+        def flush(self):
+            if self.original:
+                self.original.flush()
+            if self.buffer.strip():
+                self.log_func(self.buffer)
+                self.buffer = ""
+
+    # Wrap stdout and stderr to also write to log file
+    sys.stdout = TeeStream(sys.__stdout__, logging.info)
+    sys.stderr = TeeStream(sys.__stderr__, logging.error)
+
+    # Cleanup old log files (keep last 5)
+    try:
+        log_files = sorted(
+            [f for f in os.listdir(log_dir) if f.startswith("luma_tools_") and f.endswith(".log")],
+            reverse=True
+        )
+        for old_file in log_files[5:]:
+            try:
+                os.remove(os.path.join(log_dir, old_file))
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+    logging.info(f"=== Luma Tools Starting ===")
+    logging.info(f"Log file: {log_file}")
+
+    return log_file
+
+
+# Initialize file logging immediately
+LOG_FILE = setup_file_logging()
+
+
+def exception_hook(exc_type, exc_value, exc_traceback):
+    """Global exception handler to log unhandled exceptions."""
+    import traceback
+    logging.error("=" * 60)
+    logging.error("UNHANDLED EXCEPTION")
+    logging.error("=" * 60)
+    tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+    for line in tb_lines:
+        for subline in line.rstrip().split('\n'):
+            logging.error(subline)
+    logging.error("=" * 60)
+    # Also print to stderr for visibility
+    sys.__stderr__.write("".join(tb_lines))
+
+
+# Install global exception hook
+sys.excepthook = exception_hook
 
 # Set up Windows things
 if sys.platform == 'win32':
@@ -814,10 +915,14 @@ def main():
         window.enable_log_redirect()
 
         # Run the application
-        sys.exit(app.exec())
+        logging.info("Application window shown, entering event loop")
+        exit_code = app.exec()
+        logging.info(f"Application exiting with code {exit_code}")
+        sys.exit(exit_code)
     except Exception as e:
-        print(f"ERROR in main: {e}")
+        logging.error(f"FATAL ERROR in main: {e}")
         traceback.print_exc()
+        logging.error("Application terminating due to fatal error")
         sys.exit(1)
 
 
