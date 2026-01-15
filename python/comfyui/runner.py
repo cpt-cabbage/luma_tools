@@ -189,8 +189,7 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
 # =============================================================================
 
 def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, port: int,
-                         mode: str = "embedded", python_path: str = None,
-                         fast_mode: bool = False) -> subprocess.Popen:
+                         mode: str = "embedded", python_path: str = None) -> subprocess.Popen:
     """Start ComfyUI server process."""
     if mode == "embedded":
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
@@ -234,10 +233,6 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         '--port', str(port),
         '--disable-auto-launch'
     ]
-
-    if fast_mode:
-        cmd.append('--fast')
-        print("Fast mode enabled (--fast)")
 
     working_dir = os.path.dirname(main_py)
 
@@ -296,7 +291,6 @@ def main():
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
                        help='ComfyUI installation mode')
     parser.add_argument('--python-path', help='Path to Python executable (for standalone mode)')
-    parser.add_argument('--fast', action='store_true', help='Enable --fast flag for faster execution')
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files)')
     parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs')
     parser.add_argument('--server-not-found', choices=['fail', 'wait'], default='fail',
@@ -423,8 +417,7 @@ def main():
             args.output_directory,
             args.port,
             mode=args.mode,
-            python_path=args.python_path,
-            fast_mode=args.fast
+            python_path=args.python_path
         )
         if process is None:
             print("ERROR: Failed to start ComfyUI server")

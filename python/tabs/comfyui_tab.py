@@ -1562,31 +1562,38 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         def on_result(result):
             """Called when submission completes."""
-            # Stop spinner only if no jobs were submitted (polling will handle spinner otherwise)
-            job_ids, error_msg = result
+            try:
+                self.log(f"[ComfyUI] on_result called with: {result}")
+                # Stop spinner only if no jobs were submitted (polling will handle spinner otherwise)
+                job_ids, error_msg = result
 
-            if job_ids:
-                job_count = len(job_ids)
-                total_gens = job_count * generation_count
-                self.main_window.animator.show_success(f"Submitted {job_count} job(s), {total_gens} generations")
-                self.main_window.animator.update_status_animated(
-                    f"ComfyUI: {job_count} job(s) submitted",
-                    StatusColors.SUCCESS
-                )
-                self.log(f"ComfyUI submission complete: {job_ids}")
+                if job_ids:
+                    job_count = len(job_ids)
+                    total_gens = job_count * generation_count
+                    self.main_window.animator.show_success(f"Submitted {job_count} job(s), {total_gens} generations")
+                    self.main_window.animator.update_status_animated(
+                        f"ComfyUI: {job_count} job(s) submitted",
+                        StatusColors.SUCCESS
+                    )
+                    self.log(f"ComfyUI submission complete: {job_ids}")
 
-                # Start polling for job completion
-                if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
-                    self._start_iterate_polling(job_ids[0], network_output_dir)
+                    # Start polling for job completion
+                    self.log(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
+                    if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
+                        self._start_iterate_polling(job_ids[0], network_output_dir)
+                    else:
+                        self._start_batch_polling(job_ids, network_output_dir)
                 else:
-                    self._start_batch_polling(job_ids, network_output_dir)
-            else:
-                self.main_window.stop_status_spinner()
-                self.main_window.animator.show_error(f"Submission failed: {error_msg}")
-                self.main_window.animator.update_status_animated(
-                    f"ComfyUI failed: {error_msg}",
-                    StatusColors.ERROR
-                )
+                    self.main_window.stop_status_spinner()
+                    self.main_window.animator.show_error(f"Submission failed: {error_msg}")
+                    self.main_window.animator.update_status_animated(
+                        f"ComfyUI failed: {error_msg}",
+                        StatusColors.ERROR
+                    )
+            except Exception as e:
+                import traceback
+                self.log(f"[ComfyUI] ERROR in on_result: {e}")
+                self.log(traceback.format_exc())
 
         def on_error(error_msg, traceback_str):
             """Called when submission fails."""
@@ -1610,7 +1617,8 @@ class ComfyUITab(PollingMixin, BaseTab):
         full_restart = workflow_config.get("full_restart", False) if workflow_config else False
 
         # Create worker and run submission on background thread
-        worker = Worker(
+        # Store worker as instance attribute to prevent garbage collection before completion
+        self._submit_worker = Worker(
             submit_comfyui_job,
             workflow_path=self.app_state.comfyui_workflow_path,
             input_image=None,
@@ -1625,10 +1633,14 @@ class ComfyUITab(PollingMixin, BaseTab):
             workflow_preset=self._current_preset_name,
             full_restart=full_restart,
         )
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        worker.signals.progress.connect(on_progress)
-        QThreadPool.globalInstance().start(worker)
+        # Store callbacks as instance attributes to prevent garbage collection
+        self._submit_on_result = on_result
+        self._submit_on_error = on_error
+        self._submit_on_progress = on_progress
+        self._submit_worker.signals.result.connect(self._submit_on_result)
+        self._submit_worker.signals.error.connect(self._submit_on_error)
+        self._submit_worker.signals.progress.connect(self._submit_on_progress)
+        QThreadPool.globalInstance().start(self._submit_worker)
 
     # =========================================================================
     # POLLING METHODS - See comfyui_polling.py (PollingMixin)

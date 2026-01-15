@@ -11,6 +11,7 @@ import random
 from typing import Optional, Dict, Any, Tuple
 
 from comfyui.workflow import is_api_format, convert_to_api_format
+from comfyui.node_configs import WIDGET_MAPPINGS, EXPORT_NODE_TYPES
 
 
 def modify_workflow_api_format(
@@ -19,7 +20,8 @@ def modify_workflow_api_format(
     prompt: Optional[str],
     output_prefix: str,
     seed: int,
-    editable_values: Optional[Dict[int, Dict[str, Any]]] = None
+    editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
+    output_dir: Optional[str] = None
 ) -> Tuple[Dict[str, Any], bool]:
     """
     Modify workflow in API format (node IDs as keys with 'inputs' dict).
@@ -34,6 +36,7 @@ def modify_workflow_api_format(
         output_prefix: Output filename prefix
         seed: Random seed for samplers
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
+        output_dir: Output directory for export nodes (FBX, GLB, etc.)
 
     Returns:
         Tuple of (modified_workflow, found_editable_prompt_node)
@@ -193,63 +196,29 @@ def modify_workflow_api_format(
                 # Non-editable prompt node - log but don't modify
                 print(f"Skipping non-editable prompt node {node_id} (title: '{node_title}' - missing '_editable' suffix)")
 
-        # SaveImage nodes - set output prefix (always apply, even if editable)
-        elif class_type == 'SaveImage':
-            inputs['filename_prefix'] = output_prefix
-            print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
+        # Generic handling based on node capabilities (WIDGET_MAPPINGS)
+        # This handles output_dir, filename_prefix, and seed for ANY node that supports them
 
-        # HYMotionExportFBX nodes - clear output_dir so files go to main output, set prefix (always apply)
-        elif class_type == 'HYMotionExportFBX':
-            inputs['output_dir'] = ''  # Empty = use ComfyUI's output directory directly
-            inputs['filename_prefix'] = output_prefix
-            print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
+        # Get widget mappings for this node type (if known)
+        widget_list = WIDGET_MAPPINGS.get(class_type, [])
 
-        # Trellis2ExportGLB nodes - set output prefix (always apply)
-        elif class_type == 'Trellis2ExportGLB':
-            inputs['filename_prefix'] = output_prefix
-            print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
+        # Set output_dir for any node that supports it
+        if 'output_dir' in widget_list and output_dir:
+            inputs['output_dir'] = output_dir
+            print(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
 
-        # Trellis2ExportMesh nodes - set output prefix (always apply)
-        elif class_type == 'Trellis2ExportMesh':
+        # Set filename_prefix for export nodes
+        if class_type in EXPORT_NODE_TYPES:
             inputs['filename_prefix'] = output_prefix
-            print(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
+            print(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
 
-        # UltraShapeSaveGLB nodes - set output prefix (always apply)
-        # NOTE: output_dir cannot be reliably cleared - node writes to subdirectory regardless
-        # The move_output_files function searches recursively to handle this
-        elif class_type == 'UltraShapeSaveGLB':
-            inputs['filename_prefix'] = output_prefix
-            print(f"Set UltraShapeSaveGLB node {node_id}: prefix={output_prefix}")
-
-        # Trellis2ImageToShape nodes - set seed (always apply)
-        elif class_type == 'Trellis2ImageToShape':
+        # Set seed for sampler/generator nodes
+        if 'seed' in widget_list:
             inputs['seed'] = seed
-            print(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
-
-        # Trellis2ShapeToTexturedMesh nodes - set seed (always apply)
-        elif class_type == 'Trellis2ShapeToTexturedMesh':
-            inputs['seed'] = seed
-            print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
-
-        # Trellis2MeshWithVoxelAdvancedGenerator nodes - set seed (always apply)
-        elif class_type == 'Trellis2MeshWithVoxelAdvancedGenerator':
-            inputs['seed'] = seed
-            print(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
-
-        # KSampler nodes - set seed (always apply)
-        elif class_type == 'KSampler':
-            inputs['seed'] = seed
-            print(f"Set KSampler node {node_id} seed to: {seed}")
-
-        # SamplerCustomAdvanced / RandomNoise nodes - set seed (always apply)
-        elif class_type == 'RandomNoise':
+            print(f"Set {class_type} node {node_id} seed to: {seed}")
+        elif 'noise_seed' in widget_list:
             inputs['noise_seed'] = seed
-            print(f"Set RandomNoise node {node_id} seed to: {seed}")
-
-        # HYMotionGenerate nodes - set seed (always apply)
-        elif class_type == 'HYMotionGenerate':
-            inputs['seed'] = seed
-            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
+            print(f"Set {class_type} node {node_id} noise_seed to: {seed}")
 
     # Summary
     print(f"\n=== Workflow Modification Summary ===")
@@ -269,7 +238,8 @@ def modify_workflow(
     prompt: Optional[str],
     output_prefix: str,
     seed: Optional[int] = None,
-    editable_values: Optional[Dict[int, Dict[str, Any]]] = None
+    editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
+    output_dir: Optional[str] = None
 ) -> Tuple[Dict[str, Any], bool]:
     """
     Modify Qwen image edit workflow with user inputs.
@@ -283,6 +253,7 @@ def modify_workflow(
         output_prefix: Output filename prefix
         seed: Random seed for KSampler (None = generate random)
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
+        output_dir: Output directory for export nodes (FBX, GLB, etc.)
 
     Returns:
         Tuple of (modified_workflow, found_editable_prompt_node)
@@ -303,4 +274,4 @@ def modify_workflow(
         print(f"Converted workflow with {len(api_workflow)} nodes")
 
     # Modify the API format workflow
-    return modify_workflow_api_format(api_workflow, input_image, prompt, output_prefix, seed, editable_values)
+    return modify_workflow_api_format(api_workflow, input_image, prompt, output_prefix, seed, editable_values, output_dir)

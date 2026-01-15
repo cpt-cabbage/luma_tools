@@ -216,9 +216,10 @@ SEED_NODE_TYPES = [
 
 
 # Node types that export files and need output prefix set
+# Nodes with 'output_dir' in WIDGET_MAPPINGS will also have output_dir set automatically
 EXPORT_NODE_TYPES = {
     'SaveImage': 'filename_prefix',
-    'HYMotionExportFBX': 'filename_prefix',  # Also needs output_dir cleared
+    'HYMotionExportFBX': 'filename_prefix',
     'Trellis2ExportGLB': 'filename_prefix',
     'Trellis2ExportMesh': 'filename_prefix',
     'UltraShapeSaveGLB': 'filename_prefix',

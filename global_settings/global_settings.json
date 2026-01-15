@@ -89,8 +89,7 @@
   "comfyui_fp16_accumulation": true,
   "restricted_tabs": [
     "comfyui",
-    "comfyui_gallery",
-    "settings"
+    "comfyui_gallery"
   ],
   "comfyui_timeout": 600,
   "comfyui_server_not_found_behavior": "wait",

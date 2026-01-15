@@ -366,7 +366,12 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
             self._model_data = model_data
 
             if model_data:
-                self._scene_center = model_data.center
+                # Center horizontally but ground vertically
+                # Use geometric center for X and Z, but use min Y (feet) for grounding
+                center = model_data.center.copy()
+                center[1] = model_data.bounds_min[1]  # Ground the model on Y=0
+
+                self._scene_center = center
                 self._scene_radius = max(model_data.radius, 0.1)
                 self._reset_camera()
 

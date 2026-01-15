@@ -262,11 +262,6 @@ def submit_comfyui_to_deadline(
     if full_restart:
         runner_args += ' --full-restart'
 
-    if get_comfyui_fast_mode():
-        runner_args += ' --fast'
-    if get_comfyui_fp16_accumulation():
-        runner_args += ' --fp16-accumulation'
-
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
@@ -432,6 +427,7 @@ def submit_comfyui_job(
             current_job_name,
             seed=12345,
             editable_values=current_editable_values,
+            output_dir=current_working_dir,
         )
 
         if prompt and not found_editable and not current_editable_values:
@@ -641,7 +637,14 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         progress = int((completed_tasks / max(total_tasks, 1)) * 100)
 
-        if status in ("Complete", "Completed") and failed_tasks > 0:
+        # Debug: log raw status from Deadline
+        print(f"[Poll Debug] Job {job_id}: raw_status='{status}', completed={completed_tasks}/{total_tasks}, failed={failed_tasks}")
+
+        # Normalize "Complete" to "Completed" for consistency
+        if status == "Complete":
+            status = "Completed"
+
+        if status == "Completed" and failed_tasks > 0:
             status = "Failed"
 
         if status == "Active":
@@ -649,6 +652,8 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
                 status = "Rendering"
             elif queued_tasks > 0 and completed_tasks == 0:
                 status = "Queued"
+
+        print(f"[Poll Debug] Job {job_id}: final_status='{status}'")
 
         return {
             "status": status,

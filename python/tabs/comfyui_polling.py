@@ -53,6 +53,7 @@ class PollingMixin:
         """Initialize polling state variables. Call from __init__."""
         # Iterate mode state
         self._iterate_poll_timer = None
+        self._iterate_poll_worker = None
         self._iterate_network_output_dir = ""
         self._iterate_poll_count = 0
         self._iterate_completed_tasks = 0
@@ -73,6 +74,7 @@ class PollingMixin:
         self._batch_generation_count = 1
         self._batch_poll_pending_results = 0
         self._batch_poll_results = {}
+        self._batch_poll_workers = []
 
     # =========================================================================
     # ITERATE MODE POLLING
@@ -124,10 +126,11 @@ class PollingMixin:
             return
 
         output_dir = self._iterate_network_output_dir
-        worker = Worker(poll_deadline_job_status, job_id, output_dir)
-        worker.signals.result.connect(self._on_iterate_poll_result)
-        worker.signals.error.connect(lambda msg, tb: self.log(f"Poll error: {msg}"))
-        QThreadPool.globalInstance().start(worker)
+        # Store worker to prevent garbage collection
+        self._iterate_poll_worker = Worker(poll_deadline_job_status, job_id, output_dir)
+        self._iterate_poll_worker.signals.result.connect(self._on_iterate_poll_result)
+        self._iterate_poll_worker.signals.error.connect(lambda msg, tb: self.log(f"Poll error: {msg}"))
+        QThreadPool.globalInstance().start(self._iterate_poll_worker)
 
     def _on_iterate_poll_result(self, result):
         """Handle iterate poll result."""
@@ -330,11 +333,20 @@ class PollingMixin:
         self._batch_poll_pending_results = len(self._batch_pending_jobs)
         self._batch_poll_results = {}
 
+        # Store workers and callbacks to prevent garbage collection
+        self._batch_poll_workers = []
+
         output_dir = self._batch_network_output_dir
         for job_id in list(self._batch_pending_jobs):
             worker = Worker(poll_deadline_job_status, job_id, output_dir)
-            worker.signals.result.connect(lambda result, jid=job_id: self._on_batch_poll_result_collected(jid, result))
-            worker.signals.error.connect(lambda msg, tb, jid=job_id: self._on_batch_poll_error(jid, msg))
+            # Use bound methods instead of lambdas to avoid GC issues
+            worker.signals.result.connect(
+                lambda result, jid=job_id: self._on_batch_poll_result_collected(jid, result)
+            )
+            worker.signals.error.connect(
+                lambda msg, tb, jid=job_id: self._on_batch_poll_error(jid, msg)
+            )
+            self._batch_poll_workers.append(worker)
             QThreadPool.globalInstance().start(worker)
 
     def _on_batch_poll_error(self, job_id, error_msg):
@@ -347,6 +359,7 @@ class PollingMixin:
 
     def _on_batch_poll_result_collected(self, job_id, result):
         """Collect a single job's poll result, then process all when complete."""
+        self.log(f"[Batch] Poll result collected for {job_id}: {result.get('status', 'Unknown')}, pending={self._batch_poll_pending_results - 1}")
         self._batch_poll_results[job_id] = result
         self._batch_poll_pending_results -= 1
 
@@ -355,80 +368,86 @@ class PollingMixin:
 
     def _process_collected_poll_results(self):
         """Process all collected poll results and update status bar once."""
-        from ui_components import StatusColors
+        try:
+            from ui_components import StatusColors
 
-        had_new_frames = False
-        total_jobs = len(self._batch_job_ids)
+            self.log(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
+            had_new_frames = False
+            total_jobs = len(self._batch_job_ids)
 
-        for job_id, result in self._batch_poll_results.items():
-            status = result.get("status", "Unknown")
-            completed_tasks = result.get("completed_tasks", 0)
-            total_tasks = result.get("total_tasks", 1)
+            for job_id, result in self._batch_poll_results.items():
+                status = result.get("status", "Unknown")
+                completed_tasks = result.get("completed_tasks", 0)
+                total_tasks = result.get("total_tasks", 1)
 
-            self._batch_job_statuses[job_id] = status
-            if total_tasks > 1:
-                self._batch_total_tasks[job_id] = total_tasks
+                self._batch_job_statuses[job_id] = status
+                if total_tasks > 1:
+                    self._batch_total_tasks[job_id] = total_tasks
 
-            prev_completed = self._batch_completed_tasks.get(job_id, 0)
-            if completed_tasks > prev_completed:
-                new_frames = completed_tasks - prev_completed
-                self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
-                self._batch_completed_tasks[job_id] = completed_tasks
-                had_new_frames = True
+                prev_completed = self._batch_completed_tasks.get(job_id, 0)
+                if completed_tasks > prev_completed:
+                    new_frames = completed_tasks - prev_completed
+                    self.log(f"[Batch] Job {job_id}: {new_frames} new frame(s) rendered! ({completed_tasks}/{total_tasks})")
+                    self._batch_completed_tasks[job_id] = completed_tasks
+                    had_new_frames = True
 
-            self.log(f"[Batch Poll] Job {job_id}: {status}, Tasks: {completed_tasks}/{total_tasks}")
+                self.log(f"[Batch Poll] Job {job_id}: {status}, Tasks: {completed_tasks}/{total_tasks}")
 
-            if status == "Completed":
-                self._batch_pending_jobs.discard(job_id)
-                self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
-                self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
+                if status == "Completed":
+                    self._batch_pending_jobs.discard(job_id)
+                    self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
+                    self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
 
-            elif status == "Failed":
-                self._batch_pending_jobs.discard(job_id)
-                self._batch_failed_jobs.add(job_id)
-                error_msg = result.get("error_message", "Unknown error")
-                self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
+                elif status == "Failed":
+                    self._batch_pending_jobs.discard(job_id)
+                    self._batch_failed_jobs.add(job_id)
+                    error_msg = result.get("error_message", "Unknown error")
+                    self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
 
-        if had_new_frames:
-            self._refresh_gallery_for_new_frames("[Batch]")
+            if had_new_frames:
+                self._refresh_gallery_for_new_frames("[Batch]")
 
-        completed_jobs = total_jobs - len(self._batch_pending_jobs)
-        total_frames_all = sum(self._batch_total_tasks.values())
-        completed_frames_all = sum(self._batch_completed_tasks.values())
-        elapsed = time.time() - self._batch_start_time if self._batch_start_time else 0
-        elapsed_str = format_elapsed_time(elapsed)
+            completed_jobs = total_jobs - len(self._batch_pending_jobs)
+            total_frames_all = sum(self._batch_total_tasks.values())
+            completed_frames_all = sum(self._batch_completed_tasks.values())
+            elapsed = time.time() - self._batch_start_time if self._batch_start_time else 0
+            elapsed_str = format_elapsed_time(elapsed)
 
-        if not self._batch_pending_jobs:
-            self._on_batch_jobs_completed(had_failures=len(self._batch_failed_jobs) > 0)
-            return
+            if not self._batch_pending_jobs:
+                self._on_batch_jobs_completed(had_failures=len(self._batch_failed_jobs) > 0)
+                return
 
-        active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
-        queued_jobs = len(self._batch_pending_jobs) - active_jobs
-        failed_count = len(self._batch_failed_jobs)
+            active_jobs = sum(1 for s in self._batch_job_statuses.values() if s in ("Active", "Rendering"))
+            queued_jobs = len(self._batch_pending_jobs) - active_jobs
+            failed_count = len(self._batch_failed_jobs)
 
-        if failed_count > 0:
-            main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {failed_count} failed, {completed_jobs}/{total_jobs} done"
-            status_color = StatusColors.WARNING
-        elif active_jobs > 0:
-            eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
-            if completed_frames_all > 0:
-                main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {active_jobs} rendering"
-                if queued_jobs > 0:
-                    main_status += f", {queued_jobs} queued"
-                main_status += f" - {elapsed_str}"
-                if eta_str:
-                    main_status += f" (~{eta_str} left)"
+            if failed_count > 0:
+                main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {failed_count} failed, {completed_jobs}/{total_jobs} done"
+                status_color = StatusColors.WARNING
+            elif active_jobs > 0:
+                eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
+                if completed_frames_all > 0:
+                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} frames - {active_jobs} rendering"
+                    if queued_jobs > 0:
+                        main_status += f", {queued_jobs} queued"
+                    main_status += f" - {elapsed_str}"
+                    if eta_str:
+                        main_status += f" (~{eta_str} left)"
+                else:
+                    main_status = f"ComfyUI: Starting {total_frames_all} frames - {active_jobs} active, {queued_jobs} queued"
+                status_color = StatusColors.INFO
+            elif queued_jobs > 0:
+                main_status = f"ComfyUI: {queued_jobs} job(s) queued - Waiting for workers..."
+                status_color = StatusColors.INFO
             else:
-                main_status = f"ComfyUI: Starting {total_frames_all} frames - {active_jobs} active, {queued_jobs} queued"
-            status_color = StatusColors.INFO
-        elif queued_jobs > 0:
-            main_status = f"ComfyUI: {queued_jobs} job(s) queued - Waiting for workers..."
-            status_color = StatusColors.INFO
-        else:
-            main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
-            status_color = StatusColors.INFO
+                main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
+                status_color = StatusColors.INFO
 
-        self.main_window.animator.update_status_animated(main_status, status_color)
+            self.main_window.animator.update_status_animated(main_status, status_color)
+        except Exception as e:
+            import traceback
+            self.log(f"[Batch] ERROR in _process_collected_poll_results: {e}")
+            self.log(traceback.format_exc())
 
     def _stop_batch_polling(self):
         """Stop the batch poll timer."""
