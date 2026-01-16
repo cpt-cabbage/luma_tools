@@ -309,18 +309,27 @@ ExitCodeTreatedAsFailure=1-255
 
 
 def _collect_batch_images(editable_values: Optional[Dict[int, Dict[str, Any]]]) -> Tuple[List[str], int]:
-    """Collect all batch images from editable values."""
+    """
+    Collect all batch input files (images, 3D models, etc.) from editable values.
+
+    Returns:
+        Tuple of (list of file paths, node_id of the input node)
+    """
     if not editable_values:
         return [], -1
 
-    for node_id, data in editable_values.items():
-        node_info = data.get('node')
-        value = data.get('value')
-        if node_info and node_info.widget_type == 'image':
-            if isinstance(value, list):
-                return [p for p in value if os.path.exists(p)], node_id
-            elif value and os.path.exists(value):
-                return [value], node_id
+    # Priority order: images first, then 3D models
+    input_types = ['image', '3d_model']
+
+    for input_type in input_types:
+        for node_id, data in editable_values.items():
+            node_info = data.get('node')
+            value = data.get('value')
+            if node_info and node_info.widget_type == input_type:
+                if isinstance(value, list):
+                    return [p for p in value if os.path.exists(p)], node_id
+                elif value and os.path.exists(value):
+                    return [value], node_id
 
     return [], -1
 
@@ -341,17 +350,18 @@ def submit_comfyui_job(
     full_restart: bool = False,
 ) -> Tuple[List[str], str]:
     """
-    Submit ComfyUI job to Deadline. Supports batch image processing.
+    Submit ComfyUI job to Deadline. Supports batch input file processing.
 
-    If multiple images are selected, submits a separate job for each image.
-    Each job runs generation_count generations with different seeds.
+    If multiple input files (images, 3D models, etc.) are selected, submits a separate
+    job for each file. Each job runs generation_count generations with different seeds.
+    Output filenames always include the input filename for traceability.
 
     Args:
         workflow_path: Path to original workflow JSON file
         input_image: Path to input image (legacy, can be None)
         prompt: Edit prompt text (legacy, can be None)
         output_dir: User's output directory
-        generation_count: Number of generations per image
+        generation_count: Number of generations per input file
         job_name: Base name for the job
         editable_values: Dict of node_id -> {'node': EditableNode, 'value': Any}
         base_seed: Optional starting seed (sequential if provided, random if None)
@@ -370,20 +380,20 @@ def submit_comfyui_job(
         progress_callback(5, "Loading workflow...")
 
     workflow = load_workflow(workflow_path)
-    batch_images, image_node_id = _collect_batch_images(editable_values)
+    batch_files, input_node_id = _collect_batch_images(editable_values)
 
-    if not batch_images and input_image and os.path.exists(input_image):
-        batch_images = [input_image]
+    if not batch_files and input_image and os.path.exists(input_image):
+        batch_files = [input_image]
 
-    if not batch_images:
-        print("No input images found - submitting workflow as-is")
-        batch_images = [None]
+    if not batch_files:
+        print("No input files found - submitting workflow as-is")
+        batch_files = [None]
 
-    total_images = len(batch_images)
-    print(f"Batch submission: {total_images} image(s) x {generation_count} generations each")
+    total_files = len(batch_files)
+    print(f"Batch submission: {total_files} file(s) x {generation_count} generations each")
 
     if progress_callback:
-        progress_callback(10, f"Processing {total_images} image(s)...")
+        progress_callback(10, f"Processing {total_files} file(s)...")
 
     working_base_dir = network_output_dir if network_output_dir else output_dir
 
@@ -394,36 +404,37 @@ def submit_comfyui_job(
     all_job_ids = []
     errors = []
 
-    for img_idx, current_image in enumerate(batch_images):
-        base_progress = 10 + int((img_idx / total_images) * 80)
+    for file_idx, current_file in enumerate(batch_files):
+        base_progress = 10 + int((file_idx / total_files) * 80)
 
-        if current_image:
-            image_basename = os.path.basename(current_image)
-            image_name = os.path.splitext(image_basename)[0]
-            current_job_name = f"{job_name}_{image_name}" if total_images > 1 else job_name
-            current_working_dir = os.path.join(working_base_dir, image_name) if total_images > 1 else working_base_dir
+        if current_file:
+            file_basename = os.path.basename(current_file)
+            file_name = os.path.splitext(file_basename)[0]
+            # Always append input filename to output prefix for traceability
+            current_job_name = f"{job_name}_{file_name}"
+            current_working_dir = os.path.join(working_base_dir, file_name) if total_files > 1 else working_base_dir
         else:
-            image_basename = None
+            file_basename = None
             current_job_name = job_name
             current_working_dir = working_base_dir
 
         os.makedirs(current_working_dir, exist_ok=True)
 
         if progress_callback:
-            msg = f"Submitting {img_idx + 1}/{total_images}"
-            if current_image:
-                msg += f": {image_basename}"
+            msg = f"Submitting {file_idx + 1}/{total_files}"
+            if current_file:
+                msg += f": {file_basename}"
             progress_callback(base_progress, msg)
 
         current_editable_values = None
         if editable_values:
             current_editable_values = copy.deepcopy(editable_values)
-            if image_node_id >= 0 and image_node_id in current_editable_values:
-                current_editable_values[image_node_id]['value'] = current_image
+            if input_node_id >= 0 and input_node_id in current_editable_values:
+                current_editable_values[input_node_id]['value'] = current_file
 
         modified, found_editable = modify_workflow(
             workflow,
-            current_image,
+            current_file,
             prompt,
             current_job_name,
             seed=12345,
@@ -453,29 +464,32 @@ def submit_comfyui_job(
             json.dump(seeds_data, f, indent=2)
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)
-        if prompt_text or current_image or current_editable_values:
+        if prompt_text or current_file or current_editable_values:
             add_image_metadata(
                 output_dir=current_working_dir,
                 output_prefix=current_job_name,
                 prompt=prompt_text,
                 workflow_name=os.path.basename(workflow_path),
-                input_image=current_image,
+                input_image=current_file,
                 generation_count=generation_count,
                 base_seed=base_seed,
                 workflow_preset=workflow_preset,
                 editable_values=current_editable_values,
             )
 
-        if current_image:
-            image_dest = os.path.join(current_working_dir, image_basename)
-            if not os.path.exists(image_dest) or os.path.getmtime(current_image) > os.path.getmtime(image_dest):
-                shutil.copy2(current_image, image_dest)
+        # Copy input file to working directory for farm access
+        if current_file and os.path.exists(current_file):
+            file_dest = os.path.join(current_working_dir, file_basename)
+            if not os.path.exists(file_dest) or os.path.getmtime(current_file) > os.path.getmtime(file_dest):
+                shutil.copy2(current_file, file_dest)
 
+        # Copy additional 3D models if present in editable values
         if current_editable_values:
             for _, data in current_editable_values.items():
                 node_info = data.get('node')
                 value = data.get('value')
-                if node_info and node_info.widget_type == '3d_model' and value:
+                # Skip the primary input file (already copied above)
+                if node_info and node_info.widget_type == '3d_model' and value and value != current_file:
                     if os.path.exists(value):
                         model_basename = os.path.basename(value)
                         model_dest = os.path.join(current_working_dir, model_basename)
@@ -496,7 +510,7 @@ def submit_comfyui_job(
         if job_id:
             all_job_ids.append(job_id)
         else:
-            errors.append(f"Failed to submit job for image: {image_basename or 'workflow'}")
+            errors.append(f"Failed to submit job for file: {file_basename or 'workflow'}")
 
     if progress_callback:
         progress_callback(95, "Submission complete")
