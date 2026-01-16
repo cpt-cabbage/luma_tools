@@ -644,10 +644,6 @@ class LumaShotTools(QtWidgets.QWidget):
         """Show notification that a new version is available."""
         from PySide6.QtWidgets import QMessageBox
 
-        # Update status bar with persistent message
-        self.status_label.setText(f"⚠ New version available: v{new_version} - Please restart")
-        self.status_label.setStyleSheet("color: #f59e0b; font-weight: bold;")
-
         # Show system tray notification
         self.show_system_notification(
             "Luma Tools Update Available",
@@ -660,7 +656,7 @@ class LumaShotTools(QtWidgets.QWidget):
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("Update Available")
         msg.setText(f"A new version (v{new_version}) has been deployed.")
-        msg.setInformativeText("Please restart Luma Tools to use the latest version.")
+        msg.setInformativeText("Please restart Luma Tools to enjoy the latest version homies.")
         msg.setStandardButtons(QMessageBox.Ok)
         msg.show()  # Non-blocking show
 

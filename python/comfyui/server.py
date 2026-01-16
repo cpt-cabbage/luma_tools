@@ -311,6 +311,20 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     return process
 
 
+# Fatal error patterns that require server restart
+FATAL_ERROR_PATTERNS = [
+    'CUDA error: an illegal memory access',
+    'CUDA error: out of memory',
+    'torch.AcceleratorError',
+    'CUDA error: device-side assert',
+    'CUDA error: unspecified launch failure',
+    'RuntimeError: CUDA',
+    'CUBLAS_STATUS_EXECUTION_FAILED',
+    'CUDNN_STATUS_EXECUTION_FAILED',
+    'NCCL error',
+]
+
+
 def stream_comfyui_output(process: subprocess.Popen):
     """Stream ComfyUI output to console."""
     try:
@@ -324,6 +338,17 @@ def stream_comfyui_output(process: subprocess.Popen):
                     server_state['jobs_completed'] += 1
                 elif "Error" in line and "node" in line.lower():
                     server_state['jobs_failed'] += 1
+
+                # Check for fatal CUDA/GPU errors that require restart
+                for pattern in FATAL_ERROR_PATTERNS:
+                    if pattern in line:
+                        print(f"\n{'!' * 60}")
+                        print(f"FATAL GPU ERROR DETECTED: {pattern}")
+                        print(f"Requesting server restart...")
+                        print(f"{'!' * 60}\n")
+                        server_state['jobs_failed'] += 1
+                        server_state['restart_requested'] = True
+                        break
 
     except Exception as e:
         print(f"Output stream error: {e}")

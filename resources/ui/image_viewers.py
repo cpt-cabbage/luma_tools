@@ -242,6 +242,7 @@ class EmbeddedImageViewer(QWidget):
 
         # 1. Zoomable Image View
         self.image_view = ZoomableImageWidget()
+        self.image_view.setFocusPolicy(Qt.NoFocus)  # Prevent stealing focus from parent
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
         self.image_view.double_clicked.connect(self.close)
@@ -312,18 +313,6 @@ class EmbeddedImageViewer(QWidget):
         self.texture_toggle_btn.clicked.connect(self._toggle_3d_render_mode)
         self.texture_toggle_btn.hide()
         info_layout.addWidget(self.texture_toggle_btn)
-
-        self.keep_camera_checkbox = QCheckBox("Keep Camera")
-        self.keep_camera_checkbox.setFixedHeight(25)
-        self.keep_camera_checkbox.setStyleSheet("""
-            QCheckBox { color: #888888; font-size: 11px; spacing: 5px; }
-            QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #555555; border-radius: 3px; background-color: #2a2a2a; }
-            QCheckBox::indicator:checked { background-color: #4a9eff; border-color: #4a9eff; }
-            QCheckBox::indicator:hover { border-color: #4a9eff; }
-        """)
-        self.keep_camera_checkbox.setToolTip("Preserve camera position when navigating between 3D models")
-        self.keep_camera_checkbox.hide()
-        info_layout.addWidget(self.keep_camera_checkbox)
 
         # Publish to AYON button
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
@@ -456,7 +445,6 @@ class EmbeddedImageViewer(QWidget):
             MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae', '.stl', '.ply'}
             if ext in MODEL_EXTENSIONS:
                 self.texture_toggle_btn.show()
-                self.keep_camera_checkbox.show()
                 self._current_3d_path = media_path
                 self._3d_textured_mode = False
                 self.texture_toggle_btn.setText("Wireframe")
@@ -482,7 +470,6 @@ class EmbeddedImageViewer(QWidget):
 
             elif ext in ('.mp4', '.mov', '.avi', '.webm'):
                 self.texture_toggle_btn.hide()
-                self.keep_camera_checkbox.hide()
                 self._current_3d_path = None
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
                     from PySide6.QtMultimedia import QMediaContent
@@ -498,19 +485,18 @@ class EmbeddedImageViewer(QWidget):
 
             elif ext == '.exr':
                 self.texture_toggle_btn.hide()
-                self.keep_camera_checkbox.hide()
                 self._current_3d_path = None
                 self.message_label.setText("EXR Preview Not Available")
                 self.image_stack.setCurrentWidget(self.message_label)
 
             else:
                 self.texture_toggle_btn.hide()
-                self.keep_camera_checkbox.hide()
                 self._current_3d_path = None
                 pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
                     self.image_view.setPixmap(pixmap)
                     self.image_stack.setCurrentWidget(self.image_view)
+                    self.setFocus()  # Ensure keyboard navigation works
                 else:
                     self.message_label.setText("Failed to load image")
                     self.image_stack.setCurrentWidget(self.message_label)

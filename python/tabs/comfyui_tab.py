@@ -1116,6 +1116,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                     values[semantic_key] = input_widget.text()
                 elif hasattr(input_widget, 'isChecked'):
                     values[semantic_key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'selected_files'):
+                    # BatchImageSelector - capture image paths
+                    values[semantic_key] = input_widget.selected_files.copy()
         return values
 
     def _refresh_editable_nodes(self):
@@ -1381,6 +1384,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                             input_widget.setPlainText(value)
                         elif hasattr(input_widget, 'setText'):
                             input_widget.setText(value)
+                        elif hasattr(input_widget, 'set_images') and isinstance(value, list):
+                            # BatchImageSelector - restore image paths
+                            input_widget.set_images(value)
             except (ValueError, AttributeError) as e:
                 self.log(f"Could not restore value for node {node_id_str}: {e}")
 
@@ -1409,6 +1415,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                         input_widget.setText(str(value))
                     elif hasattr(input_widget, 'setChecked'):
                         input_widget.setChecked(bool(value))
+                    elif hasattr(input_widget, 'set_images') and isinstance(value, list):
+                        # BatchImageSelector - restore image paths
+                        input_widget.set_images(value)
 
         # Clear pending semantic values after applying
         self._pending_semantic_values = {}
@@ -1515,8 +1524,8 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._save_timer = QTimer(self.main_window)
             self._save_timer.setSingleShot(True)
             self._save_timer.timeout.connect(self._save_state)
-        # Restart timer on each change (500ms debounce)
-        self._save_timer.start(500)
+        # Restart timer on each change (200ms debounce for faster crash recovery)
+        self._save_timer.start(200)
 
     def _on_images_changed(self, images):
         """Handle image selection changes - save the last browse directory."""
@@ -1548,6 +1557,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         from comfyui.service import extract_editable_nodes, submit_comfyui_job
         from core.settings_manager import get_comfyui_network_output_path, get_workflow_config
 
+        # Immediately save state before submission (crash recovery)
+        self._save_state()
+
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
             self.main_window.animator.show_error("No workflow selected")
@@ -1564,6 +1576,15 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Get generation count from UI
         generation_count = self.ui.ComfyUIGenerationCount.value()
+
+        # Show time estimate if available
+        if self._current_preset_name:
+            from core.settings_manager import get_workflow_estimated_time_per_frame
+            from tabs.comfyui_polling import format_elapsed_time
+            per_frame = get_workflow_estimated_time_per_frame(self._current_preset_name)
+            if per_frame:
+                total_estimate = per_frame * generation_count
+                self.log(f"[ComfyUI] Estimated time: ~{format_elapsed_time(total_estimate)} ({generation_count} frame(s))")
 
         # Collect editable values from dynamic widgets
         editable_values = {}
@@ -1807,6 +1828,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                     editable_values[str(node_id)] = input_widget.toPlainText()
                 elif hasattr(input_widget, 'text'):
                     editable_values[str(node_id)] = input_widget.text()
+                elif hasattr(input_widget, 'selected_files'):
+                    # BatchImageSelector - save image paths
+                    editable_values[str(node_id)] = input_widget.selected_files.copy()
 
         state["editable_values"] = editable_values
 

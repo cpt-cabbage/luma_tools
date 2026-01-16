@@ -151,15 +151,55 @@ def load_user_settings() -> Dict[str, Any]:
 
 
 def save_user_settings(settings: Dict[str, Any]):
-    """Save user settings to file."""
+    """Save user settings to file using atomic write to prevent corruption."""
     global _user_settings_cache
     ensure_settings_dir()
     try:
-        with open(USER_SETTINGS_FILE, 'w') as f:
+        # Write to temp file first, then atomic rename
+        temp_file = USER_SETTINGS_FILE + ".tmp"
+        with open(temp_file, 'w') as f:
             json.dump(settings, f, indent=2)
+        # Atomic rename (replaces existing file)
+        os.replace(temp_file, USER_SETTINGS_FILE)
         _user_settings_cache = settings.copy()
     except Exception as e:
         print(f"Error saving user settings: {e}")
+        # Clean up temp file if it exists
+        temp_file = USER_SETTINGS_FILE + ".tmp"
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+
+
+def record_workflow_execution_time(workflow_preset: str, per_frame_seconds: float):
+    """Record per-frame execution time for a workflow.
+
+    Stores the last 10 execution times to calculate median estimates.
+    """
+    settings = load_user_settings()
+    times = settings.get("comfyui_workflow_times", {})
+    if workflow_preset not in times:
+        times[workflow_preset] = []
+    times[workflow_preset].append(per_frame_seconds)
+    times[workflow_preset] = times[workflow_preset][-10:]  # Keep last 10
+    settings["comfyui_workflow_times"] = times
+    save_user_settings(settings)
+
+
+def get_workflow_estimated_time_per_frame(workflow_preset: str):
+    """Get median per-frame time for a workflow based on history.
+
+    Returns None if no history is available.
+    """
+    settings = load_user_settings()
+    times = settings.get("comfyui_workflow_times", {}).get(workflow_preset, [])
+    if not times:
+        return None
+    sorted_times = sorted(times)
+    mid = len(sorted_times) // 2
+    return sorted_times[mid]
 
 
 def get_global_settings_path() -> str:
@@ -961,9 +1001,6 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
                         req['completed_by'] = admin_username
                         req['completed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         modified = True
-
-                        # Notify the user
-                        _notify_user_of_completion(req['username'], req, admin_username)
                         break
 
                 if modified:

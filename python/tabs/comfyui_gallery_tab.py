@@ -474,6 +474,9 @@ class ComfyUIGalleryTab(BaseTab):
         if new_user == self._selected_user:
             return
 
+        # Close embedded viewer before switching users
+        self._close_embedded_viewer()
+
         # Store old user for potential caching
         old_user = self._selected_user
 
@@ -616,6 +619,9 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_source_toggle(self):
         """Toggle between network folder and custom folder."""
+        # Close embedded viewer before switching source
+        self._close_embedded_viewer()
+
         if self._source_mode == "network":
             # Switch to custom - prompt for folder
             self._browse_custom_folder()

@@ -351,12 +351,6 @@
                     // Center horizontally, put bottom at ground level
                     model.position.set(-scaledCenterX, -scaledMinY, -scaledCenterZ);
 
-                    // Adjust camera to look at vertical center of model
-                    const visualCenterY = scaledSizeY / 2;
-                    camera.position.set(cameraDistance, cameraDistance * 0.5, cameraDistance);
-                    controls.target.set(0, visualCenterY, 0);
-                    controls.update();
-
                     // Setup animation mixer
                     if (animations.length > 0) {
                         mixer = new THREE.AnimationMixer(model);
