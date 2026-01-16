@@ -8,6 +8,7 @@ Supports standalone mode when AYON environment is not available.
 import os
 import glob
 import shutil
+import json
 
 # ============================================================================
 # BASE PATHS
@@ -162,6 +163,19 @@ AYON_DEFAULT_HEIGHT = 1080
 
 APP_ID = u'luma.tools.shotbuilder.001'
 APP_TITLE = "Luma Tools"
+
+# Load version from version.json
+def _load_version():
+    """Load version from version.json."""
+    version_file = os.path.join(_ROOT_DIR, "version.json")
+    try:
+        with open(version_file, 'r') as f:
+            data = json.load(f)
+            return data.get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+APP_VERSION = _load_version()
 
 # Frame padding
 FRAME_PADDING = 4

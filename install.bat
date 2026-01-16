@@ -65,10 +65,13 @@ REM Prompt user to update changelog
 echo.
 set /p UPDATE_CHANGELOG="Update changelog from git? (y/n): "
 if /i "%UPDATE_CHANGELOG%"=="y" (
-    REM Prepend new version entry to changelog.md (escape single quotes for PowerShell)
-    set "COMMIT_MSG_ESCAPED=!COMMIT_MSG:'=''!"
-    powershell -Command "$nl = [char]10; $msg = '!COMMIT_MSG_ESCAPED!'; $msg = $msg -replace ' -', ($nl + '-'); $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
-    echo Changelog updated with: %COMMIT_MSG%
+    REM Write commit message to temp file to avoid escaping issues with special characters
+    set "TEMP_MSG_FILE=%TEMP%\luma_commit_msg.txt"
+    git log -1 --pretty=%%s > "!TEMP_MSG_FILE!"
+    REM Use PowerShell to read from temp file and update changelog
+    powershell -Command "$nl = [char]10; $msg = Get-Content '!TEMP_MSG_FILE!' -Raw; $msg = $msg.Trim(); $msg = $msg -replace ' -', ($nl + '-'); $changelog = Get-Content '%SOURCE%\changelog.md' -Raw; $header = '# Luma Tools Changelog'; $newEntry = $nl + $nl + '## Version %NEW_VERSION%' + $nl + $msg; $changelog = $changelog -replace [regex]::Escape($header), ($header + $newEntry); Set-Content '%SOURCE%\changelog.md' $changelog -NoNewline"
+    del "!TEMP_MSG_FILE!" 2>nul
+    echo Changelog updated.
 ) else (
     echo Changelog not updated.
 )

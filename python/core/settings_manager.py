@@ -70,6 +70,12 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
     "generate_3d_thumbnails": SettingDef("generate_3d_thumbnails", True, "user"),
     "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
+    # Window state
+    "window_width": SettingDef("window_width", 1250, "user"),
+    "window_height": SettingDef("window_height", 1000, "user"),
+    "window_maximized": SettingDef("window_maximized", False, "user"),
+    # Version tracking
+    "last_opened_version": SettingDef("last_opened_version", "0.0.0", "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery"], "global"),
 }
@@ -714,3 +720,70 @@ def set_last_browse_directory(context: str, directory: str):
         settings["last_browse_directories"] = {}
     settings["last_browse_directories"][context] = directory
     save_user_settings(settings)
+
+
+# ============================================================================
+# WINDOW STATE MANAGEMENT (User Settings)
+# ============================================================================
+
+def get_window_state() -> Dict[str, Any]:
+    """Get the saved window state (size and maximized status)."""
+    return {
+        "width": get_setting("window_width"),
+        "height": get_setting("window_height"),
+        "maximized": get_setting("window_maximized")
+    }
+
+
+def save_window_state(width: int, height: int, maximized: bool):
+    """Save the window state."""
+    set_setting("window_width", width, verbose=False)
+    set_setting("window_height", height, verbose=False)
+    set_setting("window_maximized", maximized, verbose=False)
+
+
+# ============================================================================
+# VERSION TRACKING (User Settings)
+# ============================================================================
+
+def get_last_opened_version() -> str:
+    """Get the last version that the user opened."""
+    return get_setting("last_opened_version")
+
+
+def set_last_opened_version(version: str):
+    """Save the current version as the last opened version."""
+    set_setting("last_opened_version", version, verbose=False)
+
+
+def is_new_version(current_version: str) -> bool:
+    """Check if the current version is newer than the last opened version."""
+    last_version = get_last_opened_version()
+
+    # If never opened before, it's a new version
+    if last_version == "0.0.0":
+        return True
+
+    # Compare versions (simple string comparison works for x.y.z.w format)
+    try:
+        # Split versions into parts and compare
+        current_parts = [int(p) for p in current_version.split('.')]
+        last_parts = [int(p) for p in last_version.split('.')]
+
+        # Pad to same length
+        max_len = max(len(current_parts), len(last_parts))
+        current_parts += [0] * (max_len - len(current_parts))
+        last_parts += [0] * (max_len - len(last_parts))
+
+        # Compare part by part
+        for curr, last in zip(current_parts, last_parts):
+            if curr > last:
+                return True
+            elif curr < last:
+                return False
+
+        # Versions are equal
+        return False
+    except (ValueError, AttributeError):
+        # If version parsing fails, assume it's new
+        return True

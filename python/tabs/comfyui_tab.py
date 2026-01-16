@@ -243,6 +243,8 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_generation_count_changed(self, value):
         """Handle generation count change."""
+        # Update the value label next to the slider
+        self.ui.label_count_value.setText(str(value))
         self._validate_inputs()
         self._save_state()
 

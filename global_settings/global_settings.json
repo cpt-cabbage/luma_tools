@@ -73,15 +73,6 @@
         }
       },
       "is_multi": false
-    },
-    "jon": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2509.json",
-      "description": "",
-      "iteratable": true,
-      "note": "",
-      "full_restart": false,
-      "node_overrides": {},
-      "is_multi": false
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",

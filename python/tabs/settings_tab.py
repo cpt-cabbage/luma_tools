@@ -105,13 +105,33 @@ class SettingsTab(BaseTab):
             ("Standalone", "standalone"),
         ]
 
+        # Check if user is supervisor (read-only access)
+        is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
+
+        if is_supervisor:
+            # Supervisors can only see the info section
+            self._hide_settings_for_supervisor()
+
         self._load_version_ui()
-        self._load_default_passes_ui()
-        self._load_user_settings_ui()
-        self._load_global_settings_ui()
-        self._load_admin_users_ui()
-        self._load_sup_users_ui()
-        self._load_restricted_tabs_ui()
+
+        # Only load settings UI for admins
+        if not is_supervisor:
+            self._load_default_passes_ui()
+            self._load_user_settings_ui()
+            self._load_global_settings_ui()
+            self._load_admin_users_ui()
+            self._load_sup_users_ui()
+            self._load_restricted_tabs_ui()
+
+    def _hide_settings_for_supervisor(self):
+        """Hide all settings sections except info for supervisor users."""
+        # Hide user settings group box
+        if hasattr(self.ui, 'userSettingsGroupBox'):
+            self.ui.userSettingsGroupBox.hide()
+
+        # Hide global settings group box
+        if hasattr(self.ui, 'globalSettingsGroupBox'):
+            self.ui.globalSettingsGroupBox.hide()
 
     def _load_version_ui(self):
         """Load version information into the UI."""
@@ -119,8 +139,35 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'versionValueLabel'):
             self.ui.versionValueLabel.setText(version)
 
+        # Check if this is a new version and show notification on button
+        if hasattr(self.ui, 'showVersionHistoryButton'):
+            from core.settings_manager import is_new_version
+            if is_new_version(version):
+                # Add notification indicator to button text
+                current_text = self.ui.showVersionHistoryButton.text()
+                if not current_text.endswith(" •"):
+                    self.ui.showVersionHistoryButton.setText(f"{current_text} •")
+                # Optionally change button style to highlight it
+                self.ui.showVersionHistoryButton.setStyleSheet("""
+                    QPushButton {
+                        background-color: #d97706;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #f59e0b;
+                    }
+                """)
+
     def _on_show_version_history(self):
         """Show version history dialog."""
+        # Clear notification from button when clicked
+        if hasattr(self.ui, 'showVersionHistoryButton'):
+            button_text = self.ui.showVersionHistoryButton.text()
+            if button_text.endswith(" •"):
+                self.ui.showVersionHistoryButton.setText(button_text.replace(" •", ""))
+            # Reset button style
+            self.ui.showVersionHistoryButton.setStyleSheet("")
+
         changelog = get_changelog()
 
         dialog = QDialog(self.main_window)

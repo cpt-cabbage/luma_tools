@@ -1,12 +1,12 @@
 # Luma Tools Requirements
 # Python 3.10+ required
-# Install with: pip install -r requirements.txt
+# Install in virtual environment: pip install -r requirements.txt
 
 # Core Qt GUI - Upgraded to PySide6 for NumPy 2.x compatibility and macOS support
 # PySide6_Addons includes QtWebEngineWidgets for Three.js 3D viewer (WebGL via QWebEngineView)
 PySide6>=6.6.0
 QDarkStyle==3.2.3
-QtPy==2.4.2
+QtPy==2.4.2  # QDarkStyle dependency
 
 # File sequence handling
 fileseq==2.1.2
@@ -19,22 +19,11 @@ packaging>=24.1
 # Windows-specific
 pywin32==308
 
-# .NET interop (for Deadline)
-pythonnet==3.0.4
-clr_loader>=0.2.6
-cffi>=1.17.1
-pycparser>=2.22
-
-# Web server (for ComfyUI communication)
-bottle>=0.13.2
-
-# Numerical/Scientific
+# Numerical
 numpy>=1.26.4
-scipy>=1.15.3
 
 # Image processing
 pillow>=12.1.0
-imageio>=2.37.2
 
 # =============================================================================
 # 3D Model Support
@@ -55,13 +44,12 @@ PyOpenGL-accelerate>=3.1.10
 # USD support (for USD/USDA/USDC/USDZ files)
 usd-core>=25.11
 
-# Optional: PyAssimp (requires native Assimp library to be installed separately)
-# Uncomment if you have Assimp installed system-wide:
-# pyassimp>=4.1.4
-
 # =============================================================================
 # Optional Features
 # =============================================================================
 
 # Spell checking for text prompts
 pyenchant>=3.3.0
+
+# AYON integration (optional - for publishing to AYON)
+ayon-python-api>=1.2.4

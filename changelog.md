@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.13
+- New "Apply Settings" option in gallery
+- Implement expand_subgraphs function to handle ComfyUI component/subgraph nodes
+- Add file logging setup with rotation and global exception handling
+- Enhance UI components with validity checks and new menu options (View Input, Publish to AYON)
+- Update node configurations and workflow processing
+
 ## Version 0.4.1.10
 - Refactor polling terminology from frames to jobs for clarity
 - Hide add/edit model buttons from non-admin users

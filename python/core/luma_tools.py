@@ -13,7 +13,7 @@ import os
 import logging
 from datetime import datetime
 
-from core.config import APP_ID, APP_TITLE, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
+from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
 
 
 # ============================================================================
@@ -308,14 +308,17 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tabs = {}
         self.logs_tab = None
 
+        # Check for new version
+        self._check_version_update()
+
         # Load UI using modular tab system
         self._load_tabs()
 
         # Set window title based on mode
         if app_state.standalone_mode:
-            self.setWindowTitle(f"{APP_TITLE} - Standalone Mode")
+            self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}")
         else:
-            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot}")
+            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
         # Setup log redirection (deferred until after window is shown)
@@ -326,9 +329,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # Check admin status
         self._check_admin_status()
 
-        # Set initial window size and minimum size (user can resize/maximize)
-        self.resize(1250, 1000)
+        # Set minimum size
         self.setMinimumSize(800, 600)
+
+        # Restore window state from previous session
+        self._restore_window_state()
 
         # Setup animations
         self.animator = enhance_ui(self)
@@ -350,6 +355,11 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Hide tabs that require shot context in standalone mode
         self._hide_standalone_incompatible_tabs()
+
+        # Show notification on Settings tab if new version (use the glow effect)
+        if self._is_new_version and 'settings' in self.tabs:
+            # Request attention to show the red notification dot
+            self.tabs['settings'].signals.request_attention.emit()
 
         # Disable scroll wheel on combo boxes and spin boxes
         self._disable_scroll_wheel_on_inputs()
@@ -418,9 +428,9 @@ class LumaShotTools(QtWidgets.QWidget):
                 print(f"Skipping initialization of '{restrict_key}' tab for regular user")
                 continue
 
-            # Skip settings tab for non-admin users (settings is admin-only)
-            if not app_state.is_admin and restrict_key == 'settings':
-                print(f"Skipping initialization of '{restrict_key}' tab for non-admin user")
+            # Skip settings tab for regular users (admins and supervisors can access)
+            if not app_state.has_elevated_access and restrict_key == 'settings':
+                print(f"Skipping initialization of '{restrict_key}' tab for regular user")
                 continue
 
             # Create tab instance
@@ -584,12 +594,74 @@ class LumaShotTools(QtWidgets.QWidget):
         else:
             print(f"User '{app_state.user}' is a regular user")
 
+    def _check_version_update(self):
+        """Check if this is a new version and store flag for notification."""
+        from core.settings_manager import is_new_version, set_last_opened_version
+
+        # Check if current version is newer than last opened
+        self._is_new_version = is_new_version(APP_VERSION)
+
+        if self._is_new_version:
+            print(f"New version detected: v{APP_VERSION}")
+        else:
+            print(f"Current version: v{APP_VERSION}")
+
+        # Update the last opened version to current (will be saved on close)
+        # We don't save immediately to avoid file I/O on every startup
+
+
+    def _restore_window_state(self):
+        """Restore window size and maximized state from previous session."""
+        from core.settings_manager import load_user_settings
+
+        # Check if we have saved window state
+        settings = load_user_settings()
+        has_saved_state = "window_width" in settings or "window_height" in settings or "window_maximized" in settings
+
+        if has_saved_state:
+            # Restore from saved state
+            from core.settings_manager import get_window_state
+            state = get_window_state()
+            width = state.get("width", 1250)
+            height = state.get("height", 1000)
+            maximized = state.get("maximized", False)
+
+            # Set the size (this will be the size when not maximized)
+            self.resize(width, height)
+
+            # Apply maximized state if it was saved
+            if maximized:
+                self.showMaximized()
+        else:
+            # First launch - use previous default (1250x1000, not maximized)
+            self.resize(1250, 1000)
+
+    def _save_window_state(self):
+        """Save current window size and maximized state."""
+        from core.settings_manager import save_window_state
+
+        # Get the current state
+        maximized = self.isMaximized()
+
+        # If maximized, save the normal geometry (the size before maximization)
+        # If not maximized, save the current size
+        if maximized:
+            # Use the normal geometry to get the size before maximization
+            geom = self.normalGeometry()
+            width = geom.width()
+            height = geom.height()
+        else:
+            width = self.width()
+            height = self.height()
+
+        save_window_state(width, height, maximized)
+
     def _hide_restricted_tabs(self):
         """Hide tabs that are restricted based on user role.
 
         Role-based access:
-        - Admins: Full access (all tabs including Settings)
-        - Supervisors: Can see ComfyUI and Gallery tabs (but not Settings)
+        - Admins: Full access (all tabs including Settings with full edit access)
+        - Supervisors: Can see ComfyUI, Gallery, and Settings tabs (Settings is read-only, info only)
         - Regular users: Cannot see any restricted tabs
         """
         from core.settings_manager import get_restricted_tabs
@@ -606,8 +678,8 @@ class LumaShotTools(QtWidgets.QWidget):
             widget = self.tab_widget.widget(i)
             tab_name = widget.objectName()
 
-            # Supervisors can see restricted tabs (except settings, which is handled at init)
-            if app_state.is_sup and tab_name in ['comfyui', 'comfyui_gallery']:
+            # Supervisors can see ComfyUI, Gallery, and Settings tabs (Settings is read-only)
+            if app_state.is_sup and tab_name in ['comfyui', 'comfyui_gallery', 'settings']:
                 continue
 
             if tab_name in restricted:
@@ -762,6 +834,17 @@ class LumaShotTools(QtWidgets.QWidget):
             sys.stderr = self.log_stream
             self._log_redirect_pending = False
             print("Log redirection enabled")
+
+    def closeEvent(self, event):
+        """Handle window close event - save window state and version."""
+        from core.settings_manager import set_last_opened_version
+
+        self._save_window_state()
+
+        # Save current version as last opened
+        set_last_opened_version(APP_VERSION)
+
+        super().closeEvent(event)
 
 
 def main():
