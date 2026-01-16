@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.19
+Support input images from custom nodes
+
 ## Version 0.4.1.18
 - Fix input file handling edge cases, always look in their hardcoded default input directory.
 

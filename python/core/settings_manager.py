@@ -795,16 +795,35 @@ def is_new_version(current_version: str) -> bool:
 # FEATURE REQUESTS (Global Settings)
 # ============================================================================
 
-def get_feature_requests_dir() -> str:
-    """Get path to shared feature requests directory."""
-    base_path = get_global_settings_path()
-    return os.path.join(base_path, "feature_requests")
+def get_feature_requests_base_dir() -> str:
+    """Get base path for feature requests (ComfyUI network output path)."""
+    network_path = get_setting("comfyui_network_output_path")
+    if not network_path:
+        # Fallback to global settings if network path not configured
+        return os.path.join(get_global_settings_path(), "feature_requests")
+    return os.path.join(network_path, ".feature_requests")
+
+
+def get_user_feature_requests_file(username: str) -> str:
+    """Get path to user's feature requests file.
+
+    Each user has their own requests file in the ComfyUI network output folder.
+    Files are stored in a hidden .feature_requests directory to avoid showing in gallery.
+
+    Args:
+        username: Username
+
+    Returns:
+        Full path to user's requests file
+    """
+    base_dir = get_feature_requests_base_dir()
+    return os.path.join(base_dir, f"{username}_requests.json")
 
 
 def append_feature_request(category: str, description: str, username: str) -> bool:
-    """Create a new feature request file.
+    """Add a feature request to the user's requests file.
 
-    Each request is stored as a separate JSON file with timestamp in filename.
+    Each user has their own JSON file containing an array of requests.
 
     Args:
         category: Feature, Bug, Enhancement, or Question
@@ -817,29 +836,38 @@ def append_feature_request(category: str, description: str, username: str) -> bo
     from datetime import datetime
 
     try:
-        requests_dir = get_feature_requests_dir()
+        file_path = get_user_feature_requests_file(username)
 
         # Ensure the directory exists
-        os.makedirs(requests_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Format timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Create filename with timestamp (safe for filesystems)
-        filename_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        file_path = os.path.join(requests_dir, f"request_{filename_timestamp}.json")
-
-        # Create request data
-        request_data = {
+        # Create new request
+        new_request = {
             'timestamp': timestamp,
             'username': username,
             'category': category,
             'description': description
         }
 
-        # Write to file
+        # Read existing requests
+        requests = []
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    requests = json.load(f)
+            except Exception as e:
+                print(f"Error reading existing requests: {e}")
+                requests = []
+
+        # Append new request
+        requests.append(new_request)
+
+        # Write back to file
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(request_data, f, indent=2, ensure_ascii=False)
+            json.dump(requests, f, indent=2, ensure_ascii=False)
 
         print(f"Feature request created: {category} by {username}")
         return True
@@ -850,38 +878,39 @@ def append_feature_request(category: str, description: str, username: str) -> bo
 
 
 def get_feature_requests() -> List[Dict[str, str]]:
-    """Read and parse all feature requests from individual files.
+    """Read and parse all feature requests from all user files.
 
     Returns:
         List of dicts with keys: timestamp, username, category, description
         Sorted by timestamp (oldest first)
     """
     try:
-        requests_dir = get_feature_requests_dir()
+        base_dir = get_feature_requests_base_dir()
 
         # Check if directory exists
-        if not os.path.exists(requests_dir):
+        if not os.path.exists(base_dir):
             return []
 
-        # Read all JSON files
-        requests = []
-        for filename in os.listdir(requests_dir):
-            if not filename.startswith('request_') or not filename.endswith('.json'):
+        # Read all user request files
+        all_requests = []
+        for filename in os.listdir(base_dir):
+            if not filename.endswith('_requests.json'):
                 continue
 
-            file_path = os.path.join(requests_dir, filename)
+            file_path = os.path.join(base_dir, filename)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    request_data = json.load(f)
-                    requests.append(request_data)
+                    user_requests = json.load(f)
+                    if isinstance(user_requests, list):
+                        all_requests.extend(user_requests)
             except Exception as e:
                 print(f"Error reading feature request file {filename}: {e}")
                 continue
 
         # Sort by timestamp
-        requests.sort(key=lambda x: x.get('timestamp', ''))
+        all_requests.sort(key=lambda x: x.get('timestamp', ''))
 
-        return requests
+        return all_requests
 
     except Exception as e:
         print(f"Error reading feature requests: {e}")
