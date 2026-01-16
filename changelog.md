@@ -1,5 +1,10 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.17
+- Implement feature request submission dialog with categories (Feature, Bug, Enhancement, Question)
+- Fix worker import patterns to use lazy imports for thread safety
+- Fix install script not considering venv
+
 ## Version 0.4.1.15
 - Implement periodic version checking with timer (every 2 minutes)
 - Add notifications for new deployed versions via status bar, system tray, and popup

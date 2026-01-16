@@ -29,6 +29,7 @@ import subprocess
 import argparse
 import signal
 import threading
+import shutil
 from datetime import datetime
 
 # Import shared utilities
@@ -399,18 +400,59 @@ def main():
 
         print(f"Connected to existing server on port {args.port}")
 
-        # Upload input images in persistent mode
-        print("\nUploading input images to server...")
+        # Copy input images to ComfyUI's default input directory
+        # Some ComfyUI nodes ignore the server's configured input directory
+        # and always look in the hardcoded default location
         images_to_upload = get_workflow_images(base_workflow)
+        if images_to_upload:
+            comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
+            if os.path.isdir(comfyui_input_dir):
+                print(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
+                for image_name in images_to_upload:
+                    src_path = os.path.join(args.input_directory, image_name)
+                    dst_path = os.path.join(comfyui_input_dir, image_name)
+                    if os.path.exists(src_path):
+                        try:
+                            shutil.copy2(src_path, dst_path)
+                            print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                        except Exception as e:
+                            print(f"  WARNING: Failed to copy {image_name}: {e}")
+                    else:
+                        print(f"  WARNING: Image not found: {src_path}")
+            else:
+                print(f"WARNING: ComfyUI input directory not found: {comfyui_input_dir}")
+
+        # Also upload via HTTP API as backup method
+        print("\nUploading input images to server via HTTP...")
         for image_name in images_to_upload:
             image_path = os.path.join(args.input_directory, image_name)
             if os.path.exists(image_path):
                 if not upload_image_to_server(image_path, port=args.port):
-                    print(f"ERROR: Failed to upload image {image_name}")
-                    sys.exit(1)
+                    print(f"WARNING: HTTP upload failed for {image_name} (but direct copy may have succeeded)")
             else:
                 print(f"WARNING: Image not found locally: {image_path}")
     else:
+        # Copy input images to ComfyUI's default input directory
+        # Some ComfyUI nodes ignore --input-directory and use hardcoded paths
+        images_to_copy = get_workflow_images(base_workflow)
+        if images_to_copy:
+            comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
+            if os.path.isdir(comfyui_input_dir):
+                print(f"\nCopying {len(images_to_copy)} input image(s) to ComfyUI input directory...")
+                for image_name in images_to_copy:
+                    src_path = os.path.join(args.input_directory, image_name)
+                    dst_path = os.path.join(comfyui_input_dir, image_name)
+                    if os.path.exists(src_path):
+                        try:
+                            shutil.copy2(src_path, dst_path)
+                            print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                        except Exception as e:
+                            print(f"  WARNING: Failed to copy {image_name}: {e}")
+                    else:
+                        print(f"  WARNING: Image not found: {src_path}")
+            else:
+                print(f"WARNING: ComfyUI input directory not found: {comfyui_input_dir}")
+
         process = start_comfyui_server(
             args.comfyui_path,
             args.input_directory,

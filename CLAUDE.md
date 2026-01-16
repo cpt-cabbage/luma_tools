@@ -50,7 +50,7 @@ install.bat  # Deploys to L:\tools\_studio_tools\luma_tools
 3. Optionally updates `changelog.md` from last git commit
 4. Cleans old Python files from previous structure
 5. Copies all Python modules to production location
-6. **Copies entire virtual environment** (`python/venv/`) to ensure dependencies are up-to-date
+6. **Optionally copies entire virtual environment** (`python/venv/`) with progress feedback when dependencies need updating
 7. Copies UI resources, icons, and configuration files
 8. Updates paths in global_settings.json (dev → production)
 9. Removes 'pause' from production launchers for silent execution

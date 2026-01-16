@@ -248,8 +248,11 @@ REM COPY VIRTUAL ENVIRONMENT
 REM ============================================================================
 
 echo.
-echo Copying virtual environment...
-echo This may take a few minutes...
+set /p UPDATE_VENV="Update virtual environment? (y/n): "
+if /i not "%UPDATE_VENV%"=="y" (
+    echo Skipping virtual environment update.
+    goto :skip_venv
+)
 
 REM Check if source venv exists
 if not exist "%SOURCE%\python\venv\" (
@@ -258,14 +261,20 @@ if not exist "%SOURCE%\python\venv\" (
     goto :skip_venv
 )
 
-REM Copy the entire venv directory
-xcopy "%SOURCE%\python\venv\*.*" "%TARGET%\python\venv\" /E /Y /Q /I /H
+echo.
+echo Copying virtual environment...
+echo This may take a few minutes (approx 10,000+ files)...
+echo.
+
+REM Copy the entire venv directory (without /Q to show progress)
+xcopy "%SOURCE%\python\venv\*.*" "%TARGET%\python\venv\" /E /Y /I /H
 if errorlevel 1 (
     echo ERROR: Failed to copy virtual environment
     pause
     exit /b 1
 )
 
+echo.
 echo Virtual environment copied successfully.
 
 :skip_venv
