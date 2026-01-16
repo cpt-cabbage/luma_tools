@@ -168,6 +168,39 @@ class SettingsTab(BaseTab):
         # Load feature request UI
         self._load_feature_request_ui()
 
+        # Check for user notifications
+        self._check_user_notifications()
+
+    def _check_user_notifications(self):
+        """Check if user has notifications about completed requests."""
+        from core.settings_manager import get_user_notifications, mark_notifications_read
+        from PySide6.QtWidgets import QMessageBox
+
+        try:
+            notifications = get_user_notifications(self.app_state.user)
+
+            if notifications:
+                # Show notification dialog
+                message = f"You have {len(notifications)} completed request(s):\n\n"
+                for notif in notifications[:5]:  # Show max 5
+                    message += f"• [{notif['request_category']}] {notif['request_description']}\n"
+                    message += f"  Completed by {notif['completed_by']} on {notif['completed_at']}\n\n"
+
+                if len(notifications) > 5:
+                    message += f"... and {len(notifications) - 5} more"
+
+                QMessageBox.information(
+                    self.main_window,
+                    "Feature Requests Completed",
+                    message
+                )
+
+                # Mark as read
+                mark_notifications_read(self.app_state.user)
+
+        except Exception as e:
+            print(f"Error checking user notifications: {e}")
+
     def _on_show_version_history(self):
         """Show version history dialog."""
         # Clear notification from button when clicked
@@ -859,8 +892,12 @@ class SettingsTab(BaseTab):
             )
             return
 
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox, QLabel
-        from core.settings_manager import get_feature_requests, mark_feature_requests_as_read
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
+            QDialogButtonBox, QLabel, QCheckBox, QHBoxLayout, QPushButton, QMessageBox
+        )
+        from PySide6.QtCore import Qt
+        from core.settings_manager import get_feature_requests, mark_feature_requests_as_read, mark_request_completed
 
         # Clear notification indicator
         if hasattr(self.ui, 'viewFeatureRequestsButton'):
@@ -875,40 +912,143 @@ class SettingsTab(BaseTab):
 
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle("Luma Tools - Feature Requests")
-        dialog.setMinimumSize(700, 500)
+        dialog.setMinimumSize(900, 600)
 
         layout = QVBoxLayout(dialog)
 
-        # Info label
-        info_label = QLabel(f"Total Requests: {len(requests)}")
+        # Info label with completed count
+        completed_count = sum(1 for req in requests if req.get('completed', False))
+        pending_count = len(requests) - completed_count
+        info_label = QLabel(f"Total Requests: {len(requests)} | Pending: {pending_count} | Completed: {completed_count}")
         info_label.setStyleSheet("font-weight: bold; padding: 5px;")
         layout.addWidget(info_label)
 
-        # Text display
-        text_edit = QTextEdit()
-        text_edit.setReadOnly(True)
+        # Filter buttons
+        filter_layout = QHBoxLayout()
+        show_all_btn = QPushButton("Show All")
+        show_pending_btn = QPushButton("Show Pending")
+        show_completed_btn = QPushButton("Show Completed")
+        filter_layout.addWidget(show_all_btn)
+        filter_layout.addWidget(show_pending_btn)
+        filter_layout.addWidget(show_completed_btn)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
 
-        # Format requests
-        if requests:
-            formatted_text = ""
-            for i, req in enumerate(requests, 1):
-                formatted_text += f"{'='*70}\n"
-                formatted_text += f"Request #{i}\n"
-                formatted_text += f"Date: {req['timestamp']}\n"
-                formatted_text += f"User: {req['username']}\n"
-                formatted_text += f"Category: {req['category']}\n"
-                formatted_text += f"{'-'*70}\n"
-                formatted_text += f"{req['description']}\n\n"
+        # Table widget
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(["Done", "Date", "User", "Category", "Description", "Status"])
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)  # Description column stretches
+        table.setColumnWidth(0, 60)   # Done checkbox
+        table.setColumnWidth(1, 140)  # Date
+        table.setColumnWidth(2, 120)  # User
+        table.setColumnWidth(3, 100)  # Category
+        table.setColumnWidth(5, 180)  # Status
 
-            text_edit.setPlainText(formatted_text)
-        else:
-            text_edit.setPlainText("No feature requests yet.")
+        # Store request IDs with checkboxes
+        checkbox_map = {}
 
-        layout.addWidget(text_edit)
+        def populate_table(filter_type="all"):
+            """Populate table based on filter."""
+            table.setRowCount(0)
+            checkbox_map.clear()
+
+            filtered_requests = requests
+            if filter_type == "pending":
+                filtered_requests = [r for r in requests if not r.get('completed', False)]
+            elif filter_type == "completed":
+                filtered_requests = [r for r in requests if r.get('completed', False)]
+
+            table.setRowCount(len(filtered_requests))
+
+            for i, req in enumerate(filtered_requests):
+                # Checkbox
+                checkbox = QCheckBox()
+                checkbox.setChecked(req.get('completed', False))
+                checkbox.setEnabled(not req.get('completed', False))  # Disable if already completed
+                checkbox_widget = QTableWidgetItem()
+                table.setItem(i, 0, checkbox_widget)
+                table.setCellWidget(i, 0, checkbox)
+                checkbox_map[checkbox] = req.get('id')
+
+                # Date
+                table.setItem(i, 1, QTableWidgetItem(req['timestamp']))
+
+                # User
+                table.setItem(i, 2, QTableWidgetItem(req['username']))
+
+                # Category
+                table.setItem(i, 3, QTableWidgetItem(req['category']))
+
+                # Description
+                desc_item = QTableWidgetItem(req['description'])
+                desc_item.setToolTip(req['description'])  # Full text on hover
+                table.setItem(i, 4, desc_item)
+
+                # Status
+                if req.get('completed', False):
+                    status_text = f"✓ Done by {req.get('completed_by', 'Unknown')} on {req.get('completed_at', 'Unknown')}"
+                else:
+                    status_text = "Pending"
+                table.setItem(i, 5, QTableWidgetItem(status_text))
+
+        # Initial populate
+        populate_table("all")
+
+        # Connect filter buttons
+        show_all_btn.clicked.connect(lambda: populate_table("all"))
+        show_pending_btn.clicked.connect(lambda: populate_table("pending"))
+        show_completed_btn.clicked.connect(lambda: populate_table("completed"))
+
+        layout.addWidget(table)
 
         # Buttons
+        button_layout = QHBoxLayout()
+        mark_completed_btn = QPushButton("Mark Selected as Completed")
+        button_layout.addWidget(mark_completed_btn)
+        button_layout.addStretch()
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok)
         button_box.accepted.connect(dialog.accept)
-        layout.addWidget(button_box)
+        button_layout.addWidget(button_box)
+
+        layout.addLayout(button_layout)
+
+        def on_mark_completed():
+            """Mark selected requests as completed."""
+            selected_ids = []
+            for checkbox, req_id in checkbox_map.items():
+                if checkbox.isChecked() and checkbox.isEnabled():
+                    selected_ids.append(req_id)
+
+            if not selected_ids:
+                QMessageBox.information(dialog, "No Selection", "Please select pending requests to mark as completed.")
+                return
+
+            # Confirm
+            reply = QMessageBox.question(
+                dialog,
+                "Confirm Completion",
+                f"Mark {len(selected_ids)} request(s) as completed?\n\nUsers will be notified.",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                success_count = 0
+                for req_id in selected_ids:
+                    if mark_request_completed(req_id, self.app_state.user):
+                        success_count += 1
+
+                QMessageBox.information(
+                    dialog,
+                    "Completed",
+                    f"Marked {success_count} request(s) as completed.\nUsers will be notified when they open the app."
+                )
+
+                # Refresh the dialog
+                dialog.accept()
+                self._on_view_feature_requests()
+
+        mark_completed_btn.clicked.connect(on_mark_completed)
 
         dialog.exec()

@@ -844,12 +844,19 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         # Format timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # Generate unique ID for request (timestamp + microseconds)
+        request_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
         # Create new request
         new_request = {
+            'id': request_id,
             'timestamp': timestamp,
             'username': username,
             'category': category,
-            'description': description
+            'description': description,
+            'completed': False,
+            'completed_by': None,
+            'completed_at': None
         }
 
         # Read existing requests
@@ -915,6 +922,167 @@ def get_feature_requests() -> List[Dict[str, str]]:
     except Exception as e:
         print(f"Error reading feature requests: {e}")
         return []
+
+
+def mark_request_completed(request_id: str, admin_username: str) -> bool:
+    """Mark a feature request as completed and notify the user.
+
+    Args:
+        request_id: Unique ID of the request
+        admin_username: Admin who marked it complete
+
+    Returns:
+        True on success, False on failure
+    """
+    from datetime import datetime
+
+    try:
+        base_dir = get_feature_requests_base_dir()
+
+        if not os.path.exists(base_dir):
+            return False
+
+        # Find the request in user files
+        for filename in os.listdir(base_dir):
+            if not filename.endswith('_requests.json'):
+                continue
+
+            file_path = os.path.join(base_dir, filename)
+            try:
+                # Read user's requests
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    requests = json.load(f)
+
+                # Find and update the request
+                modified = False
+                for req in requests:
+                    if req.get('id') == request_id:
+                        req['completed'] = True
+                        req['completed_by'] = admin_username
+                        req['completed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        modified = True
+
+                        # Notify the user
+                        _notify_user_of_completion(req['username'], req, admin_username)
+                        break
+
+                if modified:
+                    # Write back to file
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(requests, f, indent=2, ensure_ascii=False)
+                    print(f"Marked request {request_id} as completed by {admin_username}")
+                    return True
+
+            except Exception as e:
+                print(f"Error processing file {filename}: {e}")
+                continue
+
+        print(f"Request {request_id} not found")
+        return False
+
+    except Exception as e:
+        print(f"Error marking request as completed: {e}")
+        return False
+
+
+def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_username: str):
+    """Create a notification file for the user about their completed request.
+
+    Args:
+        username: Username to notify
+        request: The completed request data
+        admin_username: Admin who completed it
+    """
+    try:
+        base_dir = get_feature_requests_base_dir()
+        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+
+        # Read existing notifications
+        notifications = []
+        if os.path.exists(notification_file):
+            try:
+                with open(notification_file, 'r', encoding='utf-8') as f:
+                    notifications = json.load(f)
+            except Exception:
+                notifications = []
+
+        # Add new notification
+        notification = {
+            'request_id': request['id'],
+            'request_category': request['category'],
+            'request_description': request['description'][:100] + '...' if len(request['description']) > 100 else request['description'],
+            'completed_by': admin_username,
+            'completed_at': request['completed_at'],
+            'read': False
+        }
+        notifications.append(notification)
+
+        # Write notifications
+        with open(notification_file, 'w', encoding='utf-8') as f:
+            json.dump(notifications, f, indent=2, ensure_ascii=False)
+
+        print(f"Notification created for {username}")
+
+    except Exception as e:
+        print(f"Error creating notification for {username}: {e}")
+
+
+def get_user_notifications(username: str) -> List[Dict[str, Any]]:
+    """Get unread notifications for a user.
+
+    Args:
+        username: Username
+
+    Returns:
+        List of unread notification dicts
+    """
+    try:
+        base_dir = get_feature_requests_base_dir()
+        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+
+        if not os.path.exists(notification_file):
+            return []
+
+        with open(notification_file, 'r', encoding='utf-8') as f:
+            notifications = json.load(f)
+
+        # Return only unread notifications
+        return [n for n in notifications if not n.get('read', False)]
+
+    except Exception as e:
+        print(f"Error reading notifications for {username}: {e}")
+        return []
+
+
+def mark_notifications_read(username: str):
+    """Mark all notifications as read for a user.
+
+    Args:
+        username: Username
+    """
+    try:
+        base_dir = get_feature_requests_base_dir()
+        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+
+        if not os.path.exists(notification_file):
+            return
+
+        # Read notifications
+        with open(notification_file, 'r', encoding='utf-8') as f:
+            notifications = json.load(f)
+
+        # Mark all as read
+        for notification in notifications:
+            notification['read'] = True
+
+        # Write back
+        with open(notification_file, 'w', encoding='utf-8') as f:
+            json.dump(notifications, f, indent=2, ensure_ascii=False)
+
+        print(f"Marked all notifications as read for {username}")
+
+    except Exception as e:
+        print(f"Error marking notifications as read: {e}")
 
 
 def get_unread_feature_request_count(username: str) -> int:
