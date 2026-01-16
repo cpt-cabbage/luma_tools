@@ -379,31 +379,14 @@ def main():
     if args.persistent:
         print(f"Persistent mode: connecting to server on port {args.port}...")
 
-        if args.full_restart:
-            print("\nFull restart requested")
-            if signal_server_restart(args.port):
-                if not wait_for_server_restart(args.port, timeout=300):
-                    print("ERROR: Server restart failed")
-                    sys.exit(1)
-            else:
-                print("WARNING: Could not signal server restart, continuing...")
-
-        if not check_server_health(port=args.port):
-            if args.server_not_found == 'wait':
-                print(f"Server not found - waiting up to {args.server_wait_timeout}s...")
-                if not wait_for_server(port=args.port, timeout=args.server_wait_timeout):
-                    print(f"ERROR: Server did not start within timeout")
-                    sys.exit(1)
-            else:
-                print(f"ERROR: No ComfyUI server found on port {args.port}")
-                sys.exit(1)
-
-        print(f"Connected to existing server on port {args.port}")
-
-        # Copy input images to ComfyUI's default input directory
+        # Copy input images to ComfyUI's default input directory FIRST
+        # This must happen before restart to ensure files are present
         # Some ComfyUI nodes ignore the server's configured input directory
         # and always look in the hardcoded default location
         images_to_upload = get_workflow_images(base_workflow)
+        print(f"DEBUG: Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
+        print(f"DEBUG: args.comfyui_path = {args.comfyui_path}")
+        print(f"DEBUG: args.input_directory = {args.input_directory}")
         if images_to_upload:
             comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
             if os.path.isdir(comfyui_input_dir):
@@ -421,6 +404,39 @@ def main():
                         print(f"  WARNING: Image not found: {src_path}")
             else:
                 print(f"WARNING: ComfyUI input directory not found: {comfyui_input_dir}")
+
+        if args.full_restart:
+            print("\nFull restart requested")
+            if signal_server_restart(args.port):
+                if not wait_for_server_restart(args.port, timeout=300):
+                    print("ERROR: Server restart failed")
+                    sys.exit(1)
+                # Re-copy images after restart in case they were cleared
+                if images_to_upload and os.path.isdir(comfyui_input_dir):
+                    print(f"\nRe-copying {len(images_to_upload)} input image(s) after restart...")
+                    for image_name in images_to_upload:
+                        src_path = os.path.join(args.input_directory, image_name)
+                        dst_path = os.path.join(comfyui_input_dir, image_name)
+                        if os.path.exists(src_path):
+                            try:
+                                shutil.copy2(src_path, dst_path)
+                                print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                            except Exception as e:
+                                print(f"  WARNING: Failed to copy {image_name}: {e}")
+            else:
+                print("WARNING: Could not signal server restart, continuing...")
+
+        if not check_server_health(port=args.port):
+            if args.server_not_found == 'wait':
+                print(f"Server not found - waiting up to {args.server_wait_timeout}s...")
+                if not wait_for_server(port=args.port, timeout=args.server_wait_timeout):
+                    print(f"ERROR: Server did not start within timeout")
+                    sys.exit(1)
+            else:
+                print(f"ERROR: No ComfyUI server found on port {args.port}")
+                sys.exit(1)
+
+        print(f"Connected to existing server on port {args.port}")
 
         # Also upload via HTTP API as backup method
         print("\nUploading input images to server via HTTP...")

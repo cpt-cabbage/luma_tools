@@ -705,19 +705,42 @@ def move_output_files(
 
 
 def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:
-    """Collect input image paths from workflow LoadImage nodes."""
+    """Collect input image paths from workflow image loading nodes.
+
+    Supports various image loading node types including LoadImage,
+    Trellis2LoadImageWithTransparency, and others.
+    """
     images = []
+
+    # List of known image loading node types
+    IMAGE_LOADER_TYPES = [
+        'LoadImage',
+        'Trellis2LoadImageWithTransparency',
+        'LoadImageMask',
+        'LoadImageBatch',
+    ]
 
     for node_id, node_data in workflow.items():
         if not isinstance(node_data, dict):
             continue
 
-        class_type = node_data.get('class_type')
+        class_type = node_data.get('class_type', '')
         inputs = node_data.get('inputs', {})
 
-        if class_type == 'LoadImage':
+        # Check if this is a known image loader type
+        if class_type in IMAGE_LOADER_TYPES:
             image_name = inputs.get('image')
-            if image_name:
+            if image_name and isinstance(image_name, str):
+                if os.path.isabs(image_name) and os.path.exists(image_name):
+                    images.append(image_name)
+                else:
+                    local_path = os.path.join(workflow_dir, image_name)
+                    if os.path.exists(local_path):
+                        images.append(local_path)
+        # Fallback for custom image loading nodes
+        elif 'image' in inputs:
+            image_name = inputs.get('image')
+            if image_name and isinstance(image_name, str) and not image_name.startswith('['):
                 if os.path.isabs(image_name) and os.path.exists(image_name):
                     images.append(image_name)
                 else:
@@ -729,16 +752,42 @@ def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:
 
 
 def get_workflow_images(workflow: dict) -> List[str]:
-    """Extract all image filenames from LoadImage nodes in a workflow."""
+    """Extract all image filenames from image loading nodes in a workflow.
+
+    Supports various image loading node types including:
+    - LoadImage
+    - Trellis2LoadImageWithTransparency
+    - Any node with 'image' input parameter
+    """
     images = []
+
+    # List of known image loading node types
+    IMAGE_LOADER_TYPES = [
+        'LoadImage',
+        'Trellis2LoadImageWithTransparency',
+        'LoadImageMask',
+        'LoadImageBatch',
+    ]
+
     for node_id, node_data in workflow.items():
         if not isinstance(node_data, dict):
             continue
-        if node_data.get('class_type') == 'LoadImage':
-            inputs = node_data.get('inputs', {})
+
+        class_type = node_data.get('class_type', '')
+        inputs = node_data.get('inputs', {})
+
+        # Check if this is a known image loader type
+        if class_type in IMAGE_LOADER_TYPES:
             image = inputs.get('image')
-            if image:
+            if image and isinstance(image, str):
                 images.append(image)
+        # Fallback: Check if any input parameter is named 'image' and contains a filename
+        elif 'image' in inputs:
+            image = inputs.get('image')
+            if image and isinstance(image, str) and not image.startswith('['):
+                # Avoid array/link references like "[1, 0]"
+                images.append(image)
+
     return images
 
 

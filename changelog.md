@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.18
+- Fix input file handling edge cases, always look in their hardcoded default input directory.
+
 ## Version 0.4.1.17
 - Implement feature request submission dialog with categories (Feature, Bug, Enhancement, Question)
 - Fix worker import patterns to use lazy imports for thread safety

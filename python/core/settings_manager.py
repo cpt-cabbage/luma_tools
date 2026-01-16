@@ -795,16 +795,16 @@ def is_new_version(current_version: str) -> bool:
 # FEATURE REQUESTS (Global Settings)
 # ============================================================================
 
-def get_feature_requests_file() -> str:
-    """Get path to shared feature requests file."""
+def get_feature_requests_dir() -> str:
+    """Get path to shared feature requests directory."""
     base_path = get_global_settings_path()
-    return os.path.join(base_path, "feature_requests.txt")
+    return os.path.join(base_path, "feature_requests")
 
 
 def append_feature_request(category: str, description: str, username: str) -> bool:
-    """Append a feature request to the shared file.
+    """Create a new feature request file.
 
-    Format: [YYYY-MM-DD HH:MM:SS] [USERNAME] [CATEGORY] Description
+    Each request is stored as a separate JSON file with timestamp in filename.
 
     Args:
         category: Feature, Bug, Enhancement, or Question
@@ -814,86 +814,72 @@ def append_feature_request(category: str, description: str, username: str) -> bo
     Returns:
         True on success, False on failure
     """
-    import time
     from datetime import datetime
 
     try:
-        file_path = get_feature_requests_file()
+        requests_dir = get_feature_requests_dir()
 
         # Ensure the directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        os.makedirs(requests_dir, exist_ok=True)
 
         # Format timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Escape description to prevent newlines from breaking format
-        # Replace actual newlines with escaped newlines for storage
-        escaped_description = description.replace('\n', '\\n').replace('\r', '')
+        # Create filename with timestamp (safe for filesystems)
+        filename_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        file_path = os.path.join(requests_dir, f"request_{filename_timestamp}.json")
 
-        # Format entry
-        entry = f"[{timestamp}] [{username}] [{category}] {escaped_description}\n"
+        # Create request data
+        request_data = {
+            'timestamp': timestamp,
+            'username': username,
+            'category': category,
+            'description': description
+        }
 
-        # Append to file with retry logic (for Windows file locking)
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                with open(file_path, 'a', encoding='utf-8') as f:
-                    f.write(entry)
-                print(f"Feature request appended: {category} by {username}")
-                return True
-            except (IOError, PermissionError) as e:
-                if attempt < max_retries - 1:
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
-                else:
-                    print(f"Failed to append feature request after {max_retries} attempts: {e}")
-                    return False
+        # Write to file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(request_data, f, indent=2, ensure_ascii=False)
+
+        print(f"Feature request created: {category} by {username}")
+        return True
 
     except Exception as e:
-        print(f"Error appending feature request: {e}")
+        print(f"Error creating feature request: {e}")
         return False
 
 
 def get_feature_requests() -> List[Dict[str, str]]:
-    """Read and parse all feature requests.
+    """Read and parse all feature requests from individual files.
 
     Returns:
         List of dicts with keys: timestamp, username, category, description
+        Sorted by timestamp (oldest first)
     """
-    import re
-
     try:
-        file_path = get_feature_requests_file()
+        requests_dir = get_feature_requests_dir()
 
-        # Check if file exists
-        if not os.path.exists(file_path):
+        # Check if directory exists
+        if not os.path.exists(requests_dir):
             return []
 
-        # Read file
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        # Parse each line
+        # Read all JSON files
         requests = []
-        pattern = r'^\[([^\]]+)\] \[([^\]]+)\] \[([^\]]+)\] (.+)$'
-
-        for line in lines:
-            line = line.strip()
-            if not line:
+        for filename in os.listdir(requests_dir):
+            if not filename.startswith('request_') or not filename.endswith('.json'):
                 continue
 
-            match = re.match(pattern, line)
-            if match:
-                timestamp, username, category, description = match.groups()
-                # Unescape newlines in description
-                description = description.replace('\\n', '\n')
-                requests.append({
-                    'timestamp': timestamp,
-                    'username': username,
-                    'category': category,
-                    'description': description
-                })
-            else:
-                print(f"Failed to parse feature request line: {line}")
+            file_path = os.path.join(requests_dir, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    request_data = json.load(f)
+                    requests.append(request_data)
+            except Exception as e:
+                print(f"Error reading feature request file {filename}: {e}")
+                continue
+
+        # Sort by timestamp
+        requests.sort(key=lambda x: x.get('timestamp', ''))
 
         return requests
 
