@@ -245,7 +245,6 @@ class EmbeddedImageViewer(QWidget):
         self.image_view.setFocusPolicy(Qt.NoFocus)  # Prevent stealing focus from parent
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
-        self.image_view.double_clicked.connect(self.close)
         self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
         self.image_stack.addWidget(self.image_view)
 
@@ -808,7 +807,6 @@ class FullscreenImageViewer(QWidget):
         self.image_view = ZoomableImageWidget()
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
-        self.image_view.double_clicked.connect(self.close)
         self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
         self.image_stack.addWidget(self.image_view)
 
@@ -1069,10 +1067,6 @@ class FullscreenImageViewer(QWidget):
             if margin < click_x < self.width() - margin:
                 pass
         super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.close()
 
     def closeEvent(self, event):
         self.closed.emit()

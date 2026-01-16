@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.2.1
+- Remove pop up when new version just use settings notification badge
+- Fix issue where rapid clicks would trigger multiple async viewer creations before the first one completed.
+
 ## Version 0.4.2
 - Add time estimates
 - Improve settings persistence with atomic writes
