@@ -317,6 +317,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Copy Three.js viewer HTML files
+echo Copying Three.js viewer files...
+xcopy "%SOURCE%\resources\threejs\*.html" "%TARGET%\resources\threejs\" /Y /Q /I
+if errorlevel 1 (
+    echo ERROR: Failed to copy Three.js viewer files
+    pause
+    exit /b 1
+)
+
 REM Copy and update global settings (replace dev paths with production paths)
 echo Copying and updating global settings...
 xcopy "%SOURCE%\global_settings\*.json" "%TARGET%\global_settings\" /Y /Q

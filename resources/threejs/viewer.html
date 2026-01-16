@@ -62,31 +62,7 @@
     <script>
         window._viewerReady = false;
         window._pendingModel = null;
-
-        // Stub functions that queue calls until viewer is ready
-        window.loadModel = function(url) {
-            if (window._viewerReady && window._loadModelImpl) {
-                window._loadModelImpl(url);
-            } else {
-                console.log('Queuing model load:', url);
-                window._pendingModel = url;
-            }
-        };
-        window.playAnimation = function(name) {
-            if (window._playAnimationImpl) window._playAnimationImpl(name);
-        };
-        window.stopAnimation = function() {
-            if (window._stopAnimationImpl) window._stopAnimationImpl();
-        };
-        window.setAnimationTime = function(t) {
-            if (window._setAnimationTimeImpl) window._setAnimationTimeImpl(t);
-        };
-        window.setViewMode = function(mode) {
-            if (window._setViewModeImpl) window._setViewModeImpl(mode);
-        };
-        window.setCameraDistance = function(dist) {
-            if (window._setCameraDistanceImpl) window._setCameraDistanceImpl(dist);
-        };
+        // Note: All other functions are directly assigned after Three.js module loads
     </script>
 
     <!-- Import map for Three.js ES modules -->
@@ -524,13 +500,21 @@
             errorDiv.style.display = 'block';
         }
 
-        // Expose implementations to global scope
-        window._loadModelImpl = loadModelImpl;
-        window._playAnimationImpl = playAnimationImpl;
-        window._stopAnimationImpl = stopAnimationImpl;
-        window._setAnimationTimeImpl = setAnimationTimeImpl;
-        window._setViewModeImpl = setViewModeImpl;
-        window._setCameraDistanceImpl = setCameraDistanceImpl;
+        // Expose functions to global scope
+        // loadModel needs special handling for queuing during early load
+        window.loadModel = function(url) {
+            if (window._viewerReady) {
+                loadModelImpl(url);
+            } else {
+                console.log('Queuing model load:', url);
+                window._pendingModel = url;
+            }
+        };
+        window.playAnimation = playAnimationImpl;
+        window.stopAnimation = stopAnimationImpl;
+        window.setAnimationTime = setAnimationTimeImpl;
+        window.setViewMode = setViewModeImpl;
+        window.setCameraDistance = setCameraDistanceImpl;
 
         // Setup QWebChannel bridge
         if (typeof QWebChannel !== 'undefined') {

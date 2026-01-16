@@ -91,7 +91,7 @@
     "comfyui",
     "comfyui_gallery"
   ],
-  "comfyui_timeout": 600,
+  "comfyui_timeout": 3600,
   "comfyui_server_not_found_behavior": "wait",
   "comfyui_server_wait_timeout": 3600,
   "sup_users": [

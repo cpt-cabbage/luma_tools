@@ -114,19 +114,7 @@ class ThreeJSBridge(QObject):
             file_url = file_path.replace('\\', '/')
             if not file_url.startswith('file://'):
                 file_url = f'file:///{file_url}'
-            # Use a safe pattern that sets _pendingModel if loadModel isn't ready
-            # This avoids "loadModel is not defined" errors during page load
-            js_code = f"""
-                (function() {{
-                    var url = '{file_url}';
-                    if (typeof window.loadModel === 'function') {{
-                        window.loadModel(url);
-                    }} else {{
-                        console.log('Queuing model (loadModel not ready):', url);
-                        window._pendingModel = url;
-                    }}
-                }})();
-            """
+            js_code = f"loadModel('{file_url}');"
             self._web_view.page().runJavaScript(js_code)
 
     def set_view_mode(self, mode: str):
