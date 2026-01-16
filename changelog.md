@@ -1,5 +1,14 @@
 # Luma Tools Changelog
 
+## Version 0.4.2
+- Add time estimates
+- Improve settings persistence with atomic writes
+- Remove unused camera controls in 3D viewer
+- Update notification text fix
+- Close viewer when switching users
+- Dont send user message feature request  task is complete
+- Better server crash detection
+
 ## Version 0.4.1.23
 - Always append input filename to ComfyUI output files
 

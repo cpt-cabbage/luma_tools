@@ -641,24 +641,11 @@ class LumaShotTools(QtWidgets.QWidget):
             print(f"Version check failed: {e}")
 
     def _show_new_version_notification(self, new_version: str):
-        """Show notification that a new version is available."""
-        from PySide6.QtWidgets import QMessageBox
-
-        # Show system tray notification
-        self.show_system_notification(
-            "Luma Tools Update Available",
-            f"A new version (v{new_version}) has been deployed. Please restart the application to use it.",
-            "info"
-        )
-
-        # Show a popup notification
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("Update Available")
-        msg.setText(f"A new version (v{new_version}) has been deployed.")
-        msg.setInformativeText("Please restart Luma Tools to enjoy the latest version homies.")
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.show()  # Non-blocking show
+        """Show notification that a new version is available via the Settings tab."""
+        # Get the settings tab and show the notification there
+        settings_tab = self.get_tab("settings")
+        if settings_tab and hasattr(settings_tab, 'show_new_version_available'):
+            settings_tab.show_new_version_available(new_version)
 
 
     def _restore_window_state(self):

@@ -1262,13 +1262,25 @@ class ComfyUIGalleryTab(BaseTab):
         # Hide gallery elements
         self.ui.galleryScrollArea.hide()
 
+        # Check if viewer creation is already in progress
+        if getattr(self, '_viewer_creation_pending', False):
+            # Update the pending parameters for when creation completes
+            self._pending_image_paths = image_paths
+            self._pending_start_index = start_index
+            return
+
         # Create embedded viewer if not exists
         if not hasattr(self, '_embedded_viewer') or self._embedded_viewer is None:
+            # Mark creation as in progress to prevent duplicate creations
+            self._viewer_creation_pending = True
+            self._pending_image_paths = image_paths
+            self._pending_start_index = start_index
+
             # Show loading indicator for first-time viewer creation
             self._show_viewer_loading()
 
             # Create viewer asynchronously to avoid UI freeze
-            QTimer.singleShot(10, lambda: self._create_embedded_viewer_async(image_paths, start_index))
+            QTimer.singleShot(10, self._create_embedded_viewer_async)
         else:
             # Update existing viewer (fast path - no lag)
             self._embedded_viewer.image_paths = image_paths
@@ -1313,9 +1325,13 @@ class ComfyUIGalleryTab(BaseTab):
 
         self._viewer_loading_widget.show()
 
-    def _create_embedded_viewer_async(self, image_paths, start_index):
+    def _create_embedded_viewer_async(self):
         """Create the embedded viewer (called after a short delay to let UI update)."""
         from ui_components import EmbeddedImageViewer
+
+        # Get the most recent parameters (may have been updated by rapid clicks)
+        image_paths = getattr(self, '_pending_image_paths', [])
+        start_index = getattr(self, '_pending_start_index', 0)
 
         # Stop spinner and hide loading widget
         if hasattr(self, '_viewer_loading_spinner'):
@@ -1342,8 +1358,20 @@ class ComfyUIGalleryTab(BaseTab):
         self._embedded_viewer.show()
         self._embedded_viewer.setFocus()
 
+        # Clear creation-in-progress flag
+        self._viewer_creation_pending = False
+
     def _close_embedded_viewer(self):
         """Close the embedded viewer and show gallery grid."""
+        # Clear any pending creation
+        self._viewer_creation_pending = False
+
+        # Hide loading widget if visible
+        if hasattr(self, '_viewer_loading_spinner'):
+            self._viewer_loading_spinner.stop()
+        if hasattr(self, '_viewer_loading_widget'):
+            self._viewer_loading_widget.hide()
+
         if hasattr(self, '_embedded_viewer') and self._embedded_viewer:
             self._embedded_viewer.hide()
 

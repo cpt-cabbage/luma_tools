@@ -146,6 +146,10 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'versionValueLabel'):
             self.ui.versionValueLabel.setText(version)
 
+        # Hide the new version label initially
+        if hasattr(self.ui, 'newVersionLabel'):
+            self.ui.newVersionLabel.setVisible(False)
+
         # Check if this is a new version and show notification on button
         if hasattr(self.ui, 'showVersionHistoryButton'):
             from core.settings_manager import is_new_version
@@ -170,6 +174,17 @@ class SettingsTab(BaseTab):
 
         # Check for user notifications
         self._check_user_notifications()
+
+    def show_new_version_available(self, new_version: str):
+        """Show notification that a new version is available in the info area."""
+        if hasattr(self.ui, 'newVersionLabel'):
+            self.ui.newVersionLabel.setText(
+                f"New version available: v{new_version} - Please restart Luma Tools to update."
+            )
+            self.ui.newVersionLabel.setVisible(True)
+
+        # Request attention for this tab (pulsing glow)
+        self.signals.request_attention.emit()
 
     def _check_user_notifications(self):
         """Check if user has notifications about completed requests."""
@@ -814,7 +829,7 @@ class SettingsTab(BaseTab):
         layout.addWidget(category_label)
 
         category_combo = QComboBox()
-        category_combo.addItems(["Feature", "Bug", "Enhancement", "Question"])
+        category_combo.addItems(["Feature", "Bug", "Enhancement"])
         layout.addWidget(category_combo)
 
         # Description text area with spell checking
