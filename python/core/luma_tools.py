@@ -310,6 +310,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Check for new version
         self._check_version_update()
+        self._deployed_version_available = False  # Flag for new deployed version
 
         # Load UI using modular tab system
         self._load_tabs()
@@ -370,6 +371,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # Connect tab change signal
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.tabBar().tabMoved.connect(self._on_tab_moved)
+
+        # Setup periodic version check (every 2 minutes)
+        self._version_check_timer = QtCore.QTimer(self)
+        self._version_check_timer.timeout.connect(self._check_deployed_version)
+        self._version_check_timer.start(120000)  # 120000ms = 2 minutes
 
     def _load_tabs(self):
         """Load all tabs using the modular tab system."""
@@ -608,6 +614,55 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Update the last opened version to current (will be saved on close)
         # We don't save immediately to avoid file I/O on every startup
+
+    def _check_deployed_version(self):
+        """Periodically check if a new version has been deployed."""
+        # Don't check if we already know there's a new version
+        if self._deployed_version_available:
+            return
+
+        try:
+            # Re-read the version.json file from disk
+            from core.config import _ROOT_DIR
+            import json
+            version_file = os.path.join(_ROOT_DIR, "version.json")
+
+            with open(version_file, 'r') as f:
+                data = json.load(f)
+                deployed_version = data.get("version", "unknown")
+
+            # Compare with the version we started with
+            if deployed_version != APP_VERSION and deployed_version != "unknown":
+                print(f"New deployed version detected: v{deployed_version} (current: v{APP_VERSION})")
+                self._deployed_version_available = True
+                self._show_new_version_notification(deployed_version)
+        except Exception as e:
+            # Silently fail - don't spam the user with errors
+            print(f"Version check failed: {e}")
+
+    def _show_new_version_notification(self, new_version: str):
+        """Show notification that a new version is available."""
+        from PySide6.QtWidgets import QMessageBox
+
+        # Update status bar with persistent message
+        self.status_label.setText(f"⚠ New version available: v{new_version} - Please restart")
+        self.status_label.setStyleSheet("color: #f59e0b; font-weight: bold;")
+
+        # Show system tray notification
+        self.show_system_notification(
+            "Luma Tools Update Available",
+            f"A new version (v{new_version}) has been deployed. Please restart the application to use it.",
+            "info"
+        )
+
+        # Show a popup notification
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Update Available")
+        msg.setText(f"A new version (v{new_version}) has been deployed.")
+        msg.setInformativeText("Please restart Luma Tools to use the latest version.")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.show()  # Non-blocking show
 
 
     def _restore_window_state(self):

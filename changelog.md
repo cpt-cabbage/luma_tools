@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.14
+- New window size and maximized state persistence.
+- New version notifications
+- Use slider for generation count
+- Update requirements.txt and remove unused libs
+
 ## Version 0.4.1.13
 - New "Apply Settings" option in gallery
 - Implement expand_subgraphs function to handle ComfyUI component/subgraph nodes
