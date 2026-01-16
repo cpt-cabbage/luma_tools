@@ -48,11 +48,65 @@ install.bat  # Deploys to L:\tools\_studio_tools\luma_tools
 1. Prompts for version increment (big update: +0.1, small update: +0.01)
 2. Auto-increments version in `version.json`
 3. Optionally updates `changelog.md` from last git commit
-4. Copies all files to production location
-5. Updates paths in global_settings.json (dev → production)
-6. Removes 'pause' from production launchers for silent execution
+4. Cleans old Python files from previous structure
+5. Copies all Python modules to production location
+6. **Copies entire virtual environment** (`python/venv/`) to ensure dependencies are up-to-date
+7. Copies UI resources, icons, and configuration files
+8. Updates paths in global_settings.json (dev → production)
+9. Removes 'pause' from production launchers for silent execution
 
 **Version tracking:** Version is stored in `version.json` and displayed in Settings tab. Changelog entries are auto-generated from git commit messages during deployment.
+
+## Recent Features (v0.4.1.x)
+
+### Periodic Version Checking & Notifications
+
+The application automatically checks for new deployed versions every 2 minutes:
+
+**Features:**
+- Compares local `version.json` with production version at `L:\tools\_studio_tools\luma_tools\version.json`
+- Notifications via status bar, system tray, and popup dialogs
+- System tray icon provides persistent OS-level notifications
+- Configurable notification icons (Information, Warning, Critical)
+
+**Key Methods in `core/luma_tools.py`:**
+- `_check_deployed_version()` - Compares versions and triggers notifications
+- `_setup_system_tray()` - Creates cross-platform system tray icon
+- `show_system_notification(title, message, icon_type)` - Shows tray notifications
+- `_show_new_version_notification(new_version)` - Displays update popup
+
+**Timer:** `_version_check_timer` runs every 120,000ms (2 minutes)
+
+### File Logging System
+
+All output (stdout, stderr, exceptions) is automatically logged to disk with rotation:
+
+**Configuration:**
+- **Location:** `~/.luma_tools/logs/luma_tools_YYYYMMDD_HHMMSS.log`
+- **Rotation:** Keeps last 5 log files, auto-deletes older ones
+- **Encoding:** UTF-8 for international character support
+- **Global Exception Handler:** `sys.excepthook` catches unhandled exceptions with full traceback
+
+**Implementation:** `TeeStream` class redirects print statements to both console and log file simultaneously.
+
+**Benefit:** Production debugging without console access - all crashes logged automatically.
+
+### Window State Persistence
+
+Window configuration persists across sessions:
+
+**Saved State:**
+- Window size (width, height)
+- Window position (x, y coordinates)
+- Maximized state (boolean)
+- Tab order (user's custom tab arrangement)
+
+**Storage:** Uses `core.state_manager` to persist in user settings (`~/.luma_tools/settings.json`)
+
+**Methods:**
+- `_save_window_state()` - Called on close event
+- `_restore_window_state()` - Called on startup
+- `_restore_tab_order()` - Restores user's tab arrangement
 
 ## Project Structure (Domain-Based Organization)
 
@@ -154,7 +208,13 @@ from ayon.validators.base import BaseValidator
 from services.pass_builder import PassBuilder
 from services.render_service import detect_passes
 from services.mp4_maker import generate_mp4
+
+# UI components (lazy imports inside functions to avoid path issues)
+from ui_components import Worker, StatusColors, enhance_ui
+from icons import IconManager, TAB_COLORS
 ```
+
+**IMPORTANT:** UI component imports should be done lazily (inside functions) to avoid import path issues, especially in modules that may be called from worker threads. The `resources/ui/` directory is added to PYTHONPATH, so imports like `from ui_components import Worker` work correctly.
 
 ## Architecture Patterns
 
@@ -200,14 +260,35 @@ class MyTab(BaseTab):
 Uses Qt's QThreadPool + QRunnable pattern. The `Worker` class is defined in `resources/ui/workers.py`:
 
 ```python
-from resources.ui.workers import Worker
+# Correct pattern with lazy import
+from ui_components import Worker
 from PySide6.QtCore import QThreadPool
 
-worker = Worker(some_function, arg1, arg2)
-worker.signals.result.connect(handle_result)
-worker.signals.error.connect(handle_error)
-worker.signals.progress.connect(update_progress)
+# CRITICAL: Store worker reference to prevent garbage collection
+self._worker = Worker(some_function, arg1, arg2)
+self._worker.signals.result.connect(handle_result)
+self._worker.signals.error.connect(handle_error)
+self._worker.signals.progress.connect(update_progress)
+QThreadPool.globalInstance().start(self._worker)
+```
+
+**Worker Garbage Collection (CRITICAL):**
+
+Python's garbage collector can delete worker objects before they complete if no reference is stored:
+
+```python
+# ❌ WRONG - Worker may be garbage collected before completion
+worker = Worker(some_function)
 QThreadPool.globalInstance().start(worker)
+# worker goes out of scope and may be GC'd
+
+# ✅ CORRECT - Store reference on self to prevent GC
+self._worker = Worker(some_function)
+QThreadPool.globalInstance().start(self._worker)
+
+# ✅ ALSO CORRECT - Store on long-lived object
+dialog._worker = Worker(some_function)
+QThreadPool.globalInstance().start(dialog._worker)
 ```
 
 **Thread Safety:**
@@ -275,6 +356,49 @@ get_comfyui_path = lambda: get_setting("comfyui_path")
 - `FarmPublishStrategy` - Submits to Deadline farm
 - `LocalPublishStrategy` - Publishes directly
 
+### Mixin Pattern for Shared Functionality
+
+Mixins provide optional functionality that can be added to tabs via multiple inheritance.
+
+**PollingMixin** (`python/tabs/comfyui_polling.py`):
+
+Provides polling capabilities for tracking ComfyUI job status:
+
+```python
+from .base_tab import BaseTab
+from .comfyui_polling import PollingMixin
+
+class ComfyUITab(PollingMixin, BaseTab):
+    """Tab with polling functionality via mixin."""
+
+    def initialize(self):
+        # Initialize mixin state
+        self._init_polling_state()
+
+        # Start polling
+        self._start_iterate_polling()
+```
+
+**Mixin Features:**
+- **Iterate Mode Polling:** Tracks single ComfyUI job with progress updates
+- **Batch Mode Polling:** Tracks multiple jobs with combined status
+- **Timer Management:** Automatic start/stop of polling timers
+- **State Tracking:** Completed tasks, failed jobs, pending results
+- **Helper Functions:** `format_elapsed_time()`, `estimate_remaining_time()`
+
+**Key Methods:**
+- `_init_polling_state()` - Initialize polling variables (call in `initialize()`)
+- `_start_iterate_polling()` - Start iterate mode polling timer
+- `_start_batch_polling(job_ids)` - Start batch mode polling with job IDs
+- `_check_iterate_status()` - Poll single job status
+- `_check_batch_status()` - Poll multiple job statuses
+
+**Usage Pattern:**
+1. Inherit from both `PollingMixin` and `BaseTab`
+2. Call `_init_polling_state()` in `initialize()`
+3. Start polling with appropriate method
+4. Mixin handles timer management and state updates
+
 ## Configuration
 
 ### Dynamic Path Resolution (core/config.py)
@@ -311,6 +435,14 @@ The application uses these environment variables (set automatically by batch lau
 | BUILTIN_OCIO_ROOT | OCIO config location | From AYON environment |
 | AYON_DEFAULT_SETTINGS_VARIANT | AYON bundle name | `LUMA-PRODUCTION-Bundle-2025-12-08-02` |
 | PYTHONPATH | Python module search path | Set by batch files to include `python/` and `resources/ui/` |
+| QTWEBENGINE_DISABLE_SANDBOX | Disable Chromium sandbox for network paths | `1` (required for Three.js viewer) |
+| QTWEBENGINE_CHROMIUM_FLAGS | Chromium rendering flags | `--in-process-gpu` (prevents window flashing) |
+| QT_IMAGEIO_MAXALLOC | Max image allocation in MB | `2048` (2GB for large VFX images) |
+
+**Qt Configuration (set in `core/luma_tools.py` startup):**
+- **OpenGL Surface Format:** Configured globally to prevent context switching flashes
+- **Image Allocation Limit:** Increased to 2GB to support large EXR/TIFF files
+- **WebEngine GPU:** In-process GPU rendering prevents Chromium creating visible windows
 
 **Standalone Mode:** When AYON environment is unavailable, the app runs in standalone mode with limited functionality (no OIIO/FFmpeg-dependent features).
 
@@ -328,6 +460,37 @@ The application uses these environment variables (set automatically by batch lau
 **Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`, `Trellis2ExportMesh`, `UltraShapeSaveGLB`, `Load3D`. See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py` for widget mappings.
 
 **Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `core/config.py` for the full list.
+
+**Subgraph Expansion (v0.4.1.13):**
+- Workflows can include component/subgraph nodes (UUIDs) that reference reusable components
+- `expand_subgraphs()` in `comfyui/workflow.py` automatically expands these into concrete nodes
+- Definitions stored in `workflow.definitions.subgraphs` section
+- Enables modular workflow design with reusable building blocks
+
+**EXPORT_NODE_TYPES Pattern:**
+
+Generic pattern for handling export nodes via dict mapping (`comfyui/node_configs.py`):
+
+```python
+EXPORT_NODE_TYPES = {
+    'SaveImage': 'filename_prefix',
+    'HYMotionExportFBX': 'filename_prefix',
+    'Trellis2ExportMesh': 'filename_prefix',
+    'UltraShapeSaveGLB': 'filename_prefix',
+    # ... maps node type to output filename parameter
+}
+```
+
+**Adding New Export Node Types:**
+1. Add entry to `EXPORT_NODE_TYPES` with filename parameter name
+2. Add widget mappings to `WIDGET_MAPPINGS` in `EDITABLE_NODE_CONFIGS`
+3. If node supports `output_dir`, include it in widget list: `['output_dir', 'filename_prefix', ...]`
+4. Node auto-configured when workflow uses it
+
+**Output Directory Support:**
+- Some nodes support `output_dir` parameter to control where files are saved
+- Example: `Trellis2ExportMesh` has both `output_dir` and `filename_prefix`
+- Service automatically configures output directory when present in WIDGET_MAPPINGS
 
 ### Pass Building
 
@@ -397,10 +560,23 @@ powershell -Command "Get-ChildItem 'path\to\directory'"
 
 ### Debugging
 
+**Console & Logging:**
 - Console hidden by Windows API (`ctypes.windll`)
-- All `print()` statements redirect to Log tab in UI
+- All `print()` statements redirect to both Log tab and log files
+- **Log Files:** `~/.luma_tools/logs/luma_tools_YYYYMMDD_HHMMSS.log`
+  - Last 5 log files kept, older ones auto-deleted
+  - Full exception tracebacks captured via global exception handler
+  - UTF-8 encoding for international characters
+
+**Worker Debugging:**
 - Worker errors emit `error` signal with traceback
 - Check for `"Worker error:"` messages in log
+- Verify worker reference is stored (not garbage collected)
+
+**Production Debugging:**
+- Users can send log files from `~/.luma_tools/logs/` for support
+- All crashes automatically logged with full context
+- System tray notifications alert users to errors
 
 ### Modifying UI
 
@@ -455,7 +631,68 @@ if DEADLINE_AVAILABLE:
 
 Use `convert_to_ayon_folder_path()` for path conversion.
 
+## Performance Optimizations
+
+### Prewarm Viewer Pattern
+
+To prevent UI flashing when the 3D viewer first loads (WebEngine initialization is slow), the application uses a prewarm pattern:
+
+**How It Works:**
+1. During splash screen display, a Three.js viewer is pre-initialized in the background
+2. The viewer is stored globally via `set_prewarm_viewer(viewer)`
+3. When the main window needs the viewer, it retrieves the prewarmed instance with `get_prewarm_viewer()`
+4. This eliminates the ~1-2 second delay and visible flashing when first viewing 3D models
+
+**Implementation:**
+- `python/models/threejs_viewer.py` - Three.js viewer using QWebEngineView
+- `resources/ui/image_viewers.py` - Prewarm storage and retrieval functions
+- `python/core/luma_tools.py` - Splash screen triggers prewarm during startup
+
+**Benefit:** First 3D model view is instant with no UI flashing.
+
+### Qt Configuration for VFX Workflows
+
+**Image Allocation Limit:**
+- Default Qt limit is 256MB, insufficient for large VFX images
+- Increased to 2GB via `QT_IMAGEIO_MAXALLOC=2048` environment variable
+- Set in `core/luma_tools.py` before QApplication initialization
+
+**OpenGL Surface Format:**
+- Globally configured at startup to prevent context switching flashes
+- Uses default format with depth buffer, stencil buffer, and vsync
+- Applied before any OpenGL widget creation
+
+**QtWebEngine GPU:**
+- `QTWEBENGINE_CHROMIUM_FLAGS=--in-process-gpu` prevents Chromium creating visible windows
+- `QTWEBENGINE_DISABLE_SANDBOX=1` required for network path access
+- Critical for Three.js viewer to work correctly
+
+### Restricted Tab Performance
+
+Restricted tabs (access-controlled via global settings) don't initialize at all when user lacks permission:
+- UI files not loaded
+- Resources not allocated
+- Signals not connected
+- Saves memory and startup time
+
+**Configuration:** `restricted_tabs` in global settings maps tab `restrict_key` to permission flags.
+
 ## Common Pitfalls
+
+**Worker Garbage Collection (CRITICAL):**
+- Symptom: Workers complete but callbacks never fire, or workers stop mid-execution
+- Cause: Python GC deletes worker object before thread completes
+- Solution: Store worker reference on `self` or long-lived object (see Threading Model section)
+
+```python
+# ❌ WRONG
+worker = Worker(func)
+QThreadPool.globalInstance().start(worker)
+
+# ✅ CORRECT
+self._worker = Worker(func)
+QThreadPool.globalInstance().start(self._worker)
+```
 
 **Threading Errors:**
 - Symptom: Crashes or "QObject: Cannot create children for a parent that is in a different thread"
@@ -480,6 +717,28 @@ Use `convert_to_ayon_folder_path()` for path conversion.
 - API format has node IDs as keys with `inputs` dict
 - Use `is_api_format(workflow)` to detect format type
 - `comfyui/service.py` converts between formats automatically
+
+**Import Pattern Errors:**
+- Symptom: "No module named 'resources'" when running from worker threads
+- Cause: Using `from resources.ui.workers import Worker` instead of lazy import
+- Solution: Use `from ui_components import Worker` inside functions (lazy import)
+- Pattern: All UI component imports should be lazy to avoid path issues
+
+```python
+# ❌ WRONG - Module-level import fails in worker threads
+from resources.ui.workers import Worker
+
+# ✅ CORRECT - Lazy import inside function
+def my_function():
+    from ui_components import Worker
+    worker = Worker(some_func)
+```
+
+**Subgraph Widget Detection:**
+- Symptom: Editable widgets not appearing for nodes in subgraphs
+- Cause: Auto-detection of widget names from node inputs can fail
+- Solution: Add explicit widget mappings to `WIDGET_MAPPINGS` in `EDITABLE_NODE_CONFIGS`
+- Fallback: Manual configuration always takes precedence over auto-detection
 
 ## UI Components Organization
 

@@ -76,6 +76,8 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "window_maximized": SettingDef("window_maximized", False, "user"),
     # Version tracking
     "last_opened_version": SettingDef("last_opened_version", "0.0.0", "user"),
+    # Feature requests tracking
+    "feature_requests_last_read": SettingDef("feature_requests_last_read", "", "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery"], "global"),
 }
@@ -787,3 +789,186 @@ def is_new_version(current_version: str) -> bool:
     except (ValueError, AttributeError):
         # If version parsing fails, assume it's new
         return True
+
+
+# ============================================================================
+# FEATURE REQUESTS (Global Settings)
+# ============================================================================
+
+def get_feature_requests_file() -> str:
+    """Get path to shared feature requests file."""
+    base_path = get_global_settings_path()
+    return os.path.join(base_path, "feature_requests.txt")
+
+
+def append_feature_request(category: str, description: str, username: str) -> bool:
+    """Append a feature request to the shared file.
+
+    Format: [YYYY-MM-DD HH:MM:SS] [USERNAME] [CATEGORY] Description
+
+    Args:
+        category: Feature, Bug, Enhancement, or Question
+        description: Detailed description of the request
+        username: Username of the requester
+
+    Returns:
+        True on success, False on failure
+    """
+    import time
+    from datetime import datetime
+
+    try:
+        file_path = get_feature_requests_file()
+
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # Format timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Escape description to prevent newlines from breaking format
+        # Replace actual newlines with escaped newlines for storage
+        escaped_description = description.replace('\n', '\\n').replace('\r', '')
+
+        # Format entry
+        entry = f"[{timestamp}] [{username}] [{category}] {escaped_description}\n"
+
+        # Append to file with retry logic (for Windows file locking)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with open(file_path, 'a', encoding='utf-8') as f:
+                    f.write(entry)
+                print(f"Feature request appended: {category} by {username}")
+                return True
+            except (IOError, PermissionError) as e:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                else:
+                    print(f"Failed to append feature request after {max_retries} attempts: {e}")
+                    return False
+
+    except Exception as e:
+        print(f"Error appending feature request: {e}")
+        return False
+
+
+def get_feature_requests() -> List[Dict[str, str]]:
+    """Read and parse all feature requests.
+
+    Returns:
+        List of dicts with keys: timestamp, username, category, description
+    """
+    import re
+
+    try:
+        file_path = get_feature_requests_file()
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return []
+
+        # Read file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Parse each line
+        requests = []
+        pattern = r'^\[([^\]]+)\] \[([^\]]+)\] \[([^\]]+)\] (.+)$'
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            match = re.match(pattern, line)
+            if match:
+                timestamp, username, category, description = match.groups()
+                # Unescape newlines in description
+                description = description.replace('\\n', '\n')
+                requests.append({
+                    'timestamp': timestamp,
+                    'username': username,
+                    'category': category,
+                    'description': description
+                })
+            else:
+                print(f"Failed to parse feature request line: {line}")
+
+        return requests
+
+    except Exception as e:
+        print(f"Error reading feature requests: {e}")
+        return []
+
+
+def get_unread_feature_request_count(username: str) -> int:
+    """Get count of unread feature requests for admin users.
+
+    Uses user settings to track last read timestamp.
+
+    Args:
+        username: Admin username
+
+    Returns:
+        Count of unread requests
+    """
+    from datetime import datetime
+
+    try:
+        # Get user's last read timestamp
+        settings = load_user_settings()
+        last_read_str = settings.get("feature_requests_last_read", "")
+
+        # Parse timestamp
+        if last_read_str:
+            try:
+                last_read = datetime.strptime(last_read_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                last_read = None
+        else:
+            last_read = None
+
+        # Get all requests
+        requests = get_feature_requests()
+
+        # Count requests newer than last read
+        if last_read is None:
+            # Never read before, all are unread
+            return len(requests)
+
+        unread_count = 0
+        for req in requests:
+            try:
+                req_time = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S")
+                if req_time > last_read:
+                    unread_count += 1
+            except ValueError:
+                # If can't parse, assume unread
+                unread_count += 1
+
+        return unread_count
+
+    except Exception as e:
+        print(f"Error counting unread feature requests: {e}")
+        return 0
+
+
+def mark_feature_requests_as_read(username: str):
+    """Mark all current feature requests as read for this admin user.
+
+    Saves current timestamp to user settings.
+
+    Args:
+        username: Admin username
+    """
+    from datetime import datetime
+
+    try:
+        # Save current timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        set_setting("feature_requests_last_read", timestamp, verbose=False)
+        print(f"Marked feature requests as read for {username} at {timestamp}")
+
+    except Exception as e:
+        print(f"Error marking feature requests as read: {e}")

@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QThreadPool
 
-from resources.ui.workers import Worker
-
 
 def _run_publish_validators(
     file_path: str,
@@ -301,6 +299,7 @@ def publish_comfyui_asset_to_ayon(
 
             # Create and start worker
             # Store worker on progress_dialog to prevent garbage collection
+            from ui_components import Worker
             progress_dialog._worker = Worker(publish_worker)
             progress_dialog._worker.signals.result.connect(on_publish_complete)
             progress_dialog._worker.signals.error.connect(on_publish_error)

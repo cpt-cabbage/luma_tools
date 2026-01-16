@@ -65,6 +65,13 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'showVersionHistoryButton'):
             self.ui.showVersionHistoryButton.clicked.connect(self._on_show_version_history)
 
+        # Feature request buttons
+        if hasattr(self.ui, 'submitFeatureRequestButton'):
+            self.ui.submitFeatureRequestButton.clicked.connect(self._on_submit_feature_request)
+
+        if hasattr(self.ui, 'viewFeatureRequestsButton'):
+            self.ui.viewFeatureRequestsButton.clicked.connect(self._on_view_feature_requests)
+
         # User settings
         self.ui.AddPassButton.clicked.connect(self._on_add_pass_clicked)
         self.ui.RemovePassButton.clicked.connect(self._on_remove_pass_clicked)
@@ -157,6 +164,9 @@ class SettingsTab(BaseTab):
                         background-color: #f59e0b;
                     }
                 """)
+
+        # Load feature request UI
+        self._load_feature_request_ui()
 
     def _on_show_version_history(self):
         """Show version history dialog."""
@@ -722,3 +732,183 @@ class SettingsTab(BaseTab):
                 restricted.append(tab_name)
 
         set_restricted_tabs(restricted)
+
+    def _load_feature_request_ui(self):
+        """Configure feature request buttons based on user role."""
+        # Submit button is visible to everyone
+        if hasattr(self.ui, 'submitFeatureRequestButton'):
+            self.ui.submitFeatureRequestButton.setVisible(True)
+
+        # View button only visible to admins
+        if hasattr(self.ui, 'viewFeatureRequestsButton'):
+            is_admin = self.app_state.is_admin
+            self.ui.viewFeatureRequestsButton.setVisible(is_admin)
+
+            # Check for unread requests (admins only)
+            if is_admin:
+                from core.settings_manager import get_unread_feature_request_count
+                unread_count = get_unread_feature_request_count(self.app_state.user)
+
+                if unread_count > 0:
+                    # Add notification indicator
+                    self.ui.viewFeatureRequestsButton.setText(f"View Requests ({unread_count})")
+                    # Add orange styling like version history
+                    self.ui.viewFeatureRequestsButton.setStyleSheet("""
+                        QPushButton {
+                            background-color: #d97706;
+                            color: white;
+                        }
+                        QPushButton:hover {
+                            background-color: #f59e0b;
+                        }
+                    """)
+                    # Request attention (pulsing glow)
+                    self.signals.request_attention.emit()
+
+    def _on_submit_feature_request(self):
+        """Show feature request submission dialog."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QComboBox, QTextEdit, QLabel, QDialogButtonBox, QMessageBox
+        from core.settings_manager import append_feature_request
+
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Luma Tools - Submit Feature Request")
+        dialog.setMinimumSize(500, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        # Category dropdown
+        category_label = QLabel("Category:")
+        layout.addWidget(category_label)
+
+        category_combo = QComboBox()
+        category_combo.addItems(["Feature", "Bug", "Enhancement", "Question"])
+        layout.addWidget(category_combo)
+
+        # Description text area with spell checking
+        description_label = QLabel("Description:")
+        layout.addWidget(description_label)
+
+        description_edit = QTextEdit()
+        description_edit.setPlaceholderText("Describe your request or issue in detail...")
+
+        # Add spell checking if available
+        try:
+            from ui.spell_checker import add_spell_checking
+            add_spell_checking(description_edit)
+        except Exception as e:
+            print(f"Spell checking not available: {e}")
+
+        layout.addWidget(description_edit)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Show dialog
+        if dialog.exec() == QDialog.Accepted:
+            category = category_combo.currentText()
+            description = description_edit.toPlainText().strip()
+
+            if not description:
+                QMessageBox.warning(
+                    self.main_window,
+                    "Empty Description",
+                    "Please enter a description for your request."
+                )
+                return
+
+            # Submit request
+            username = self.app_state.user
+            success = append_feature_request(category, description, username)
+
+            if success:
+                QMessageBox.information(
+                    self.main_window,
+                    "Request Submitted",
+                    "Your feature request has been submitted successfully.\nAdmins will be notified."
+                )
+
+                # Notify admins
+                self._notify_admins_of_new_request()
+            else:
+                QMessageBox.critical(
+                    self.main_window,
+                    "Submission Failed",
+                    "Failed to submit feature request. Please try again or contact an admin."
+                )
+
+    def _notify_admins_of_new_request(self):
+        """Notify all admins of new feature request via system tray."""
+        # Use main window's notification system
+        if hasattr(self.main_window, 'show_system_notification'):
+            self.main_window.show_system_notification(
+                "New Feature Request",
+                "A new feature request has been submitted. Check the Settings tab to view.",
+                "info"
+            )
+
+    def _on_view_feature_requests(self):
+        """Show all feature requests dialog (admin only)."""
+        if not self.app_state.is_admin:
+            QMessageBox.warning(
+                self.main_window,
+                "Access Denied",
+                "Only administrators can view feature requests."
+            )
+            return
+
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox, QLabel
+        from core.settings_manager import get_feature_requests, mark_feature_requests_as_read
+
+        # Clear notification indicator
+        if hasattr(self.ui, 'viewFeatureRequestsButton'):
+            self.ui.viewFeatureRequestsButton.setText("View Requests")
+            self.ui.viewFeatureRequestsButton.setStyleSheet("")
+
+        # Mark as read
+        mark_feature_requests_as_read(self.app_state.user)
+
+        # Get requests
+        requests = get_feature_requests()
+
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Luma Tools - Feature Requests")
+        dialog.setMinimumSize(700, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        # Info label
+        info_label = QLabel(f"Total Requests: {len(requests)}")
+        info_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(info_label)
+
+        # Text display
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+
+        # Format requests
+        if requests:
+            formatted_text = ""
+            for i, req in enumerate(requests, 1):
+                formatted_text += f"{'='*70}\n"
+                formatted_text += f"Request #{i}\n"
+                formatted_text += f"Date: {req['timestamp']}\n"
+                formatted_text += f"User: {req['username']}\n"
+                formatted_text += f"Category: {req['category']}\n"
+                formatted_text += f"{'-'*70}\n"
+                formatted_text += f"{req['description']}\n\n"
+
+            text_edit.setPlainText(formatted_text)
+        else:
+            text_edit.setPlainText("No feature requests yet.")
+
+        layout.addWidget(text_edit)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+
+        dialog.exec()

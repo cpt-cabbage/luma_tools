@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.1.15
+- Implement periodic version checking with timer (every 2 minutes)
+- Add notifications for new deployed versions via status bar, system tray, and popup
+
 ## Version 0.4.1.14
 - New window size and maximized state persistence.
 - New version notifications

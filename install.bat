@@ -243,6 +243,33 @@ if errorlevel 1 (
     echo WARNING: Failed to copy Python libs (may not exist)
 )
 
+REM ============================================================================
+REM COPY VIRTUAL ENVIRONMENT
+REM ============================================================================
+
+echo.
+echo Copying virtual environment...
+echo This may take a few minutes...
+
+REM Check if source venv exists
+if not exist "%SOURCE%\python\venv\" (
+    echo WARNING: Source venv not found at %SOURCE%\python\venv\
+    echo Skipping venv copy.
+    goto :skip_venv
+)
+
+REM Copy the entire venv directory
+xcopy "%SOURCE%\python\venv\*.*" "%TARGET%\python\venv\" /E /Y /Q /I /H
+if errorlevel 1 (
+    echo ERROR: Failed to copy virtual environment
+    pause
+    exit /b 1
+)
+
+echo Virtual environment copied successfully.
+
+:skip_venv
+
 REM Copy UI resources (root)
 echo Copying UI resources...
 xcopy "%SOURCE%\resources\ui\*.ui" "%TARGET%\resources\ui\" /Y /Q

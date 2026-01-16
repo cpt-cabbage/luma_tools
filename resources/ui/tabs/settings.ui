@@ -101,6 +101,41 @@
              </widget>
             </item>
             <item>
+             <widget class="QPushButton" name="submitFeatureRequestButton">
+              <property name="text">
+               <string>Submit Request</string>
+              </property>
+              <property name="toolTip">
+               <string>Submit a feature request or bug report</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>120</width>
+                <height>28</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="viewFeatureRequestsButton">
+              <property name="text">
+               <string>View Requests</string>
+              </property>
+              <property name="toolTip">
+               <string>View all feature requests (admin only)</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>120</width>
+                <height>28</height>
+               </size>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer name="versionSpacer">
               <property name="orientation">
                <enum>Qt::Horizontal</enum>
