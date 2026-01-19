@@ -1,12 +1,5 @@
 # Luma Tools Changelog
 
-## Version 0.4.3.2 (Unreleased)
-- Refactor ComfyUI tab for improved maintainability
-  - Extract widget management to `comfyui_ui_manager.py` (332 lines)
-  - Extract state persistence to `comfyui_state_manager.py` (105 lines)
-  - Reduce main tab file from 1559 to 1268 lines (291 line reduction)
-  - Improve separation of concerns: UI coordination vs business logic
-
 ## Version 0.4.3.1
 - Hdri rendering improvements
 - Viewer UI polish
