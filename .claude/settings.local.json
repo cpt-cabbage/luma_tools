@@ -33,7 +33,8 @@
       "Bash(python/venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); from comfyui.workflow import expand_subgraphs, _normalize_link; print\\(''Import successful''\\)\")",
       "Bash(python/venv/Scripts/python.exe:*)",
       "WebSearch",
-      "WebFetch"
+      "WebFetch",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

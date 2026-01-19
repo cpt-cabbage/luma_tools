@@ -4,29 +4,6 @@ import os
 from pathlib import Path
 
 
-def extract_shot_short(path):
-    """
-    Extracts the shot identifier from a given path and returns it in short form.
-
-    Args:
-        path: File system path containing shot information
-
-    Returns:
-        str: Short form shot name (e.g., 'sh10') or None if not found
-    """
-    parts = path.split(os.sep)
-    try:
-        shots_index = parts.index('shots')
-        shot_full = parts[shots_index + 2]
-        if shot_full.startswith('sh'):
-            num_str = shot_full[2:]
-            num_int = int(num_str)
-            return f"sh{num_int}"
-    except (ValueError, IndexError):
-        pass
-    return None
-
-
 def get_trailing_number(s):
     """
     Extract trailing number from string.
@@ -43,20 +20,6 @@ def get_trailing_number(s):
     """
     query = s
     return re.findall(r'\d+', query)[-1]
-
-
-def extract_number(s):
-    """
-    Extract trailing number from string and return as int.
-
-    Args:
-        s: String containing a number at the end
-
-    Returns:
-        int: The trailing number or None if not found
-    """
-    m = re.search(r'\d+$', s)
-    return int(m.group()) if m else None
 
 
 def remove_after(string, suffix):
