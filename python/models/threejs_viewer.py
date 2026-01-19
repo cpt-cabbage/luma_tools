@@ -34,6 +34,20 @@ class ViewMode(Enum):
     WIREFRAME = "wireframe"
 
 
+class LightingMode(Enum):
+    """Viewer lighting modes."""
+    HEADLIGHT = "headlight"
+    STUDIO = "studio"
+    HDRI = "hdri"
+
+
+class ShadingMode(Enum):
+    """Viewer shading modes."""
+    SHADED = "shaded"
+    TEXTURED = "textured"
+    WIREFRAME = "wireframe"
+
+
 # Global pre-warmed viewer instance (initialized during splash)
 _prewarm_viewer = None
 
@@ -147,6 +161,33 @@ class ThreeJSBridge(QObject):
         """Set the default camera distance for model loading."""
         if self._web_view:
             js_code = f"setCameraDistance({distance});"
+            self._web_view.page().runJavaScript(js_code)
+
+    def set_lighting_mode(self, mode: str):
+        """Send lighting mode command to JavaScript."""
+        if self._web_view:
+            js_code = f"setLightingMode('{mode}');"
+            self._web_view.page().runJavaScript(js_code)
+
+    def set_shading_mode(self, mode: str):
+        """Send shading mode command to JavaScript."""
+        if self._web_view:
+            js_code = f"setShadingMode('{mode}');"
+            self._web_view.page().runJavaScript(js_code)
+
+    def load_hdri(self, path: str):
+        """Send load HDRI command to JavaScript."""
+        if self._web_view:
+            file_url = path.replace('\\', '/')
+            if not file_url.startswith('file://'):
+                file_url = f'file:///{file_url}'
+            js_code = f"loadHdri('{file_url}');"
+            self._web_view.page().runJavaScript(js_code)
+
+    def set_light_strength(self, strength: float):
+        """Send light strength command to JavaScript."""
+        if self._web_view:
+            js_code = f"setLightStrength({strength});"
             self._web_view.page().runJavaScript(js_code)
 
 
@@ -372,15 +413,58 @@ class ThreeJSViewerWidget(QWidget):
         """Get the currently loaded model path."""
         return self._current_model_path
 
+    def set_lighting_mode(self, mode: LightingMode):
+        """
+        Set the lighting mode (headlight, studio, hdri).
+
+        Args:
+            mode: LightingMode enum value
+        """
+        if self._viewer_ready:
+            self._bridge.set_lighting_mode(mode.value)
+
+    def set_shading_mode(self, mode: ShadingMode):
+        """
+        Set the shading mode (shaded, textured, wireframe).
+
+        Args:
+            mode: ShadingMode enum value
+        """
+        if self._viewer_ready:
+            self._bridge.set_shading_mode(mode.value)
+
+    def load_hdri(self, path: str):
+        """
+        Load an HDRI environment map.
+
+        Args:
+            path: Path to HDRI file (.hdr or .exr)
+        """
+        if self._viewer_ready:
+            self._bridge.load_hdri(path)
+
+    def set_light_strength(self, strength: float):
+        """
+        Set the light intensity strength multiplier.
+
+        Args:
+            strength: Light strength from 0.1 to 3.0 (1.0 = default)
+        """
+        if self._viewer_ready:
+            self._bridge.set_light_strength(strength)
+
 
 class ThreeJSViewerDialog(QWidget):
     """
     Standalone dialog window for viewing 3D models with Three.js.
 
     Used when opening a 3D model from context menu or thumbnail click.
+    Includes lighting and shading controls matching the embedded viewer.
     """
 
     def __init__(self, model_path: str, parent=None):
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QLabel, QMenu, QSlider
+
         super().__init__(parent)
 
         if not WEBENGINE_AVAILABLE:
@@ -390,16 +474,304 @@ class ThreeJSViewerDialog(QWidget):
         self.setWindowFlags(Qt.Window)
         self.resize(800, 600)
 
-        # Create layout
+        # State for controls
+        self._current_shading_mode = "textured"
+        self._current_lighting_mode = "studio"
+        self._current_hdri_path = None
+        self._current_light_strength = 1.0
+
+        # Load saved preferences
+        try:
+            from core.settings_manager import (
+                get_viewer_3d_shading_mode,
+                get_viewer_3d_lighting_mode,
+                get_viewer_3d_hdri_name,
+                get_viewer_3d_light_strength,
+                get_hdri_list
+            )
+            self._current_shading_mode = get_viewer_3d_shading_mode() or "textured"
+            self._current_lighting_mode = get_viewer_3d_lighting_mode() or "studio"
+            self._current_light_strength = get_viewer_3d_light_strength() or 1.0
+            hdri_name = get_viewer_3d_hdri_name()
+            if hdri_name:
+                hdri_list = get_hdri_list()
+                for hdri in hdri_list:
+                    if os.path.basename(hdri["path"]) == hdri_name:
+                        self._current_hdri_path = hdri["path"]
+                        break
+        except Exception:
+            pass
+
+        # Create layout - viewer takes full space
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Create viewer widget
+        # Create viewer widget first (will be the main content)
         self._viewer = ThreeJSViewerWidget(self)
         layout.addWidget(self._viewer)
 
+        # Info bar with controls - overlays on content
+        self._info_bar = QWidget(self)  # Child of self for overlay
+        self._info_bar.setStyleSheet("background-color: rgba(30, 30, 30, 200); border-top: 1px solid #444444;")
+        self._info_bar.setFixedHeight(35)
+        info_layout = QHBoxLayout(self._info_bar)
+        info_layout.setContentsMargins(10, 5, 10, 5)
+        info_layout.setSpacing(10)
+
+        # Filename label
+        filename_label = QLabel(os.path.basename(model_path))
+        filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        info_layout.addWidget(filename_label)
+
+        # Shading Mode dropdown
+        self._shading_btn = QPushButton(self._current_shading_mode.title())
+        self._shading_btn.setFixedHeight(25)
+        self._shading_btn.setStyleSheet("""
+            QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
+            QPushButton:hover { background-color: #5aa9ff; }
+        """)
+        self._shading_btn.clicked.connect(self._show_shading_menu)
+        info_layout.addWidget(self._shading_btn)
+
+        # Lighting Mode dropdown
+        label_map = {"headlight": "Headlight", "studio": "Studio", "hdri": "HDRI"}
+        self._lighting_btn = QPushButton(label_map.get(self._current_lighting_mode, "Studio"))
+        self._lighting_btn.setFixedHeight(25)
+        self._lighting_btn.setStyleSheet("""
+            QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
+            QPushButton:hover { background-color: #7c8596; }
+        """)
+        self._lighting_btn.clicked.connect(self._show_lighting_menu)
+        info_layout.addWidget(self._lighting_btn)
+
+        # Light strength label
+        light_label = QLabel("Light:")
+        light_label.setStyleSheet("color: #888888; font-size: 11px;")
+        info_layout.addWidget(light_label)
+
+        # Light strength slider
+        self._light_slider = QSlider(Qt.Horizontal)
+        self._light_slider.setMinimum(10)  # 0.1x
+        self._light_slider.setMaximum(300)  # 3.0x
+        self._light_slider.setValue(int(self._current_light_strength * 100))
+        self._light_slider.setFixedWidth(100)
+        self._light_slider.setFixedHeight(20)
+        self._light_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #333333;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a9eff;
+                width: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #5aa9ff;
+            }
+        """)
+        self._light_slider.valueChanged.connect(self._on_light_strength_changed)
+        info_layout.addWidget(self._light_slider)
+
+        # Light strength value label
+        self._light_value_label = QLabel(f"{self._current_light_strength:.1f}x")
+        self._light_value_label.setFixedWidth(35)
+        self._light_value_label.setStyleSheet("color: #888888; font-size: 11px;")
+        info_layout.addWidget(self._light_value_label)
+
+        info_layout.addStretch()
+
+        # Help text
+        help_label = QLabel("Scroll: Zoom | Drag: Rotate | Shift+Drag: Pan")
+        help_label.setStyleSheet("color: #888888; font-size: 10px;")
+        info_layout.addWidget(help_label)
+
+        self._info_bar.raise_()
+
+        # Connect to viewer ready signal to apply saved preferences
+        self._viewer._bridge.viewerReady.connect(self._on_viewer_ready)
+
         # Load the model
         self._viewer.load_file(model_path)
+
+    def _on_viewer_ready(self):
+        """Apply saved preferences once viewer is ready."""
+        # Apply saved shading mode
+        if self._current_shading_mode != "textured":
+            self._viewer.set_shading_mode(ShadingMode(self._current_shading_mode))
+
+        # Apply saved lighting mode
+        if self._current_lighting_mode != "studio":
+            self._viewer.set_lighting_mode(LightingMode(self._current_lighting_mode))
+            if self._current_lighting_mode == "hdri" and self._current_hdri_path:
+                self._viewer.load_hdri(self._current_hdri_path)
+
+        # Apply saved light strength
+        if self._current_light_strength != 1.0:
+            self._viewer.set_light_strength(self._current_light_strength)
+
+    def _show_shading_menu(self):
+        """Show shading mode selection menu."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        modes = [("Shaded", "shaded"), ("Textured", "textured"), ("Wireframe", "wireframe")]
+
+        for label, mode in modes:
+            action = menu.addAction(label)
+            action.setData(mode)
+            if mode == self._current_shading_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        action = menu.exec_(self._shading_btn.mapToGlobal(
+            self._shading_btn.rect().bottomLeft()))
+
+        if action and action.data():
+            self._set_shading_mode(action.data())
+
+    def _show_lighting_menu(self):
+        """Show lighting mode selection menu."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+
+        # Basic lighting modes
+        modes = [("Headlight", "headlight"), ("Studio (3-Point)", "studio")]
+        for label, mode in modes:
+            action = menu.addAction(label)
+            action.setData(("mode", mode))
+            if mode == self._current_lighting_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # HDRI submenu (only if HDRIs are configured)
+        try:
+            from core.settings_manager import get_hdri_list
+            hdri_list = get_hdri_list()
+            if hdri_list:
+                hdri_menu = menu.addMenu("HDRI")
+                for hdri in hdri_list:
+                    action = hdri_menu.addAction(hdri["name"])
+                    action.setData(("hdri", hdri["path"]))
+                    if (self._current_lighting_mode == "hdri" and
+                        self._current_hdri_path == hdri["path"]):
+                        action.setCheckable(True)
+                        action.setChecked(True)
+        except Exception as e:
+            print(f"Error loading HDRI list: {e}")
+
+        action = menu.exec_(self._lighting_btn.mapToGlobal(
+            self._lighting_btn.rect().bottomLeft()))
+
+        if action and action.data():
+            data_type, value = action.data()
+            if data_type == "mode":
+                self._set_lighting_mode(value)
+            elif data_type == "hdri":
+                self._set_lighting_mode("hdri")
+                self._load_hdri(value)
+
+    def _set_shading_mode(self, mode):
+        """Set shading mode on the viewer."""
+        self._current_shading_mode = mode
+        self._shading_btn.setText(mode.title())
+
+        try:
+            mode_enum = ShadingMode(mode)
+            self._viewer.set_shading_mode(mode_enum)
+        except Exception as e:
+            print(f"Error setting shading mode: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_shading_mode
+            set_viewer_3d_shading_mode(mode)
+        except Exception:
+            pass
+
+    def _set_lighting_mode(self, mode):
+        """Set lighting mode on the viewer."""
+        self._current_lighting_mode = mode
+        label_map = {"headlight": "Headlight", "studio": "Studio", "hdri": "HDRI"}
+        self._lighting_btn.setText(label_map.get(mode, mode.title()))
+
+        try:
+            mode_enum = LightingMode(mode)
+            self._viewer.set_lighting_mode(mode_enum)
+        except Exception as e:
+            print(f"Error setting lighting mode: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_lighting_mode
+            set_viewer_3d_lighting_mode(mode)
+        except Exception:
+            pass
+
+    def _load_hdri(self, hdri_path):
+        """Load an HDRI environment map."""
+        self._current_hdri_path = hdri_path
+
+        try:
+            self._viewer.load_hdri(hdri_path)
+        except Exception as e:
+            print(f"Error loading HDRI: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_hdri_name
+            set_viewer_3d_hdri_name(os.path.basename(hdri_path))
+        except Exception:
+            pass
+
+    def _on_light_strength_changed(self, value):
+        """Handle light strength slider changes."""
+        strength = value / 100.0
+        self._current_light_strength = strength
+        self._light_value_label.setText(f"{strength:.1f}x")
+
+        try:
+            self._viewer.set_light_strength(strength)
+        except Exception as e:
+            print(f"Error setting light strength: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_light_strength
+            set_viewer_3d_light_strength(strength)
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        """Handle show event - position info bar."""
+        super().showEvent(event)
+        self._position_info_bar()
+
+    def resizeEvent(self, event):
+        """Handle resize event - reposition info bar."""
+        super().resizeEvent(event)
+        self._position_info_bar()
+
+    def _position_info_bar(self):
+        """Position info_bar at bottom of window as overlay."""
+        # Lower the viewer first (helps with QWebEngineView z-order)
+        if hasattr(self, '_viewer'):
+            self._viewer.lower()
+
+        if hasattr(self, '_info_bar'):
+            bar_height = self._info_bar.height()
+            self._info_bar.setGeometry(
+                0,
+                self.height() - bar_height,
+                self.width(),
+                bar_height
+            )
+            self._info_bar.raise_()
+            self._info_bar.show()
 
     def exec(self):
         """Show dialog modally (compatibility with QDialog interface)."""

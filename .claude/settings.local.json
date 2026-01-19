@@ -31,7 +31,9 @@
       "Bash(git mv utils.py core/)",
       "Bash(python/venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); from comfyui.workflow import expand_subgraphs; print\\(''Import successful''\\)\")",
       "Bash(python/venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); from comfyui.workflow import expand_subgraphs, _normalize_link; print\\(''Import successful''\\)\")",
-      "Bash(python/venv/Scripts/python.exe:*)"
+      "Bash(python/venv/Scripts/python.exe:*)",
+      "WebSearch",
+      "WebFetch"
     ],
     "deny": [],
     "ask": []

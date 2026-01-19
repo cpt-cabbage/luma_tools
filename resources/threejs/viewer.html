@@ -90,6 +90,8 @@
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+        import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 
         // Global state
         let scene, camera, renderer, controls;
@@ -104,6 +106,19 @@
         let skeletonHelper = null;
         let initComplete = false;  // Track if Three.js init is done
         let cameraDistance = 3.5;  // Default camera distance (configurable via settings)
+        let activeLoadUrl = null;  // Track currently loading model URL to prevent race conditions
+
+        // Lighting and shading state
+        let lightingMode = 'studio';  // 'headlight', 'studio', 'hdri'
+        let shadingMode = 'textured'; // 'shaded', 'textured', 'wireframe'
+        let lightStrength = 1.0;      // Light intensity multiplier (0.1 to 3.0)
+        let ambientLight = null;
+        let keyLight = null;
+        let fillLight = null;
+        let rimLight = null;
+        let headlight = null;
+        let pmremGenerator = null;
+        let envTexture = null;
 
         // Initialize scene
         function init() {
@@ -134,20 +149,15 @@
             controls.minDistance = 0.1;
             controls.maxDistance = 100;
 
-            // Lights
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
+            // Initialize PMREMGenerator for HDRI environment maps
+            pmremGenerator = new THREE.PMREMGenerator(renderer);
+            pmremGenerator.compileEquirectangularShader();
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            dirLight.position.set(5, 10, 5);
-            dirLight.castShadow = true;
-            dirLight.shadow.mapSize.width = 2048;
-            dirLight.shadow.mapSize.height = 2048;
-            scene.add(dirLight);
+            // Setup all lights
+            setupLights();
 
-            const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-            fillLight.position.set(-5, 5, -5);
-            scene.add(fillLight);
+            // Apply initial lighting mode (studio by default)
+            setLightingModeImpl(lightingMode);
 
             // Grid
             gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x333333);
@@ -260,6 +270,12 @@
         // Load 3D model implementation
         function loadModelImpl(url) {
             console.log('Loading model:', url);
+
+            // Cancel any previous load in progress by marking it as stale
+            // When the old load completes, it will check if activeLoadUrl matches before adding to scene
+            const thisLoadUrl = url;
+            activeLoadUrl = thisLoadUrl;
+
             document.getElementById('loading').style.display = 'block';
             document.getElementById('loading').querySelector('div:last-child').textContent = 'Loading model...';
             document.getElementById('error').style.display = 'none';
@@ -305,6 +321,19 @@
             loader.load(
                 url,
                 function(result) {
+                    // Race condition protection: Check if this load is still the active one
+                    // If user clicked "next" rapidly, a newer load may have started
+                    if (activeLoadUrl !== thisLoadUrl) {
+                        console.log('Load cancelled (newer load started):', thisLoadUrl);
+                        // Dispose the loaded model since we won't be using it
+                        if (result.scene) {
+                            disposeObject(result.scene);
+                        } else if (result) {
+                            disposeObject(result);
+                        }
+                        return;
+                    }
+
                     let model;
 
                     // GLTFLoader returns { scene, animations, ... }
@@ -377,6 +406,9 @@
 
                     // Apply current view mode
                     applyViewMode();
+
+                    // Apply current lighting settings to materials
+                    updateMaterialsForLighting();
 
                     // Hide loading, show success
                     document.getElementById('loading').style.display = 'none';
@@ -487,6 +519,245 @@
             }
         }
 
+        // Setup all lights (called once during init)
+        function setupLights() {
+            // Ambient light (used in all modes, intensity varies)
+            // Store base intensity, will be multiplied by lightStrength
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+            ambientLight.userData.baseIntensity = 0.3;
+            scene.add(ambientLight);
+
+            // Headlight (follows camera) - attached to camera so it moves with view
+            headlight = new THREE.DirectionalLight(0xffffff, 1.0);
+            headlight.userData.baseIntensity = 1.0;
+            headlight.position.set(0, 0, 1);
+            camera.add(headlight);
+            scene.add(camera);  // Camera must be in scene for headlight to work
+            headlight.visible = false;
+
+            // Studio Key light (warm, strong, with shadows) - front right
+            keyLight = new THREE.DirectionalLight(0xfff5e6, 1.0);
+            keyLight.userData.baseIntensity = 1.0;
+            keyLight.position.set(5, 10, 5);
+            keyLight.castShadow = true;
+            keyLight.shadow.mapSize.width = 2048;
+            keyLight.shadow.mapSize.height = 2048;
+            keyLight.shadow.camera.near = 0.1;
+            keyLight.shadow.camera.far = 50;
+            keyLight.shadow.camera.left = -10;
+            keyLight.shadow.camera.right = 10;
+            keyLight.shadow.camera.top = 10;
+            keyLight.shadow.camera.bottom = -10;
+            scene.add(keyLight);
+
+            // Studio Fill light (cool, softer) - left side
+            fillLight = new THREE.DirectionalLight(0xe6f0ff, 0.4);
+            fillLight.userData.baseIntensity = 0.4;
+            fillLight.position.set(-5, 5, -5);
+            scene.add(fillLight);
+
+            // Studio Rim/Back light - behind subject
+            rimLight = new THREE.DirectionalLight(0xffffff, 0.3);
+            rimLight.userData.baseIntensity = 0.3;
+            rimLight.position.set(0, 5, -10);
+            scene.add(rimLight);
+        }
+
+        // Set lighting mode
+        function setLightingModeImpl(mode) {
+            lightingMode = mode;
+
+            // Disable all lights first
+            headlight.visible = false;
+            keyLight.visible = false;
+            fillLight.visible = false;
+            rimLight.visible = false;
+
+            // Clear environment map
+            scene.environment = null;
+            scene.background = new THREE.Color(0x1e1e1e);
+
+            switch (mode) {
+                case 'headlight':
+                    headlight.visible = true;
+                    ambientLight.userData.baseIntensity = 0.2;
+                    break;
+
+                case 'studio':
+                    keyLight.visible = true;
+                    fillLight.visible = true;
+                    rimLight.visible = true;
+                    ambientLight.userData.baseIntensity = 0.3;
+                    break;
+
+                case 'hdri':
+                    // HDRI mode - environment provides lighting
+                    ambientLight.userData.baseIntensity = 0.1;
+                    if (envTexture) {
+                        scene.environment = envTexture;
+                        // Don't set as background - keep dark bg
+                    }
+                    break;
+            }
+
+            // Apply light strength to all lights
+            applyLightStrength();
+
+            // Update materials for new lighting mode
+            updateMaterialsForLighting();
+
+            console.log('Lighting mode set to:', mode);
+        }
+
+        // Load HDRI environment map
+        function loadHdriImpl(url) {
+            console.log('Loading HDRI:', url);
+
+            const extension = url.split('.').pop().toLowerCase().split('?')[0];
+            const loader = extension === 'exr' ? new EXRLoader() : new RGBELoader();
+
+            loader.load(url, function(texture) {
+                // Generate environment map from equirectangular texture
+                envTexture = pmremGenerator.fromEquirectangular(texture).texture;
+                texture.dispose();
+
+                // Apply if in HDRI mode
+                if (lightingMode === 'hdri') {
+                    scene.environment = envTexture;
+                }
+
+                // Update materials to use new environment
+                updateMaterialsForLighting();
+
+                console.log('HDRI loaded successfully:', url);
+
+                // Notify Python
+                if (bridge && bridge.onHdriLoaded) {
+                    bridge.onHdriLoaded(url);
+                }
+            }, undefined, function(error) {
+                console.error('Error loading HDRI:', error);
+                if (bridge && bridge.onHdriLoadError) {
+                    bridge.onHdriLoadError(error.message || String(error));
+                }
+            });
+        }
+
+        // Update material properties based on lighting mode
+        function updateMaterialsForLighting() {
+            if (!currentModel) return;
+
+            currentModel.traverse(function(child) {
+                if (child.isMesh && child.material) {
+                    // Handle both single materials and material arrays
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+
+                    materials.forEach(function(material) {
+                        // Only update PBR materials (MeshStandardMaterial, MeshPhysicalMaterial)
+                        if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+                            // In HDRI mode, explicitly set the environment map on the material
+                            if (lightingMode === 'hdri' && envTexture) {
+                                material.envMap = envTexture;
+                                material.envMapIntensity = 1.0 * lightStrength;
+
+                                // Ensure material is metallic/rough enough to show reflections
+                                // Only adjust if not already set by the model
+                                if (material.metalness === 0 && material.roughness === 1) {
+                                    // If material has default values, make it slightly reflective
+                                    material.roughness = 0.7;  // Less rough = more reflective
+                                }
+                            } else {
+                                // In non-HDRI modes, use scene environment with lower intensity
+                                material.envMap = envTexture || null;
+                                material.envMapIntensity = 0.3 * lightStrength;
+                            }
+                            material.needsUpdate = true;
+                        }
+                    });
+                }
+            });
+        }
+
+        // Set light strength multiplier (0.1 to 3.0)
+        function setLightStrengthImpl(strength) {
+            lightStrength = Math.max(0.1, Math.min(3.0, strength));
+            applyLightStrength();
+            console.log('Light strength set to:', lightStrength);
+        }
+
+        // Apply current light strength to all lights
+        function applyLightStrength() {
+            if (ambientLight) {
+                ambientLight.intensity = ambientLight.userData.baseIntensity * lightStrength;
+            }
+            if (headlight) {
+                headlight.intensity = headlight.userData.baseIntensity * lightStrength;
+            }
+            if (keyLight) {
+                keyLight.intensity = keyLight.userData.baseIntensity * lightStrength;
+            }
+            if (fillLight) {
+                fillLight.intensity = fillLight.userData.baseIntensity * lightStrength;
+            }
+            if (rimLight) {
+                rimLight.intensity = rimLight.userData.baseIntensity * lightStrength;
+            }
+
+            // Update HDRI environment map intensity on materials
+            updateMaterialsForLighting();
+        }
+
+        // Set shading mode (shaded, textured, wireframe)
+        function setShadingModeImpl(mode) {
+            shadingMode = mode;
+
+            if (!currentModel) return;
+
+            currentModel.traverse(function(child) {
+                if (child.isMesh) {
+                    switch (mode) {
+                        case 'shaded':
+                            // Show material colors but no textures
+                            child.material.wireframe = false;
+                            child.visible = true;
+                            // Store original map if not already stored
+                            if (child.material.map && !child.userData.originalMap) {
+                                child.userData.originalMap = child.material.map;
+                            }
+                            // Disable texture
+                            if (child.userData.originalMap) {
+                                child.material.map = null;
+                            }
+                            child.material.needsUpdate = true;
+                            break;
+
+                        case 'textured':
+                            // Full materials with textures (restore if disabled)
+                            child.material.wireframe = false;
+                            child.visible = true;
+                            // Restore original map if we stored it
+                            if (child.userData.originalMap) {
+                                child.material.map = child.userData.originalMap;
+                            }
+                            child.material.needsUpdate = true;
+                            break;
+
+                        case 'wireframe':
+                            child.material.wireframe = true;
+                            child.visible = true;
+                            break;
+                    }
+                }
+            });
+
+            // Hide skeleton in shading modes (skeleton is viewMode, not shadingMode)
+            if (skeletonHelper) {
+                skeletonHelper.visible = false;
+            }
+
+            console.log('Shading mode set to:', mode);
+        }
+
         function showError(message) {
             document.getElementById('loading').style.display = 'none';
             const errorDiv = document.getElementById('error');
@@ -509,6 +780,10 @@
         window.setAnimationTime = setAnimationTimeImpl;
         window.setViewMode = setViewModeImpl;
         window.setCameraDistance = setCameraDistanceImpl;
+        window.setLightingMode = setLightingModeImpl;
+        window.setShadingMode = setShadingModeImpl;
+        window.loadHdri = loadHdriImpl;
+        window.setLightStrength = setLightStrengthImpl;
 
         // Setup QWebChannel bridge
         if (typeof QWebChannel !== 'undefined') {

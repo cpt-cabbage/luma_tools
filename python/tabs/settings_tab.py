@@ -102,6 +102,12 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'RemoveSupUserButton'):
             self.ui.RemoveSupUserButton.clicked.connect(self._on_remove_sup_user)
 
+        # HDRI management
+        if hasattr(self.ui, 'AddHdriButton'):
+            self.ui.AddHdriButton.clicked.connect(self._on_add_hdri)
+        if hasattr(self.ui, 'RemoveHdriButton'):
+            self.ui.RemoveHdriButton.clicked.connect(self._on_remove_hdri)
+
     def initialize(self):
         """Initialize settings tab."""
         # ComfyUI mode options
@@ -129,6 +135,7 @@ class SettingsTab(BaseTab):
             self._load_admin_users_ui()
             self._load_sup_users_ui()
             self._load_restricted_tabs_ui()
+            self._load_hdri_list_ui()
 
     def _hide_settings_for_supervisor(self):
         """Hide all settings sections except info for supervisor users."""
@@ -1067,3 +1074,106 @@ class SettingsTab(BaseTab):
         mark_completed_btn.clicked.connect(on_mark_completed)
 
         dialog.exec()
+
+    def _load_hdri_list_ui(self):
+        """Load HDRI list from global settings."""
+        from core.settings_manager import get_hdri_list
+
+        if not hasattr(self.ui, 'HdriListWidget'):
+            return
+
+        self.ui.HdriListWidget.clear()
+        hdri_list = get_hdri_list()
+
+        for hdri in hdri_list:
+            name = hdri.get("name", "Unnamed")
+            path = hdri.get("path", "")
+            item = QtWidgets.QListWidgetItem(f"{name}")
+            item.setToolTip(path)
+            item.setData(Qt.UserRole, hdri)  # Store full hdri dict
+            self.ui.HdriListWidget.addItem(item)
+
+    def _on_add_hdri(self):
+        """Add a new HDRI to the global list."""
+        from core.settings_manager import add_hdri_to_list
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+        # Browse for HDRI file
+        file_path, _ = QFileDialog.getOpenFileName(
+            self.main_window,
+            "Select HDRI File",
+            "",
+            "HDRI Files (*.hdr *.exr);;All Files (*.*)"
+        )
+
+        if not file_path:
+            return
+
+        # Get a name for the HDRI
+        default_name = os.path.splitext(os.path.basename(file_path))[0]
+        name, ok = QInputDialog.getText(
+            self.main_window,
+            "HDRI Name",
+            "Enter a name for this HDRI:",
+            QtWidgets.QLineEdit.Normal,
+            default_name
+        )
+
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+
+        # Add to global settings
+        try:
+            add_hdri_to_list(name, file_path)
+            self._load_hdri_list_ui()
+            self.log(f"Added HDRI: {name}")
+        except Exception as e:
+            QMessageBox.warning(
+                self.main_window,
+                "Error",
+                f"Failed to add HDRI: {e}"
+            )
+
+    def _on_remove_hdri(self):
+        """Remove selected HDRI from the global list."""
+        from core.settings_manager import remove_hdri_from_list
+
+        if not hasattr(self.ui, 'HdriListWidget'):
+            return
+
+        selected_items = self.ui.HdriListWidget.selectedItems()
+        if not selected_items:
+            self.log("No HDRI selected for removal")
+            return
+
+        # Confirm deletion
+        hdri_names = [item.text() for item in selected_items]
+        reply = QMessageBox.question(
+            self.main_window,
+            "Remove HDRI",
+            f"Remove {len(hdri_names)} HDRI(s)?\n\n" + "\n".join(hdri_names),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Remove from settings
+        try:
+            for item in selected_items:
+                hdri = item.data(Qt.UserRole)
+                name = hdri.get("name", "")
+                if name:
+                    remove_hdri_from_list(name)
+                    self.log(f"Removed HDRI: {name}")
+
+            self._load_hdri_list_ui()
+        except Exception as e:
+            QMessageBox.warning(
+                self.main_window,
+                "Error",
+                f"Failed to remove HDRI: {e}"
+            )

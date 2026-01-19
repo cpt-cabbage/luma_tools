@@ -84,7 +84,7 @@ echo.
 
 REM Copy launcher batch files
 echo Copying launchers...
-xcopy "%SOURCE%\luma_tools.bat" "%TARGET%\" /Y /Q
+REM Skipping luma_tools.bat - only copy standalone launcher
 xcopy "%SOURCE%\luma_tools_standalone.bat" "%TARGET%\" /Y /Q
 if errorlevel 1 (
     echo ERROR: Failed to copy launcher
@@ -92,9 +92,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Remove pause from launcher batch files in target
-echo Removing pause from launchers...
-powershell -Command "(Get-Content '%TARGET%\luma_tools.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools.bat'"
+REM Remove pause from launcher batch file in target
+echo Removing pause from launcher...
 powershell -Command "(Get-Content '%TARGET%\luma_tools_standalone.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools_standalone.bat'"
 
 REM ============================================================================

@@ -191,8 +191,20 @@ class PollingMixin:
                 else:
                     main_status = f"ComfyUI: Starting render - {display_total} job(s)"
             elif status in ("Pending", "Queued"):
-                status_text = "Queued, waiting for worker..."
-                main_status = "ComfyUI: Queued - Waiting for available worker..."
+                queue_position = result.get("queue_position", 0)
+                total_queued = result.get("total_queued", 0)
+                jobs_ahead = result.get("jobs_ahead", 0)
+
+                if queue_position > 0 and total_queued > 0:
+                    if jobs_ahead > 0:
+                        status_text = f"Queue position {queue_position}/{total_queued} ({jobs_ahead} ahead)"
+                        main_status = f"ComfyUI: Queued #{queue_position} of {total_queued} - {jobs_ahead} job(s) ahead in queue"
+                    else:
+                        status_text = f"Queue position {queue_position}/{total_queued} (next up!)"
+                        main_status = f"ComfyUI: Queued #{queue_position} of {total_queued} - Next in line!"
+                else:
+                    status_text = "Queued, waiting for worker..."
+                    main_status = "ComfyUI: Queued - Waiting for available worker..."
             else:
                 status_text = f"{status}: {progress}%"
                 main_status = f"ComfyUI: {status} ({progress}%)"
@@ -454,6 +466,17 @@ class PollingMixin:
             queued_jobs = len(self._batch_pending_jobs) - active_jobs
             failed_count = len(self._batch_failed_jobs)
 
+            # Get total farm queue info from poll results
+            total_farm_queued = 0
+            for result in self._batch_poll_results.values():
+                tq = result.get("total_queued", 0)
+                if tq > 0:
+                    total_farm_queued = tq
+                    break
+
+            # Calculate other people's jobs in queue
+            others_queued = max(0, total_farm_queued - queued_jobs) if total_farm_queued > 0 else 0
+
             if failed_count > 0:
                 main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs - {failed_count} failed, {completed_jobs}/{total_jobs} done"
                 status_color = StatusColors.WARNING
@@ -462,7 +485,10 @@ class PollingMixin:
                 if completed_frames_all > 0:
                     main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs - {active_jobs} rendering"
                     if queued_jobs > 0:
-                        main_status += f", {queued_jobs} queued"
+                        if others_queued > 0:
+                            main_status += f", {queued_jobs} queued ({others_queued} others in queue)"
+                        else:
+                            main_status += f", {queued_jobs} queued"
                     main_status += f" - {elapsed_str}"
                     if eta_str:
                         main_status += f" (~{eta_str} left)"
@@ -470,7 +496,10 @@ class PollingMixin:
                     main_status = f"ComfyUI: Starting {total_frames_all} jobs - {active_jobs} active, {queued_jobs} queued"
                 status_color = StatusColors.INFO
             elif queued_jobs > 0:
-                main_status = f"ComfyUI: {queued_jobs} job(s) queued - Waiting for workers..."
+                if others_queued > 0:
+                    main_status = f"ComfyUI: {queued_jobs} job(s) queued - {others_queued} other job(s) ahead in farm queue"
+                else:
+                    main_status = f"ComfyUI: {queued_jobs} job(s) queued - Next in line!"
                 status_color = StatusColors.INFO
             else:
                 main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"

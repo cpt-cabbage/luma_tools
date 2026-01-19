@@ -98,5 +98,11 @@
     "bruce.mclaren",
     "craig.portnoy",
     "phoebe.redelinghuys"
+  ],
+  "hdri_list": [
+    {
+      "name": "abandoned_church_4k",
+      "path": "L:/asset_libs/textures/hdri/HDRIHaven/abandoned_church/abandoned_church_4k.hdr"
+    }
   ]
 }

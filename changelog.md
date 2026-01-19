@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.4.2.3
+- Fix 3D viewer race condition when rapidly clicking next/prev on 3D models causing multiple models to appear in viewport
+
+## Version 0.4.2.2
+- fix double clicking an image making it close
+
 ## Version 0.4.2.1
 - Remove pop up when new version just use settings notification badge
 - Fix issue where rapid clicks would trigger multiple async viewer creations before the first one completed.

@@ -670,6 +670,13 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         print(f"[Poll Debug] Job {job_id}: final_status='{status}'")
 
+        # Get queue position info for queued/pending jobs
+        queue_info = {}
+        if status in ("Queued", "Pending"):
+            queue_info = get_queue_info(job_id)
+            if queue_info.get("queue_position", 0) > 0:
+                print(f"[Poll Debug] Job {job_id}: position {queue_info['queue_position']}/{queue_info['total_queued']} in queue")
+
         return {
             "status": status,
             "progress": progress,
@@ -677,11 +684,114 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             "total_tasks": total_tasks,
             "queued_tasks": queued_tasks,
             "rendering_tasks": rendering_tasks,
-            "error_message": error_message
+            "error_message": error_message,
+            "queue_position": queue_info.get("queue_position", 0),
+            "total_queued": queue_info.get("total_queued", 0),
+            "jobs_ahead": queue_info.get("jobs_ahead", 0),
         }
 
     except Exception as e:
         return {"status": "Unknown", "progress": 0, "error_message": str(e)}
+
+
+def get_queue_info(job_id: str) -> Dict[str, Any]:
+    """
+    Get queue position information for a job.
+
+    Queries Deadline for all pending/queued jobs and calculates the position
+    of the specified job in the queue based on priority and submission time.
+
+    Args:
+        job_id: The Deadline job ID to find in the queue
+
+    Returns:
+        Dict with:
+            - queue_position: Position in queue (1-based), 0 if not in queue
+            - total_queued: Total number of queued jobs on the farm
+            - jobs_ahead: Number of jobs ahead of this one
+            - error: Error message if query failed
+    """
+    try:
+        if not DEADLINE_PATH:
+            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": "Deadline not available"}
+
+        # Get all pending (queued) jobs
+        result = subprocess.run(
+            [DEADLINE_PATH, "GetJobIdsFilter", "Status=Pending"],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+
+        if result.returncode != 0:
+            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": result.stderr.strip()}
+
+        # Parse job IDs from output (one per line)
+        pending_job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+
+        if not pending_job_ids:
+            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": ""}
+
+        # Get job details for all pending jobs to sort by priority/submission time
+        jobs_info = []
+        for pending_id in pending_job_ids:
+            job_result = subprocess.run(
+                [DEADLINE_PATH, "GetJob", pending_id],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+
+            if job_result.returncode == 0:
+                priority = 50  # Default priority
+                submit_date = ""
+                job_name = ""
+                job_user = ""
+
+                for line in job_result.stdout.split('\n'):
+                    line = line.strip()
+                    if line.startswith("Priority="):
+                        try:
+                            priority = int(line.split('=', 1)[1])
+                        except ValueError:
+                            pass
+                    elif line.startswith("SubmitDate="):
+                        submit_date = line.split('=', 1)[1]
+                    elif line.startswith("Name="):
+                        job_name = line.split('=', 1)[1]
+                    elif line.startswith("User="):
+                        job_user = line.split('=', 1)[1]
+
+                jobs_info.append({
+                    "id": pending_id,
+                    "priority": priority,
+                    "submit_date": submit_date,
+                    "name": job_name,
+                    "user": job_user
+                })
+
+        # Sort by priority (higher first), then by submit date (earlier first)
+        jobs_info.sort(key=lambda x: (-x["priority"], x["submit_date"]))
+
+        # Find our job's position
+        queue_position = 0
+        for i, job in enumerate(jobs_info):
+            if job["id"] == job_id:
+                queue_position = i + 1  # 1-based position
+                break
+
+        total_queued = len(jobs_info)
+        jobs_ahead = max(0, queue_position - 1) if queue_position > 0 else total_queued
+
+        return {
+            "queue_position": queue_position,
+            "total_queued": total_queued,
+            "jobs_ahead": jobs_ahead,
+            "error": ""
+        }
+
+    except Exception as e:
+        return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": str(e)}
 
 
 def complete_deadline_job(job_id: str) -> Tuple[bool, str]:

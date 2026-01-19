@@ -7,7 +7,7 @@ import os
 from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
-    QMenu, QComboBox, QApplication
+    QMenu, QComboBox, QApplication, QSlider
 )
 from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
@@ -168,63 +168,19 @@ class EmbeddedImageViewer(QWidget):
         """Set up the embedded viewer UI."""
         self.setStyleSheet("background-color: #1a1a1a;")
 
+        # Main layout - single container fills everything
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Top bar
-        self.top_bar = QWidget()
-        self.top_bar.setStyleSheet("background-color: rgba(0, 0, 0, 0.5);")
-        self.top_bar.setFixedHeight(40)
+        # Main container for content and overlays
+        self.image_container = QWidget()
+        layout.addWidget(self.image_container)
 
-        top_layout = QHBoxLayout(self.top_bar)
-        top_layout.setContentsMargins(10, 5, 10, 5)
-
-        self.back_btn = QPushButton("< Back to Gallery")
-        self.back_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #4a9eff; border: none; font-size: 12px; padding: 5px 10px; }
-            QPushButton:hover { color: #7ab8ff; }
-        """)
-        self.back_btn.setCursor(Qt.PointingHandCursor)
-        self.back_btn.clicked.connect(self._on_back)
-        top_layout.addWidget(self.back_btn)
-
-        top_layout.addStretch()
-
-        self.counter_label = QLabel()
-        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
-        top_layout.addWidget(self.counter_label)
-
-        self.zoom_combo = QComboBox()
-        self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
-        self.zoom_combo.setCurrentText("Fit")
-        self.zoom_combo.setFixedWidth(80)
-        self.zoom_combo.setStyleSheet("""
-            QComboBox { background-color: #2a2a2a; color: #cccccc; border: 1px solid #555555; border-radius: 3px; padding: 3px 8px; font-size: 11px; }
-            QComboBox:hover { border-color: #4a9eff; }
-            QComboBox::drop-down { border: none; width: 20px; }
-            QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #888888; margin-right: 5px; }
-            QComboBox QAbstractItemView { background-color: #2a2a2a; color: #cccccc; selection-background-color: #4a9eff; border: 1px solid #555555; }
-        """)
-        self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
-        top_layout.addWidget(self.zoom_combo)
-
-        self.fullscreen_btn = QPushButton("Fullscreen")
-        self.fullscreen_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #888888; border: 1px solid #555555; border-radius: 3px; font-size: 11px; padding: 3px 10px; }
-            QPushButton:hover { color: #ffffff; border-color: #4a9eff; }
-        """)
-        self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
-        self.fullscreen_btn.clicked.connect(self._on_fullscreen)
-        top_layout.addWidget(self.fullscreen_btn)
-
-        layout.addWidget(self.top_bar)
-
-        # Image container with navigation
-        image_container = QWidget()
-        image_layout = QHBoxLayout(image_container)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        image_layout.setSpacing(0)
+        # Content layout inside container
+        content_layout = QHBoxLayout(self.image_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
         self.left_btn = QPushButton("<")
         self.left_btn.setFixedWidth(50)
@@ -235,10 +191,10 @@ class EmbeddedImageViewer(QWidget):
         """)
         self.left_btn.setCursor(Qt.PointingHandCursor)
         self.left_btn.clicked.connect(self._prev_image)
-        image_layout.addWidget(self.left_btn)
+        content_layout.addWidget(self.left_btn)
 
         self.image_stack = QtWidgets.QStackedWidget()
-        image_layout.addWidget(self.image_stack, stretch=1)
+        content_layout.addWidget(self.image_stack, stretch=1)
 
         # 1. Zoomable Image View
         self.image_view = ZoomableImageWidget()
@@ -286,13 +242,57 @@ class EmbeddedImageViewer(QWidget):
         """)
         self.right_btn.setCursor(Qt.PointingHandCursor)
         self.right_btn.clicked.connect(self._next_image)
-        image_layout.addWidget(self.right_btn)
+        content_layout.addWidget(self.right_btn)
 
-        layout.addWidget(image_container, stretch=1)
+        # Top bar - overlay widget (child of image_container, not in layout)
+        self.top_bar = QWidget(self.image_container)
+        self.top_bar.setStyleSheet("background-color: transparent;")
+        self.top_bar.setFixedHeight(40)
 
-        # Bottom info bar
-        self.info_bar = QWidget()
-        self.info_bar.setStyleSheet("background-color: rgba(0, 0, 0, 0.5);")
+        top_layout = QHBoxLayout(self.top_bar)
+        top_layout.setContentsMargins(10, 5, 10, 5)
+
+        self.back_btn = QPushButton("< Back to Gallery")
+        self.back_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; color: #4a9eff; border: none; font-size: 12px; padding: 5px 10px; }
+            QPushButton:hover { color: #7ab8ff; }
+        """)
+        self.back_btn.setCursor(Qt.PointingHandCursor)
+        self.back_btn.clicked.connect(self._on_back)
+        top_layout.addWidget(self.back_btn)
+
+        top_layout.addStretch()
+
+        self.counter_label = QLabel()
+        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        top_layout.addWidget(self.counter_label)
+
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
+        self.zoom_combo.setCurrentText("Fit")
+        self.zoom_combo.setFixedWidth(80)
+        self.zoom_combo.setStyleSheet("""
+            QComboBox { background-color: #2a2a2a; color: #cccccc; border: 1px solid #555555; border-radius: 3px; padding: 3px 8px; font-size: 11px; }
+            QComboBox:hover { border-color: #4a9eff; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #888888; margin-right: 5px; }
+            QComboBox QAbstractItemView { background-color: #2a2a2a; color: #cccccc; selection-background-color: #4a9eff; border: 1px solid #555555; }
+        """)
+        self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
+        top_layout.addWidget(self.zoom_combo)
+
+        self.fullscreen_btn = QPushButton("Fullscreen")
+        self.fullscreen_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; color: #888888; border: 1px solid #555555; border-radius: 3px; font-size: 11px; padding: 3px 10px; }
+            QPushButton:hover { color: #ffffff; border-color: #4a9eff; }
+        """)
+        self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_btn.clicked.connect(self._on_fullscreen)
+        top_layout.addWidget(self.fullscreen_btn)
+
+        # Bottom info bar - overlay widget (child of image_container, not in layout)
+        self.info_bar = QWidget(self.image_container)
+        self.info_bar.setStyleSheet("background-color: transparent;")
         self.info_bar.setFixedHeight(35)
 
         info_layout = QHBoxLayout(self.info_bar)
@@ -303,15 +303,67 @@ class EmbeddedImageViewer(QWidget):
         info_layout.addWidget(self.filename_label)
 
         # 3D Model controls (hidden by default)
-        self.texture_toggle_btn = QPushButton("Wireframe")
-        self.texture_toggle_btn.setFixedHeight(25)
-        self.texture_toggle_btn.setStyleSheet("""
+        # Shading Mode dropdown
+        self.shading_btn = QPushButton("Textured")
+        self.shading_btn.setFixedHeight(25)
+        self.shading_btn.setStyleSheet("""
             QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
             QPushButton:hover { background-color: #5aa9ff; }
         """)
-        self.texture_toggle_btn.clicked.connect(self._toggle_3d_render_mode)
-        self.texture_toggle_btn.hide()
-        info_layout.addWidget(self.texture_toggle_btn)
+        self.shading_btn.clicked.connect(self._show_shading_menu)
+        self.shading_btn.hide()
+        info_layout.addWidget(self.shading_btn)
+
+        # Lighting Mode dropdown
+        self.lighting_btn = QPushButton("Studio")
+        self.lighting_btn.setFixedHeight(25)
+        self.lighting_btn.setStyleSheet("""
+            QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
+            QPushButton:hover { background-color: #7c8596; }
+        """)
+        self.lighting_btn.clicked.connect(self._show_lighting_menu)
+        self.lighting_btn.hide()
+        info_layout.addWidget(self.lighting_btn)
+
+        # Light strength label
+        self.light_label = QLabel("Light:")
+        self.light_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.light_label.hide()
+        info_layout.addWidget(self.light_label)
+
+        # Light strength slider
+        self.light_slider = QSlider(Qt.Horizontal)
+        self.light_slider.setMinimum(10)  # 0.1x
+        self.light_slider.setMaximum(300)  # 3.0x
+        self.light_slider.setValue(100)  # 1.0x default
+        self.light_slider.setFixedWidth(100)
+        self.light_slider.setFixedHeight(20)
+        self.light_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #333333;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a9eff;
+                width: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #5aa9ff;
+            }
+        """)
+        self.light_slider.valueChanged.connect(self._on_light_strength_changed)
+        self.light_slider.hide()
+        info_layout.addWidget(self.light_slider)
+
+        # Light strength value label
+        self.light_value_label = QLabel("1.0x")
+        self.light_value_label.setFixedWidth(35)
+        self.light_value_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.light_value_label.hide()
+        info_layout.addWidget(self.light_value_label)
 
         # Publish to AYON button
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
@@ -352,24 +404,64 @@ class EmbeddedImageViewer(QWidget):
         self.delete_btn.clicked.connect(self._delete_current_image)
         info_layout.addWidget(self.delete_btn)
 
-        self._3d_textured_mode = False
         self._current_3d_path = None
         self._saved_camera_state = None
+        self._current_shading_mode = "textured"
+        self._current_lighting_mode = "studio"
+        self._current_hdri_path = None
+        self._current_light_strength = 1.0
 
         info_layout.addStretch()
 
         help_label = QLabel("Navigate | Esc Back | C Prompt | Del Delete")
-        help_label.setStyleSheet("color: #555555; font-size: 10px;")
+        help_label.setStyleSheet("color: #888888; font-size: 10px;")
         info_layout.addWidget(help_label)
 
-        layout.addWidget(self.info_bar)
+        # Position and raise overlay bars immediately
+        # They'll be repositioned in resizeEvent when actual size is known
+        self.top_bar.move(0, 0)
+        self.info_bar.move(0, 0)
+        self.top_bar.raise_()
+        self.info_bar.raise_()
 
     def showEvent(self, event):
         super().showEvent(event)
         self.setFocus()
+        # Delay positioning to ensure layout is complete
+        QTimer.singleShot(0, self._position_overlays)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._position_overlays()
+
+    def _position_overlays(self):
+        """Position top_bar and info_bar as overlays on image_container."""
+        if not hasattr(self, 'image_container'):
+            return
+
+        w = self.image_container.width()
+        h = self.image_container.height()
+
+        if w == 0 or h == 0:
+            return  # Widget not yet sized
+
+        # Lower the content stack first (helps with QWebEngineView z-order)
+        if hasattr(self, 'image_stack'):
+            self.image_stack.lower()
+
+        # Top bar at top of image_container
+        if hasattr(self, 'top_bar'):
+            top_height = 40
+            self.top_bar.setGeometry(0, 0, w, top_height)
+            self.top_bar.raise_()
+            self.top_bar.show()
+
+        # Info bar at bottom of image_container
+        if hasattr(self, 'info_bar'):
+            bar_height = 35
+            self.info_bar.setGeometry(0, h - bar_height, w, bar_height)
+            self.info_bar.raise_()
+            self.info_bar.show()
 
     def _init_glb_viewer_async(self, callback=None):
         """Initialize the GLB viewer widget asynchronously."""
@@ -443,10 +535,34 @@ class EmbeddedImageViewer(QWidget):
 
             MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae', '.stl', '.ply'}
             if ext in MODEL_EXTENSIONS:
-                self.texture_toggle_btn.show()
+                self.shading_btn.show()
+                self.lighting_btn.show()
+                self.light_label.show()
+                self.light_slider.show()
+                self.light_value_label.show()
                 self._current_3d_path = media_path
-                self._3d_textured_mode = False
-                self.texture_toggle_btn.setText("Wireframe")
+
+                # Restore saved preferences from settings
+                try:
+                    from core.settings_manager import (
+                        get_viewer_3d_shading_mode,
+                        get_viewer_3d_lighting_mode,
+                        get_viewer_3d_hdri_name,
+                        get_viewer_3d_light_strength
+                    )
+                    self._current_shading_mode = get_viewer_3d_shading_mode()
+                    self._current_lighting_mode = get_viewer_3d_lighting_mode()
+                    self._current_hdri_path = get_viewer_3d_hdri_name()
+                    self._current_light_strength = get_viewer_3d_light_strength() or 1.0
+                    self.light_slider.setValue(int(self._current_light_strength * 100))
+                    self.light_value_label.setText(f"{self._current_light_strength:.1f}x")
+                except Exception:
+                    pass  # Use defaults if settings unavailable
+
+                # Update button labels
+                self.shading_btn.setText(self._current_shading_mode.title())
+                label_map = {"headlight": "Headlight", "studio": "Studio", "hdri": "HDRI"}
+                self.lighting_btn.setText(label_map.get(self._current_lighting_mode, "Studio"))
 
                 if not self._glb_viewer_initialized:
                     self.message_label.setText("Initializing 3D viewer...")
@@ -468,7 +584,11 @@ class EmbeddedImageViewer(QWidget):
                     self.image_stack.setCurrentWidget(self.message_label)
 
             elif ext in ('.mp4', '.mov', '.avi', '.webm'):
-                self.texture_toggle_btn.hide()
+                self.shading_btn.hide()
+                self.lighting_btn.hide()
+                self.light_label.hide()
+                self.light_slider.hide()
+                self.light_value_label.hide()
                 self._current_3d_path = None
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
                     from PySide6.QtMultimedia import QMediaContent
@@ -483,13 +603,21 @@ class EmbeddedImageViewer(QWidget):
                     self.image_stack.setCurrentWidget(self.message_label)
 
             elif ext == '.exr':
-                self.texture_toggle_btn.hide()
+                self.shading_btn.hide()
+                self.lighting_btn.hide()
+                self.light_label.hide()
+                self.light_slider.hide()
+                self.light_value_label.hide()
                 self._current_3d_path = None
                 self.message_label.setText("EXR Preview Not Available")
                 self.image_stack.setCurrentWidget(self.message_label)
 
             else:
-                self.texture_toggle_btn.hide()
+                self.shading_btn.hide()
+                self.lighting_btn.hide()
+                self.light_label.hide()
+                self.light_slider.hide()
+                self.light_value_label.hide()
                 self._current_3d_path = None
                 pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
@@ -533,6 +661,38 @@ class EmbeddedImageViewer(QWidget):
         """Handle successful 3D model load - switch to the viewer."""
         self.image_stack.setCurrentWidget(self.glb_viewer)
         self.glb_viewer.setFocus()
+
+        # Apply saved lighting/shading preferences
+        if self.glb_viewer:
+            try:
+                from models.threejs_viewer import ShadingMode, LightingMode
+
+                # Apply shading mode
+                if self._current_shading_mode:
+                    mode_enum = ShadingMode(self._current_shading_mode)
+                    self.glb_viewer.set_shading_mode(mode_enum)
+
+                # Apply lighting mode
+                if self._current_lighting_mode:
+                    mode_enum = LightingMode(self._current_lighting_mode)
+                    self.glb_viewer.set_lighting_mode(mode_enum)
+
+                    # If HDRI mode and we have a saved HDRI, load it
+                    if self._current_lighting_mode == "hdri" and self._current_hdri_path:
+                        # Find the full path from settings
+                        from core.settings_manager import get_hdri_list
+                        hdri_list = get_hdri_list()
+                        for hdri in hdri_list:
+                            if hdri["name"] == self._current_hdri_path or hdri["path"].endswith(self._current_hdri_path):
+                                self.glb_viewer.load_hdri(hdri["path"])
+                                break
+
+                # Apply light strength
+                if self._current_light_strength != 1.0:
+                    self.glb_viewer.set_light_strength(self._current_light_strength)
+
+            except Exception as e:
+                print(f"Error applying viewer preferences: {e}")
 
     def _on_3d_load_error(self, error_msg):
         """Handle 3D model loading error from Three.js viewer."""
@@ -579,15 +739,141 @@ class EmbeddedImageViewer(QWidget):
             self.zoom_combo.setCurrentText(level)
         self.zoom_combo.blockSignals(False)
 
-    def _toggle_3d_render_mode(self):
-        """Toggle between textured and wireframe mode for 3D models."""
-        if not self._current_3d_path:
-            return
+    def _show_shading_menu(self):
+        """Show shading mode selection menu."""
+        menu = QMenu(self)
+        modes = [("Shaded", "shaded"), ("Textured", "textured"), ("Wireframe", "wireframe")]
 
-        if self._has_glb_viewer and self.glb_viewer:
-            self.glb_viewer.toggle_wireframe()
-            self._3d_textured_mode = not self._3d_textured_mode
-            self.texture_toggle_btn.setText("Textured" if self._3d_textured_mode else "Wireframe")
+        for label, mode in modes:
+            action = menu.addAction(label)
+            action.setData(mode)
+            if mode == self._current_shading_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        action = menu.exec_(self.shading_btn.mapToGlobal(
+            self.shading_btn.rect().bottomLeft()))
+
+        if action and action.data():
+            self._set_shading_mode(action.data())
+
+    def _show_lighting_menu(self):
+        """Show lighting mode selection menu."""
+        menu = QMenu(self)
+
+        # Basic lighting modes
+        modes = [("Headlight", "headlight"), ("Studio (3-Point)", "studio")]
+        for label, mode in modes:
+            action = menu.addAction(label)
+            action.setData(("mode", mode))
+            if mode == self._current_lighting_mode:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # HDRI submenu (only if HDRIs are configured)
+        try:
+            from core.settings_manager import get_hdri_list
+            hdri_list = get_hdri_list()
+            if hdri_list:
+                hdri_menu = menu.addMenu("HDRI")
+                for hdri in hdri_list:
+                    action = hdri_menu.addAction(hdri["name"])
+                    action.setData(("hdri", hdri["path"]))
+                    if (self._current_lighting_mode == "hdri" and
+                        self._current_hdri_path == hdri["path"]):
+                        action.setCheckable(True)
+                        action.setChecked(True)
+        except Exception as e:
+            print(f"Error loading HDRI list: {e}")
+
+        action = menu.exec_(self.lighting_btn.mapToGlobal(
+            self.lighting_btn.rect().bottomLeft()))
+
+        if action and action.data():
+            data_type, value = action.data()
+            if data_type == "mode":
+                self._set_lighting_mode(value)
+            elif data_type == "hdri":
+                self._set_lighting_mode("hdri")
+                self._load_hdri(value)
+
+    def _set_shading_mode(self, mode):
+        """Set shading mode on the viewer."""
+        self._current_shading_mode = mode
+        self.shading_btn.setText(mode.title())
+
+        if self.glb_viewer:
+            try:
+                from models.threejs_viewer import ShadingMode
+                mode_enum = ShadingMode(mode)
+                self.glb_viewer.set_shading_mode(mode_enum)
+            except Exception as e:
+                print(f"Error setting shading mode: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_shading_mode
+            set_viewer_3d_shading_mode(mode)
+        except Exception:
+            pass
+
+    def _set_lighting_mode(self, mode):
+        """Set lighting mode on the viewer."""
+        self._current_lighting_mode = mode
+        label_map = {"headlight": "Headlight", "studio": "Studio", "hdri": "HDRI"}
+        self.lighting_btn.setText(label_map.get(mode, mode.title()))
+
+        if self.glb_viewer:
+            try:
+                from models.threejs_viewer import LightingMode
+                mode_enum = LightingMode(mode)
+                self.glb_viewer.set_lighting_mode(mode_enum)
+            except Exception as e:
+                print(f"Error setting lighting mode: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_lighting_mode
+            set_viewer_3d_lighting_mode(mode)
+        except Exception:
+            pass
+
+    def _load_hdri(self, hdri_path):
+        """Load an HDRI environment map."""
+        self._current_hdri_path = hdri_path
+
+        if self.glb_viewer:
+            try:
+                self.glb_viewer.load_hdri(hdri_path)
+            except Exception as e:
+                print(f"Error loading HDRI: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_hdri_name
+            import os
+            set_viewer_3d_hdri_name(os.path.basename(hdri_path))
+        except Exception:
+            pass
+
+    def _on_light_strength_changed(self, value):
+        """Handle light strength slider changes."""
+        strength = value / 100.0
+        self._current_light_strength = strength
+        self.light_value_label.setText(f"{strength:.1f}x")
+
+        if self.glb_viewer:
+            try:
+                self.glb_viewer.set_light_strength(strength)
+            except Exception as e:
+                print(f"Error setting light strength: {e}")
+
+        # Persist preference
+        try:
+            from core.settings_manager import set_viewer_3d_light_strength
+            set_viewer_3d_light_strength(strength)
+        except Exception:
+            pass
 
     def _copy_prompt(self):
         """Copy prompt for current image to clipboard."""
@@ -815,10 +1101,10 @@ class FullscreenImageViewer(QWidget):
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
         self.image_stack.addWidget(self.message_label)
 
-        # Info bar
-        self.info_bar = QWidget()
-        self.info_bar.setStyleSheet("QWidget { background-color: rgba(0, 0, 0, 0.7); padding: 10px; }")
-        self.info_bar.setFixedHeight(60)
+        # Info bar - overlays on content
+        self.info_bar = QWidget(self)  # Child of self for overlay
+        self.info_bar.setStyleSheet("QWidget { background-color: transparent; }")
+        self.info_bar.setFixedHeight(50)
 
         info_layout = QHBoxLayout(self.info_bar)
         info_layout.setContentsMargins(20, 5, 20, 5)
@@ -848,10 +1134,10 @@ class FullscreenImageViewer(QWidget):
         info_layout.addWidget(self.zoom_combo)
 
         self.help_label = QLabel("Navigate | Esc Close | Space Info | C Prompt | Del Delete")
-        self.help_label.setStyleSheet("color: #666666; font-size: 10px; margin-left: 20px;")
+        self.help_label.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
         info_layout.addWidget(self.help_label)
 
-        layout.addWidget(self.info_bar)
+        self.info_bar.raise_()
 
         self._create_nav_buttons()
 
@@ -876,17 +1162,29 @@ class FullscreenImageViewer(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.showFullScreen()
-        self._position_nav_buttons()
+        self._position_overlays()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._position_nav_buttons()
+        self._position_overlays()
 
-    def _position_nav_buttons(self):
+    def _position_overlays(self):
+        """Position info bar and nav buttons as overlays."""
+        # Lower the content first
+        if hasattr(self, 'image_stack'):
+            self.image_stack.lower()
+
+        # Position info_bar at bottom
+        bar_height = self.info_bar.height()
+        self.info_bar.setGeometry(0, self.height() - bar_height, self.width(), bar_height)
+        self.info_bar.raise_()
+        self.info_bar.show()
+
+        # Position nav buttons centered vertically (accounting for info bar)
         btn_width = 60
         btn_height = 100
         margin = 20
-        center_y = (self.height() - self.info_bar.height() - btn_height) // 2
+        center_y = (self.height() - bar_height - btn_height) // 2
 
         self.left_btn.setGeometry(margin, center_y, btn_width, btn_height)
         self.right_btn.setGeometry(self.width() - margin - btn_width, center_y, btn_width, btn_height)

@@ -70,6 +70,10 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
     "generate_3d_thumbnails": SettingDef("generate_3d_thumbnails", True, "user"),
     "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
+    "viewer_3d_shading_mode": SettingDef("viewer_3d_shading_mode", "textured", "user"),
+    "viewer_3d_lighting_mode": SettingDef("viewer_3d_lighting_mode", "studio", "user"),
+    "viewer_3d_hdri_name": SettingDef("viewer_3d_hdri_name", "", "user"),
+    "viewer_3d_light_strength": SettingDef("viewer_3d_light_strength", 1.0, "user"),
     # Window state
     "window_width": SettingDef("window_width", 1250, "user"),
     "window_height": SettingDef("window_height", 1000, "user"),
@@ -371,6 +375,48 @@ get_auto_extract_textures = lambda: get_setting("auto_extract_textures")
 set_auto_extract_textures = lambda v: set_setting("auto_extract_textures", v)
 get_generate_3d_thumbnails = lambda: get_setting("generate_3d_thumbnails")
 set_generate_3d_thumbnails = lambda v: set_setting("generate_3d_thumbnails", v)
+
+# 3D Viewer settings
+get_viewer_3d_shading_mode = lambda: get_setting("viewer_3d_shading_mode")
+set_viewer_3d_shading_mode = lambda v: set_setting("viewer_3d_shading_mode", v, verbose=False)
+get_viewer_3d_lighting_mode = lambda: get_setting("viewer_3d_lighting_mode")
+set_viewer_3d_lighting_mode = lambda v: set_setting("viewer_3d_lighting_mode", v, verbose=False)
+get_viewer_3d_hdri_name = lambda: get_setting("viewer_3d_hdri_name")
+set_viewer_3d_hdri_name = lambda v: set_setting("viewer_3d_hdri_name", v, verbose=False)
+get_viewer_3d_light_strength = lambda: get_setting("viewer_3d_light_strength")
+set_viewer_3d_light_strength = lambda v: set_setting("viewer_3d_light_strength", v, verbose=False)
+
+
+def get_hdri_list() -> List[Dict[str, str]]:
+    """Get list of available HDRIs from global settings.
+
+    Returns:
+        List of dicts with keys: name, path
+    """
+    return load_global_settings().get("hdri_list", [])
+
+
+def add_hdri_to_list(name: str, path: str):
+    """Add an HDRI to the global list."""
+    settings = load_global_settings()
+    hdri_list = settings.get("hdri_list", [])
+    # Check for duplicates
+    for hdri in hdri_list:
+        if hdri.get("name") == name:
+            return  # Already exists
+    hdri_list.append({"name": name, "path": path})
+    settings["hdri_list"] = hdri_list
+    save_global_settings(settings)
+    print(f"Added HDRI to global settings: {name}")
+
+
+def remove_hdri_from_list(name: str):
+    """Remove an HDRI from the global list."""
+    settings = load_global_settings()
+    hdri_list = settings.get("hdri_list", [])
+    settings["hdri_list"] = [h for h in hdri_list if h.get("name") != name]
+    save_global_settings(settings)
+    print(f"Removed HDRI from global settings: {name}")
 
 
 def is_tab_restricted(tab_name: str) -> bool:
