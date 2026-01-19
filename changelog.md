@@ -1,7 +1,13 @@
 # Luma Tools Changelog
 
-## Version 0.4.2.3
-- Fix 3D viewer race condition when rapidly clicking next/prev on 3D models causing multiple models to appear in viewport
+## Version 0.4.3
+- Add lighting modes (headlight, studio, HDRI) 
+- Add shading modes (shaded, textured, wireframe) 
+- Add light strength slider for intensity control
+- Implement queue position display for Deadline jobs in ComfyUI polling
+- Add admin level HDRI management
+- Fix 3D viewer race condition when rapidly clicking next/prev
+- Enhance viewer UI
 
 ## Version 0.4.2.2
 - fix double clicking an image making it close

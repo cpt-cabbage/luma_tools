@@ -247,10 +247,10 @@ class EmbeddedImageViewer(QWidget):
         # Top bar - overlay widget (child of image_container, not in layout)
         self.top_bar = QWidget(self.image_container)
         self.top_bar.setStyleSheet("background-color: transparent;")
-        self.top_bar.setFixedHeight(40)
+        self.top_bar.setFixedHeight(75)
 
         top_layout = QHBoxLayout(self.top_bar)
-        top_layout.setContentsMargins(10, 5, 10, 5)
+        top_layout.setContentsMargins(10, 10, 10, 10)
 
         self.back_btn = QPushButton("< Back to Gallery")
         self.back_btn.setStyleSheet("""
@@ -293,10 +293,10 @@ class EmbeddedImageViewer(QWidget):
         # Bottom info bar - overlay widget (child of image_container, not in layout)
         self.info_bar = QWidget(self.image_container)
         self.info_bar.setStyleSheet("background-color: transparent;")
-        self.info_bar.setFixedHeight(35)
+        self.info_bar.setFixedHeight(120)
 
         info_layout = QHBoxLayout(self.info_bar)
-        info_layout.setContentsMargins(15, 5, 15, 5)
+        info_layout.setContentsMargins(1, 10, 10, 75)
 
         self.filename_label = QLabel()
         self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
@@ -305,7 +305,7 @@ class EmbeddedImageViewer(QWidget):
         # 3D Model controls (hidden by default)
         # Shading Mode dropdown
         self.shading_btn = QPushButton("Textured")
-        self.shading_btn.setFixedHeight(25)
+        self.shading_btn.setFixedHeight(10)
         self.shading_btn.setStyleSheet("""
             QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
             QPushButton:hover { background-color: #5aa9ff; }
@@ -316,7 +316,7 @@ class EmbeddedImageViewer(QWidget):
 
         # Lighting Mode dropdown
         self.lighting_btn = QPushButton("Studio")
-        self.lighting_btn.setFixedHeight(25)
+        self.lighting_btn.setFixedHeight(10)
         self.lighting_btn.setStyleSheet("""
             QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
             QPushButton:hover { background-color: #7c8596; }
@@ -367,7 +367,7 @@ class EmbeddedImageViewer(QWidget):
 
         # Publish to AYON button
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
-        self.publish_to_ayon_btn.setFixedHeight(25)
+        self.publish_to_ayon_btn.setFixedHeight(10)
         self.publish_to_ayon_btn.setStyleSheet("""
             QPushButton { background-color: #10b981; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; font-weight: bold; }
             QPushButton:hover { background-color: #14ce94; }
@@ -395,7 +395,7 @@ class EmbeddedImageViewer(QWidget):
 
         # Delete button
         self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setFixedHeight(25)
+        self.delete_btn.setFixedHeight(10)
         self.delete_btn.setStyleSheet("""
             QPushButton { background-color: #dc2626; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; }
             QPushButton:hover { background-color: #ef4444; }
@@ -458,7 +458,7 @@ class EmbeddedImageViewer(QWidget):
 
         # Info bar at bottom of image_container
         if hasattr(self, 'info_bar'):
-            bar_height = 35
+            bar_height = 75
             self.info_bar.setGeometry(0, h - bar_height, w, bar_height)
             self.info_bar.raise_()
             self.info_bar.show()
@@ -1104,10 +1104,10 @@ class FullscreenImageViewer(QWidget):
         # Info bar - overlays on content
         self.info_bar = QWidget(self)  # Child of self for overlay
         self.info_bar.setStyleSheet("QWidget { background-color: transparent; }")
-        self.info_bar.setFixedHeight(50)
+        self.info_bar.setFixedHeight(60)
 
         info_layout = QHBoxLayout(self.info_bar)
-        info_layout.setContentsMargins(20, 5, 20, 5)
+        info_layout.setContentsMargins(20, 15, 20, 15)
 
         self.filename_label = QLabel()
         self.filename_label.setStyleSheet("color: #ffffff; font-size: 14px;")

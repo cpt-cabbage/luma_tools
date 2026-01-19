@@ -149,6 +149,13 @@
             controls.minDistance = 0.1;
             controls.maxDistance = 100;
 
+            // Swap middle mouse button from zoom to pan
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.PAN,
+                RIGHT: THREE.MOUSE.DOLLY
+            };
+
             // Initialize PMREMGenerator for HDRI environment maps
             pmremGenerator = new THREE.PMREMGenerator(renderer);
             pmremGenerator.compileEquirectangularShader();
@@ -617,13 +624,19 @@
             const loader = extension === 'exr' ? new EXRLoader() : new RGBELoader();
 
             loader.load(url, function(texture) {
+                console.log('HDRI texture loaded, generating environment map...');
+                console.log('Texture size:', texture.image?.width, 'x', texture.image?.height);
+
                 // Generate environment map from equirectangular texture
                 envTexture = pmremGenerator.fromEquirectangular(texture).texture;
                 texture.dispose();
 
+                console.log('Environment map generated successfully');
+
                 // Apply if in HDRI mode
                 if (lightingMode === 'hdri') {
                     scene.environment = envTexture;
+                    console.log('Applied HDRI to scene.environment');
                 }
 
                 // Update materials to use new environment
@@ -635,7 +648,12 @@
                 if (bridge && bridge.onHdriLoaded) {
                     bridge.onHdriLoaded(url);
                 }
-            }, undefined, function(error) {
+            }, function(progress) {
+                if (progress.lengthComputable) {
+                    const percent = Math.round((progress.loaded / progress.total) * 100);
+                    console.log(`HDRI loading: ${percent}%`);
+                }
+            }, function(error) {
                 console.error('Error loading HDRI:', error);
                 if (bridge && bridge.onHdriLoadError) {
                     bridge.onHdriLoadError(error.message || String(error));
@@ -647,27 +665,53 @@
         function updateMaterialsForLighting() {
             if (!currentModel) return;
 
+            let materialCount = 0;
+            let updatedCount = 0;
+
             currentModel.traverse(function(child) {
                 if (child.isMesh && child.material) {
                     // Handle both single materials and material arrays
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
 
                     materials.forEach(function(material) {
-                        // Only update PBR materials (MeshStandardMaterial, MeshPhysicalMaterial)
+                        materialCount++;
+
+                        // Update all material types, not just PBR
+                        // Convert basic materials to standard materials if needed
+                        if (material.isMeshBasicMaterial) {
+                            console.log('Warning: MeshBasicMaterial found - cannot display reflections');
+                        }
+
+                        // Update PBR materials (MeshStandardMaterial, MeshPhysicalMaterial)
                         if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
                             // In HDRI mode, explicitly set the environment map on the material
                             if (lightingMode === 'hdri' && envTexture) {
                                 material.envMap = envTexture;
                                 material.envMapIntensity = 1.0 * lightStrength;
 
-                                // Ensure material is metallic/rough enough to show reflections
-                                // Only adjust if not already set by the model
-                                if (material.metalness === 0 && material.roughness === 1) {
-                                    // If material has default values, make it slightly reflective
-                                    material.roughness = 0.7;  // Less rough = more reflective
+                                // Make material more reflective for better HDRI visibility
+                                // Store original values if not already stored
+                                if (!material.userData.originalRoughness) {
+                                    material.userData.originalRoughness = material.roughness;
+                                    material.userData.originalMetalness = material.metalness;
                                 }
+
+                                // Boost reflectivity for better HDRI visibility
+                                // Apply more aggressive settings for demo purposes
+                                if (material.roughness > 0.5) {
+                                    material.roughness = 0.3;  // Make much smoother for clear reflections
+                                }
+                                if (material.metalness < 0.5) {
+                                    material.metalness = 0.7;  // Strong metalness for obvious HDRI reflections
+                                }
+
+                                updatedCount++;
                             } else {
-                                // In non-HDRI modes, use scene environment with lower intensity
+                                // In non-HDRI modes, restore original values or use scene environment
+                                if (material.userData.originalRoughness !== undefined) {
+                                    material.roughness = material.userData.originalRoughness;
+                                    material.metalness = material.userData.originalMetalness;
+                                }
                                 material.envMap = envTexture || null;
                                 material.envMapIntensity = 0.3 * lightStrength;
                             }
@@ -676,6 +720,8 @@
                     });
                 }
             });
+
+            console.log(`Updated materials: ${updatedCount}/${materialCount} (lighting: ${lightingMode}, strength: ${lightStrength.toFixed(2)})`);
         }
 
         // Set light strength multiplier (0.1 to 3.0)

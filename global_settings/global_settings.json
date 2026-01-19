@@ -103,6 +103,14 @@
     {
       "name": "abandoned_church_4k",
       "path": "L:/asset_libs/textures/hdri/HDRIHaven/abandoned_church/abandoned_church_4k.hdr"
+    },
+    {
+      "name": "crystal_falls_4k",
+      "path": "L:/asset_libs/textures/hdri/HDRIHaven/crystal_falls/crystal_falls_4k.hdr"
+    },
+    {
+      "name": "northcliff_4k",
+      "path": "L:/asset_libs/textures/hdri/HDRIHaven/northcliff/northcliff_4k.hdr"
     }
   ]
 }
