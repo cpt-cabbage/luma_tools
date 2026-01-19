@@ -1,5 +1,10 @@
 # Luma Tools Changelog
 
+## Version 0.4.3.4
+- Add real-time ComfyUI task progress tracking via Deadline logs
+- Improve queue messaging to distinguish between own queued jobs vs other users' jobs
+- Show job-level progress percentage in status bar during rendering
+
 ## Version 0.4.3.3
 - Improve ComfyUI server crash detection and automatic restart
 

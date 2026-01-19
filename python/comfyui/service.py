@@ -673,6 +673,17 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             if queue_info.get("queue_position", 0) > 0:
                 print(f"[Poll Debug] Job {job_id}: position {queue_info['queue_position']}/{queue_info['total_queued']} in queue")
 
+        # Try to get detailed progress for rendering tasks
+        task_progress = None
+        if status == "Rendering" and rendering_tasks > 0:
+            # Find the first rendering task (usually task 0-based index = completed_tasks)
+            active_task_id = completed_tasks
+            log_content = get_task_log(job_id, active_task_id)
+            if log_content:
+                task_progress = extract_task_progress(log_content)
+                if task_progress:
+                    print(f"[Poll Debug] Job {job_id} task {active_task_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
+
         return {
             "status": status,
             "progress": progress,
@@ -684,10 +695,80 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             "queue_position": queue_info.get("queue_position", 0),
             "total_queued": queue_info.get("total_queued", 0),
             "jobs_ahead": queue_info.get("jobs_ahead", 0),
+            "own_jobs_ahead": queue_info.get("own_jobs_ahead", 0),
+            "other_jobs_ahead": queue_info.get("other_jobs_ahead", 0),
+            "task_progress": task_progress,
         }
 
     except Exception as e:
         return {"status": "Unknown", "progress": 0, "error_message": str(e)}
+
+
+def get_task_log(job_id: str, task_id: int) -> Optional[str]:
+    """
+    Get stdout log for a specific Deadline task.
+
+    Args:
+        job_id: Deadline job ID
+        task_id: Task number (0-based)
+
+    Returns:
+        Task log contents, or None if unavailable
+    """
+    try:
+        if not DEADLINE_PATH:
+            return None
+
+        result = subprocess.run(
+            [DEADLINE_PATH, "GetTaskLog", job_id, str(task_id)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+
+        if result.returncode == 0:
+            return result.stdout
+        return None
+    except Exception:
+        return None
+
+
+def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract ComfyUI progress information from task log.
+
+    Searches for patterns like:
+    - "Progress: 42% (5/12) (15s)"
+    - "[ComfyUI] Progress: 42% (5/12)"
+
+    Args:
+        log_content: Task log stdout text
+
+    Returns:
+        Dict with progress_pct, current_node, total_nodes, elapsed_seconds
+        or None if no progress found
+    """
+    import re
+
+    if not log_content:
+        return None
+
+    # Pattern: Progress: 42% (5/12) (15s) or Progress: 42% (5/12)
+    pattern = r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?'
+
+    # Search from end of log (most recent progress)
+    matches = list(re.finditer(pattern, log_content))
+    if not matches:
+        return None
+
+    last_match = matches[-1]
+    return {
+        'progress_pct': int(last_match.group(1)),
+        'current_node': int(last_match.group(2)),
+        'total_nodes': int(last_match.group(3)),
+        'elapsed_seconds': int(last_match.group(4)) if last_match.group(4) else None
+    }
 
 
 def get_queue_info(job_id: str) -> Dict[str, Any]:
@@ -769,12 +850,29 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
         # Sort by priority (higher first), then by submit date (earlier first)
         jobs_info.sort(key=lambda x: (-x["priority"], x["submit_date"]))
 
-        # Find our job's position
+        # Get current user from environment (matches job submission user)
+        current_user = os.environ.get("USERNAME", "").lower()
+
+        # Find our job and count own vs other jobs ahead
         queue_position = 0
+        own_jobs_ahead = 0
+        other_jobs_ahead = 0
+        target_job_user = ""
+
         for i, job in enumerate(jobs_info):
             if job["id"] == job_id:
                 queue_position = i + 1  # 1-based position
+                target_job_user = job["user"].lower()
                 break
+
+        # Count jobs ahead, separating own vs others
+        if queue_position > 0:
+            for i in range(queue_position - 1):
+                job_user = jobs_info[i]["user"].lower()
+                if job_user == current_user or job_user == target_job_user:
+                    own_jobs_ahead += 1
+                else:
+                    other_jobs_ahead += 1
 
         total_queued = len(jobs_info)
         jobs_ahead = max(0, queue_position - 1) if queue_position > 0 else total_queued
@@ -783,6 +881,8 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
             "queue_position": queue_position,
             "total_queued": total_queued,
             "jobs_ahead": jobs_ahead,
+            "own_jobs_ahead": own_jobs_ahead,
+            "other_jobs_ahead": other_jobs_ahead,
             "error": ""
         }
 

@@ -151,6 +151,7 @@ class PollingMixin:
         completed_tasks = result.get("completed_tasks", 0)
         total_tasks = result.get("total_tasks", 1)
         error_message = result.get("error_message", "")
+        task_progress = result.get("task_progress")
 
         display_total = max(total_tasks, self._iterate_total_tasks)
 
@@ -183,9 +184,20 @@ class PollingMixin:
             eta_str = estimate_remaining_time(completed_tasks, display_total, elapsed)
 
             if status in ("Active", "Rendering"):
-                status_text = f"Rendering job {completed_tasks + 1}/{display_total}"
+                if task_progress:
+                    tp_pct = task_progress['progress_pct']
+                    tp_cur = task_progress['current_node']
+                    tp_tot = task_progress['total_nodes']
+                    status_text = f"Rendering job {completed_tasks + 1}/{display_total} - {tp_pct}% ({tp_cur}/{tp_tot} nodes)"
+                else:
+                    status_text = f"Rendering job {completed_tasks + 1}/{display_total} ({progress}%)"
+
                 if completed_tasks > 0:
-                    main_status = f"ComfyUI: Job {completed_tasks}/{display_total} - {elapsed_str} elapsed"
+                    if task_progress:
+                        tp_pct = task_progress['progress_pct']
+                        main_status = f"ComfyUI: Job {completed_tasks + 1}/{display_total} - {tp_pct}% of current job - {elapsed_str}"
+                    else:
+                        main_status = f"ComfyUI: Job {completed_tasks}/{display_total} ({progress}%) - {elapsed_str} elapsed"
                     if eta_str:
                         main_status += f" - ~{eta_str} remaining"
                 else:
@@ -194,11 +206,21 @@ class PollingMixin:
                 queue_position = result.get("queue_position", 0)
                 total_queued = result.get("total_queued", 0)
                 jobs_ahead = result.get("jobs_ahead", 0)
+                own_jobs_ahead = result.get("own_jobs_ahead", 0)
+                other_jobs_ahead = result.get("other_jobs_ahead", 0)
 
                 if queue_position > 0 and total_queued > 0:
                     if jobs_ahead > 0:
-                        status_text = f"Queue position {queue_position}/{total_queued} ({jobs_ahead} ahead)"
-                        main_status = f"ComfyUI: Queued #{queue_position} of {total_queued} - {jobs_ahead} job(s) ahead in queue"
+                        # Build detailed queue message
+                        queue_parts = []
+                        if own_jobs_ahead > 0:
+                            queue_parts.append(f"{own_jobs_ahead} own")
+                        if other_jobs_ahead > 0:
+                            queue_parts.append(f"{other_jobs_ahead} others")
+
+                        queue_detail = " + ".join(queue_parts) if queue_parts else "0"
+                        status_text = f"Queue position {queue_position}/{total_queued} ({queue_detail} ahead)"
+                        main_status = f"ComfyUI: Queued #{queue_position} of {total_queued} - {queue_detail} ahead in queue"
                     else:
                         status_text = f"Queue position {queue_position}/{total_queued} (next up!)"
                         main_status = f"ComfyUI: Queued #{queue_position} of {total_queued} - Next in line!"
@@ -482,8 +504,9 @@ class PollingMixin:
                 status_color = StatusColors.WARNING
             elif active_jobs > 0:
                 eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
+                batch_progress = int((completed_frames_all / max(total_frames_all, 1)) * 100)
                 if completed_frames_all > 0:
-                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs - {active_jobs} rendering"
+                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs ({batch_progress}%) - {active_jobs} rendering"
                     if queued_jobs > 0:
                         if others_queued > 0:
                             main_status += f", {queued_jobs} queued ({others_queued} others in queue)"
