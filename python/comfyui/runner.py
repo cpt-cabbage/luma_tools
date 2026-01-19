@@ -190,7 +190,7 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
 # =============================================================================
 
 def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, port: int,
-                         mode: str = "embedded", python_path: str = None) -> subprocess.Popen:
+                         mode: str = "embedded", python_path: str = None, lowvram: bool = False) -> subprocess.Popen:
     """Start ComfyUI server process."""
     if mode == "embedded":
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
@@ -234,6 +234,9 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
         '--port', str(port),
         '--disable-auto-launch'
     ]
+
+    if lowvram:
+        cmd.append('--lowvram')
 
     working_dir = os.path.dirname(main_py)
 
@@ -298,6 +301,7 @@ def main():
                        help='Behavior when server not found in persistent mode')
     parser.add_argument('--server-wait-timeout', type=int, default=300,
                        help='Timeout when waiting for server to start')
+    parser.add_argument('--lowvram', action='store_true', help='Enable low VRAM mode')
 
     args = parser.parse_args()
 
@@ -475,7 +479,8 @@ def main():
             args.output_directory,
             args.port,
             mode=args.mode,
-            python_path=args.python_path
+            python_path=args.python_path,
+            lowvram=args.lowvram
         )
         if process is None:
             print("ERROR: Failed to start ComfyUI server")

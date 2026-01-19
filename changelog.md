@@ -1,5 +1,16 @@
 # Luma Tools Changelog
 
+## Version 0.4.3.7
+- Add Low VRAM mode setting for ComfyUI (--lowvram flag) 
+- ComfyUI server now reads global settings automatically (lowvram, fast mode) 
+
+## Version 0.4.3.6
+- Fix job-level progress percentage display in batch mode status bar
+- Fix queue counting to only include luma_tools ComfyUI jobs (was showing all Deadline jobs)
+
+## Version 0.4.3.5
+- Fix mapping for some nodes
+
 ## Version 0.4.3.4
 - Add real-time ComfyUI task progress tracking via Deadline logs
 - Improve queue messaging to distinguish between own queued jobs vs other users' jobs

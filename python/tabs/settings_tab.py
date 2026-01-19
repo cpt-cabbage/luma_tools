@@ -323,6 +323,7 @@ class SettingsTab(BaseTab):
         # ComfyUI performance settings
         self.ui.ComfyUIFastMode.setChecked(get_setting("comfyui_fast_mode"))
         self.ui.ComfyUIFP16Accumulation.setChecked(get_setting("comfyui_fp16_accumulation"))
+        self.ui.ComfyUILowVRAM.setChecked(get_setting("comfyui_lowvram"))
 
         # ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
@@ -619,6 +620,7 @@ class SettingsTab(BaseTab):
         set_setting("comfyui_network_output_path", self.ui.ComfyUINetworkOutputEdit.text().strip())
         set_setting("comfyui_fast_mode", self.ui.ComfyUIFastMode.isChecked())
         set_setting("comfyui_fp16_accumulation", self.ui.ComfyUIFP16Accumulation.isChecked())
+        set_setting("comfyui_lowvram", self.ui.ComfyUILowVRAM.isChecked())
 
         # Save ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):

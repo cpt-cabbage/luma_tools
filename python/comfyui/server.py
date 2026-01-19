@@ -504,7 +504,45 @@ def shutdown(signum=None, frame=None):
     sys.exit(0)
 
 
+def load_global_settings() -> dict:
+    """Load global settings to get default values for server flags."""
+    try:
+        # Try to find global_settings.json in common locations
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Try relative path from script location (../../global_settings/global_settings.json)
+        possible_paths = [
+            os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
+            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
+            # Fallback to home directory settings
+            os.path.join(os.path.expanduser("~"), ".luma_tools", "global_settings_path.txt"),
+        ]
+
+        for path in possible_paths:
+            if path.endswith('global_settings_path.txt'):
+                # Read the path from the file
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        settings_dir = f.read().strip()
+                        settings_file = os.path.join(settings_dir, 'global_settings.json')
+                        if os.path.exists(settings_file):
+                            with open(settings_file, 'r') as sf:
+                                return json.load(sf)
+            elif os.path.exists(path):
+                with open(path, 'r') as f:
+                    return json.load(f)
+
+        print("Warning: Could not find global_settings.json, using defaults")
+        return {}
+    except Exception as e:
+        print(f"Warning: Error loading global settings: {e}")
+        return {}
+
+
 def main():
+    # Load global settings to get default values
+    global_settings = load_global_settings()
+
     parser = argparse.ArgumentParser(description='Persistent ComfyUI Server')
 
     parser.add_argument('--comfyui-path', required=True, help='Path to ComfyUI installation')
@@ -513,9 +551,13 @@ def main():
     parser.add_argument('--input-directory', default=None, help='Default input directory')
     parser.add_argument('--output-directory', default=None, help='Default output directory')
     parser.add_argument('--extra-model-paths', default=None, help='Extra model paths config file')
-    parser.add_argument('--lowvram', action='store_true', help='Enable low VRAM mode')
+    parser.add_argument('--lowvram', action='store_true',
+                        default=global_settings.get('comfyui_lowvram', False),
+                        help='Enable low VRAM mode (default from global settings)')
     parser.add_argument('--gpu-only', action='store_true', help='Run everything on GPU')
-    parser.add_argument('--fast', action='store_true', help='Enable --fast flag')
+    parser.add_argument('--fast', action='store_true',
+                        default=global_settings.get('comfyui_fast_mode', False),
+                        help='Enable --fast flag (default from global settings)')
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
                         help='ComfyUI installation mode')
     parser.add_argument('--python-path', default=None, help='Path to Python executable')
@@ -543,7 +585,6 @@ def main():
         extra_args.append('--gpu-only')
     if args.fast:
         extra_args.append('--fast')
-        print("Fast mode enabled (--fast)")
 
     if args.mode == "standalone" and not args.python_path:
         print("ERROR: --python-path is required for standalone mode")
@@ -562,6 +603,18 @@ def main():
     print(f"Mode: {args.mode}")
     if args.mode == "standalone":
         print(f"Python Path: {args.python_path}")
+
+    # Show performance flags
+    flags_enabled = []
+    if args.lowvram:
+        flags_enabled.append("--lowvram")
+    if args.fast:
+        flags_enabled.append("--fast")
+    if args.gpu_only:
+        flags_enabled.append("--gpu-only")
+    if flags_enabled:
+        print(f"Performance Flags: {', '.join(flags_enabled)}")
+
     if args.max_crash_restarts > 0:
         print(f"Crash Recovery: enabled (max {args.max_crash_restarts} restarts, {args.crash_cooldown}s cooldown)")
     else:

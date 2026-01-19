@@ -709,6 +709,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="ComfyUILowVRAM">
+              <property name="text">
+               <string>Low VRAM Mode (--lowvram)</string>
+              </property>
+              <property name="toolTip">
+               <string>Enable --lowvram flag for systems with limited GPU memory. Reduces VRAM usage at the cost of performance.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer name="performanceFlagsSpacer">
               <property name="orientation">
                <enum>Qt::Horizontal</enum>

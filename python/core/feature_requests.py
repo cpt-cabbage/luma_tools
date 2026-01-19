@@ -136,6 +136,21 @@ def get_feature_requests() -> List[Dict[str, str]]:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     user_requests = json.load(f)
                     if isinstance(user_requests, list):
+                        # Migrate old requests without IDs
+                        modified = False
+                        for req in user_requests:
+                            if 'id' not in req:
+                                # Generate ID from timestamp
+                                req['id'] = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d_%H%M%S_%f")
+                                modified = True
+                                print(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
+
+                        # Save back if modified
+                        if modified:
+                            with open(file_path, 'w', encoding='utf-8') as f_out:
+                                json.dump(user_requests, f_out, indent=2, ensure_ascii=False)
+                            print(f"Updated {filename} with missing IDs")
+
                         all_requests.extend(user_requests)
             except Exception as e:
                 print(f"Error reading feature request file {filename}: {e}")

@@ -262,6 +262,10 @@ def submit_comfyui_to_deadline(
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
+    # Add performance flags from global settings
+    if get_setting("comfyui_lowvram"):
+        runner_args += ' --lowvram'
+
     job_info_path = os.path.join(output_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine
 Name=LUMA TOOLS - {render_name}
@@ -810,6 +814,7 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
             return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": ""}
 
         # Get job details for all pending jobs to sort by priority/submission time
+        # Filter to only luma_tools ComfyUI jobs
         jobs_info = []
         for pending_id in pending_job_ids:
             job_result = subprocess.run(
@@ -839,13 +844,15 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
                     elif line.startswith("User="):
                         job_user = line.split('=', 1)[1]
 
-                jobs_info.append({
-                    "id": pending_id,
-                    "priority": priority,
-                    "submit_date": submit_date,
-                    "name": job_name,
-                    "user": job_user
-                })
+                # Only include luma_tools ComfyUI jobs (job names end with "_luma_tools" or equal "luma_tools_job")
+                if job_name.endswith("_luma_tools") or job_name == "luma_tools_job":
+                    jobs_info.append({
+                        "id": pending_id,
+                        "priority": priority,
+                        "submit_date": submit_date,
+                        "name": job_name,
+                        "user": job_user
+                    })
 
         # Sort by priority (higher first), then by submit date (earlier first)
         jobs_info.sort(key=lambda x: (-x["priority"], x["submit_date"]))

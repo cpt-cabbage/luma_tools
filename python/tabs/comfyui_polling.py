@@ -441,15 +441,21 @@ class PollingMixin:
             self.log(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
             had_new_frames = False
             total_jobs = len(self._batch_job_ids)
+            active_job_task_progress = None
 
             for job_id, result in self._batch_poll_results.items():
                 status = result.get("status", "Unknown")
                 completed_tasks = result.get("completed_tasks", 0)
                 total_tasks = result.get("total_tasks", 1)
+                task_progress = result.get("task_progress")
 
                 self._batch_job_statuses[job_id] = status
                 if total_tasks > 1:
                     self._batch_total_tasks[job_id] = total_tasks
+
+                # Capture task progress from any active job for status display
+                if status in ("Active", "Rendering") and task_progress and not active_job_task_progress:
+                    active_job_task_progress = task_progress
 
                 prev_completed = self._batch_completed_tasks.get(job_id, 0)
                 if completed_tasks > prev_completed:
@@ -505,8 +511,15 @@ class PollingMixin:
             elif active_jobs > 0:
                 eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
                 batch_progress = int((completed_frames_all / max(total_frames_all, 1)) * 100)
+
+                # Show task-level progress if available
+                task_progress_str = ""
+                if active_job_task_progress:
+                    tp_pct = active_job_task_progress.get('progress_pct', 0)
+                    task_progress_str = f" - {tp_pct}% of current job"
+
                 if completed_frames_all > 0:
-                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs ({batch_progress}%) - {active_jobs} rendering"
+                    main_status = f"ComfyUI: {completed_frames_all}/{total_frames_all} jobs ({batch_progress}%){task_progress_str} - {active_jobs} rendering"
                     if queued_jobs > 0:
                         if others_queued > 0:
                             main_status += f", {queued_jobs} queued ({others_queued} others in queue)"
@@ -516,7 +529,10 @@ class PollingMixin:
                     if eta_str:
                         main_status += f" (~{eta_str} left)"
                 else:
-                    main_status = f"ComfyUI: Starting {total_frames_all} jobs - {active_jobs} active, {queued_jobs} queued"
+                    # Show task progress even when no frames completed yet
+                    main_status = f"ComfyUI: Starting {total_frames_all} jobs{task_progress_str} - {active_jobs} active"
+                    if queued_jobs > 0:
+                        main_status += f", {queued_jobs} queued"
                 status_color = StatusColors.INFO
             elif queued_jobs > 0:
                 if others_queued > 0:
