@@ -11,7 +11,8 @@ The actual implementations are in:
 - layouts.py: Custom layouts (FlowLayout)
 - dialogs.py: Edit dialogs (EditItemDialog, EditModelDialog)
 - batch_selector.py: Image selection (BatchImageSelector)
-- small_widgets.py: Simple widgets (CollapsibleSection, etc.)
+- thumbnail_base.py: Base thumbnail widget (BaseThumbnailWidget)
+- image_viewers.py: Image and model viewing widgets
 """
 import os
 from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool, QFile, QTextStream
@@ -31,10 +32,7 @@ from notifications import ToastNotification, ComfyUIStatusBanner
 from layouts import FlowLayout
 from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog
 from batch_selector import BatchImageSelector
-from small_widgets import (
-    CollapsibleSection, StepGroupBox, StepProgressIndicator,
-    EmptyStateWidget, ThumbnailRenderList, RenderListItem
-)
+from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
 
 
@@ -118,15 +116,13 @@ class MetadataCopyMixin:
 # GALLERY THUMBNAIL WIDGET
 # ============================================================================
 
-class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
+class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     """Thumbnail widget for gallery images with async loading."""
     clicked = Signal(str)
     fullscreen_requested = Signal(str)
     copy_settings_requested = Signal(dict)
     deleted = Signal(str)
     viewed = Signal(str)
-    THUMBNAIL_SIZE = (150, 150)
-    _placeholder_cache = {}
 
     def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
@@ -285,23 +281,6 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
         if not isValid(self):
             return
         self.thumbnail_label.setPixmap(self._create_placeholder("!"))
-
-    def _create_placeholder(self, text):
-        if text in GalleryThumbnailWidget._placeholder_cache:
-            return GalleryThumbnailWidget._placeholder_cache[text]
-        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
-        pixmap.fill(QColor("#3c414b"))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QColor("#888888"))
-        font = painter.font()
-        font.setPointSize(14)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
-        painter.end()
-        GalleryThumbnailWidget._placeholder_cache[text] = pixmap
-        return pixmap
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -467,13 +446,11 @@ class GalleryThumbnailWidget(MetadataCopyMixin, QWidget):
 # GLB THUMBNAIL WIDGET (Stub - full implementation in separate file for large models)
 # ============================================================================
 
-class GLBThumbnailWidget(QWidget):
+class GLBThumbnailWidget(BaseThumbnailWidget):
     """Thumbnail widget for 3D models. Full implementation kept for compatibility."""
     clicked = Signal(str)
     deleted = Signal(str)
     viewed = Signal(str)
-    THUMBNAIL_SIZE = (150, 150)
-    _placeholder_cache = {}
 
     def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
@@ -653,8 +630,14 @@ class GLBThumbnailWidget(QWidget):
         print(f"GLB thumbnail error: {error_msg}")
 
     def _create_placeholder(self, text):
-        if text in GLBThumbnailWidget._placeholder_cache:
-            return GLBThumbnailWidget._placeholder_cache[text]
+        """Create a 3D cube icon placeholder for GLB thumbnails."""
+        # Create a cache key including the cube indicator
+        cache_key = f"glb_3d_cube_{text}"
+
+        # Return cached version if available
+        if cache_key in BaseThumbnailWidget._placeholder_cache:
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
+
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
         painter = QPainter(pixmap)
@@ -676,7 +659,9 @@ class GLBThumbnailWidget(QWidget):
         painter.setFont(font)
         painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 30, Qt.AlignCenter, text)
         painter.end()
-        GLBThumbnailWidget._placeholder_cache[text] = pixmap
+
+        # Cache and return
+        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
         return pixmap
 
     def mousePressEvent(self, event):
