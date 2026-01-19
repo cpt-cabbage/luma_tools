@@ -25,10 +25,7 @@ from core.config import (
     COMFYUI_SUPPORTED_EXTENSIONS,
     COMFYUI_OUTPUT_EXTENSIONS,
 )
-from core.settings_manager import (
-    get_comfyui_path, get_comfyui_mode, get_comfyui_python_path,
-    get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout
-)
+from core.settings_manager import get_setting
 
 # Re-export from split modules for backwards compatibility
 from comfyui.workflow import (
@@ -93,9 +90,9 @@ def submit_comfyui_to_deadline_server_mode(
     import shutil
 
     # Get ComfyUI paths and mode from settings
-    comfyui_path = get_comfyui_path()
-    comfyui_mode = get_comfyui_mode()
-    comfyui_python = get_comfyui_python_path()
+    comfyui_path = get_setting("comfyui_path")
+    comfyui_mode = get_setting("comfyui_mode")
+    comfyui_python = get_setting("comfyui_python_path")
 
     # Determine Python executable based on mode
     if comfyui_mode == "embedded":
@@ -119,7 +116,7 @@ def submit_comfyui_to_deadline_server_mode(
             print(f"Copied {os.path.basename(src)} to: {dst}")
 
     # Build arguments for the client script
-    timeout = get_comfyui_timeout()
+    timeout = get_setting("comfyui_timeout")
     client_args = (
         f'"{client_script}" '
         f'--workflow "{workflow_path}" '
@@ -206,9 +203,9 @@ def submit_comfyui_to_deadline(
 
     import shutil
 
-    comfyui_path = get_comfyui_path()
-    comfyui_mode = get_comfyui_mode()
-    comfyui_python = get_comfyui_python_path()
+    comfyui_path = get_setting("comfyui_path")
+    comfyui_mode = get_setting("comfyui_mode")
+    comfyui_python = get_setting("comfyui_python_path")
 
     if comfyui_mode == "embedded":
         python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
@@ -233,7 +230,7 @@ def submit_comfyui_to_deadline(
     port = 8188 if use_server_mode else random.randint(8200, 8299)
 
     comfyui_path_clean = comfyui_path.rstrip('/\\')
-    timeout = get_comfyui_timeout()
+    timeout = get_setting("comfyui_timeout")
     runner_args = (
         f'"{runner_script}" '
         f'--comfyui-path "{comfyui_path_clean}" '
@@ -253,11 +250,10 @@ def submit_comfyui_to_deadline(
 
     if use_server_mode:
         runner_args += ' --persistent'
-        from core.settings_manager import get_comfyui_server_not_found_behavior, get_comfyui_server_wait_timeout
-        server_behavior = get_comfyui_server_not_found_behavior()
+        server_behavior = get_setting("comfyui_server_not_found_behavior")
         runner_args += f' --server-not-found {server_behavior}'
         if server_behavior == 'wait':
-            server_wait_timeout = get_comfyui_server_wait_timeout()
+            server_wait_timeout = get_setting("comfyui_server_wait_timeout")
             runner_args += f' --server-wait-timeout {server_wait_timeout}'
 
     if full_restart:

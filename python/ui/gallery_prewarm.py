@@ -23,10 +23,10 @@ def get_gallery_output_path() -> Optional[str]:
         Path to the user's gallery folder, or None if not configured.
     """
     try:
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
         from core.state_manager import app_state
 
-        network_path = get_comfyui_network_output_path()
+        network_path = get_setting("comfyui_network_output_path")
         if not network_path:
             return None
 

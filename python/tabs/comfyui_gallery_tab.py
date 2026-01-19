@@ -358,9 +358,9 @@ class ComfyUIGalleryTab(BaseTab):
         Returns:
             list: Sorted list of usernames (folder names in network output path)
         """
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
 
-        network_path = get_comfyui_network_output_path()
+        network_path = get_setting("comfyui_network_output_path")
         print(f"[Gallery] Discovering users in: {network_path}")
 
         if not network_path:
@@ -541,9 +541,9 @@ class ComfyUIGalleryTab(BaseTab):
         Returns:
             str: Full path to user's gallery folder, or empty string if not configured.
         """
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
 
-        network_path = get_comfyui_network_output_path()
+        network_path = get_setting("comfyui_network_output_path")
         if network_path:
             user = username if username else self._selected_user
             return os.path.join(network_path, user)

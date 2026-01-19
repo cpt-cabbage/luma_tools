@@ -95,9 +95,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _update_network_path_display(self):
         """Update the network path display label."""
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
 
-        network_path = get_comfyui_network_output_path()
+        network_path = get_setting("comfyui_network_output_path")
         if network_path:
             self.ui.ComfyUINetworkPathDisplay.setText(network_path)
             self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #aaaaaa;")
@@ -1543,10 +1543,10 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _validate_inputs(self):
         """Validate inputs and enable/disable submit button."""
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
 
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
-        network_path_ok = bool(get_comfyui_network_output_path())
+        network_path_ok = bool(get_setting("comfyui_network_output_path"))
         self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
 
     # =========================================================================
@@ -1557,7 +1557,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui.service import extract_editable_nodes, submit_comfyui_job
-        from core.settings_manager import get_comfyui_network_output_path
+        from core.settings_manager import get_setting
         from comfyui.presets_manager import get_workflow_config
 
         # Immediately save state before submission (crash recovery)
@@ -1569,7 +1569,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Get network output path - always use user subfolder
-        network_output_dir = get_comfyui_network_output_path()
+        network_output_dir = get_setting("comfyui_network_output_path")
         if not network_output_dir:
             self.main_window.animator.show_error("Network output path not configured in Settings")
             return
@@ -1813,7 +1813,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _save_state(self):
         """Save the current ComfyUI tab state to user settings."""
-        from core.settings_manager import save_comfyui_tab_state
+        from core.settings_manager import set_setting
 
         state = {
             "workflow_preset": self._current_preset_name or "",
@@ -1837,14 +1837,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         state["editable_values"] = editable_values
 
-        save_comfyui_tab_state(state)
+        set_setting("comfyui_tab_state", state, verbose=False)
 
     def _restore_state(self):
         """Restore the ComfyUI tab state from user settings."""
-        from core.settings_manager import get_comfyui_tab_state
+        from core.settings_manager import get_setting
         from comfyui.presets_manager import get_comfyui_workflow_presets
 
-        state = get_comfyui_tab_state()
+        state = get_setting("comfyui_tab_state")
         if not state:
             return
 

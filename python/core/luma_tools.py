@@ -702,13 +702,13 @@ class LumaShotTools(QtWidgets.QWidget):
         - Supervisors: Can see ComfyUI, Gallery, and Settings tabs (Settings is read-only, info only)
         - Regular users: Cannot see any restricted tabs
         """
-        from core.settings_manager import get_restricted_tabs
+        from core.settings_manager import get_setting
 
         # Admins can see all tabs
         if app_state.is_admin:
             return
 
-        restricted = get_restricted_tabs()
+        restricted = get_setting("restricted_tabs")
         if not restricted:
             return
 

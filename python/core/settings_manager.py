@@ -313,35 +313,21 @@ def set_setting(name: str, value: Any, verbose: bool = True):
 # These wrap the registry for existing code that uses get_*/set_* functions
 # ============================================================================
 
-# ComfyUI settings
-get_comfyui_path = lambda: get_setting("comfyui_path")
-set_comfyui_path = lambda v: set_setting("comfyui_path", v)
-get_comfyui_mode = lambda: get_setting("comfyui_mode")
-set_comfyui_mode = lambda v: set_setting("comfyui_mode", v)
-get_comfyui_python_path = lambda: get_setting("comfyui_python_path")
-set_comfyui_python_path = lambda v: set_setting("comfyui_python_path", v)
-get_comfyui_fast_mode = lambda: get_setting("comfyui_fast_mode")
-set_comfyui_fast_mode = lambda v: set_setting("comfyui_fast_mode", v)
-get_comfyui_fp16_accumulation = lambda: get_setting("comfyui_fp16_accumulation")
-set_comfyui_fp16_accumulation = lambda v: set_setting("comfyui_fp16_accumulation", v)
-get_comfyui_network_output_path = lambda: get_setting("comfyui_network_output_path")
-set_comfyui_network_output_path = lambda v: set_setting("comfyui_network_output_path", v)
-get_comfyui_timeout = lambda: get_setting("comfyui_timeout")
-set_comfyui_timeout = lambda v: set_setting("comfyui_timeout", v)
-get_comfyui_server_not_found_behavior = lambda: get_setting("comfyui_server_not_found_behavior")
-set_comfyui_server_not_found_behavior = lambda v: set_setting("comfyui_server_not_found_behavior", v)
-get_comfyui_server_wait_timeout = lambda: get_setting("comfyui_server_wait_timeout")
-set_comfyui_server_wait_timeout = lambda v: set_setting("comfyui_server_wait_timeout", v)
-
-# Tab and UI state
-get_comfyui_tab_state = lambda: get_setting("comfyui_tab_state")
-save_comfyui_tab_state = lambda v: set_setting("comfyui_tab_state", v, verbose=False)
-get_restricted_tabs = lambda: get_setting("restricted_tabs")
-set_restricted_tabs = lambda v: (set_setting("restricted_tabs", v, verbose=False), print(f"Updated restricted tabs: {v}"))[0]
-
-# Model export settings
-get_auto_extract_textures = lambda: get_setting("auto_extract_textures")
-set_auto_extract_textures = lambda v: set_setting("auto_extract_textures", v)
+# NOTE: Lambda wrappers removed. Use get_setting() and set_setting() directly.
+# For backwards compatibility reference, these were the old wrapper functions:
+#   get_comfyui_path, set_comfyui_path -> get_setting("comfyui_path"), set_setting("comfyui_path", value)
+#   get_comfyui_mode, set_comfyui_mode -> get_setting("comfyui_mode"), set_setting("comfyui_mode", value)
+#   get_comfyui_python_path, set_comfyui_python_path -> get_setting("comfyui_python_path"), set_setting("comfyui_python_path", value)
+#   get_comfyui_fast_mode, set_comfyui_fast_mode -> get_setting("comfyui_fast_mode"), set_setting("comfyui_fast_mode", value)
+#   get_comfyui_network_output_path, set_comfyui_network_output_path -> get_setting("comfyui_network_output_path"), set_setting("comfyui_network_output_path", value)
+#   get_comfyui_timeout, set_comfyui_timeout -> get_setting("comfyui_timeout"), set_setting("comfyui_timeout", value)
+#   get_comfyui_server_not_found_behavior, set_comfyui_server_not_found_behavior -> get_setting("comfyui_server_not_found_behavior"), set_setting("comfyui_server_not_found_behavior", value)
+#   get_comfyui_server_wait_timeout, set_comfyui_server_wait_timeout -> get_setting("comfyui_server_wait_timeout"), set_setting("comfyui_server_wait_timeout", value)
+#   get_comfyui_tab_state -> get_setting("comfyui_tab_state")
+#   save_comfyui_tab_state -> set_setting("comfyui_tab_state", value, verbose=False)
+#   get_restricted_tabs -> get_setting("restricted_tabs")
+#   set_restricted_tabs -> set_setting("restricted_tabs", value, verbose=False) + print statement
+#   get_auto_extract_textures, set_auto_extract_textures -> get_setting("auto_extract_textures"), set_setting("auto_extract_textures", value)
 get_generate_3d_thumbnails = lambda: get_setting("generate_3d_thumbnails")
 set_generate_3d_thumbnails = lambda v: set_setting("generate_3d_thumbnails", v)
 
@@ -398,7 +384,7 @@ def remove_hdri_from_list(name: str):
 
 def is_tab_restricted(tab_name: str) -> bool:
     """Check if a specific tab is restricted to admin users."""
-    return tab_name in get_restricted_tabs()
+    return tab_name in get_setting("restricted_tabs")
 
 
 # ============================================================================

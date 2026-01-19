@@ -254,11 +254,11 @@ class SettingsTab(BaseTab):
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
-        from core.settings_manager import get_auto_extract_textures, get_generate_3d_thumbnails, get_setting
+        from core.settings_manager import get_setting
 
         # Auto-extract textures checkbox
         if hasattr(self.ui, 'AutoExtractTextures'):
-            self.ui.AutoExtractTextures.setChecked(get_auto_extract_textures())
+            self.ui.AutoExtractTextures.setChecked(get_setting("auto_extract_textures"))
 
         # Generate 3D thumbnails checkbox
         if hasattr(self.ui, 'Generate3DThumbnails'):
@@ -304,12 +304,7 @@ class SettingsTab(BaseTab):
 
     def _load_global_settings_ui(self):
         """Load global settings into the settings UI."""
-        from core.settings_manager import (
-            get_global_settings_path, get_comfyui_mode, get_comfyui_path,
-            get_comfyui_python_path, get_comfyui_network_output_path,
-            get_comfyui_fast_mode, get_comfyui_fp16_accumulation, get_comfyui_timeout,
-            get_comfyui_server_not_found_behavior, get_comfyui_server_wait_timeout
-        )
+        from core.settings_manager import get_global_settings_path, get_setting
 
         # Global settings path
         global_path = get_global_settings_path()
@@ -317,27 +312,27 @@ class SettingsTab(BaseTab):
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
         # ComfyUI mode
-        self._comfyui_mode = get_comfyui_mode()
+        self._comfyui_mode = get_setting("comfyui_mode")
         self._update_comfyui_mode_button_text()
 
         # ComfyUI paths
-        self.ui.ComfyUIPathEdit.setText(get_comfyui_path())
-        self.ui.ComfyUIPythonEdit.setText(get_comfyui_python_path())
-        self.ui.ComfyUINetworkOutputEdit.setText(get_comfyui_network_output_path())
+        self.ui.ComfyUIPathEdit.setText(get_setting("comfyui_path"))
+        self.ui.ComfyUIPythonEdit.setText(get_setting("comfyui_python_path"))
+        self.ui.ComfyUINetworkOutputEdit.setText(get_setting("comfyui_network_output_path"))
 
         # ComfyUI performance settings
-        self.ui.ComfyUIFastMode.setChecked(get_comfyui_fast_mode())
-        self.ui.ComfyUIFP16Accumulation.setChecked(get_comfyui_fp16_accumulation())
+        self.ui.ComfyUIFastMode.setChecked(get_setting("comfyui_fast_mode"))
+        self.ui.ComfyUIFP16Accumulation.setChecked(get_setting("comfyui_fp16_accumulation"))
 
         # ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
-            timeout_seconds = get_comfyui_timeout()
+            timeout_seconds = get_setting("comfyui_timeout")
             # Convert to minutes for UI display
             self.ui.ComfyUITimeoutSpinBox.setValue(timeout_seconds // 60)
 
         # Server not found behavior setting
         if hasattr(self.ui, 'ServerNotFoundCombo'):
-            behavior = get_comfyui_server_not_found_behavior()
+            behavior = get_setting("comfyui_server_not_found_behavior")
             # Index 0 = "Fail Immediately" (fail), Index 1 = "Wait for Server" (wait)
             self.ui.ServerNotFoundCombo.setCurrentIndex(0 if behavior == "fail" else 1)
             # Connect signal to update wait timeout visibility
@@ -345,7 +340,7 @@ class SettingsTab(BaseTab):
 
         # Server wait timeout setting
         if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
-            timeout_seconds = get_comfyui_server_wait_timeout()
+            timeout_seconds = get_setting("comfyui_server_wait_timeout")
             # Convert to minutes for UI display
             self.ui.ServerWaitTimeoutSpinBox.setValue(timeout_seconds // 60)
 
@@ -476,7 +471,7 @@ class SettingsTab(BaseTab):
         """Save user settings."""
         from core.config import REQUIRED_PASSES
         from core.user_preferences import set_default_passes
-        from core.settings_manager import set_auto_extract_textures, set_generate_3d_thumbnails, set_setting
+        from core.settings_manager import set_setting
 
         # Collect selected passes
         selected_passes = []
@@ -493,11 +488,11 @@ class SettingsTab(BaseTab):
 
         # Save auto-extract textures setting
         if hasattr(self.ui, 'AutoExtractTextures'):
-            set_auto_extract_textures(self.ui.AutoExtractTextures.isChecked())
+            set_setting("auto_extract_textures", self.ui.AutoExtractTextures.isChecked())
 
         # Save generate 3D thumbnails setting
         if hasattr(self.ui, 'Generate3DThumbnails'):
-            set_generate_3d_thumbnails(self.ui.Generate3DThumbnails.isChecked())
+            set_setting("generate_3d_thumbnails", self.ui.Generate3DThumbnails.isChecked())
 
         # Save 3D viewer zoom setting
         if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
@@ -593,13 +588,7 @@ class SettingsTab(BaseTab):
 
     def _on_save_global_settings(self):
         """Save all global settings."""
-        from core.settings_manager import (
-            set_global_settings_path, set_comfyui_mode, set_comfyui_path,
-            set_comfyui_python_path, set_comfyui_network_output_path,
-            set_comfyui_fast_mode, set_comfyui_fp16_accumulation,
-            set_comfyui_timeout, set_comfyui_server_not_found_behavior,
-            set_comfyui_server_wait_timeout
-        )
+        from core.settings_manager import set_global_settings_path, set_setting
 
         # Save global settings path
         new_global_path = self.ui.GlobalSettingsPathEdit.text().strip()
@@ -624,27 +613,27 @@ class SettingsTab(BaseTab):
             self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
 
         # Save ComfyUI settings
-        set_comfyui_mode(self._comfyui_mode)
-        set_comfyui_path(self.ui.ComfyUIPathEdit.text().strip())
-        set_comfyui_python_path(self.ui.ComfyUIPythonEdit.text().strip())
-        set_comfyui_network_output_path(self.ui.ComfyUINetworkOutputEdit.text().strip())
-        set_comfyui_fast_mode(self.ui.ComfyUIFastMode.isChecked())
-        set_comfyui_fp16_accumulation(self.ui.ComfyUIFP16Accumulation.isChecked())
+        set_setting("comfyui_mode", self._comfyui_mode)
+        set_setting("comfyui_path", self.ui.ComfyUIPathEdit.text().strip())
+        set_setting("comfyui_python_path", self.ui.ComfyUIPythonEdit.text().strip())
+        set_setting("comfyui_network_output_path", self.ui.ComfyUINetworkOutputEdit.text().strip())
+        set_setting("comfyui_fast_mode", self.ui.ComfyUIFastMode.isChecked())
+        set_setting("comfyui_fp16_accumulation", self.ui.ComfyUIFP16Accumulation.isChecked())
 
         # Save ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
             timeout_minutes = self.ui.ComfyUITimeoutSpinBox.value()
-            set_comfyui_timeout(timeout_minutes * 60)  # Convert to seconds
+            set_setting("comfyui_timeout", timeout_minutes * 60)  # Convert to seconds
 
         # Save server not found behavior setting
         if hasattr(self.ui, 'ServerNotFoundCombo'):
             behavior = "fail" if self.ui.ServerNotFoundCombo.currentIndex() == 0 else "wait"
-            set_comfyui_server_not_found_behavior(behavior)
+            set_setting("comfyui_server_not_found_behavior", behavior)
 
         # Save server wait timeout setting
         if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
             timeout_minutes = self.ui.ServerWaitTimeoutSpinBox.value()
-            set_comfyui_server_wait_timeout(timeout_minutes * 60)  # Convert to seconds
+            set_setting("comfyui_server_wait_timeout", timeout_minutes * 60)  # Convert to seconds
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()
@@ -749,9 +738,9 @@ class SettingsTab(BaseTab):
 
     def _load_restricted_tabs_ui(self):
         """Load restricted tabs settings into the checkboxes."""
-        from core.settings_manager import get_restricted_tabs
+        from core.settings_manager import get_setting
 
-        restricted = get_restricted_tabs()
+        restricted = get_setting("restricted_tabs")
 
         # Map tab names to checkboxes (Settings is admin-only, not configurable here)
         checkbox_map = {
@@ -769,7 +758,7 @@ class SettingsTab(BaseTab):
 
     def _save_restricted_tabs_settings(self):
         """Save restricted tabs settings from the checkboxes."""
-        from core.settings_manager import set_restricted_tabs
+        from core.settings_manager import set_setting
 
         restricted = []
 
@@ -787,7 +776,8 @@ class SettingsTab(BaseTab):
             if checkbox and checkbox.isChecked():
                 restricted.append(tab_name)
 
-        set_restricted_tabs(restricted)
+        set_setting("restricted_tabs", restricted, verbose=False)
+        print(f"Updated restricted tabs: {restricted}")
 
     def _load_feature_request_ui(self):
         """Configure feature request buttons based on user role."""

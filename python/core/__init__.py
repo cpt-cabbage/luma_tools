@@ -6,8 +6,6 @@ from .settings_manager import (
     get_setting, set_setting,
     load_user_settings, save_user_settings,
     load_global_settings, save_global_settings,
-    get_comfyui_path, set_comfyui_path,
-    get_comfyui_mode, set_comfyui_mode,
     get_admin_users, is_admin_user,
 )
 from .user_preferences import (
