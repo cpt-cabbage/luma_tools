@@ -451,6 +451,13 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     - SaveImage nodes (filename_prefix)
     - HYMotionExportFBX nodes (output_dir, filename_prefix)
     - HYMotionGenerate nodes (seed)
+    - Trellis2MeshWithVoxelAdvancedGenerator nodes (seed)
+    - Trellis2ImageToShape nodes (seed)
+    - Trellis2ShapeToTexturedMesh nodes (seed)
+    - Trellis2ExportMesh nodes (filename_prefix)
+    - Trellis2ExportGLB nodes (filename_prefix)
+    - UltraShapeRefine nodes (seed)
+    - UltraShapeSaveGLB nodes (filename_prefix)
     """
     modified = copy.deepcopy(workflow)
 
@@ -461,6 +468,7 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
         class_type = node_data.get('class_type')
         inputs = node_data.get('inputs', {})
 
+        # === Seed nodes ===
         if class_type == 'KSampler':
             inputs['seed'] = seed
             print(f"Set KSampler node {node_id} seed to: {seed}")
@@ -469,6 +477,27 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             inputs['noise_seed'] = seed
             print(f"Set RandomNoise node {node_id} seed to: {seed}")
 
+        elif class_type == 'HYMotionGenerate':
+            inputs['seed'] = seed
+            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
+
+        elif class_type == 'Trellis2MeshWithVoxelAdvancedGenerator':
+            inputs['seed'] = seed
+            print(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
+
+        elif class_type == 'Trellis2ImageToShape':
+            inputs['seed'] = seed
+            print(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
+
+        elif class_type == 'Trellis2ShapeToTexturedMesh':
+            inputs['seed'] = seed
+            print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
+
+        elif class_type == 'UltraShapeRefine':
+            inputs['seed'] = seed
+            print(f"Set UltraShapeRefine node {node_id} seed to: {seed}")
+
+        # === Export/output prefix nodes ===
         elif class_type == 'SaveImage':
             inputs['filename_prefix'] = output_prefix
             print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
@@ -478,9 +507,17 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             inputs['filename_prefix'] = output_prefix
             print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
 
-        elif class_type == 'HYMotionGenerate':
-            inputs['seed'] = seed
-            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
+        elif class_type == 'Trellis2ExportMesh':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
+
+        elif class_type == 'Trellis2ExportGLB':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
+
+        elif class_type == 'UltraShapeSaveGLB':
+            inputs['filename_prefix'] = output_prefix
+            print(f"Set UltraShapeSaveGLB node {node_id} prefix to: {output_prefix}")
 
     return modified
 

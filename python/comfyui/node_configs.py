@@ -94,6 +94,13 @@ WIDGET_MAPPINGS = {
     'ImageInvert': [],
     'ImageBatch': [],
     'RepeatLatentBatch': ['amount'],
+    'ResizeAndPadImage': ['target_width', 'target_height', 'padding_color', 'interpolation'],
+
+    # Background removal nodes
+    'RMBG': [
+        'model', 'sensitivity', 'process_res', 'mask_blur', 'mask_offset',
+        'invert_output', 'refine_foreground', 'background', 'background_color'
+    ],
 
     # Latent nodes
     'LatentFromBatch': ['batch_index', 'length'],
@@ -135,6 +142,8 @@ WIDGET_MAPPINGS = {
     'Trellis2RemoveBackground': ['low_vram'],
 
     # TRELLIS2 v2 nodes (from ComfyUI-Trellis2 visualbruno)
+    # NOTE: These are fallback mappings only - auto-discovery from node inputs is preferred.
+    # Widget counts may vary between node versions, so auto-discovery is more reliable.
     'Trellis2LoadModel': ['modelname', 'backend', 'device', 'low_vram', 'keep_models_loaded'],
     'Trellis2LoadImageWithTransparency': ['image', 'upload'],
     'Trellis2MeshWithVoxelAdvancedGenerator': [
@@ -147,7 +156,7 @@ WIDGET_MAPPINGS = {
         'sparse_structure_guidance_interval_start', 'sparse_structure_guidance_interval_end',
         'shape_guidance_interval_start', 'shape_guidance_interval_end',
         'texture_guidance_interval_start', 'texture_guidance_interval_end',
-        'use_tiled_decoder', 'vertex_clamp_margin'
+        'use_tiled_decoder'
     ],
     'Trellis2PostProcessMesh': [
         'fill_holes', 'fill_holes_max_perimeter', 'remove_duplicate_faces',
