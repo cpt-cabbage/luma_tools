@@ -328,18 +328,11 @@ def set_setting(name: str, value: Any, verbose: bool = True):
 #   get_restricted_tabs -> get_setting("restricted_tabs")
 #   set_restricted_tabs -> set_setting("restricted_tabs", value, verbose=False) + print statement
 #   get_auto_extract_textures, set_auto_extract_textures -> get_setting("auto_extract_textures"), set_setting("auto_extract_textures", value)
-get_generate_3d_thumbnails = lambda: get_setting("generate_3d_thumbnails")
-set_generate_3d_thumbnails = lambda v: set_setting("generate_3d_thumbnails", v)
-
-# 3D Viewer settings
-get_viewer_3d_shading_mode = lambda: get_setting("viewer_3d_shading_mode")
-set_viewer_3d_shading_mode = lambda v: set_setting("viewer_3d_shading_mode", v, verbose=False)
-get_viewer_3d_lighting_mode = lambda: get_setting("viewer_3d_lighting_mode")
-set_viewer_3d_lighting_mode = lambda v: set_setting("viewer_3d_lighting_mode", v, verbose=False)
-get_viewer_3d_hdri_name = lambda: get_setting("viewer_3d_hdri_name")
-set_viewer_3d_hdri_name = lambda v: set_setting("viewer_3d_hdri_name", v, verbose=False)
-get_viewer_3d_light_strength = lambda: get_setting("viewer_3d_light_strength")
-set_viewer_3d_light_strength = lambda v: set_setting("viewer_3d_light_strength", v, verbose=False)
+#   get_generate_3d_thumbnails, set_generate_3d_thumbnails -> get_setting("generate_3d_thumbnails"), set_setting("generate_3d_thumbnails", value)
+#   get_viewer_3d_shading_mode, set_viewer_3d_shading_mode -> get_setting("viewer_3d_shading_mode"), set_setting("viewer_3d_shading_mode", value, verbose=False)
+#   get_viewer_3d_lighting_mode, set_viewer_3d_lighting_mode -> get_setting("viewer_3d_lighting_mode"), set_setting("viewer_3d_lighting_mode", value, verbose=False)
+#   get_viewer_3d_hdri_name, set_viewer_3d_hdri_name -> get_setting("viewer_3d_hdri_name"), set_setting("viewer_3d_hdri_name", value, verbose=False)
+#   get_viewer_3d_light_strength, set_viewer_3d_light_strength -> get_setting("viewer_3d_light_strength"), set_setting("viewer_3d_light_strength", value, verbose=False)
 
 
 # ============================================================================

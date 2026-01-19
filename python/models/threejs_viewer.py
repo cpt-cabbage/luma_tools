@@ -482,17 +482,11 @@ class ThreeJSViewerDialog(QWidget):
 
         # Load saved preferences
         try:
-            from core.settings_manager import (
-                get_viewer_3d_shading_mode,
-                get_viewer_3d_lighting_mode,
-                get_viewer_3d_hdri_name,
-                get_viewer_3d_light_strength,
-                get_hdri_list
-            )
-            self._current_shading_mode = get_viewer_3d_shading_mode() or "textured"
-            self._current_lighting_mode = get_viewer_3d_lighting_mode() or "studio"
-            self._current_light_strength = get_viewer_3d_light_strength() or 1.0
-            hdri_name = get_viewer_3d_hdri_name()
+            from core.settings_manager import get_setting, get_hdri_list
+            self._current_shading_mode = get_setting("viewer_3d_shading_mode") or "textured"
+            self._current_lighting_mode = get_setting("viewer_3d_lighting_mode") or "studio"
+            self._current_light_strength = get_setting("viewer_3d_light_strength") or 1.0
+            hdri_name = get_setting("viewer_3d_hdri_name")
             if hdri_name:
                 hdri_list = get_hdri_list()
                 for hdri in hdri_list:
@@ -688,8 +682,8 @@ class ThreeJSViewerDialog(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_shading_mode
-            set_viewer_3d_shading_mode(mode)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_shading_mode", mode, verbose=False)
         except Exception:
             pass
 
@@ -707,8 +701,8 @@ class ThreeJSViewerDialog(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_lighting_mode
-            set_viewer_3d_lighting_mode(mode)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_lighting_mode", mode, verbose=False)
         except Exception:
             pass
 
@@ -723,8 +717,8 @@ class ThreeJSViewerDialog(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_hdri_name
-            set_viewer_3d_hdri_name(os.path.basename(hdri_path))
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_hdri_name", os.path.basename(hdri_path), verbose=False)
         except Exception:
             pass
 
@@ -741,8 +735,8 @@ class ThreeJSViewerDialog(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_light_strength
-            set_viewer_3d_light_strength(strength)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_light_strength", strength, verbose=False)
         except Exception:
             pass
 

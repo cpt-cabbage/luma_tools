@@ -262,7 +262,7 @@ class SettingsTab(BaseTab):
 
         # Generate 3D thumbnails checkbox
         if hasattr(self.ui, 'Generate3DThumbnails'):
-            self.ui.Generate3DThumbnails.setChecked(get_generate_3d_thumbnails())
+            self.ui.Generate3DThumbnails.setChecked(get_setting("generate_3d_thumbnails"))
 
         # 3D Viewer zoom distance
         if hasattr(self.ui, 'Viewer3DZoomSpinBox'):

@@ -544,16 +544,11 @@ class EmbeddedImageViewer(QWidget):
 
                 # Restore saved preferences from settings
                 try:
-                    from core.settings_manager import (
-                        get_viewer_3d_shading_mode,
-                        get_viewer_3d_lighting_mode,
-                        get_viewer_3d_hdri_name,
-                        get_viewer_3d_light_strength
-                    )
-                    self._current_shading_mode = get_viewer_3d_shading_mode()
-                    self._current_lighting_mode = get_viewer_3d_lighting_mode()
-                    self._current_hdri_path = get_viewer_3d_hdri_name()
-                    self._current_light_strength = get_viewer_3d_light_strength() or 1.0
+                    from core.settings_manager import get_setting
+                    self._current_shading_mode = get_setting("viewer_3d_shading_mode")
+                    self._current_lighting_mode = get_setting("viewer_3d_lighting_mode")
+                    self._current_hdri_path = get_setting("viewer_3d_hdri_name")
+                    self._current_light_strength = get_setting("viewer_3d_light_strength") or 1.0
                     self.light_slider.setValue(int(self._current_light_strength * 100))
                     self.light_value_label.setText(f"{self._current_light_strength:.1f}x")
                 except Exception:
@@ -812,8 +807,8 @@ class EmbeddedImageViewer(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_shading_mode
-            set_viewer_3d_shading_mode(mode)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_shading_mode", mode, verbose=False)
         except Exception:
             pass
 
@@ -833,8 +828,8 @@ class EmbeddedImageViewer(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_lighting_mode
-            set_viewer_3d_lighting_mode(mode)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_lighting_mode", mode, verbose=False)
         except Exception:
             pass
 
@@ -850,9 +845,9 @@ class EmbeddedImageViewer(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_hdri_name
+            from core.settings_manager import set_setting
             import os
-            set_viewer_3d_hdri_name(os.path.basename(hdri_path))
+            set_setting("viewer_3d_hdri_name", os.path.basename(hdri_path), verbose=False)
         except Exception:
             pass
 
@@ -870,8 +865,8 @@ class EmbeddedImageViewer(QWidget):
 
         # Persist preference
         try:
-            from core.settings_manager import set_viewer_3d_light_strength
-            set_viewer_3d_light_strength(strength)
+            from core.settings_manager import set_setting
+            set_setting("viewer_3d_light_strength", strength, verbose=False)
         except Exception:
             pass
 
