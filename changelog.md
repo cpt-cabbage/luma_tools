@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.3.1
+- Hdri rendering improvements
+- Viewer UI polish
+
 ## Version 0.4.3
 - Add lighting modes (headlight, studio, HDRI) 
 - Add shading modes (shaded, textured, wireframe) 

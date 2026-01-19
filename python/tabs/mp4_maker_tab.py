@@ -32,9 +32,7 @@ class MP4MakerTab(BaseTab):
         """Connect MP4 maker tab signals."""
         self.ui.MP4ScanRenders.clicked.connect(self._on_scan_renders_clicked)
         self.ui.MP4CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
-        self.ui.MP4UseForComp.toggled.connect(self._on_source_changed)
-        self.ui.MP4UseRaw.toggled.connect(self._on_source_changed)
-        self.ui.MP4UseCustom.toggled.connect(self._on_source_changed)
+        self.ui.MP4SourceButton.clicked.connect(self._on_source_button_clicked)
         self.ui.MP4BrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.MP4RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.MP4BrowseOutput.clicked.connect(self._on_browse_output)
@@ -45,6 +43,15 @@ class MP4MakerTab(BaseTab):
         """Initialize MP4 maker tab."""
         self.ui.MP4Generate.setEnabled(False)
 
+        # Source options (label, value)
+        self._source = "for_comp"  # Default
+        self._source_options = [
+            ("For Comp", "for_comp"),
+            ("Raw", "raw"),
+            ("Custom", "custom"),
+        ]
+        self._update_source_button_text()
+
         # Quality options (index, label, button_label)
         self._quality_index = 0  # Default: high quality
         self._quality_options = [
@@ -54,12 +61,49 @@ class MP4MakerTab(BaseTab):
         ]
         self._update_quality_button_text()
 
+    def _update_source_button_text(self):
+        """Update the source button text to show current selection."""
+        # Find label for current source value
+        label = next((l for l, v in self._source_options if v == self._source), self._source)
+        # Update with output_subdirectory if available and using for_comp
+        if self._source == "for_comp" and self.app_state.output_subdirectory:
+            label = self.app_state.output_subdirectory.title()
+        self.ui.MP4SourceButton.setText(f"Source: {label}")
+
     def _update_quality_button_text(self):
         """Update the quality button text to show current selection."""
         for index, label, button_label in self._quality_options:
             if index == self._quality_index:
                 self.ui.MP4QualityButton.setText(button_label)
                 break
+
+    def _on_source_button_clicked(self):
+        """Show popup menu with source options."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self.main_window)
+
+        for label, value in self._source_options:
+            # Update label for for_comp if output_subdirectory is set
+            display_label = label
+            if value == "for_comp" and self.app_state.output_subdirectory:
+                display_label = self.app_state.output_subdirectory.title()
+
+            action = menu.addAction(display_label)
+            action.setData(value)
+            if value == self._source:
+                action.setCheckable(True)
+                action.setChecked(True)
+
+        # Show menu below the button
+        action = menu.exec_(self.ui.MP4SourceButton.mapToGlobal(
+            self.ui.MP4SourceButton.rect().bottomLeft()
+        ))
+
+        if action and action.data():
+            self._source = action.data()
+            self._update_source_button_text()
+            self._on_source_changed()
 
     def _on_quality_button_clicked(self):
         """Show popup menu with quality options."""
@@ -84,9 +128,14 @@ class MP4MakerTab(BaseTab):
             self._update_quality_button_text()
 
     def _on_source_changed(self):
-        """Handle source type change - enable/disable custom path button and trigger scan."""
-        is_custom = self.ui.MP4UseCustom.isChecked()
-        self.ui.MP4BrowseCustomPath.setEnabled(is_custom)
+        """Handle source type change - show/hide custom path controls and trigger scan."""
+        is_custom = self._source == "custom"
+
+        # Show/hide browse button and custom path label based on source type
+        self.ui.MP4BrowseCustomPath.setVisible(is_custom)
+        self.ui.MP4CustomPathLabel.setVisible(is_custom)
+
+        # Trigger scan
         self._on_scan_renders_clicked()
 
     def _on_browse_custom_path(self):
@@ -127,16 +176,16 @@ class MP4MakerTab(BaseTab):
             self.app_state.mp4_searchpath = update_path_version(self.app_state.mp4_searchpath, newver)
             self.ui.MP4RenderPath.setText(self.app_state.mp4_searchpath)
 
-        # Update "For Comp" radio button label with actual subdirectory name
-        self.ui.MP4UseForComp.setText(f"Denoised ({self.app_state.output_subdirectory.title()})")
+        # Update source button text with actual subdirectory name if using for_comp
+        self._update_source_button_text()
 
-        # Determine which source to scan based on radio buttons
+        # Determine which source to scan based on source selection
         self.app_state.mp4_renders = []
         self.ui.MP4Generate.setEnabled(False)
 
         self.log(f"MP4 Maker: Scanning path: {self.app_state.mp4_searchpath}")
 
-        if self.ui.MP4UseForComp.isChecked():
+        if self._source == "for_comp":
             for_comp_path = os.path.join(self.app_state.mp4_searchpath, self.app_state.output_subdirectory)
             self.log(f"MP4 Maker: Scanning {self.app_state.output_subdirectory} path: {for_comp_path}")
             if os.path.exists(for_comp_path):
@@ -145,7 +194,7 @@ class MP4MakerTab(BaseTab):
                 for render_seq in for_comp_renders:
                     self.app_state.mp4_renders.append((self.app_state.output_subdirectory, render_seq))
 
-        elif self.ui.MP4UseRaw.isChecked():
+        elif self._source == "raw":
             self.log(f"MP4 Maker: Scanning raw render path: {self.app_state.mp4_searchpath}")
             if os.path.exists(self.app_state.mp4_searchpath):
                 root_renders = scan_exr_sequences(self.app_state.mp4_searchpath)
@@ -153,7 +202,7 @@ class MP4MakerTab(BaseTab):
                 for render_seq in root_renders:
                     self.app_state.mp4_renders.append(("raw", render_seq))
 
-        elif self.ui.MP4UseCustom.isChecked():
+        elif self._source == "custom":
             self.log(f"MP4 Maker: Scanning custom path: {self.app_state.mp4_custom_path}")
             if self.app_state.mp4_custom_path and os.path.exists(self.app_state.mp4_custom_path):
                 custom_renders = scan_exr_sequences(self.app_state.mp4_custom_path)
