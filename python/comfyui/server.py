@@ -185,10 +185,10 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
 def health_monitor_thread(port: int):
     """Background thread to monitor ComfyUI health."""
     consecutive_failures = 0
-    max_consecutive_failures = 3  # Trigger restart after 3 consecutive failures
+    max_consecutive_failures = 2  # Trigger restart after 2 consecutive failures (was 3)
 
     while not server_state['shutdown_requested']:
-        time.sleep(30)
+        time.sleep(20)  # Check more frequently (was 30s)
 
         if server_state['is_ready']:
             healthy = check_server_health(port=port)
@@ -344,10 +344,12 @@ def stream_comfyui_output(process: subprocess.Popen):
                     if pattern in line:
                         print(f"\n{'!' * 60}")
                         print(f"FATAL GPU ERROR DETECTED: {pattern}")
-                        print(f"Requesting server restart...")
+                        print(f"Requesting immediate server restart...")
                         print(f"{'!' * 60}\n")
                         server_state['jobs_failed'] += 1
                         server_state['restart_requested'] = True
+                        server_state['is_ready'] = False  # Mark as not ready immediately
+                        # Fatal error detected, server is in bad state
                         break
 
     except Exception as e:
@@ -618,9 +620,10 @@ def main():
 
     try:
         while not server_state['shutdown_requested']:
-            # Handle manual restart requests
+            # Handle restart requests (from fatal errors or health checks)
             if server_state['restart_requested']:
-                if restart_comfyui(reason="manual"):
+                reason = "fatal_error" if not server_state['is_ready'] else "health_check"
+                if restart_comfyui(reason=reason):
                     process = server_state['comfyui_process']
                     last_stable_check = time.time()
                 else:
@@ -647,7 +650,7 @@ def main():
                     reset_crash_counter()
                     last_stable_check = time.time()
 
-            time.sleep(5)
+            time.sleep(2)  # Check more frequently (was 5s)
 
     except KeyboardInterrupt:
         pass

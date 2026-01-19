@@ -4,957 +4,194 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Luma Tools is a VFX shot management application for the Luma Animation pipeline. It's a Windows-based PySide6 GUI application that handles:
-- Render pass management and building
-- AYON publishing (local and farm-based)
-- Deadline farm job submission
-- MP4 preview generation from EXR sequences
-- ComfyUI AI image generation workflows
-- Lookdev file cleanup
+Luma Tools is a VFX shot management PySide6 GUI application for the Luma Animation pipeline handling render passes, AYON publishing, Deadline farm jobs, MP4 previews, ComfyUI AI workflows, and lookdev cleanup.
 
 ## Running the Application
 
 ```bash
-# From repository root (Windows)
-luma_tools.bat                  # With shot context args passed through
-luma_tools_standalone.bat       # Without shot context (standalone mode)
+luma_tools.bat                  # With shot context (6 args: jobname, shot, task, shotpath, user, output_subdirectory)
+luma_tools_standalone.bat       # Standalone mode
+install.bat                     # Deploy to L:\tools\_studio_tools\luma_tools with version management
 
-# Direct Python (ensure venv is activated and PYTHONPATH is set)
+# Direct Python
 python\venv\Scripts\activate.bat
 set PYTHONPATH=%CD%\python;%CD%\resources\ui;%PYTHONPATH%
 python python/core/luma_tools.py
-
-# Deploy to production location
-install.bat                     # Copies files to L:\tools\_studio_tools\luma_tools
 ```
 
-The batch files activate the venv and launch with `start /B` to run in background. The console window is hidden by the Python code itself using Windows API (`ctypes.windll`).
-
-**Single Instance Enforcement:**
-The application uses a Windows named mutex (`Global\\LumaToolsSingleInstance`) to ensure only one instance runs at a time. If a second instance is launched, it finds and focuses the existing window instead of starting a new one.
-
-**Command Line Arguments:**
-The application accepts 6 positional arguments for shot context: `jobname`, `shot`, `task`, `shotpath`, `user`, `output_subdirectory` (parsed by `state_manager.py`).
+**Single Instance:** Uses Windows mutex `Global\\LumaToolsSingleInstance` to prevent multiple instances. Console hidden via `ctypes.windll`.
 
 ## Deployment
 
-The `install.bat` script handles deployment to production with automated version management:
+`install.bat` auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod), and removes 'pause' from launchers. Version stored in `version.json`.
 
-```bash
-install.bat  # Deploys to L:\tools\_studio_tools\luma_tools
-```
+## Key Features
 
-**What it does:**
-1. Prompts for version increment (big update: +0.1, small update: +0.01)
-2. Auto-increments version in `version.json`
-3. Optionally updates `changelog.md` from last git commit
-4. Cleans old Python files from previous structure
-5. Copies all Python modules to production location
-6. **Optionally copies entire virtual environment** (`python/venv/`) with progress feedback when dependencies need updating
-7. Copies UI resources, icons, and configuration files
-8. Updates paths in global_settings.json (dev → production)
-9. Removes 'pause' from production launchers for silent execution
+- **Version Checking:** Every 2 minutes, compares local vs production `version.json`, notifies via status bar/system tray (`_check_deployed_version()`, `_setup_system_tray()` in `core/luma_tools.py`)
+- **File Logging:** All output → `~/.luma_tools/logs/` (last 5 files kept, UTF-8, global exception handler via `TeeStream`)
+- **Window State Persistence:** Size, position, maximized state, tab order saved in `~/.luma_tools/settings.json` (`core/user_preferences`)
 
-**Version tracking:** Version is stored in `version.json` and displayed in Settings tab. Changelog entries are auto-generated from git commit messages during deployment.
-
-## Recent Features (v0.4.1.x)
-
-### Periodic Version Checking & Notifications
-
-The application automatically checks for new deployed versions every 2 minutes:
-
-**Features:**
-- Compares local `version.json` with production version at `L:\tools\_studio_tools\luma_tools\version.json`
-- Notifications via status bar, system tray, and popup dialogs
-- System tray icon provides persistent OS-level notifications
-- Configurable notification icons (Information, Warning, Critical)
-
-**Key Methods in `core/luma_tools.py`:**
-- `_check_deployed_version()` - Compares versions and triggers notifications
-- `_setup_system_tray()` - Creates cross-platform system tray icon
-- `show_system_notification(title, message, icon_type)` - Shows tray notifications
-- `_show_new_version_notification(new_version)` - Displays update popup
-
-**Timer:** `_version_check_timer` runs every 120,000ms (2 minutes)
-
-### File Logging System
-
-All output (stdout, stderr, exceptions) is automatically logged to disk with rotation:
-
-**Configuration:**
-- **Location:** `~/.luma_tools/logs/luma_tools_YYYYMMDD_HHMMSS.log`
-- **Rotation:** Keeps last 5 log files, auto-deletes older ones
-- **Encoding:** UTF-8 for international character support
-- **Global Exception Handler:** `sys.excepthook` catches unhandled exceptions with full traceback
-
-**Implementation:** `TeeStream` class redirects print statements to both console and log file simultaneously.
-
-**Benefit:** Production debugging without console access - all crashes logged automatically.
-
-### Window State Persistence
-
-Window configuration persists across sessions:
-
-**Saved State:**
-- Window size (width, height)
-- Window position (x, y coordinates)
-- Maximized state (boolean)
-- Tab order (user's custom tab arrangement)
-
-**Storage:** Uses `core.user_preferences` module to persist in user settings (`~/.luma_tools/settings.json`)
-
-**Methods:**
-- `_save_window_state()` - Called on close event
-- `_restore_window_state()` - Called on startup
-- `_restore_tab_order()` - Restores user's tab arrangement
-
-## Code Quality Refactoring (2026-01)
-
-Between January 2026, the codebase underwent systematic refactoring across 6 sprints to improve maintainability, readability, and modularity:
-
-### Sprint 1: Dead Code Removal
-- Removed ~2800 lines of unused/commented code
-- Cleaned up obsolete functions and deprecated patterns
-- Improved codebase clarity and reduced maintenance burden
-
-### Sprint 2: Settings Module Decomposition
-- Split monolithic `settings_manager.py` (981 lines) into 4 focused modules:
-  - **`core/settings_manager.py`** (489 lines) - Core settings registry and get/set operations
-  - **`core/user_preferences.py`** (164 lines) - Window state, tab order, default passes, version tracking
-  - **`core/feature_requests.py`** (61 lines) - Feature request storage and retrieval
-  - **`comfyui/presets_manager.py`** (243 lines) - ComfyUI text/prompt/workflow preset management
-- Each module has clear, single responsibility
-- Improved code organization and discoverability
-
-### Sprint 3: Lambda Wrapper Removal
-- Removed 22 lambda wrapper functions from settings_manager
-- Direct `get_setting()` and `set_setting()` usage now preferred
-- Example: `get_comfyui_path()` → `get_setting("comfyui_path")`
-- Reduced indirection and improved code clarity
-
-### Sprint 4: ComfyUI Tab Helper Extraction
-- Extracted helper classes from `comfyui_tab.py` (reduced from 1273 to 652 lines):
-  - **`tabs/comfyui_ui_manager.py`** (320 lines) - Dynamic widget creation and management
-  - **`tabs/comfyui_state_manager.py`** (266 lines) - State persistence and restoration
-- Improved separation of concerns
-- Main tab file now focuses on high-level orchestration
-
-### Sprint 5: Gallery Tab Helper Extraction
-- Extracted helper classes from `comfyui_gallery_tab.py` (reduced from 813 to 439 lines):
-  - **`tabs/comfyui_gallery_loader.py`** (197 lines) - Async file I/O operations
-  - **`tabs/comfyui_gallery_manager.py`** (166 lines) - UI state management (selection, filtering)
-- Clear separation between I/O operations and UI state
-- Improved testability and maintainability
-
-### Sprint 6: Placeholder Logic Consolidation
-- Consolidated duplicate placeholder logic into `BaseThumbnailWidget`
-- Removed redundant code from `ImageThumbnailWidget` and `ModelThumbnailWidget`
-- Single source of truth for placeholder rendering
-- Consistent placeholder behavior across widget types
-
-**Overall Impact:**
-- **Removed:** ~2800 lines of dead code, 22 lambda wrappers
-- **Reorganized:** 7 large modules split into 17 focused modules
-- **Improved:** Code clarity, maintainability, and discoverability
-- **Maintained:** 100% backward compatibility with existing code
-
-## Project Structure (Domain-Based Organization)
-
-The codebase is organized into domain-specific packages for clarity and maintainability:
+## Project Structure (Domain-Based)
 
 ```
 python/
-├── core/                    # Core infrastructure
-│   ├── luma_tools.py        # Main window, entry point
-│   ├── config.py            # Configuration and path resolution
-│   ├── state_manager.py     # Thread-safe global state
-│   ├── settings_manager.py  # Core settings registry (489 lines, focused)
-│   ├── user_preferences.py  # Window state, tab order, default passes (164 lines)
-│   ├── feature_requests.py  # Feature request system (61 lines)
-│   ├── utils.py             # General utilities
-│   └── import_utils.py      # Safe import utilities
-│
-├── comfyui/                 # ComfyUI AI image generation
-│   ├── service.py           # Main orchestration, Deadline submission
-│   ├── workflow.py          # Load/save, format conversion
-│   ├── editable.py          # Extract editable nodes
-│   ├── modifier.py          # Modify workflow parameters
-│   ├── node_configs.py      # Node type configurations
-│   ├── presets_manager.py   # Text/prompt/workflow presets (243 lines)
-│   ├── utils.py             # Server communication utilities
-│   ├── runner.py            # Farm worker script
-│   ├── client.py            # Persistent server mode client
-│   ├── server.py            # Server management
-│   └── ayon_publisher.py    # AYON publishing integration
-│
-├── models/                  # 3D model handling
-│   ├── loader.py            # Universal 3D loader (GLB, FBX, OBJ, USD)
-│   ├── viewer.py            # 3D viewer with textures/skeletons/animation
-│   ├── animation_utils.py   # Animation interpolation utilities
-│   ├── thumbnail_service.py # Multi-format thumbnail generation
-│   └── thumbnail_renderer.py # Subprocess thumbnail renderer
-│
-├── ayon/                    # AYON publishing integration
-│   ├── service.py           # AYON/Deadline integration, Strategy Pattern
-│   ├── publisher_integration.py # Standard AYON Publisher UI
-│   └── validators/          # Validation plugins
-│       ├── base.py
-│       ├── validate_file_exists.py
-│       ├── validate_file_format.py
-│       └── validate_naming_convention.py
-│
-├── services/                # General service layer
-│   ├── pass_builder.py      # Pass building orchestration (OIIO)
-│   ├── render_service.py    # Pass detection from EXR
-│   ├── mp4_maker.py         # FFmpeg-based MP4 generation
-│   ├── scan_service.py      # Directory scanning
-│   ├── cleanup_service.py   # File cleanup
-│   ├── thumbnail_service.py # EXR thumbnail generation
-│   ├── file_operations.py   # File utilities
-│   └── deadline_utils.py    # Deadline job submission helper
-│
-├── tabs/                    # UI tabs (modular tab system)
-│   ├── base_tab.py          # Abstract base class with TabSignals
-│   ├── pass_builder_tab.py  # Render scanning and pass building
-│   ├── mp4_maker_tab.py     # MP4 generation
-│   ├── republish_tab.py     # Re-publishing renders
-│   ├── shot_cleaner_tab.py  # Cleanup tool
-│   ├── comfyui_tab.py       # ComfyUI workflow execution (652 lines, focused)
-│   ├── comfyui_ui_manager.py # ComfyUI dynamic widget management (320 lines)
-│   ├── comfyui_state_manager.py # ComfyUI state persistence (266 lines)
-│   ├── comfyui_gallery_tab.py # Gallery view for outputs (439 lines, focused)
-│   ├── comfyui_gallery_loader.py # Gallery async I/O operations (197 lines)
-│   ├── comfyui_gallery_manager.py # Gallery UI state management (166 lines)
-│   ├── comfyui_polling.py   # Polling mixin for ComfyUI
-│   ├── settings_tab.py      # Settings UI
-│   └── logs_tab.py          # Log output viewer
-│
-├── ui/                      # Shared UI components
-│   ├── spell_checker.py     # PyEnchant spell checking widget
-│   └── gallery_prewarm.py   # Pre-load gallery data
-│
-└── libs/                    # External binaries (Assimp DLL)
+├── core/         # luma_tools.py (main), config.py, state_manager.py, settings_manager.py, user_preferences.py, feature_requests.py
+├── comfyui/      # service.py, workflow.py, node_configs.py, presets_manager.py, runner.py, server.py, ayon_publisher.py
+├── models/       # loader.py (GLB/FBX/OBJ/USD), viewer.py, animation_utils.py, thumbnail_service.py
+├── ayon/         # service.py (Strategy Pattern), publisher_integration.py, validators/ (base, file_exists, format, naming)
+├── services/     # pass_builder.py, render_service.py, mp4_maker.py, file_operations.py, deadline_utils.py
+├── tabs/         # base_tab.py, *_tab.py, comfyui_*_manager.py (helpers), comfyui_polling.py (mixin)
+├── ui/           # spell_checker.py, gallery_prewarm.py
+└── resources/ui/ # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py, etc.
 ```
 
-### Import Conventions
-
-With the domain-based structure, imports follow these patterns:
+### Import Patterns
 
 ```python
-# Core modules
 from core.config import OIIO_PATH, FFMPEG_PATH
 from core.state_manager import app_state
-from core.utils import normalize_path
-from core.import_utils import safe_import
-
-# Settings (generic get/set preferred over wrapper functions)
-from core.settings_manager import get_setting, set_setting
-
-# User preferences
-from core.user_preferences import get_window_state, save_window_state, get_default_passes
-
-# Feature requests
-from core.feature_requests import append_feature_request, get_feature_requests
-
-# ComfyUI modules
+from core.settings_manager import get_setting, set_setting  # Prefer generic get/set
+from core.user_preferences import get_window_state, save_window_state
 from comfyui.service import submit_comfyui_to_deadline
-from comfyui.workflow import load_workflow
-from comfyui.node_configs import EDITABLE_NODE_CONFIGS
-
-# ComfyUI presets
-from comfyui.presets_manager import get_comfyui_workflow_presets, save_comfyui_workflow_preset
-
-# Model modules
 from models.loader import load_3d_model
-from models.animation_utils import lerp, slerp, interpolate_bone_animation
-
-# AYON modules
 from ayon.service import create_ayon_metadata
-from ayon.validators.base import BaseValidator
-
-# Service modules
 from services.pass_builder import PassBuilder
-from services.render_service import detect_passes
-from services.mp4_maker import generate_mp4
 
-# UI components (lazy imports inside functions to avoid path issues)
-from ui_components import Worker, StatusColors, enhance_ui
-from icons import IconManager, TAB_COLORS
+# UI components - MUST lazy import (inside functions) to avoid worker thread issues
+from ui_components import Worker  # resources/ui/ in PYTHONPATH
 ```
-
-**IMPORTANT:** UI component imports should be done lazily (inside functions) to avoid import path issues, especially in modules that may be called from worker threads. The `resources/ui/` directory is added to PYTHONPATH, so imports like `from ui_components import Worker` work correctly.
 
 ## Architecture Patterns
 
-### Modular Tab Architecture
+### Tabs (BaseTab)
+Inherit from `tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` with `restrict_key` for access control. BaseTab provides `TabSignals` (log_message, status_update), lifecycle hooks, and helpers (`log()`, `set_status()`).
 
-Tabs follow a base class pattern defined in `python/tabs/base_tab.py`:
+**Helper Classes:** Complex tabs extract helpers (e.g., ComfyUIWidgetManager, ComfyUIStateManager, GalleryLoader, GalleryManager) to separate UI generation, state, and I/O concerns.
 
+### Threading (CRITICAL)
+
+**Worker Pattern:**
 ```python
-class MyTab(BaseTab):
-    @property
-    def ui_file(self) -> str:
-        return "my_tab.ui"  # Located in resources/ui/tabs/
-
-    @property
-    def tab_name(self) -> str:
-        return "My Tab"
-
-    def connect_signals(self):
-        """Wire up UI signals after load."""
-        self.ui.myButton.clicked.connect(self._on_button_clicked)
-
-    def initialize(self):
-        """Post-load setup."""
-        pass
-```
-
-**Key BaseTab features:**
-- `TabSignals` for cross-tab communication (`log_message`, `status_update`, `request_attention`)
-- `load_ui()` loads from `resources/ui/tabs/{ui_file}`
-- Lifecycle hooks: `on_tab_activated()`, `on_tab_deactivated()`
-- Helper methods: `log()`, `set_status()`, `get_widget()`
-
-**Adding a new tab:**
-1. Create `python/tabs/my_tab.py` inheriting from `BaseTab`
-2. Create `resources/ui/tabs/my_tab.ui` in Qt Designer
-3. Import the tab class in `python/tabs/__init__.py`
-4. Register in `TAB_CONFIG` with format: `{'class': MyTab, 'restrict_key': 'mytab'}`
-   - The `restrict_key` is used for tab access control via global settings
-   - Restricted tabs won't appear unless user has permission
-
-### Helper Classes for Complex Tabs
-
-Complex tabs can benefit from extracting helper classes to improve maintainability:
-
-**ComfyUI Tab Helpers:**
-- **`tabs/comfyui_ui_manager.py`** - `ComfyUIWidgetManager` class
-  - Dynamic widget creation based on editable nodes
-  - Parameter validation and extraction
-  - UI cleanup and reset operations
-  - Manages complex UI generation logic separately from tab orchestration
-
-- **`tabs/comfyui_state_manager.py`** - `ComfyUIStateManager` class
-  - State persistence (workflow selections, parameters)
-  - State restoration on tab initialization
-  - Handles settings storage and retrieval
-  - Separates state management from UI logic
-
-**Gallery Tab Helpers:**
-- **`tabs/comfyui_gallery_loader.py`** - `GalleryLoader` class
-  - Async file I/O operations (loading images/models)
-  - Thumbnail generation coordination
-  - Progress reporting for long operations
-  - Isolates I/O operations from UI state
-
-- **`tabs/comfyui_gallery_manager.py`** - `GalleryManager` class
-  - UI state management (selection, filtering, sorting)
-  - Gallery grid layout and updates
-  - User interaction handling
-  - Pure UI state without I/O concerns
-
-**Pattern for Helper Classes:**
-1. Identify distinct responsibilities (UI generation, state, I/O, etc.)
-2. Extract into separate classes with clear interfaces
-3. Helper classes should not depend on each other
-4. Main tab class orchestrates helpers
-5. Improves testability and code organization
-
-### Threading Model (Critical)
-
-Uses Qt's QThreadPool + QRunnable pattern. The `Worker` class is defined in `resources/ui/workers.py`:
-
-```python
-# Correct pattern with lazy import
-from ui_components import Worker
-from PySide6.QtCore import QThreadPool
-
-# CRITICAL: Store worker reference to prevent garbage collection
-self._worker = Worker(some_function, arg1, arg2)
+from ui_components import Worker  # Lazy import
+self._worker = Worker(func, arg1)  # MUST store reference to prevent GC
 self._worker.signals.result.connect(handle_result)
-self._worker.signals.error.connect(handle_error)
-self._worker.signals.progress.connect(update_progress)
 QThreadPool.globalInstance().start(self._worker)
 ```
 
-**Worker Garbage Collection (CRITICAL):**
+**Rules:**
+- Store worker on `self` or long-lived object (GC will delete if not stored)
+- Never update Qt widgets from worker threads (use signals)
+- `app_state` is thread-safe (RLock)
+- Workers auto-inject `progress_callback(int, str)` if in function signature
+- Use `self.set_status("msg")` for status bar, `self.log("msg")` for logs (never QProgressDialog)
 
-Python's garbage collector can delete worker objects before they complete if no reference is stored:
+### Settings
 
-```python
-# ❌ WRONG - Worker may be garbage collected before completion
-worker = Worker(some_function)
-QThreadPool.globalInstance().start(worker)
-# worker goes out of scope and may be GC'd
+4 modules: `core/settings_manager` (registry, get/set), `core/user_preferences` (window state, tab order), `core/feature_requests`, `comfyui/presets_manager`. Use `get_setting(key)` / `set_setting(key, val)`.
 
-# ✅ CORRECT - Store reference on self to prevent GC
-self._worker = Worker(some_function)
-QThreadPool.globalInstance().start(self._worker)
+- **User:** `~/.luma_tools/settings.json` (window, tabs, last dirs)
+- **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs via TAB_RESTRICTION_MAP)
 
-# ✅ ALSO CORRECT - Store on long-lived object
-dialog._worker = Worker(some_function)
-QThreadPool.globalInstance().start(dialog._worker)
-```
+### Strategy Pattern
+`ayon/service.py`: `PublishStrategy` (ABC) → `FarmPublishStrategy`, `LocalPublishStrategy`
 
-**Thread Safety:**
-- `ApplicationState` uses `threading.RLock()` for all property access
-- Qt Signals automatically queue cross-thread communication
-- **Never update Qt widgets directly from worker threads** - always use signals
-
-**Worker Progress Callbacks:**
-- Workers auto-inject `progress_callback` if function signature includes it
-- Progress callback receives: `(int: percentage, str: message)`
-- Use `report_progress(callback, progress, message)` utility for consistent progress reporting
-
-### Progress and Status Reporting (Critical)
-
-**IMPORTANT:** All progress feedback must use the main window status bar ONLY. Never create separate QProgressDialog, loading overlays, or custom progress widgets.
-
-**For Tabs (inheriting from BaseTab):**
-```python
-# Show status message on status bar
-self.set_status("Processing files...")
-
-# Log to console (appears in Log tab)
-self.log("Operation completed")
-```
-
-### Settings System with Registry Pattern
-
-Settings are managed across 4 focused modules with a centralized registry pattern:
-
-**Core Settings Registry (`core/settings_manager.py`):**
-```python
-SETTINGS_REGISTRY = {
-    "comfyui_path": SettingDef("comfyui_path", default=r"L:\...", scope="global"),
-    "comfyui_mode": SettingDef("comfyui_mode", "embedded", "global", validator=...),
-    # ... all settings defined once
-}
-
-# Generic getters/setters (PREFERRED)
-value = get_setting("comfyui_path")
-set_setting("comfyui_mode", "standalone")
-```
-
-**Note:** Lambda wrapper functions have been removed in favor of direct `get_setting()` and `set_setting()` usage. This reduces indirection and improves code clarity.
-
-**Settings Modules:**
-1. **`core/settings_manager.py`** (489 lines) - Core settings registry, get/set operations, validation
-2. **`core/user_preferences.py`** (164 lines) - Window state, tab order, default passes, version tracking
-3. **`core/feature_requests.py`** (61 lines) - Feature request storage and retrieval
-4. **`comfyui/presets_manager.py`** (243 lines) - ComfyUI text/prompt/workflow preset management
-
-**User Settings** (`~/.luma_tools/settings.json`):
-- Window state (size, position, maximized)
-- Tab order (custom arrangement)
-- Default passes (for pass builder)
-- Last browse directories
-- Version tracking (last seen version)
-
-**Global Settings** (shared network path):
-- ComfyUI workflow presets
-- ComfyUI installation path/mode
-- Tab restrictions (`restricted_tabs`) - controls which tabs are hidden from users
-  - Maps restrict_key to permission flags via `TAB_RESTRICTION_MAP` in settings_manager.py
-  - Restricted tabs are prevented from initializing entirely (including UI pre-loading) to avoid performance impact
-  - When a tab is restricted, it's hidden unless the user has the corresponding permission
-
-**Global Settings Location:**
-- Development: `L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/global_settings/global_settings.json`
-- Production: `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json`
-- Paths are automatically updated during deployment by `install.bat`
-
-### Strategy Pattern for Publishing
-
-`ayon/service.py` implements farm vs local publishing:
-- `PublishStrategy` (ABC) - Base strategy interface
-- `FarmPublishStrategy` - Submits to Deadline farm
-- `LocalPublishStrategy` - Publishes directly
-
-### Mixin Pattern for Shared Functionality
-
-Mixins provide optional functionality that can be added to tabs via multiple inheritance.
-
-**PollingMixin** (`python/tabs/comfyui_polling.py`):
-
-Provides polling capabilities for tracking ComfyUI job status:
-
-```python
-from .base_tab import BaseTab
-from .comfyui_polling import PollingMixin
-
-class ComfyUITab(PollingMixin, BaseTab):
-    """Tab with polling functionality via mixin."""
-
-    def initialize(self):
-        # Initialize mixin state
-        self._init_polling_state()
-
-        # Start polling
-        self._start_iterate_polling()
-```
-
-**Mixin Features:**
-- **Iterate Mode Polling:** Tracks single ComfyUI job with progress updates
-- **Batch Mode Polling:** Tracks multiple jobs with combined status
-- **Timer Management:** Automatic start/stop of polling timers
-- **State Tracking:** Completed tasks, failed jobs, pending results
-- **Helper Functions:** `format_elapsed_time()`, `estimate_remaining_time()`
-
-**Key Methods:**
-- `_init_polling_state()` - Initialize polling variables (call in `initialize()`)
-- `_start_iterate_polling()` - Start iterate mode polling timer
-- `_start_batch_polling(job_ids)` - Start batch mode polling with job IDs
-- `_check_iterate_status()` - Poll single job status
-- `_check_batch_status()` - Poll multiple job statuses
-
-**Usage Pattern:**
-1. Inherit from both `PollingMixin` and `BaseTab`
-2. Call `_init_polling_state()` in `initialize()`
-3. Start polling with appropriate method
-4. Mixin handles timer management and state updates
+### Mixin Pattern
+`PollingMixin` (`tabs/comfyui_polling.py`): Add to tabs via inheritance, call `_init_polling_state()` in `initialize()`, then `_start_iterate_polling()` or `_start_batch_polling(job_ids)`
 
 ## Naming Conventions
 
-Consistent naming conventions improve code readability and maintainability:
-
-### Modules and Packages
-
-- **Modules:** `snake_case.py` (e.g., `settings_manager.py`, `comfyui_tab.py`)
-- **Packages:** `snake_case/` (e.g., `core/`, `comfyui/`, `services/`)
-- **Domain-based organization:** Group related functionality in domain packages
-  - Core infrastructure: `core/`
-  - ComfyUI features: `comfyui/`
-  - 3D model handling: `models/`
-  - AYON integration: `ayon/`
-  - General services: `services/`
-  - UI tabs: `tabs/`
-
-### Classes
-
-- **Classes:** `PascalCase` (e.g., `ComfyUITab`, `PassBuilder`, `GalleryLoader`)
-- **Abstract base classes:** Prefix with `Base` (e.g., `BaseTab`, `BaseValidator`)
-- **Mixins:** Suffix with `Mixin` (e.g., `PollingMixin`)
-- **Managers:** Suffix with `Manager` when managing state/resources (e.g., `ComfyUIStateManager`, `GalleryManager`)
-- **Services:** Suffix with `Service` for service layer classes (e.g., `RenderService`, `ThumbnailService`)
-
-### Functions and Methods
-
-- **Functions/Methods:** `snake_case()` (e.g., `load_workflow()`, `get_setting()`, `submit_to_deadline()`)
-- **Private methods:** Prefix with underscore `_private_method()` (e.g., `_check_status()`, `_init_polling_state()`)
-- **Protected methods:** Single underscore indicates internal use but not strictly private
-- **Signal handlers:** Prefix with `_on_` (e.g., `_on_button_clicked()`, `_on_selection_changed()`)
-- **Boolean functions/methods:** Use verb prefixes (e.g., `is_api_format()`, `has_permission()`, `can_publish()`)
-
-### Variables and Properties
-
-- **Variables:** `snake_case` (e.g., `workflow_path`, `selected_files`, `job_id`)
-- **Constants:** `UPPER_SNAKE_CASE` (e.g., `OIIO_PATH`, `DEFAULT_FPS`, `EDITABLE_NODE_CONFIGS`)
-- **Private attributes:** Prefix with underscore `_private_attr` (e.g., `_worker`, `_timer`, `_state`)
-- **Class variables:** Same as constants if truly constant, otherwise `snake_case`
-- **Boolean variables:** Use `is_`, `has_`, `can_` prefixes (e.g., `is_ready`, `has_error`, `can_submit`)
-
-### Settings Keys
-
-- **Settings keys:** `snake_case` strings (e.g., `"comfyui_path"`, `"default_passes"`, `"window_state"`)
-- **Consistent naming:** Settings keys should match their corresponding variable names where possible
-- **Scope indication:** Global settings often relate to application-wide configuration, user settings to personal preferences
-
-### UI Elements
-
-- **Widget names in .ui files:** `camelCase` matching Qt Designer convention (e.g., `submitButton`, `workflowComboBox`)
-- **Layout names:** Descriptive `camelCase` (e.g., `mainLayout`, `buttonLayout`)
-- **Signal names:** `snake_case` in custom signals (e.g., `log_message`, `status_update`)
-
-### File and Directory Naming
-
-- **UI files:** Match tab name `tab_name.ui` (e.g., `comfyui_tab.ui`, `pass_builder.ui`)
-- **Resource directories:** `snake_case` (e.g., `resources/ui/`, `global_settings/`)
-- **Batch files:** `snake_case.bat` (e.g., `luma_tools.bat`, `install.bat`)
-
-### Helper and Utility Modules
-
-- **Utility modules:** End with `_utils` or `_helper` (e.g., `import_utils.py`, `deadline_utils.py`)
-- **Manager modules:** End with `_manager` (e.g., `settings_manager.py`, `presets_manager.py`)
-- **Service modules:** End with `_service` or standalone names (e.g., `render_service.py`, `mp4_maker.py`)
+- **Modules/Packages:** `snake_case` (settings_manager.py, core/)
+- **Classes:** `PascalCase`, prefix `Base*`, suffix `*Mixin`/`*Manager`/`*Service`
+- **Functions/Methods:** `snake_case()`, private `_method()`, handlers `_on_event()`, booleans `is_*/has_*/can_*()`
+- **Variables:** `snake_case`, constants `UPPER_SNAKE`, private `_attr`, booleans `is_/has_/can_`
+- **UI Files:** `camelCase` in .ui (submitButton), `snake_case` signals (log_message)
 
 ## Configuration
 
-### Dynamic Path Resolution (core/config.py)
+**Environment (auto-set by batch files):**
+- `AYON_LAUNCHER_LOCAL_DIR`, `DEADLINE_PATH`, `BUILTIN_OCIO_ROOT`, `PYTHONPATH`
+- `QTWEBENGINE_DISABLE_SANDBOX=1`, `QTWEBENGINE_CHROMIUM_FLAGS=--in-process-gpu`, `QT_IMAGEIO_MAXALLOC=2048`
 
-Tool paths are resolved dynamically from environment variables:
-- `AYON_LAUNCHER_LOCAL_DIR` - Base path for OIIO, FFmpeg
-- `DEADLINE_PATH` - Deadline executable location
-- `BUILTIN_OCIO_ROOT` - OCIO config path
+**Key Settings:** ACES-ACEScg colorspace, sRGB view, 25 FPS, Deadline pool=luma, group=processing_group
 
-```python
-# Example: OIIO resolved from AYON directory
-OIIO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
-OIIO_PATH = glob.glob(OIIO_ROOT)[0]
-```
-
-### Key Settings
-
-| Setting | Value |
-|---------|-------|
-| Colorspace | ACES - ACEScg |
-| Display/View | ACES/sRGB |
-| Default FPS | 25.0 |
-| Deadline Pool | luma |
-| Deadline Group | processing_group |
-
-### Environment Variables
-
-The application uses these environment variables (set automatically by batch launchers):
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| AYON_LAUNCHER_LOCAL_DIR | AYON installation path for OIIO/FFmpeg | OS-specific (see config.py) |
-| DEADLINE_PATH | Deadline installation path | `C:\Program Files\Thinkbox\Deadline10\bin` (Windows) |
-| BUILTIN_OCIO_ROOT | OCIO config location | From AYON environment |
-| AYON_DEFAULT_SETTINGS_VARIANT | AYON bundle name | `LUMA-PRODUCTION-Bundle-2025-12-08-02` |
-| PYTHONPATH | Python module search path | Set by batch files to include `python/` and `resources/ui/` |
-| QTWEBENGINE_DISABLE_SANDBOX | Disable Chromium sandbox for network paths | `1` (required for Three.js viewer) |
-| QTWEBENGINE_CHROMIUM_FLAGS | Chromium rendering flags | `--in-process-gpu` (prevents window flashing) |
-| QT_IMAGEIO_MAXALLOC | Max image allocation in MB | `2048` (2GB for large VFX images) |
-
-**Qt Configuration (set in `core/luma_tools.py` startup):**
-- **OpenGL Surface Format:** Configured globally to prevent context switching flashes
-- **Image Allocation Limit:** Increased to 2GB to support large EXR/TIFF files
-- **WebEngine GPU:** In-process GPU rendering prevents Chromium creating visible windows
-
-**Standalone Mode:** When AYON environment is unavailable, the app runs in standalone mode with limited functionality (no OIIO/FFmpeg-dependent features).
+**Standalone Mode:** Limited functionality when AYON unavailable (no OIIO/FFmpeg)
 
 ## Key Workflows
 
-### ComfyUI Workflow
-
-1. Select workflow preset from global settings
-2. Workflow scanned for `_editable` suffix nodes (dynamic UI generated)
-3. Select input images (batch processing supported)
-4. Configure editable parameters (prompts, seeds, etc.)
-5. Submit to Deadline - each frame is a different seed
-6. `comfyui/runner.py` executes on farm workers
-
-**Editable Nodes:** Nodes with titles ending in `_editable` become UI controls. Supported types: `LoadImage`, `TextEncodeQwenImageEditPlus`, `CLIPTextEncode`, `HYMotionEncodeText`, `KSampler`, `SaveImage`, `HYMotionExportFBX`, `Trellis2ExportMesh`, `UltraShapeSaveGLB`, `Load3D`. See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py` for widget mappings.
-
-**Output Files:** ComfyUI can output images, 3D models (GLB/FBX/USD), video, audio, and other formats. See `COMFYUI_OUTPUT_EXTENSIONS` in `core/config.py` for the full list.
-
-**Subgraph Expansion (v0.4.1.13):**
-- Workflows can include component/subgraph nodes (UUIDs) that reference reusable components
-- `expand_subgraphs()` in `comfyui/workflow.py` automatically expands these into concrete nodes
-- Definitions stored in `workflow.definitions.subgraphs` section
-- Enables modular workflow design with reusable building blocks
-
-**EXPORT_NODE_TYPES Pattern:**
-
-Generic pattern for handling export nodes via dict mapping (`comfyui/node_configs.py`):
-
-```python
-EXPORT_NODE_TYPES = {
-    'SaveImage': 'filename_prefix',
-    'HYMotionExportFBX': 'filename_prefix',
-    'Trellis2ExportMesh': 'filename_prefix',
-    'UltraShapeSaveGLB': 'filename_prefix',
-    # ... maps node type to output filename parameter
-}
-```
-
-**Adding New Export Node Types:**
-1. Add entry to `EXPORT_NODE_TYPES` with filename parameter name
-2. Add widget mappings to `WIDGET_MAPPINGS` in `EDITABLE_NODE_CONFIGS`
-3. If node supports `output_dir`, include it in widget list: `['output_dir', 'filename_prefix', ...]`
-4. Node auto-configured when workflow uses it
-
-**Output Directory Support:**
-- Some nodes support `output_dir` parameter to control where files are saved
-- Example: `Trellis2ExportMesh` has both `output_dir` and `filename_prefix`
-- Service automatically configures output directory when present in WIDGET_MAPPINGS
+### ComfyUI
+1. Select preset, scan for `_editable` suffix nodes (dynamic UI), select images, configure params
+2. Submit to Deadline (each frame = different seed), `comfyui/runner.py` executes on farm
+3. **Editable Nodes:** See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py`
+4. **Subgraph Expansion:** `expand_subgraphs()` expands UUID component nodes into concrete nodes
+5. **Export Nodes:** Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param), add to `WIDGET_MAPPINGS`
 
 ### Pass Building
-
-1. Scan renders via `find_renders()` from `services/file_operations.py`
-2. Detect passes using `detect_passes()` from `services/render_service.py`
-3. Build using `PassBuilder.build_passes()` (OIIO local or Deadline)
-4. Publish to AYON using appropriate strategy
+`find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
 
 ### MP4 Generation
-
-1. Scan renders from denoised/raw/custom paths
-2. Configure quality and burn-in options
-3. Generate via `services/mp4_maker.py` using FFmpeg
+Scan renders → configure quality/burn-in → `services/mp4_maker.py` (FFmpeg)
 
 ## Development
 
-No build process - runs directly from source. Venv location: `python/venv/`
+**Setup:** Python 3.10+, PySide6, pre-configured venv in `python/venv/`. No build process.
+**Key deps:** PySide6 ≥6.6, open3d ≥0.18, trimesh ≥4.10, usd-core ≥25.11, PyOpenGL ≥3.1, pyenchant ≥3.3
+**Testing:** No test suite - manual testing required (both launcher modes, with/without AYON env)
 
-### Requirements
-
-- Python 3.10+
-- PySide6 (Qt6) - upgraded from PySide2 for NumPy 2.x compatibility and macOS support
-- **Virtual environment is pre-configured** in `python/venv/`
-- To reinstall dependencies: `python\venv\Scripts\activate.bat && pip install -r requirements.txt`
-
-**Key dependencies:**
-- PySide6 >= 6.6.0 (Qt6 GUI framework)
-- open3d >= 0.18.0 (3D model loading with bundled Assimp)
-- trimesh >= 4.10.1 (Fallback 3D loader)
-- usd-core >= 25.11 (USD format support)
-- PyOpenGL >= 3.1.0 (3D viewer rendering)
-- numpy >= 1.26.4, scipy >= 1.15.3 (NumPy 2.x compatible)
-- pyenchant >= 3.3.0 (Spell checking for text prompts)
-
-### Testing
-
-**Important:** This project currently has no test suite. When making changes:
-- Test manually using both launcher modes (context and standalone)
-- Verify tab functionality after modifying core components
-- Test with and without AYON environment variables set
-- Verify UI changes in Qt Designer preview and running application
-
-### Running Python Scripts on Windows (Claude Code)
-
-**IMPORTANT:** On Windows, the Bash tool runs in a compatibility layer that doesn't handle Windows paths well. Always use PowerShell to run Python scripts:
-
+### Windows PowerShell (for Claude Code)
+Always use PowerShell for Python scripts and file operations (Bash compatibility layer has path issues):
 ```bash
-# CORRECT - Use PowerShell with full paths
-powershell -Command "& 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python\venv\Scripts\python.exe' 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python\script.py'"
-
-# CORRECT - PowerShell for simple commands
-powershell -Command "Remove-Item -Force 'path\to\file'"
-powershell -Command "Test-Path 'path\to\file'"
-```
-
-**File Operations:**
-```bash
-# Check if file exists
-powershell -Command "Test-Path 'path\to\file'"
-
-# Delete file
-powershell -Command "Remove-Item -Force 'path\to\file'"
-
-# List directory contents
-powershell -Command "Get-ChildItem 'path\to\directory'"
+powershell -Command "& 'python\venv\Scripts\python.exe' 'script.py'"
+powershell -Command "Test-Path 'path'"
+powershell -Command "Remove-Item -Force 'path'"
 ```
 
 ### Debugging
+Logs: `~/.luma_tools/logs/` (last 5 kept, UTF-8, global exception handler). Check worker GC if callbacks don't fire.
 
-**Console & Logging:**
-- Console hidden by Windows API (`ctypes.windll`)
-- All `print()` statements redirect to both Log tab and log files
-- **Log Files:** `~/.luma_tools/logs/luma_tools_YYYYMMDD_HHMMSS.log`
-  - Last 5 log files kept, older ones auto-deleted
-  - Full exception tracebacks captured via global exception handler
-  - UTF-8 encoding for international characters
+### UI Modifications
+Edit `.ui` files in Qt Designer, update tab logic in `python/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.
 
-**Worker Debugging:**
-- Worker errors emit `error` signal with traceback
-- Check for `"Worker error:"` messages in log
-- Verify worker reference is stored (not garbage collected)
-
-**Production Debugging:**
-- Users can send log files from `~/.luma_tools/logs/` for support
-- All crashes automatically logged with full context
-- System tray notifications alert users to errors
-
-### Modifying UI
-
-**For modular tabs (preferred):**
-1. Edit `resources/ui/tabs/{tab_name}.ui` in Qt Designer
-2. Update tab logic in `python/tabs/{tab_name}_tab.py`
-3. Styles in `resources/ui/la_shot_tools_styles.qss`
-
-**For main window:**
-1. Edit `resources/ui/main_window.ui`
-2. Connect signals in `LumaShotTools._connect_signals()`
-
-### Adding New Features
-
-1. Create service module in appropriate domain package (`services/`, `comfyui/`, `models/`, etc.)
-2. Add configuration to `core/config.py`
-3. For new tab: Follow "Adding a new tab" steps in Architecture section
-4. For long operations: Wrap in Worker, submit to QThreadPool
-5. Use `set_status()` to update status bar, `print()` for logging
-
-**Thread Safety Checklist:**
-- Access `app_state` properties (thread-safe via RLock)
-- Update GUI via signals from worker threads
-- Never call Qt widget methods directly from workers
-- Never access Qt widgets from service functions
+### Adding Features
+1. Create service in domain package, add config to `core/config.py`
+2. For tabs: inherit BaseTab, register in TAB_CONFIG
+3. Long ops: wrap in Worker (store on self), use signals
+4. Use `set_status()` for status bar, `print()` for logs
 
 ### AYON Publishing
+- Single files: `create_ayon_metadata_single_file()` in `ayon/service.py`
+- EXR sequences: `create_ayon_metadata()`
+- Validators: `ValidateFileExists`, `ValidateFileFormat`, `ValidateNamingConvention` (call `run_validators()` first)
+- Check `AYON_AVAILABLE`, `DEADLINE_AVAILABLE` before using features
+- Use `convert_to_ayon_folder_path()` for paths
 
-**For single files (FBX, GLB, images):**
-Use `create_ayon_metadata_single_file()` in `ayon/service.py` - handles single files without frame sequences.
+## Performance
 
-**For EXR sequences:**
-Use `create_ayon_metadata()` in `ayon/service.py` - handles frame sequences with proper file lists.
-
-**Validators:**
-Located in `python/ayon/validators/`:
-- `ValidateFileExists` - Checks file presence
-- `ValidateFileFormat` - Validates extension against product type
-- `ValidateNamingConvention` - Validates product/variant names
-
-Call `run_validators()` before publishing to catch errors early.
-
-### Working with AYON
-
-```python
-# Check availability before using features
-if AYON_AVAILABLE:
-    # Use AYON features
-if DEADLINE_AVAILABLE:
-    # Use Deadline features
-```
-
-Use `convert_to_ayon_folder_path()` for path conversion.
-
-## Performance Optimizations
-
-### Prewarm Viewer Pattern
-
-To prevent UI flashing when the 3D viewer first loads (WebEngine initialization is slow), the application uses a prewarm pattern:
-
-**How It Works:**
-1. During splash screen display, a Three.js viewer is pre-initialized in the background
-2. The viewer is stored globally via `set_prewarm_viewer(viewer)`
-3. When the main window needs the viewer, it retrieves the prewarmed instance with `get_prewarm_viewer()`
-4. This eliminates the ~1-2 second delay and visible flashing when first viewing 3D models
-
-**Implementation:**
-- `python/models/threejs_viewer.py` - Three.js viewer using QWebEngineView
-- `resources/ui/image_viewers.py` - Prewarm storage and retrieval functions
-- `python/core/luma_tools.py` - Splash screen triggers prewarm during startup
-
-**Benefit:** First 3D model view is instant with no UI flashing.
-
-### Qt Configuration for VFX Workflows
-
-**Image Allocation Limit:**
-- Default Qt limit is 256MB, insufficient for large VFX images
-- Increased to 2GB via `QT_IMAGEIO_MAXALLOC=2048` environment variable
-- Set in `core/luma_tools.py` before QApplication initialization
-
-**OpenGL Surface Format:**
-- Globally configured at startup to prevent context switching flashes
-- Uses default format with depth buffer, stencil buffer, and vsync
-- Applied before any OpenGL widget creation
-
-**QtWebEngine GPU:**
-- `QTWEBENGINE_CHROMIUM_FLAGS=--in-process-gpu` prevents Chromium creating visible windows
-- `QTWEBENGINE_DISABLE_SANDBOX=1` required for network path access
-- Critical for Three.js viewer to work correctly
-
-### Restricted Tab Performance
-
-Restricted tabs (access-controlled via global settings) don't initialize at all when user lacks permission:
-- UI files not loaded
-- Resources not allocated
-- Signals not connected
-- Saves memory and startup time
-
-**Configuration:** `restricted_tabs` in global settings maps tab `restrict_key` to permission flags.
+- **Prewarm 3D Viewer:** Pre-initialize Three.js viewer during splash screen (`set_prewarm_viewer()`, `get_prewarm_viewer()`) to eliminate ~1-2s delay
+- **Qt Config:** 2GB image limit (`QT_IMAGEIO_MAXALLOC=2048`), global OpenGL surface format, in-process GPU for WebEngine
+- **Restricted Tabs:** Don't initialize (no UI load, no resources) when user lacks permission (`restricted_tabs` in global settings)
 
 ## Common Pitfalls
 
-**Worker Garbage Collection (CRITICAL):**
-- Symptom: Workers complete but callbacks never fire, or workers stop mid-execution
-- Cause: Python GC deletes worker object before thread completes
-- Solution: Store worker reference on `self` or long-lived object (see Threading Model section)
-
+### Worker GC (CRITICAL)
+**Must store worker on `self`** or GC deletes before completion:
 ```python
-# ❌ WRONG
-worker = Worker(func)
-QThreadPool.globalInstance().start(worker)
-
-# ✅ CORRECT
-self._worker = Worker(func)
-QThreadPool.globalInstance().start(self._worker)
+# ❌ worker = Worker(func); QThreadPool.start(worker)  # Gets GC'd
+# ✅ self._worker = Worker(func); QThreadPool.start(self._worker)
 ```
 
-**Threading Errors:**
-- Symptom: Crashes or "QObject: Cannot create children for a parent that is in a different thread"
-- Solution: Use signals for all cross-thread GUI updates
+### Other Issues
+- **Threading:** Use signals for cross-thread GUI updates (never direct Qt widget calls from workers)
+- **State:** `app_state` is thread-safe, services are stateless
+- **Optional Deps:** Check `*_AVAILABLE` flags (AYON_AVAILABLE, DEADLINE_AVAILABLE, etc.) before using features
+- **Paths:** Use `normalize_path()` from `core.utils` (Windows backslash vs AYON forward slash)
+- **ComfyUI Workflows:** 2 formats (UI/nodes vs API), use `is_api_format()` to detect, `comfyui/service.py` converts
+- **Imports:** Lazy import UI components inside functions (avoid module-level `from resources.ui...`)
+- **Subgraph Widgets:** If editable widgets missing, add explicit mappings to `WIDGET_MAPPINGS` in `EDITABLE_NODE_CONFIGS`
 
-**State Management:**
-- `app_state` is thread-safe - access properties normally
-- Services should be stateless
+## Utilities
 
-**Optional Dependencies Pattern:**
-- Many modules use try/except around imports with `*_AVAILABLE` flags
-- Examples: `AYON_AVAILABLE`, `DEADLINE_AVAILABLE`, `OPENGL_AVAILABLE`, `PYOPENGL_AVAILABLE`
-- Always check these flags before using optional features
-- Features gracefully degrade when dependencies are unavailable
+**resources/ui/:** workers.py, styles.py, spinners.py, dialogs.py, batch_selector.py, small_widgets.py (show_popup_menu, browse_directory, browse_file), image_viewers.py
 
-**Path Handling:**
-- Windows uses backslashes, AYON uses forward slashes
-- Use `normalize_path()` from `core.utils` to standardize
+**core/import_utils.py:** `safe_import()`, `safe_import_multiple()` - graceful optional imports with `*_AVAILABLE` flags
 
-**ComfyUI Workflow Formats:**
-- UI/nodes format has `nodes` array with `widgets_values`
-- API format has node IDs as keys with `inputs` dict
-- Use `is_api_format(workflow)` to detect format type
-- `comfyui/service.py` converts between formats automatically
-
-**Import Pattern Errors:**
-- Symptom: "No module named 'resources'" when running from worker threads
-- Cause: Using `from resources.ui.workers import Worker` instead of lazy import
-- Solution: Use `from ui_components import Worker` inside functions (lazy import)
-- Pattern: All UI component imports should be lazy to avoid path issues
-
-```python
-# ❌ WRONG - Module-level import fails in worker threads
-from resources.ui.workers import Worker
-
-# ✅ CORRECT - Lazy import inside function
-def my_function():
-    from ui_components import Worker
-    worker = Worker(some_func)
-```
-
-**Subgraph Widget Detection:**
-- Symptom: Editable widgets not appearing for nodes in subgraphs
-- Cause: Auto-detection of widget names from node inputs can fail
-- Solution: Add explicit widget mappings to `WIDGET_MAPPINGS` in `EDITABLE_NODE_CONFIGS`
-- Fallback: Manual configuration always takes precedence over auto-detection
-
-## UI Components Organization
-
-The `resources/ui/` directory contains modularized UI components (recently refactored from monolithic `ui_components.py`):
-
-- **workers.py** - Threading utilities (`Worker`, `WorkerSignals`)
-- **styles.py** - Styling constants and themes
-- **spinners.py** - Loading animations and progress indicators
-- **effects.py** - Visual effects and animations
-- **notifications.py** - Toast notifications and status banners
-- **layouts.py** - Custom layout implementations
-- **dialogs.py** - Edit dialogs and forms
-- **batch_selector.py** - Image selection widgets
-- **small_widgets.py** - Miscellaneous UI components (`show_popup_menu()`, `browse_directory()`, `browse_file()`)
-- **image_viewers.py** - Image and model viewing widgets
-
-## Utility Functions
-
-**Shared UI Utilities (`resources/ui/small_widgets.py`):**
-- `show_popup_menu()` - Display popup menu below button with optional submenus
-- `browse_directory()` - Directory browser with last-used memory
-- `browse_file()` - File browser with last-used memory
-
-**Safe Imports (`core/import_utils.py`):**
-```python
-from core.import_utils import safe_import, safe_import_multiple
-
-# Single import
-Usd, USD_AVAILABLE = safe_import("pxr", "Usd")
-
-# Multiple imports
-(Usd, Sdf, UsdGeom), USD_AVAILABLE = safe_import_multiple("pxr", "Usd", "Sdf", "UsdGeom")
-```
-
-**Animation Utilities (`models/animation_utils.py`):**
-- `lerp()` - Linear interpolation
-- `slerp()` - Spherical linear interpolation (quaternions)
-- `quaternion_to_matrix()` - Convert quaternion to 4x4 matrix
-- `compose_transform()` - Build transform from position/rotation/scale
-- `interpolate_bone_animation()` - Sample bone animation at time
+**models/animation_utils.py:** lerp, slerp, quaternion_to_matrix, compose_transform, interpolate_bone_animation

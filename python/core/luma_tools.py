@@ -782,7 +782,9 @@ class LumaShotTools(QtWidgets.QWidget):
             self._tray_icon = None
             return
 
-        self._tray_icon = QSystemTrayIcon(self)
+        # Use None as parent to avoid "must be a top level window" warnings on Windows
+        # Qt will handle the parent relationship automatically
+        self._tray_icon = QSystemTrayIcon(None)
 
         # Use window icon for tray
         self._tray_icon.setIcon(self.windowIcon())
@@ -881,6 +883,11 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Save current version as last opened
         set_last_opened_version(APP_VERSION)
+
+        # Clean up system tray icon
+        if hasattr(self, '_tray_icon') and self._tray_icon:
+            self._tray_icon.hide()
+            self._tray_icon = None
 
         super().closeEvent(event)
 

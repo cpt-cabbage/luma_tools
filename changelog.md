@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.4.3.3
+- Improve ComfyUI server crash detection and automatic restart
+
+## Version 0.4.3.2
+- Refactor backend for easier maintainability
+
 ## Version 0.4.3.1
 - Hdri rendering improvements
 - Viewer UI polish
