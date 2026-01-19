@@ -551,7 +551,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _on_tab_moved(self, _from_index, _to_index):
         """Save tab order when user reorders tabs."""
-        from core.settings_manager import save_tab_order
+        from core.user_preferences import save_tab_order
 
         tab_names = []
         for i in range(self.tab_widget.count()):
@@ -562,7 +562,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _restore_tab_order(self):
         """Restore saved tab order on startup."""
-        from core.settings_manager import get_tab_order
+        from core.user_preferences import get_tab_order
 
         saved_order = get_tab_order()
         if not saved_order:
@@ -602,7 +602,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _check_version_update(self):
         """Check if this is a new version and store flag for notification."""
-        from core.settings_manager import is_new_version, set_last_opened_version
+        from core.user_preferences import is_new_version, set_last_opened_version
 
         # Check if current version is newer than last opened
         self._is_new_version = is_new_version(APP_VERSION)
@@ -658,7 +658,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         if has_saved_state:
             # Restore from saved state
-            from core.settings_manager import get_window_state
+            from core.user_preferences import get_window_state
             state = get_window_state()
             width = state.get("width", 1250)
             height = state.get("height", 1000)
@@ -676,7 +676,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _save_window_state(self):
         """Save current window size and maximized state."""
-        from core.settings_manager import save_window_state
+        from core.user_preferences import save_window_state
 
         # Get the current state
         maximized = self.isMaximized()
@@ -875,7 +875,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         """Handle window close event - save window state and version."""
-        from core.settings_manager import set_last_opened_version
+        from core.user_preferences import set_last_opened_version
 
         self._save_window_state()
 

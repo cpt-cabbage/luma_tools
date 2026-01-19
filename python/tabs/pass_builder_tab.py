@@ -138,7 +138,7 @@ class PassBuilderTab(BaseTab):
 
         def on_result(channels):
             """Called when pass detection completes."""
-            from core.settings_manager import get_all_default_passes
+            from core.user_preferences import get_all_default_passes
 
             # Hide spinner
             self.passes_spinner.stop()
@@ -181,7 +181,7 @@ class PassBuilderTab(BaseTab):
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
         from services.render_service import load_pass_config
-        from core.settings_manager import get_all_default_passes
+        from core.user_preferences import get_all_default_passes
 
         selectedpasses = load_pass_config(passes_file)
         self.log(f"Loaded passes from file: {selectedpasses}")
@@ -196,7 +196,7 @@ class PassBuilderTab(BaseTab):
         """Build passes for the selected render."""
         from services.pass_builder import pass_builder
         from services.render_service import save_pass_config
-        from core.settings_manager import get_all_default_passes
+        from core.user_preferences import get_all_default_passes
         from ui_components import Worker, StatusColors
 
         # Get selected passes from the list

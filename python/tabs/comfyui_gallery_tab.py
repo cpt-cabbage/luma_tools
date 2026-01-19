@@ -635,7 +635,7 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _browse_custom_folder(self):
         """Browse for a custom gallery folder."""
-        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
 
         current_path = self._custom_path or get_last_browse_directory("comfyui_gallery")
 

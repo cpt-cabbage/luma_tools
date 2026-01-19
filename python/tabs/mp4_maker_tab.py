@@ -140,7 +140,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Browse for custom directory containing image sequences."""
-        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
 
         default_dir = get_last_browse_directory("mp4_custom")
         if not default_dir:
@@ -257,7 +257,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_output(self):
         """Browse for MP4 output location."""
-        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
         from services.mp4_maker import get_output_filename
 
         # Get current render name for default filename

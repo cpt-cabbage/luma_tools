@@ -159,7 +159,7 @@ class SettingsTab(BaseTab):
 
         # Check if this is a new version and show notification on button
         if hasattr(self.ui, 'showVersionHistoryButton'):
-            from core.settings_manager import is_new_version
+            from core.user_preferences import is_new_version
             if is_new_version(version):
                 # Add notification indicator to button text
                 current_text = self.ui.showVersionHistoryButton.text()
@@ -195,7 +195,7 @@ class SettingsTab(BaseTab):
 
     def _check_user_notifications(self):
         """Check if user has notifications about completed requests."""
-        from core.settings_manager import get_user_notifications, mark_notifications_read
+        from core.feature_requests import get_user_notifications, mark_notifications_read
         from PySide6.QtWidgets import QMessageBox
 
         try:
@@ -270,7 +270,7 @@ class SettingsTab(BaseTab):
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
-        from core.settings_manager import get_default_passes
+        from core.user_preferences import get_default_passes
         from core.config import REQUIRED_PASSES, DEFAULT_PASSES
 
         self.ui.DefaultPassesList.clear()
@@ -467,7 +467,7 @@ class SettingsTab(BaseTab):
 
         if reply == QMessageBox.Yes:
             from core.config import DEFAULT_PASSES
-            from core.settings_manager import set_default_passes
+            from core.user_preferences import set_default_passes
             set_default_passes(DEFAULT_PASSES.copy())
             self.log("Reset to default passes")
             self._load_default_passes_ui()
@@ -475,7 +475,8 @@ class SettingsTab(BaseTab):
     def _on_save_settings_clicked(self):
         """Save user settings."""
         from core.config import REQUIRED_PASSES
-        from core.settings_manager import set_default_passes, set_auto_extract_textures, set_generate_3d_thumbnails, set_setting
+        from core.user_preferences import set_default_passes
+        from core.settings_manager import set_auto_extract_textures, set_generate_3d_thumbnails, set_setting
 
         # Collect selected passes
         selected_passes = []
@@ -801,7 +802,7 @@ class SettingsTab(BaseTab):
 
             # Check for unread requests (admins only)
             if is_admin:
-                from core.settings_manager import get_unread_feature_request_count
+                from core.feature_requests import get_unread_feature_request_count
                 unread_count = get_unread_feature_request_count(self.app_state.user)
 
                 if unread_count > 0:
@@ -823,7 +824,7 @@ class SettingsTab(BaseTab):
     def _on_submit_feature_request(self):
         """Show feature request submission dialog."""
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QComboBox, QTextEdit, QLabel, QDialogButtonBox, QMessageBox
-        from core.settings_manager import append_feature_request
+        from core.feature_requests import append_feature_request
 
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle("Luma Tools - Submit Feature Request")
@@ -919,7 +920,7 @@ class SettingsTab(BaseTab):
             QDialogButtonBox, QLabel, QCheckBox, QHBoxLayout, QPushButton, QMessageBox
         )
         from PySide6.QtCore import Qt
-        from core.settings_manager import get_feature_requests, mark_feature_requests_as_read, mark_request_completed
+        from core.feature_requests import get_feature_requests, mark_feature_requests_as_read, mark_request_completed
 
         # Clear notification indicator
         if hasattr(self.ui, 'viewFeatureRequestsButton'):

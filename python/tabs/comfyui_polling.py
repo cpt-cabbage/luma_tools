@@ -242,7 +242,7 @@ class PollingMixin:
 
         # Record per-frame execution time for future estimates
         if frames > 0 and hasattr(self, '_current_preset_name') and self._current_preset_name:
-            from core.settings_manager import record_workflow_execution_time
+            from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / frames
             record_workflow_execution_time(self._current_preset_name, per_frame_time)
             self.log(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")

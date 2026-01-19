@@ -159,7 +159,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _update_workflow_selector_visibility(self):
         """Update workflow selector visibility based on current preset."""
-        from core.settings_manager import is_workflow_preset_multi, get_workflow_preset_workflows
+        from comfyui.presets_manager import is_workflow_preset_multi, get_workflow_preset_workflows
 
         if not self._current_preset_name:
             self._workflow_selector_widget.setVisible(False)
@@ -189,7 +189,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
-        from core.settings_manager import get_comfyui_workflow_preset_path, get_workflow_config
+        from comfyui.presets_manager import get_comfyui_workflow_preset_path, get_workflow_config
 
         if not workflow_name:
             return
@@ -220,7 +220,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _update_note_display(self):
         """Update the note display based on current preset/workflow."""
-        from core.settings_manager import get_workflow_preset_note
+        from comfyui.presets_manager import get_workflow_preset_note
 
         if not self._current_preset_name:
             self._note_display_widget.setVisible(False)
@@ -273,7 +273,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_choose_preset_clicked(self):
         """Show popup menu with available workflow presets, grouped by folder."""
-        from core.settings_manager import get_comfyui_workflow_presets
+        from comfyui.presets_manager import get_comfyui_workflow_presets
 
         menu = QMenu(self.main_window)
 
@@ -329,7 +329,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
-        from core.settings_manager import (
+        from comfyui.presets_manager import (
             get_comfyui_workflow_preset_path,
             is_workflow_preset_multi,
             get_workflow_preset_workflows
@@ -385,9 +385,11 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_add_preset_clicked(self):
         """Add a new workflow preset."""
-        from core.settings_manager import (
+        from comfyui.presets_manager import (
             get_comfyui_workflow_presets,
-            save_comfyui_workflow_preset,
+            save_comfyui_workflow_preset
+        )
+        from core.user_preferences import (
             get_last_browse_directory,
             set_last_browse_directory
         )
@@ -442,7 +444,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
         from comfyui.service import extract_editable_nodes
-        from core.settings_manager import (
+        from comfyui.presets_manager import (
             get_comfyui_workflow_presets,
             save_comfyui_workflow_preset,
             update_comfyui_workflow_preset,
@@ -1124,7 +1126,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _refresh_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
         from comfyui.service import extract_editable_nodes
-        from core.settings_manager import get_comfyui_workflow_presets, get_workflow_config
+        from comfyui.presets_manager import get_comfyui_workflow_presets, get_workflow_config
 
         # Clear layout
         layout = self.ui.comfyuiEditableNodesLayout
@@ -1248,7 +1250,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Create a widget for an editable node."""
         from ui_components import BatchImageSelector
         from ui.spell_checker import SpellCheckTextEdit
-        from core.settings_manager import get_last_browse_directory
+        from core.user_preferences import get_last_browse_directory
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -1355,7 +1357,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _browse_3d_model(self, line_edit):
         """Open file browser for 3D model selection."""
-        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
 
         last_dir = get_last_browse_directory("comfyui_3d_models") or ""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1428,7 +1430,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_prompt_preset_clicked(self, text_widget, button, node_type):
         """Show popup menu for prompt presets (per-node-type)."""
-        from core.settings_manager import get_comfyui_prompt_presets_for_node_type
+        from comfyui.presets_manager import get_comfyui_prompt_presets_for_node_type
 
         menu = QMenu(self.main_window)
 
@@ -1466,7 +1468,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _apply_prompt_preset(self, preset_name, text_widget, node_type):
         """Apply a prompt preset to the text widget."""
-        from core.settings_manager import get_comfyui_prompt_presets_for_node_type
+        from comfyui.presets_manager import get_comfyui_prompt_presets_for_node_type
 
         presets = get_comfyui_prompt_presets_for_node_type(node_type)
         if preset_name in presets:
@@ -1474,7 +1476,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _save_prompt_preset(self, text_widget, node_type):
         """Save current text as a new prompt preset for the node type."""
-        from core.settings_manager import save_comfyui_prompt_preset_for_node_type
+        from comfyui.presets_manager import save_comfyui_prompt_preset_for_node_type
 
         current_text = text_widget.toPlainText().strip()
         if not current_text:
@@ -1500,7 +1502,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _delete_prompt_preset(self, preset_name, node_type):
         """Delete a prompt preset for a node type."""
-        from core.settings_manager import delete_comfyui_prompt_preset_for_node_type
+        from comfyui.presets_manager import delete_comfyui_prompt_preset_for_node_type
 
         # Make node type more readable for display
         display_type = node_type.replace('Plus', '+')
@@ -1529,7 +1531,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_images_changed(self, images):
         """Handle image selection changes - save the last browse directory."""
-        from core.settings_manager import set_last_browse_directory
+        from core.user_preferences import set_last_browse_directory
 
         if images:
             last_dir = os.path.dirname(images[0])
@@ -1555,7 +1557,8 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import Worker, StatusColors
         from comfyui.service import extract_editable_nodes, submit_comfyui_job
-        from core.settings_manager import get_comfyui_network_output_path, get_workflow_config
+        from core.settings_manager import get_comfyui_network_output_path
+        from comfyui.presets_manager import get_workflow_config
 
         # Immediately save state before submission (crash recovery)
         self._save_state()
@@ -1579,7 +1582,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Show time estimate if available
         if self._current_preset_name:
-            from core.settings_manager import get_workflow_estimated_time_per_frame
+            from core.user_preferences import get_workflow_estimated_time_per_frame
             from tabs.comfyui_polling import format_elapsed_time
             per_frame = get_workflow_estimated_time_per_frame(self._current_preset_name)
             if per_frame:
@@ -1753,7 +1756,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 - generation_count: Number of generations
                 - editable_values: Dict of node_id -> {display_name, value, ...}
         """
-        from core.settings_manager import get_comfyui_workflow_presets
+        from comfyui.presets_manager import get_comfyui_workflow_presets
 
         if not metadata:
             self.main_window.animator.show_warning("No settings metadata found for this image")
@@ -1838,7 +1841,8 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _restore_state(self):
         """Restore the ComfyUI tab state from user settings."""
-        from core.settings_manager import get_comfyui_tab_state, get_comfyui_workflow_presets
+        from core.settings_manager import get_comfyui_tab_state
+        from comfyui.presets_manager import get_comfyui_workflow_presets
 
         state = get_comfyui_tab_state()
         if not state:

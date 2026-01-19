@@ -166,7 +166,7 @@ class RePublishTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Handle custom path browse button click for rePublish."""
-        from core.settings_manager import get_last_browse_directory, set_last_browse_directory
+        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
 
         default_path = get_last_browse_directory("republish_custom")
         if not default_path:
