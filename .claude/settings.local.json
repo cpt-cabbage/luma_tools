@@ -34,7 +34,8 @@
       "Bash(python/venv/Scripts/python.exe:*)",
       "WebSearch",
       "WebFetch",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(pythonvenvScriptspython.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); sys.path.insert\\(0, ''resources/ui''\\); from tabs.comfyui_tab import ComfyUITab; print\\(''Import successful''\\)\")"
     ],
     "deny": [],
     "ask": []
