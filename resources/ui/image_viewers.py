@@ -153,6 +153,7 @@ class EmbeddedImageViewer(QWidget):
     view_fullscreen = Signal(str, int)
     copy_settings_requested = Signal(dict)
     image_deleted = Signal(str)  # Emitted when an image is deleted (path)
+    image_viewed = Signal(str)  # Emitted when navigating to an image (path)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
@@ -712,11 +713,13 @@ class EmbeddedImageViewer(QWidget):
         if self.current_index < len(self.image_paths) - 1:
             self.current_index += 1
             self._load_current_image()
+            self.image_viewed.emit(self.image_paths[self.current_index])
 
     def _prev_image(self):
         if self.current_index > 0:
             self.current_index -= 1
             self._load_current_image()
+            self.image_viewed.emit(self.image_paths[self.current_index])
 
     def _on_back(self):
         self.closed.emit()
@@ -1061,6 +1064,7 @@ class FullscreenImageViewer(QWidget):
     closed = Signal()
     copy_settings_requested = Signal(dict)
     image_deleted = Signal(str)  # Emitted when a file is deleted (path)
+    image_viewed = Signal(str)  # Emitted when navigating to an image (path)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
@@ -1230,11 +1234,13 @@ class FullscreenImageViewer(QWidget):
         if self.current_index < len(self.image_paths) - 1:
             self.current_index += 1
             self._load_current_image()
+            self.image_viewed.emit(self.image_paths[self.current_index])
 
     def _prev_image(self):
         if self.current_index > 0:
             self.current_index -= 1
             self._load_current_image()
+            self.image_viewed.emit(self.image_paths[self.current_index])
 
     def _on_zoom_changed(self, level):
         self.image_view.setZoomLevel(level)

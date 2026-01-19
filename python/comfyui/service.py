@@ -679,6 +679,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         # Try to get detailed progress for rendering tasks
         task_progress = None
+        is_loading_model = False
         if status == "Rendering" and rendering_tasks > 0:
             # Find the first rendering task (usually task 0-based index = completed_tasks)
             active_task_id = completed_tasks
@@ -686,7 +687,11 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             if log_content:
                 task_progress = extract_task_progress(log_content)
                 if task_progress:
-                    print(f"[Poll Debug] Job {job_id} task {active_task_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
+                    is_loading_model = task_progress.get('is_loading_model', False)
+                    if is_loading_model:
+                        print(f"[Poll Debug] Job {job_id} task {active_task_id}: Loading model...")
+                    else:
+                        print(f"[Poll Debug] Job {job_id} task {active_task_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
 
         return {
             "status": status,
@@ -702,6 +707,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             "own_jobs_ahead": queue_info.get("own_jobs_ahead", 0),
             "other_jobs_ahead": queue_info.get("other_jobs_ahead", 0),
             "task_progress": task_progress,
+            "is_loading_model": is_loading_model,
         }
 
     except Exception as e:
@@ -746,11 +752,13 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     - "Progress: 42% (5/12) (15s)"
     - "[ComfyUI] Progress: 42% (5/12)"
 
+    Also detects model loading state from log patterns.
+
     Args:
         log_content: Task log stdout text
 
     Returns:
-        Dict with progress_pct, current_node, total_nodes, elapsed_seconds
+        Dict with progress_pct, current_node, total_nodes, elapsed_seconds, is_loading_model
         or None if no progress found
     """
     import re
@@ -758,20 +766,66 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     if not log_content:
         return None
 
+    # Detect model loading patterns in ComfyUI logs
+    # These patterns appear when ComfyUI is loading models into GPU memory
+    model_loading_patterns = [
+        r'Loading\s+model',
+        r'Loading\s+checkpoint',
+        r'Loading\s+CLIP',
+        r'Loading\s+VAE',
+        r'Loading\s+ControlNet',
+        r'Loading\s+LoRA',
+        r'Loading\s+UNET',
+        r'model\s+loaded',
+        r'models\s+loaded',
+        r'Moving\s+model\s+to',
+        r'weights\s+loaded',
+        r'to_model.*loaded',
+        r'Trellis.*Loading',
+        r'Loading.*safetensors',
+        r'Loading.*ckpt',
+    ]
+
+    # Check for model loading indicators
+    is_loading_model = False
+    for pattern in model_loading_patterns:
+        if re.search(pattern, log_content, re.IGNORECASE):
+            is_loading_model = True
+            break
+
+    # Also detect server restart which means models need to reload
+    if 'RESTART' in log_content.upper() or 'Server restart' in log_content:
+        is_loading_model = True
+
     # Pattern: Progress: 42% (5/12) (15s) or Progress: 42% (5/12)
     pattern = r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?'
 
     # Search from end of log (most recent progress)
     matches = list(re.finditer(pattern, log_content))
     if not matches:
+        # No progress yet - check if execution has started
+        # If we see "Execution started" or "Executing node" but no progress,
+        # we're likely in the model loading phase
+        execution_started = bool(re.search(r'Execution\s+started|Executing\s+node', log_content, re.IGNORECASE))
+        if execution_started or is_loading_model:
+            return {
+                'progress_pct': 0,
+                'current_node': 0,
+                'total_nodes': 0,
+                'elapsed_seconds': None,
+                'is_loading_model': is_loading_model or execution_started
+            }
         return None
 
     last_match = matches[-1]
+    # Once we have actual progress (current_node > 0), models are loaded
+    current_node = int(last_match.group(2))
     return {
         'progress_pct': int(last_match.group(1)),
-        'current_node': int(last_match.group(2)),
+        'current_node': current_node,
         'total_nodes': int(last_match.group(3)),
-        'elapsed_seconds': int(last_match.group(4)) if last_match.group(4) else None
+        'elapsed_seconds': int(last_match.group(4)) if last_match.group(4) else None,
+        'is_loading_model': is_loading_model and current_node == 0
     }
 
 

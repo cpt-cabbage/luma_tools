@@ -19,6 +19,13 @@ Usage:
 
 import sys
 import os
+
+# Add parent directory to path when run directly (must be before comfyui imports)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 import json
 import time
 import signal
@@ -302,6 +309,8 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding='utf-8',
+        errors='replace',  # Replace invalid characters instead of crashing
         bufsize=1,
         cwd=working_dir,
         env=env,
@@ -545,7 +554,9 @@ def main():
 
     parser = argparse.ArgumentParser(description='Persistent ComfyUI Server')
 
-    parser.add_argument('--comfyui-path', required=True, help='Path to ComfyUI installation')
+    parser.add_argument('--comfyui-path',
+                        default=global_settings.get('comfyui_path'),
+                        help='Path to ComfyUI installation (default from global settings)')
     parser.add_argument('--port', type=int, default=8188, help='Port for ComfyUI server')
     parser.add_argument('--health-port', type=int, default=None, help='Port for health check server')
     parser.add_argument('--input-directory', default=None, help='Default input directory')
@@ -558,9 +569,12 @@ def main():
     parser.add_argument('--fast', action='store_true',
                         default=global_settings.get('comfyui_fast_mode', False),
                         help='Enable --fast flag (default from global settings)')
-    parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'], default='embedded',
-                        help='ComfyUI installation mode')
-    parser.add_argument('--python-path', default=None, help='Path to Python executable')
+    parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'],
+                        default=global_settings.get('comfyui_mode', 'embedded'),
+                        help='ComfyUI installation mode (default from global settings)')
+    parser.add_argument('--python-path',
+                        default=global_settings.get('comfyui_python_path'),
+                        help='Path to Python executable (default from global settings)')
     parser.add_argument('--skip-dep-check', action='store_true', help='Skip dependency check')
     parser.add_argument('--max-crash-restarts', type=int, default=5,
                         help='Max automatic restart attempts after crash (default: 5, 0 to disable)')
@@ -568,6 +582,11 @@ def main():
                         help='Seconds to wait between crash restarts (default: 60)')
 
     args = parser.parse_args()
+
+    # Validate required arguments
+    if not args.comfyui_path:
+        print("ERROR: --comfyui-path is required (not found in command line or global settings)")
+        sys.exit(1)
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)

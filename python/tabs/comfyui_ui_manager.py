@@ -90,6 +90,9 @@ class ComfyUIWidgetManager:
 
         editable_nodes = extract_editable_nodes(workflow_path)
 
+        # Collect image widgets separately for horizontal layout
+        image_widgets = []  # List of (widget, node) tuples
+
         # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
             # Check if this node is disabled via overrides
@@ -106,10 +109,32 @@ class ComfyUIWidgetManager:
 
             widget = self._create_editable_node_widget(node)
             if widget:
-                self.layout.addWidget(widget)
-                self.dynamic_widgets[node.node_id] = widget
                 # Store the node info on the widget for condition handling
                 widget.editable_node = node
+                self.dynamic_widgets[node.node_id] = widget
+
+                # Collect image widgets for horizontal layout
+                if node.widget_type == 'image':
+                    image_widgets.append((widget, node))
+                else:
+                    self.layout.addWidget(widget)
+
+        # Add image widgets in a horizontal layout if there are multiple
+        if len(image_widgets) > 1:
+            image_row_container = QWidget()
+            image_row_layout = QHBoxLayout(image_row_container)
+            image_row_layout.setContentsMargins(0, 5, 0, 5)
+            image_row_layout.setSpacing(10)
+
+            for widget, node in image_widgets:
+                image_row_layout.addWidget(widget)
+
+            self.layout.addWidget(image_row_container)
+            # Store container reference for cleanup
+            image_row_container.is_image_row = True
+        elif len(image_widgets) == 1:
+            # Single image widget - add normally (vertically)
+            self.layout.addWidget(image_widgets[0][0])
 
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:

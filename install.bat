@@ -97,66 +97,54 @@ echo Removing pause from launcher...
 powershell -Command "(Get-Content '%TARGET%\luma_tools_standalone.bat') | Where-Object { $_ -ne 'pause' } | Set-Content '%TARGET%\luma_tools_standalone.bat'"
 
 REM ============================================================================
-REM CLEAN OLD PYTHON FILES FROM PREVIOUS STRUCTURE
+REM CLEAN ALL PYTHON FILES FOR FRESH INSTALL
 REM ============================================================================
 
-echo Cleaning old Python files from production...
+echo Cleaning all Python files from production for fresh install...
 
-REM Remove old monolithic Python files from root (pre-restructure)
-if exist "%TARGET%\python\la_shot_tools.py" (
-    echo Removing old la_shot_tools.py...
-    del /Q "%TARGET%\python\la_shot_tools.py"
+REM Remove all Python module directories (ensures no orphaned files)
+if exist "%TARGET%\python\core\" (
+    echo Removing old core module...
+    rmdir /S /Q "%TARGET%\python\core\"
 )
-if exist "%TARGET%\python\config.py" (
-    echo Removing old config.py...
-    del /Q "%TARGET%\python\config.py"
+if exist "%TARGET%\python\ayon\" (
+    echo Removing old ayon module...
+    rmdir /S /Q "%TARGET%\python\ayon\"
 )
-if exist "%TARGET%\python\state_manager.py" (
-    echo Removing old state_manager.py...
-    del /Q "%TARGET%\python\state_manager.py"
+if exist "%TARGET%\python\comfyui\" (
+    echo Removing old comfyui module...
+    rmdir /S /Q "%TARGET%\python\comfyui\"
 )
-if exist "%TARGET%\python\settings_manager.py" (
-    echo Removing old settings_manager.py...
-    del /Q "%TARGET%\python\settings_manager.py"
+if exist "%TARGET%\python\models\" (
+    echo Removing old models module...
+    rmdir /S /Q "%TARGET%\python\models\"
 )
-if exist "%TARGET%\python\utils.py" (
-    echo Removing old utils.py...
-    del /Q "%TARGET%\python\utils.py"
+if exist "%TARGET%\python\services\" (
+    echo Removing old services module...
+    rmdir /S /Q "%TARGET%\python\services\"
 )
-
-REM Clean old tab files (if any exist in root before modular structure)
-for %%f in (
-    pass_builder_tab.py
-    mp4_maker_tab.py
-    republish_tab.py
-    shot_cleaner_tab.py
-    comfyui_tab.py
-    comfyui_gallery_tab.py
-    settings_tab.py
-    logs_tab.py
-) do (
-    if exist "%TARGET%\python\%%f" (
-        echo Removing old %%f...
-        del /Q "%TARGET%\python\%%f"
-    )
+if exist "%TARGET%\python\tabs\" (
+    echo Removing old tabs module...
+    rmdir /S /Q "%TARGET%\python\tabs\"
+)
+if exist "%TARGET%\python\ui\" (
+    echo Removing old ui module...
+    rmdir /S /Q "%TARGET%\python\ui\"
+)
+if exist "%TARGET%\python\libs\" (
+    echo Removing old libs directory...
+    rmdir /S /Q "%TARGET%\python\libs\"
 )
 
-REM Remove old service files from root
-for %%f in (
-    pass_builder.py
-    render_service.py
-    mp4_maker.py
-    scan_service.py
-    cleanup_service.py
-    file_operations.py
-) do (
-    if exist "%TARGET%\python\%%f" (
-        echo Removing old %%f...
-        del /Q "%TARGET%\python\%%f"
-    )
+REM Remove any stray Python files in python root directory
+echo Removing any stray Python files in python root...
+del /Q "%TARGET%\python\*.py" 2>nul
+del /Q "%TARGET%\python\*.pyc" 2>nul
+if exist "%TARGET%\python\__pycache__\" (
+    rmdir /S /Q "%TARGET%\python\__pycache__\"
 )
 
-echo Old files cleaned.
+echo All old Python files cleaned.
 echo.
 
 REM ============================================================================

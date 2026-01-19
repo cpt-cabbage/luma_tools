@@ -464,9 +464,12 @@ class ComfyUIGalleryTab(BaseTab):
             # Update known images from cache
             self._known_items = set(item['path'] for item in self._cached_items)
             self._initial_scan_done = True
-            # Sort and display cached items
+            # Sort and display cached items immediately
             sorted_items = self._manager.sort_items(self._cached_items, self._sort_mode)
             self._manager.display_items(sorted_items)
+            # Trigger a background rescan to detect any new items added since cache was created
+            # This ensures newly rendered files are detected when switching back to own gallery
+            QTimer.singleShot(100, self._on_refresh)
         else:
             # No cache, need to scan
             self._cached_items = None
@@ -679,12 +682,8 @@ class ComfyUIGalleryTab(BaseTab):
         self.log(f"[Gallery] Scan complete: {len(file_paths)} items, {len(new_items)} new")
 
         if self._initial_scan_done and new_items:
-            # New items detected - request attention and show toast
+            # New items detected - request attention
             self.signals.request_attention.emit()
-            # Count new images vs models
-            new_images = sum(1 for item in items if item['path'] in new_items and item['type'] == 'image')
-            new_models = sum(1 for item in items if item['path'] in new_items and item['type'] == 'model')
-            self._show_new_items_toast(new_images, new_models)
             # Add to unviewed items set for highlighting
             self._new_items.update(new_items)
 
@@ -719,41 +718,6 @@ class ComfyUIGalleryTab(BaseTab):
     def _load_visible_thumbnails(self):
         """Load thumbnails for widgets that are currently visible in the viewport."""
         self._manager.load_visible_thumbnails()
-
-    def _show_new_items_toast(self, image_count, model_count):
-        """Show a toast notification for new items added to gallery.
-
-        Args:
-            image_count: Number of new images
-            model_count: Number of new 3D models
-        """
-        from ui_components import ToastNotification
-
-        parts = []
-        if image_count == 1:
-            parts.append("1 new image")
-        elif image_count > 1:
-            parts.append(f"{image_count} new images")
-
-        if model_count == 1:
-            parts.append("1 new model")
-        elif model_count > 1:
-            parts.append(f"{model_count} new models")
-
-        if parts:
-            message = f"{' and '.join(parts)} added to Gallery"
-
-            # In-app toast notification
-            toast = ToastNotification(message, "success", self.main_window)
-            toast.show_toast()
-
-            # System notification when window is not focused (cross-platform via Qt)
-            if not self.main_window.isActiveWindow():
-                self.main_window.show_system_notification(
-                    "Luma Tools - Gallery",
-                    message,
-                    "success"
-                )
 
     def _on_thumbnail_clicked(self, image_path):
         """Handle thumbnail click - open embedded viewer."""
@@ -823,6 +787,7 @@ class ComfyUIGalleryTab(BaseTab):
                 parent=None
             )
             self._fullscreen_viewer.copy_settings_requested.connect(self._on_copy_settings_requested)
+            self._fullscreen_viewer.image_viewed.connect(self._on_item_viewed)
             self._fullscreen_viewer.show()
         else:
             # Open embedded viewer within the tab
@@ -936,6 +901,7 @@ class ComfyUIGalleryTab(BaseTab):
         self._embedded_viewer.closed.connect(self._close_embedded_viewer)
         self._embedded_viewer.view_fullscreen.connect(self._on_view_fullscreen)
         self._embedded_viewer.copy_settings_requested.connect(self._on_copy_settings_requested)
+        self._embedded_viewer.image_viewed.connect(self._on_item_viewed)
 
         # Insert viewer into the main layout (after header, before footer)
         self.ui.galleryMainLayout.insertWidget(1, self._embedded_viewer)

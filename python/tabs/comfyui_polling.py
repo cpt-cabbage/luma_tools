@@ -152,6 +152,7 @@ class PollingMixin:
         total_tasks = result.get("total_tasks", 1)
         error_message = result.get("error_message", "")
         task_progress = result.get("task_progress")
+        is_loading_model = result.get("is_loading_model", False)
 
         display_total = max(total_tasks, self._iterate_total_tasks)
 
@@ -184,24 +185,29 @@ class PollingMixin:
             eta_str = estimate_remaining_time(completed_tasks, display_total, elapsed)
 
             if status in ("Active", "Rendering"):
-                if task_progress:
+                if is_loading_model:
+                    # Model is being loaded - show specific feedback
+                    status_text = f"Rendering job {completed_tasks + 1}/{display_total} - Loading model..."
+                    main_status = f"ComfyUI: Loading model... (job {completed_tasks + 1}/{display_total}) - {elapsed_str}"
+                elif task_progress:
                     tp_pct = task_progress['progress_pct']
                     tp_cur = task_progress['current_node']
                     tp_tot = task_progress['total_nodes']
                     status_text = f"Rendering job {completed_tasks + 1}/{display_total} - {tp_pct}% ({tp_cur}/{tp_tot} nodes)"
+                    if completed_tasks > 0:
+                        main_status = f"ComfyUI: Job {completed_tasks + 1}/{display_total} - {tp_pct}% of current job - {elapsed_str}"
+                        if eta_str:
+                            main_status += f" - ~{eta_str} remaining"
+                    else:
+                        main_status = f"ComfyUI: Job 1/{display_total} - {tp_pct}% - {elapsed_str}"
                 else:
                     status_text = f"Rendering job {completed_tasks + 1}/{display_total} ({progress}%)"
-
-                if completed_tasks > 0:
-                    if task_progress:
-                        tp_pct = task_progress['progress_pct']
-                        main_status = f"ComfyUI: Job {completed_tasks + 1}/{display_total} - {tp_pct}% of current job - {elapsed_str}"
-                    else:
+                    if completed_tasks > 0:
                         main_status = f"ComfyUI: Job {completed_tasks}/{display_total} ({progress}%) - {elapsed_str} elapsed"
-                    if eta_str:
-                        main_status += f" - ~{eta_str} remaining"
-                else:
-                    main_status = f"ComfyUI: Starting render - {display_total} job(s)"
+                        if eta_str:
+                            main_status += f" - ~{eta_str} remaining"
+                    else:
+                        main_status = f"ComfyUI: Starting render - {display_total} job(s)"
             elif status in ("Pending", "Queued"):
                 queue_position = result.get("queue_position", 0)
                 total_queued = result.get("total_queued", 0)
@@ -443,11 +449,14 @@ class PollingMixin:
             total_jobs = len(self._batch_job_ids)
             active_job_task_progress = None
 
+            active_job_loading_model = False
+
             for job_id, result in self._batch_poll_results.items():
                 status = result.get("status", "Unknown")
                 completed_tasks = result.get("completed_tasks", 0)
                 total_tasks = result.get("total_tasks", 1)
                 task_progress = result.get("task_progress")
+                is_loading_model = result.get("is_loading_model", False)
 
                 self._batch_job_statuses[job_id] = status
                 if total_tasks > 1:
@@ -456,6 +465,10 @@ class PollingMixin:
                 # Capture task progress from any active job for status display
                 if status in ("Active", "Rendering") and task_progress and not active_job_task_progress:
                     active_job_task_progress = task_progress
+
+                # Track if any active job is loading a model
+                if status in ("Active", "Rendering") and is_loading_model:
+                    active_job_loading_model = True
 
                 prev_completed = self._batch_completed_tasks.get(job_id, 0)
                 if completed_tasks > prev_completed:
@@ -512,9 +525,11 @@ class PollingMixin:
                 eta_str = estimate_remaining_time(completed_frames_all, total_frames_all, elapsed)
                 batch_progress = int((completed_frames_all / max(total_frames_all, 1)) * 100)
 
-                # Show task-level progress if available
+                # Show model loading or task-level progress
                 task_progress_str = ""
-                if active_job_task_progress:
+                if active_job_loading_model:
+                    task_progress_str = " - Loading model..."
+                elif active_job_task_progress:
                     tp_pct = active_job_task_progress.get('progress_pct', 0)
                     task_progress_str = f" - {tp_pct}% of current job"
 
@@ -529,8 +544,11 @@ class PollingMixin:
                     if eta_str:
                         main_status += f" (~{eta_str} left)"
                 else:
-                    # Show task progress even when no frames completed yet
-                    main_status = f"ComfyUI: Starting {total_frames_all} jobs{task_progress_str} - {active_jobs} active"
+                    # Show model loading or task progress when no frames completed yet
+                    if active_job_loading_model:
+                        main_status = f"ComfyUI: Loading model... ({total_frames_all} jobs) - {active_jobs} active"
+                    else:
+                        main_status = f"ComfyUI: Starting {total_frames_all} jobs{task_progress_str} - {active_jobs} active"
                     if queued_jobs > 0:
                         main_status += f", {queued_jobs} queued"
                 status_color = StatusColors.INFO
@@ -723,5 +741,11 @@ class PollingMixin:
         gallery_tab = self.main_window.get_tab("comfyui_gallery")
         if gallery_tab:
             self.log(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
+            # Invalidate cache for current user so new items are detected when switching back
+            # This handles the case where user is viewing another user's gallery when renders complete
+            current_user = getattr(self.app_state, 'user', None)
+            if current_user and hasattr(gallery_tab, '_user_cache') and current_user in gallery_tab._user_cache:
+                del gallery_tab._user_cache[current_user]
+                self.log(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
             gallery_tab._on_refresh()
             gallery_tab.signals.request_attention.emit()
