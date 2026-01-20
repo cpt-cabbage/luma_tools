@@ -94,6 +94,10 @@ class ComfyUIGalleryTab(BaseTab):
         self._user_cache = {}
         self._precache_in_progress = set()  # Users currently being pre-cached
 
+        # Multi-select state
+        self._selected_items = set()  # Set of selected image paths
+        self._selection_toolbar = None  # Will be created when needed
+
         # Initialize user selector (async discovery)
         self._populate_user_selector()
 
@@ -106,6 +110,37 @@ class ComfyUIGalleryTab(BaseTab):
         # Use pre-warmed cache from splash screen (already scanned during startup)
         # This creates all widgets immediately since data is already available
         self._use_prewarm_cache_sync()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts for gallery actions."""
+        from PySide6.QtCore import Qt
+
+        # Ctrl+A: Select all items
+        if event.key() == Qt.Key_A and event.modifiers() == Qt.ControlModifier:
+            self._select_all()
+            event.accept()
+            return
+
+        # Escape: Clear selection
+        if event.key() == Qt.Key_Escape:
+            if self._selected_items:
+                self._clear_selection()
+                event.accept()
+                return
+
+        # Pass unhandled events to parent
+        super().keyPressEvent(event)
+
+    def _select_all(self):
+        """Select all items in the gallery."""
+        if not hasattr(self, '_widget_cache'):
+            return
+
+        for path, widget in self._widget_cache.items():
+            if hasattr(widget, 'set_selected'):
+                widget.set_selected(True)
+
+        self.log(f"[Gallery] Selected all {len(self._selected_items)} items")
 
     def _use_prewarm_cache_sync(self):
         """Use pre-warmed cache synchronously during initialization.
@@ -728,7 +763,63 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_thumbnail_clicked(self, image_path):
         """Handle thumbnail click - open embedded viewer."""
+        # Clear any existing selections when opening viewer normally
+        self._clear_selection()
         self._open_viewer(image_path)
+
+    def _on_selection_changed(self, image_path, is_selected):
+        """Handle thumbnail selection state change."""
+        if is_selected:
+            self._selected_items.add(image_path)
+        else:
+            self._selected_items.discard(image_path)
+
+        # Update toolbar visibility and state
+        self._update_selection_toolbar()
+
+    def _clear_selection(self):
+        """Clear all selected items."""
+        # Update all selected widgets
+        for path in list(self._selected_items):
+            if path in self._widget_cache:
+                widget = self._widget_cache[path]
+                widget.set_selected(False)
+        self._selected_items.clear()
+        self._update_selection_toolbar()
+
+    def _create_selection_toolbar(self):
+        """Create the floating selection toolbar."""
+        from ui_components import GallerySelectionToolbar
+
+        self._selection_toolbar = GallerySelectionToolbar(self.ui.galleryThumbnailContainer)
+        self._selection_toolbar.delete_selected.connect(self._on_delete_selected)
+        self._selection_toolbar.publish_selected.connect(self._on_publish_selected)
+        self._selection_toolbar.view_selected.connect(self._on_view_selected)
+        self._selection_toolbar.clear_selection.connect(self._clear_selection)
+        self._selection_toolbar.hide()
+
+        # Setup resize event to reposition toolbar
+        def on_container_resize(event):
+            if self._selection_toolbar and self._selection_toolbar.isVisible():
+                self._selection_toolbar.position_at_bottom(self.ui.galleryThumbnailContainer)
+            return original_resize_event(event)
+
+        original_resize_event = self.ui.galleryThumbnailContainer.resizeEvent
+        self.ui.galleryThumbnailContainer.resizeEvent = on_container_resize
+
+    def _update_selection_toolbar(self):
+        """Show/hide and update the selection toolbar based on selection state."""
+        if self._selected_items:
+            # Show toolbar if items are selected
+            if not self._selection_toolbar:
+                self._create_selection_toolbar()
+            self._selection_toolbar.update_count(len(self._selected_items))
+            self._selection_toolbar.position_at_bottom(self.ui.galleryThumbnailContainer)
+            self._selection_toolbar.show()
+        else:
+            # Hide toolbar if no items selected
+            if self._selection_toolbar:
+                self._selection_toolbar.hide()
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion - remove from caches."""
@@ -743,6 +834,11 @@ class ComfyUIGalleryTab(BaseTab):
         # Remove from known images
         if item_path in self._known_items:
             self._known_items.discard(item_path)
+
+        # Remove from selection if it was selected
+        if item_path in self._selected_items:
+            self._selected_items.discard(item_path)
+            self._update_selection_toolbar()
 
         # Update status count
         if self._cached_items:
@@ -762,17 +858,125 @@ class ComfyUIGalleryTab(BaseTab):
         else:
             self.log("Could not find ComfyUI tab to apply settings")
 
-    def _open_viewer(self, start_image=None, fullscreen=False):
+    def _on_delete_selected(self):
+        """Delete all selected items with confirmation."""
+        from PySide6.QtWidgets import QMessageBox
+
+        if not self._selected_items:
+            return
+
+        count = len(self._selected_items)
+        reply = QMessageBox.question(
+            self,
+            "Delete Selected Items",
+            f"Are you sure you want to delete {count} selected item(s)?\n\nThis will permanently delete the files from disk.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            deleted_count = 0
+            failed_items = []
+
+            for path in list(self._selected_items):
+                try:
+                    os.remove(path)
+                    deleted_count += 1
+                    # Widget will be cleaned up via _on_item_deleted signal
+                    if path in self._widget_cache:
+                        widget = self._widget_cache[path]
+                        widget.deleted.emit(path)
+                except Exception as e:
+                    failed_items.append(f"{os.path.basename(path)}: {str(e)}")
+
+            # Clear selection after delete
+            self._clear_selection()
+
+            # Show result
+            if failed_items:
+                QMessageBox.warning(
+                    self,
+                    "Delete Completed with Errors",
+                    f"Deleted {deleted_count} of {count} items.\n\nFailed:\n" + "\n".join(failed_items[:5])
+                )
+            else:
+                self.log(f"[Gallery] Deleted {deleted_count} selected items")
+
+    def _on_publish_selected(self):
+        """Publish all selected items to AYON."""
+        if not self._selected_items:
+            return
+
+        count = len(self._selected_items)
+        self.log(f"[Gallery] Publishing {count} items to AYON...")
+
+        # Use Worker for async publishing
+        from ui_components import Worker
+
+        def publish_batch(selected_paths):
+            """Publish batch of images to AYON."""
+            results = []
+            for path in selected_paths:
+                try:
+                    from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
+                    # Get output_dir from first widget (should be same for all in gallery)
+                    output_dir = os.path.dirname(path)
+                    publish_comfyui_asset_to_ayon(path, None, output_dir)
+                    results.append((path, True, None))
+                except Exception as e:
+                    results.append((path, False, str(e)))
+            return results
+
+        self._publish_worker = Worker(publish_batch, list(self._selected_items))
+        self._publish_worker.signals.result.connect(self._on_publish_batch_complete)
+        self._publish_worker.signals.error.connect(
+            lambda msg, tb: self.log(f"[Gallery] Batch publish error: {msg}")
+        )
+        QThreadPool.globalInstance().start(self._publish_worker)
+
+    def _on_publish_batch_complete(self, results):
+        """Handle batch publish completion."""
+        from PySide6.QtWidgets import QMessageBox
+
+        success_count = sum(1 for _, success, _ in results if success)
+        failed_count = len(results) - success_count
+
+        if failed_count == 0:
+            self.log(f"[Gallery] Successfully published {success_count} items to AYON")
+            # Clear selection after successful publish
+            self._clear_selection()
+        else:
+            failed_items = [f"{os.path.basename(path)}: {err}" for path, success, err in results if not success]
+            QMessageBox.warning(
+                self,
+                "Publish Completed with Errors",
+                f"Published {success_count} of {len(results)} items.\n\nFailed:\n" + "\n".join(failed_items[:5])
+            )
+
+    def _on_view_selected(self):
+        """Open viewer showing only selected images."""
+        if not self._selected_items:
+            return
+
+        # Get sorted list of selected paths
+        selected_paths = sorted(list(self._selected_items))
+
+        # Open viewer with filtered list
+        self._open_viewer(start_image=selected_paths[0], image_paths=selected_paths)
+
+    def _open_viewer(self, start_image=None, fullscreen=False, image_paths=None):
         """Open the image viewer.
 
         Args:
             start_image: Path of image to start on (None = first image)
             fullscreen: If True, open in fullscreen mode
+            image_paths: Optional list of specific image paths to show (for filtered view)
         """
         from ui_components import EmbeddedImageViewer, FullscreenImageViewer
 
-        # Collect all image paths from the current gallery
-        image_paths = self._get_image_paths()
+        # Use provided image paths or collect all from gallery
+        if image_paths is None:
+            image_paths = self._get_image_paths()
 
         if not image_paths:
             self.log("No images to display")

@@ -226,6 +226,7 @@ class GalleryManager:
                 thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
                 thumbnail.deleted.connect(self.tab._on_item_deleted)
                 thumbnail.viewed.connect(self.tab._on_item_viewed)
+                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
 
             self.tab._widget_cache[path] = thumbnail
             self.tab._flow_layout.addWidget(thumbnail)
@@ -301,6 +302,7 @@ class GalleryManager:
                 thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
                 thumbnail.deleted.connect(self.tab._on_item_deleted)
                 thumbnail.viewed.connect(self.tab._on_item_viewed)
+                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
 
             self.tab._widget_cache[path] = thumbnail
             # Don't add to layout yet - will be reordered after all widgets are created

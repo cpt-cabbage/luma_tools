@@ -123,6 +123,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     copy_settings_requested = Signal(dict)
     deleted = Signal(str)
     viewed = Signal(str)
+    selection_changed = Signal(str, bool)  # path, is_selected
 
     def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False):
         super().__init__(parent)
@@ -130,6 +131,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.output_dir = output_dir or os.path.dirname(image_path)
         self._editable = editable
         self._is_new = is_new
+        self._is_selected = False
         self._cached_metadata = None
         self._thumbnail_loaded = False
         self._tooltip_loaded = False
@@ -173,11 +175,37 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
         self.note_indicator.hide()
 
+        # Selection checkmark indicator
+        self.selection_indicator = QLabel(self.thumbnail_label)
+        self.selection_indicator.setText("✓")
+        self.selection_indicator.setAlignment(Qt.AlignCenter)
+        self.selection_indicator.setStyleSheet("""
+            QLabel {
+                background-color: rgba(59, 130, 246, 0.95);
+                color: white;
+                border-radius: 12px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        self.selection_indicator.setFixedSize(24, 24)
+        self.selection_indicator.move(4, 4)
+        self.selection_indicator.hide()
+
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _apply_thumbnail_style(self):
-        if self._is_new:
+        if self._is_selected:
+            # Selected state - blue border
+            self.thumbnail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #2c313a;
+                    border: 3px solid #3b82f6;
+                    border-radius: 4px;
+                }
+            """)
+        elif self._is_new:
             self.thumbnail_label.setStyleSheet("""
                 QLabel {
                     background-color: #2c313a;
@@ -199,6 +227,21 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             self._is_new = False
             self._apply_thumbnail_style()
             self.viewed.emit(self.image_path)
+
+    def set_selected(self, selected):
+        """Set the selection state of this thumbnail."""
+        if self._is_selected != selected:
+            self._is_selected = selected
+            self._apply_thumbnail_style()
+            if selected:
+                self.selection_indicator.show()
+            else:
+                self.selection_indicator.hide()
+            self.selection_changed.emit(self.image_path, selected)
+
+    def is_selected(self):
+        """Return whether this thumbnail is selected."""
+        return self._is_selected
 
     def load_thumbnail_if_needed(self):
         if not self._thumbnail_loaded:
@@ -284,8 +327,14 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.mark_as_viewed()
-            self.clicked.emit(self.image_path)
+            # Check if Ctrl is held for multi-select
+            if event.modifiers() & Qt.ControlModifier:
+                # Toggle selection
+                self.set_selected(not self._is_selected)
+            else:
+                # Normal click - mark as viewed and emit clicked signal
+                self.mark_as_viewed()
+                self.clicked.emit(self.image_path)
         super().mousePressEvent(event)
 
     def _get_metadata(self):
@@ -781,6 +830,140 @@ def enhance_ui(parent_widget):
     animator = UIAnimations(parent_widget)
     animator.setup_animations()
     return animator
+
+
+# ============================================================================
+# GALLERY SELECTION TOOLBAR
+# ============================================================================
+
+class GallerySelectionToolbar(QWidget):
+    """Floating toolbar for gallery multi-select actions."""
+
+    # Signals for multi-select actions
+    delete_selected = Signal()
+    publish_selected = Signal()
+    view_selected = Signal()
+    clear_selection = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Setup the toolbar UI."""
+        # Set as floating toolbar (will be positioned by parent)
+        self.setAutoFillBackground(True)
+
+        # Main horizontal layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+
+        # Selection count label
+        self.count_label = QLabel("0 items selected")
+        self.count_label.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 4px;
+            }
+        """)
+        layout.addWidget(self.count_label)
+
+        # Spacer
+        layout.addStretch()
+
+        # View selected button
+        self.view_btn = QPushButton("View")
+        self.view_btn.setToolTip("Open selected images in viewer")
+        self.view_btn.clicked.connect(self.view_selected.emit)
+        self.view_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.view_btn)
+
+        # Publish to AYON button
+        self.publish_btn = QPushButton("Publish to AYON")
+        self.publish_btn.setToolTip("Publish selected images to AYON")
+        self.publish_btn.clicked.connect(self.publish_selected.emit)
+        self.publish_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.publish_btn)
+
+        # Delete button
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setToolTip("Delete selected images")
+        self.delete_btn.clicked.connect(self.delete_selected.emit)
+        self.delete_btn.setStyleSheet(self._get_button_style("#dc2626"))
+        layout.addWidget(self.delete_btn)
+
+        # Clear selection button
+        self.clear_btn = QPushButton("✕")
+        self.clear_btn.setToolTip("Clear selection (Escape)")
+        self.clear_btn.setFixedSize(32, 32)
+        self.clear_btn.clicked.connect(self.clear_selection.emit)
+        self.clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #9ca3af;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                color: #ffffff;
+            }
+        """)
+        layout.addWidget(self.clear_btn)
+
+        # Toolbar background style
+        self.setStyleSheet("""
+            GallerySelectionToolbar {
+                background-color: rgba(59, 130, 246, 0.95);
+                border: 1px solid rgba(96, 165, 250, 0.5);
+                border-radius: 8px;
+            }
+        """)
+
+    def _get_button_style(self, hover_color="#2563eb"):
+        """Get button stylesheet with optional custom hover color."""
+        return f"""
+            QPushButton {{
+                background-color: rgba(255, 255, 255, 0.15);
+                color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+                border-color: rgba(255, 255, 255, 0.3);
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
+            }}
+        """
+
+    def update_count(self, count):
+        """Update the selection count display."""
+        if count == 1:
+            self.count_label.setText("1 item selected")
+        else:
+            self.count_label.setText(f"{count} items selected")
+
+    def position_at_bottom(self, parent_widget):
+        """Position toolbar at bottom center of parent widget."""
+        # Calculate position
+        parent_width = parent_widget.width()
+        toolbar_width = self.sizeHint().width()
+        x = (parent_width - toolbar_width) // 2
+        y = parent_widget.height() - self.sizeHint().height() - 20
+
+        # Position and ensure visible
+        self.move(x, y)
+        self.raise_()
 
 
 def load_stylesheet():

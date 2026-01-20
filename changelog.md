@@ -1,5 +1,17 @@
 # Luma Tools Changelog
 
+## Version 0.4.6
+- Add multi-select support to ComfyUI Gallery
+  - Ctrl+Click to select/deselect individual images
+  - Ctrl+A to select all items
+  - Escape to clear selection
+  - Visual selection indicator with blue border and checkmark
+  - Floating toolbar with batch actions (Delete, Publish to AYON, View)
+  - Batch delete with confirmation
+  - Batch publish to AYON with progress tracking
+  - Filtered viewer showing only selected images
+- UI updates
+
 ## Version 0.4.5.1
 - Added job persistence/recovery
 - Luma tools should pick up running jobs if you close and open now.

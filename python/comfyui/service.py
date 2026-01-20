@@ -787,10 +787,13 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
             return None
 
         # Find the most recent log file matching the job name
-        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)[:50]
-        pattern = os.path.join(output_dir, f"comfyui_runner_{safe_name}_*.log")
+        # Don't truncate - UUIDs can be longer than 50 chars
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
+
+        # Search recursively in subdirectories (logs written to user/uuid/ subdirs)
+        pattern = os.path.join(output_dir, "**", f"comfyui_runner_{safe_name}_*.log")
         print(f"[Debug] Looking for log with pattern: {pattern}")
-        log_files = glob.glob(pattern)
+        log_files = glob.glob(pattern, recursive=True)
         print(f"[Debug] Found {len(log_files)} log files: {log_files[:3] if len(log_files) > 3 else log_files}")
 
         if not log_files:
