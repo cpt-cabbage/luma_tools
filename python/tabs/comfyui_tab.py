@@ -82,6 +82,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Restore saved state
         self._restore_state()
 
+        # Attempt to recover and resume any jobs that were running when app closed
+        self._attempt_job_recovery()
+
         # Initial validation
         self._validate_inputs()
 

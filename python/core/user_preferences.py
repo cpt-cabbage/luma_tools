@@ -173,3 +173,46 @@ def set_last_browse_directory(context: str, directory: str):
         settings["last_browse_directories"] = {}
     settings["last_browse_directories"][context] = directory
     save_user_settings(settings)
+
+
+# ============================================================================
+# COMFYUI RUNNING JOBS PERSISTENCE
+# ============================================================================
+
+def save_comfyui_running_jobs(job_state: Optional[Dict[str, Any]]):
+    """Save running ComfyUI job state for recovery on restart.
+
+    Args:
+        job_state: Dictionary containing job state info, or None to clear
+            Expected keys for iterate mode:
+                - mode: "iterate"
+                - job_id: str
+                - network_output_dir: str
+                - total_tasks: int
+                - generation_count: int
+                - start_time: float
+            Expected keys for batch mode:
+                - mode: "batch"
+                - job_ids: List[str]
+                - network_output_dir: str
+                - total_tasks: Dict[str, int]
+                - generation_count: int
+                - start_time: float
+    """
+    settings = load_user_settings()
+    if job_state is None:
+        # Clear running jobs
+        settings.pop("comfyui_running_jobs", None)
+    else:
+        settings["comfyui_running_jobs"] = job_state
+    save_user_settings(settings)
+
+
+def get_comfyui_running_jobs() -> Optional[Dict[str, Any]]:
+    """Get persisted ComfyUI running job state.
+
+    Returns:
+        Job state dictionary if jobs were running when app closed, None otherwise
+    """
+    settings = load_user_settings()
+    return settings.get("comfyui_running_jobs")

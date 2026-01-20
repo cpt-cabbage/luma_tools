@@ -783,25 +783,33 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
     import glob
     try:
         if not output_dir or not os.path.isdir(output_dir):
+            print(f"[Debug] Output dir not valid: {output_dir}")
             return None
 
         # Find the most recent log file matching the job name
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)[:50]
         pattern = os.path.join(output_dir, f"comfyui_runner_{safe_name}_*.log")
+        print(f"[Debug] Looking for log with pattern: {pattern}")
         log_files = glob.glob(pattern)
+        print(f"[Debug] Found {len(log_files)} log files: {log_files[:3] if len(log_files) > 3 else log_files}")
 
         if not log_files:
             return None
 
         # Get the most recent log file
         latest_log = max(log_files, key=os.path.getmtime)
+        print(f"[Debug] Reading log file: {latest_log}")
 
         # Read the log file
         with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
-            return f.read()
+            content = f.read()
+            print(f"[Debug] Read {len(content)} bytes from log file")
+            return content
 
     except Exception as e:
         print(f"[Debug] Error reading runner log: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 

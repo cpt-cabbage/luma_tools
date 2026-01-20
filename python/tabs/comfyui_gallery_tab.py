@@ -681,11 +681,15 @@ class ComfyUIGalleryTab(BaseTab):
 
         self.log(f"[Gallery] Scan complete: {len(file_paths)} items, {len(new_items)} new")
 
+        # Determine if we can do incremental update
+        use_incremental = False
         if self._initial_scan_done and new_items:
             # New items detected - request attention
             self.signals.request_attention.emit()
             # Add to unviewed items set for highlighting
             self._new_items.update(new_items)
+            # Use incremental update if no items were removed
+            use_incremental = len(current_items) >= len(self._known_items)
 
         # Update known items
         self._known_items = current_items
@@ -697,8 +701,8 @@ class ComfyUIGalleryTab(BaseTab):
         # Sort items based on current sort mode
         sorted_items = self._manager.sort_items(items, self._sort_mode)
 
-        # Display the sorted items
-        self._manager.display_items(sorted_items)
+        # Display the sorted items (incremental if possible)
+        self._manager.display_items(sorted_items, incremental=use_incremental)
 
 
 

@@ -1,14 +1,19 @@
 # Luma Tools Changelog
 
 ## Version 0.4.5
-- Enhance batch image selector with visual pairing for multiple LoadImage nodes
-- Add square grid layout for batch image thumbnails 
-- Implement color-coded borders to show which images will pair with which nodes
+- Improve batch image selector with visual pairing for multiple LoadImage nodes
+- Add square grid layout for batch image thumbnails
+- Color-coded borders to show which images will pair with which nodes
 - Add drag-and-drop reordering of images in batch selector
 - Display order numbers in corner of each thumbnail
 - Show pairing statistics in count label (images per node)
 - Support double-click to remove images from batch selection
-- Remove toast notifications 
+- Remove toast notifications
+- Fix ComfyUI Gallery flashing when new images appear - now uses incremental updates
+
+## Version 0.4.4.1
+- Better user feedback
+- Fix preview nodes being bypassed and not saving images
 
 ## Version 0.4.4
 - Add model loading detection in ComfyUI polling with improved status messages
@@ -17,8 +22,8 @@
 - Update server defaults from global settings and improve encoding handling to handle all the emojis
 
 ## Version 0.4.3.7
-- Add Low VRAM mode setting for ComfyUI (--lowvram flag) 
-- ComfyUI server now reads global settings automatically (lowvram, fast mode) 
+- Add Low VRAM mode setting for ComfyUI (--lowvram flag)
+- ComfyUI server now reads global settings automatically (lowvram, fast mode)
 
 ## Version 0.4.3.6
 - Fix job-level progress percentage display in batch mode status bar
@@ -43,8 +48,8 @@
 - Viewer UI polish
 
 ## Version 0.4.3
-- Add lighting modes (headlight, studio, HDRI) 
-- Add shading modes (shaded, textured, wireframe) 
+- Add lighting modes (headlight, studio, HDRI)
+- Add shading modes (shaded, textured, wireframe)
 - Add light strength slider for intensity control
 - Implement queue position display for Deadline jobs in ComfyUI polling
 - Add admin level HDRI management
@@ -52,11 +57,11 @@
 - Enhance viewer UI
 
 ## Version 0.4.2.2
-- fix double clicking an image making it close
+- Fix double clicking an image making it close
 
 ## Version 0.4.2.1
 - Remove pop up when new version just use settings notification badge
-- Fix issue where rapid clicks would trigger multiple async viewer creations before the first one completed.
+- Fix issue where rapid clicks would trigger multiple async viewer creations before the first one completed
 
 ## Version 0.4.2
 - Add time estimates
@@ -74,7 +79,7 @@
 - Feature request improvements
 
 ## Version 0.4.1.21
-- Fix 3d viewer
+- Fix 3D viewer
 
 ## Version 0.4.1.20
 - Move user requests to user folders
@@ -83,7 +88,7 @@
 - Support input images from custom nodes
 
 ## Version 0.4.1.18
-- Fix input file handling edge cases, always look in their hardcoded default input directory.
+- Fix input file handling edge cases, always look in their hardcoded default input directory
 
 ## Version 0.4.1.17
 - Implement feature request submission dialog with categories (Feature, Bug, Enhancement, Question)
@@ -95,7 +100,7 @@
 - Add notifications for new deployed versions via status bar, system tray, and popup
 
 ## Version 0.4.1.14
-- New window size and maximized state persistence.
+- New window size and maximized state persistence
 - New version notifications
 - Use slider for generation count
 - Update requirements.txt and remove unused libs
@@ -127,12 +132,12 @@
 - Status endpoint now reports crash count and recovery info
 
 ## Version 0.4.1.7
-- Replace hardcoded node type checks with generic handling based on WIDGET_MAPPINGS and EXPORT_NODE_TYPES for better maintainability. 
-- Add output_dir support for export nodes.
-- Improve polling and submission error handling to prevent garbage collection issues.
+- Replace hardcoded node type checks with generic handling based on WIDGET_MAPPINGS and EXPORT_NODE_TYPES for better maintainability
+- Add output_dir support for export nodes
+- Improve polling and submission error handling to prevent garbage collection issues
 
 ## Version 0.4.1.6
-- Added explicit sys.path manipulation to ensure the script directory is in Python's search path.
+- Added explicit sys.path manipulation to ensure the script directory is in Python's search path
 
 ## Version 0.4.1.5
 - Rename upload_image_from_server to upload_image_to_server in runner.py
@@ -146,13 +151,13 @@
 - Fix AYON publishing always creating version 1 - now auto-increments to next version
 
 ## Version 0.4.1.2
-- Make Daddy Mark Happy.
+- Make Daddy Mark Happy
 - Improve UI and flow in republish tab
 - Convert source selector to dropdown button
 - Make product name field read-only
 
 ## Version 0.4.1.1
-- Add Publish to Current AYON Task toggle checkbox to rePublish tab that allows users to publish custom selected renders to their current AYON task instead of the path string.
+- Add Publish to Current AYON Task toggle checkbox to rePublish tab that allows users to publish custom selected renders to their current AYON task instead of the path string
 
 ## Version 0.4.1
 - Fix publishing from viewer
@@ -202,42 +207,43 @@
 - Migrate UI components from PySide2 to PySide6
 
 ## Version 0.28
-- Add unified model loader supporting FBX, OBJ, USD, GLB, GLTF formats 
-- Implement lazy loading for gallery thumbnails with batched loading 
-- Add multi-workflow models with individual settings and editable nodes 
-- Improve metadata caching and batch loading for better performance 
-- Update UI components with tooltip lazy loading and placeholder caching 
-- Add server restart functionality for persistent ComfyUI mode 
-- Refactor GLB-specific modules to unified model handling 
+- Add unified model loader supporting FBX, OBJ, USD, GLB, GLTF formats
+- Implement lazy loading for gallery thumbnails with batched loading
+- Add multi-workflow models with individual settings and editable nodes
+- Improve metadata caching and batch loading for better performance
+- Update UI components with tooltip lazy loading and placeholder caching
+- Add server restart functionality for persistent ComfyUI mode
+- Refactor GLB-specific modules to unified model handling
 - Update dependencies and clean up cache files
 
 ## Version 0.26
-- Introduce multi-workflow models allowing multiple workflows per preset with individual settings 
-- Add UI components for workflow selection and notes display in ComfyUI tab 
-- Implement metadata caching and batch loading for improved gallery performance 
+- Introduce multi-workflow models allowing multiple workflows per preset with individual settings
+- Add UI components for workflow selection and notes display in ComfyUI tab
+- Implement metadata caching and batch loading for improved gallery performance
 - Update workflow presets structure
 
 ## Version 0.25
-- Implement lazy loading for gallery thumbnails to improve performance 
-- Updates to thumbnaill rendering 
-- Add auto-extract textures option for 3D model exports 
-- Add server not found behavior settings for persistent mode 
+- Implement lazy loading for gallery thumbnails to improve performance
+- Updates to thumbnail rendering
+- Add auto-extract textures option for 3D model exports
+- Add server not found behavior settings for persistent mode
 - Add regenerate thumbnails button in settings
 
 ## Version 0.24
-- Add conditional node bypassing based on toggle values in workflows 
+- Add conditional node bypassing based on toggle values in workflows
 - Refactor USD export to use subprocess for avoiding DLL conflicts
 
 ## Version 0.23
-- -Add support for exporting 3D models to ABC, OBJ, USD, and FBX formats from the gallery context menu. Include texture extraction functionality for 3D models. 
-- Update metadata handling to use per-workflow subfolders. 
-- Fix runner to avoid double prefixing filenames and adjust tab reordering logic.
+- Add support for exporting 3D models to ABC, OBJ, USD, and FBX formats from the gallery context menu. Include texture extraction functionality for 3D models
+- Update metadata handling to use per-workflow subfolders
+- Fix runner to avoid double prefixing filenames and adjust tab reordering logic
 
 ## Version 0.22
 - Fix Changelog generation
 
 ## Version 0.21
-- fix installer
+- Fix installer
+
 ## Version 0.20
 - Implement user selector for viewing other users' galleries in network mode with view-only restrictions
 - Add job cancellation functionality for running ComfyUI submissions
@@ -246,12 +252,13 @@
 - Enhance thumbnail widgets with new item highlighting and editable permissions
 - Auto-enable iterate mode when single image selected
 - Background caching updates
+
 ## Version 0.14
 - UI Updates
 
 ## Version 0.13
-- Replace loading overlay with status bar progress 
-- Better batch job polling 
+- Replace loading overlay with status bar progress
+- Better batch job polling
 - Add editable node overrides in Edit Model dialog
 
 ## Version 0.12

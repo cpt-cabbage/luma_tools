@@ -51,15 +51,39 @@ class GalleryManager:
         else:
             return items
 
-    def display_items(self, items):
+    def display_items(self, items, incremental=False):
         """Display items in the gallery.
 
         Args:
             items: List of item dicts (already sorted)
+            incremental: If True, only add new items without clearing existing widgets
         """
-        # Clear existing thumbnails and widget cache
-        # Keep updates disabled - _create_all_widgets will re-enable when done
         container = self.tab.ui.galleryThumbnailContainer
+
+        if incremental and hasattr(self.tab, '_widget_cache') and self.tab._widget_cache:
+            # Incremental update - only add new items in correct sorted positions
+            existing_paths = set(self.tab._widget_cache.keys())
+            new_items = [item for item in items if item['path'] not in existing_paths]
+
+            if new_items:
+                # Disable updates during insertion
+                container.setUpdatesEnabled(False)
+
+                # Store only new items for widget creation (to be inserted later)
+                self.tab._pending_items = [(item['path'], item['type']) for item in new_items]
+                # Also store full sorted items list for proper insertion
+                self.tab._sorted_items_for_insertion = items
+
+                # Update status with new count
+                self.update_status_count(items)
+
+                # Create widgets for new items only
+                self.create_all_widgets_incremental()
+
+                print(f"[Gallery] Incremental update: added {len(new_items)} new items")
+            return
+
+        # Full refresh - clear and rebuild everything
         container.setUpdatesEnabled(False)
 
         while self.tab._flow_layout.count():
@@ -74,21 +98,8 @@ class GalleryManager:
         self.tab._pending_items = [(item['path'], item['type']) for item in items]
         self.tab._load_index = 0
 
-        # Count by type for status
-        image_count = sum(1 for item in items if item['type'] == 'image')
-        model_count = sum(1 for item in items if item['type'] == 'model')
-
         # Update status
-        total_count = len(items)
-        if total_count == 0:
-            self.tab.ui.GalleryStatus.setText("No files found")
-        else:
-            parts = []
-            if image_count > 0:
-                parts.append(f"{image_count} image{'s' if image_count != 1 else ''}")
-            if model_count > 0:
-                parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
-            self.tab.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
+        self.update_status_count(items)
 
         # Connect scroll events for lazy loading (if not already connected)
         if not hasattr(self.tab, '_scroll_connected') or not self.tab._scroll_connected:
@@ -151,6 +162,23 @@ class GalleryManager:
         self.tab._is_editable_cache = self.tab._is_own_gallery()
         self.create_widget_batch()
 
+    def create_all_widgets_incremental(self):
+        """Create thumbnail widgets for incremental update (inserts in sorted positions)."""
+        if not hasattr(self.tab, '_pending_items') or not self.tab._pending_items:
+            # Re-enable updates since we're not creating anything
+            self.tab.ui.galleryThumbnailContainer.setUpdatesEnabled(True)
+            return
+
+        # Ensure widget cache exists
+        if not hasattr(self.tab, '_widget_cache'):
+            self.tab._widget_cache = {}
+
+        # Start batched creation
+        self.tab._widget_create_index = 0
+        self.tab._widget_batch_size = 12
+        self.tab._is_editable_cache = self.tab._is_own_gallery()
+        self.create_widget_batch_incremental()
+
     def create_widget_batch(self):
         """Create a batch of widgets, then schedule the next batch."""
         from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
@@ -206,6 +234,81 @@ class GalleryManager:
 
         # Schedule next batch with small delay to keep UI responsive
         QTimer.singleShot(10, self.create_widget_batch)
+
+    def create_widget_batch_incremental(self):
+        """Create a batch of widgets for incremental update and insert in correct positions."""
+        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+
+        container = self.tab.ui.galleryThumbnailContainer
+
+        if not hasattr(self.tab, '_pending_items') or self.tab._widget_create_index >= len(self.tab._pending_items):
+            # All widgets created - reorder to match sorted list
+            if hasattr(self.tab, '_sorted_items_for_insertion'):
+                sorted_items = self.tab._sorted_items_for_insertion
+                # Remove all widgets from layout (but don't delete them)
+                while self.tab._flow_layout.count():
+                    self.tab._flow_layout.takeAt(0)
+
+                # Add widgets back in sorted order using cache
+                for item_dict in sorted_items:
+                    path = item_dict['path']
+                    if path in self.tab._widget_cache:
+                        widget = self.tab._widget_cache[path]
+                        self.tab._flow_layout.addWidget(widget)
+
+                # Clean up temporary storage
+                delattr(self.tab, '_sorted_items_for_insertion')
+
+            # Re-enable updates and trigger layout
+            container.setUpdatesEnabled(True)
+            self.tab._flow_layout.invalidate()
+            container.updateGeometry()
+
+            # Trigger lazy load for visible items
+            QTimer.singleShot(50, self.tab._load_visible_thumbnails)
+            return
+
+        end_index = min(self.tab._widget_create_index + self.tab._widget_batch_size, len(self.tab._pending_items))
+
+        for i in range(self.tab._widget_create_index, end_index):
+            path, file_type = self.tab._pending_items[i]
+            is_new = path in self.tab._new_items
+            item_output_dir = os.path.dirname(path)
+
+            if file_type == 'model':
+                thumbnail = GLBThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=self.tab._is_editable_cache,
+                    is_new=is_new
+                )
+                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+                thumbnail.deleted.connect(self.tab._on_item_deleted)
+                thumbnail.viewed.connect(self.tab._on_item_viewed)
+            else:
+                thumbnail = GalleryThumbnailWidget(
+                    path,
+                    container,
+                    output_dir=item_output_dir,
+                    editable=self.tab._is_editable_cache,
+                    is_new=is_new
+                )
+                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+                thumbnail.fullscreen_requested.connect(
+                    lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
+                )
+                thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
+                thumbnail.deleted.connect(self.tab._on_item_deleted)
+                thumbnail.viewed.connect(self.tab._on_item_viewed)
+
+            self.tab._widget_cache[path] = thumbnail
+            # Don't add to layout yet - will be reordered after all widgets are created
+
+        self.tab._widget_create_index = end_index
+
+        # Schedule next batch
+        QTimer.singleShot(10, self.create_widget_batch_incremental)
 
     def load_visible_thumbnails(self):
         """Load thumbnails for widgets that are currently visible in the viewport.
