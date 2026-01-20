@@ -483,18 +483,29 @@ def submit_comfyui_job(
             if not os.path.exists(file_dest) or os.path.getmtime(current_file) > os.path.getmtime(file_dest):
                 shutil.copy2(current_file, file_dest)
 
-        # Copy additional 3D models if present in editable values
+        # Copy additional files (images, 3D models) from editable values
         if current_editable_values:
             for _, data in current_editable_values.items():
                 node_info = data.get('node')
                 value = data.get('value')
-                # Skip the primary input file (already copied above)
-                if node_info and node_info.widget_type == '3d_model' and value and value != current_file:
-                    if os.path.exists(value):
-                        model_basename = os.path.basename(value)
-                        model_dest = os.path.join(current_working_dir, model_basename)
-                        if not os.path.exists(model_dest) or os.path.getmtime(value) > os.path.getmtime(model_dest):
-                            shutil.copy2(value, model_dest)
+
+                # Handle both image and 3D model widgets
+                if node_info and node_info.widget_type in ('image', '3d_model'):
+                    # Value might be a string or a list
+                    files_to_copy = []
+                    if isinstance(value, list):
+                        files_to_copy = value
+                    elif value:
+                        files_to_copy = [value]
+
+                    for file_path in files_to_copy:
+                        # Skip the primary input file (already copied above)
+                        if file_path and file_path != current_file and os.path.exists(file_path):
+                            file_base = os.path.basename(file_path)
+                            file_dest = os.path.join(current_working_dir, file_base)
+                            if not os.path.exists(file_dest) or os.path.getmtime(file_path) > os.path.getmtime(file_dest):
+                                shutil.copy2(file_path, file_dest)
+                                print(f"Copied {node_info.widget_type} file: {file_base}")
 
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,

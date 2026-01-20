@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4.6.4
+- Fix path lists for multi image workflows
+
 ## Version 0.4.6.3
 - Add memory management flags for ComfyUI persistent server mode
 

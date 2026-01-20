@@ -96,9 +96,6 @@ class PollingMixin:
         self.log(f"[Iterate] Network output dir: {network_output_dir}")
         self.log(f"[Iterate] Expected jobs: {self._iterate_total_tasks}")
 
-        # Save job state for recovery on app restart
-        self._save_running_job_state()
-
         self.main_window.start_status_spinner()
 
         self.ui.ComfyUIIterateStatus.setText("Job submitted, waiting for Deadline...")
@@ -117,6 +114,10 @@ class PollingMixin:
 
         self._iterate_poll_timer.start(5000)
         self._update_cancel_button_visibility()
+
+        # Save job state for recovery on app restart (after timer is started)
+        self._save_running_job_state()
+
         self._poll_iterate_job()
 
     def _poll_iterate_job(self):
@@ -397,9 +398,6 @@ class PollingMixin:
 
         self.log(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
 
-        # Save job state for recovery on app restart
-        self._save_running_job_state()
-
         self.main_window.start_status_spinner()
 
         self.main_window.animator.update_status_animated(
@@ -413,6 +411,10 @@ class PollingMixin:
 
         self._batch_poll_timer.start(10000)
         self._update_cancel_button_visibility()
+
+        # Save job state for recovery on app restart (after timer is started)
+        self._save_running_job_state()
+
         self._poll_batch_jobs()
 
     def _poll_batch_jobs(self):
