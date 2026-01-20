@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.4.6.3
+- Add memory management flags for ComfyUI persistent server mode
+
 
 ## Version 0.4.6.2
 - UI fix
