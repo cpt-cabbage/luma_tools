@@ -57,6 +57,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_fast_mode": SettingDef("comfyui_fast_mode", False, "global"),
     "comfyui_fp16_accumulation": SettingDef("comfyui_fp16_accumulation", False, "global"),
     "comfyui_lowvram": SettingDef("comfyui_lowvram", False, "global"),
+    "comfyui_highvram": SettingDef("comfyui_highvram", False, "global"),
+    "comfyui_normalvram": SettingDef("comfyui_normalvram", False, "global"),
+    "comfyui_disable_smart_memory": SettingDef("comfyui_disable_smart_memory", False, "global"),
     "comfyui_network_output_path": SettingDef("comfyui_network_output_path", "", "global"),
     "comfyui_timeout": SettingDef("comfyui_timeout", 3600, "global", _validate_timeout),
     "comfyui_server_not_found_behavior": SettingDef(

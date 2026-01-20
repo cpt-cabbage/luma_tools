@@ -719,6 +719,36 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="ComfyUIHighVRAM">
+              <property name="text">
+               <string>High VRAM Mode (--highvram)</string>
+              </property>
+              <property name="toolTip">
+               <string>Keep models loaded in VRAM between inferences. Best for persistent server mode with high-end GPUs (24GB+).</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="ComfyUINormalVRAM">
+              <property name="text">
+               <string>Normal VRAM Mode (--normalvram)</string>
+              </property>
+              <property name="toolTip">
+               <string>Use default ComfyUI memory management with smart model unloading.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="ComfyUIDisableSmartMemory">
+              <property name="text">
+               <string>Disable Smart Memory (--disable-smart-memory)</string>
+              </property>
+              <property name="toolTip">
+               <string>Disable automatic model unloading. Maximum memory usage, but models never unload. Best for dedicated servers.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer name="performanceFlagsSpacer">
               <property name="orientation">
                <enum>Qt::Horizontal</enum>

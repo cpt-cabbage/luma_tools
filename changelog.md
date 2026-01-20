@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+
+## Version 0.4.6.2
+- UI fix
+
 ## Version 0.4.6.1
 - Fix User feedback
 - Fix Prompt copy

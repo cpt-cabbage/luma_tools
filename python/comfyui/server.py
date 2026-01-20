@@ -565,6 +565,15 @@ def main():
     parser.add_argument('--lowvram', action='store_true',
                         default=global_settings.get('comfyui_lowvram', False),
                         help='Enable low VRAM mode (default from global settings)')
+    parser.add_argument('--highvram', action='store_true',
+                        default=global_settings.get('comfyui_highvram', False),
+                        help='Keep models in VRAM (default from global settings)')
+    parser.add_argument('--normalvram', action='store_true',
+                        default=global_settings.get('comfyui_normalvram', False),
+                        help='Use normal VRAM mode (default from global settings)')
+    parser.add_argument('--disable-smart-memory', action='store_true',
+                        default=global_settings.get('comfyui_disable_smart_memory', False),
+                        help='Disable smart memory management to keep models loaded (default from global settings)')
     parser.add_argument('--gpu-only', action='store_true', help='Run everything on GPU')
     parser.add_argument('--fast', action='store_true',
                         default=global_settings.get('comfyui_fast_mode', False),
@@ -600,6 +609,12 @@ def main():
         extra_args.extend(['--extra-model-paths-config', args.extra_model_paths])
     if args.lowvram:
         extra_args.append('--lowvram')
+    if args.highvram:
+        extra_args.append('--highvram')
+    if args.normalvram:
+        extra_args.append('--normalvram')
+    if args.disable_smart_memory:
+        extra_args.append('--disable-smart-memory')
     if args.gpu_only:
         extra_args.append('--gpu-only')
     if args.fast:
@@ -627,6 +642,12 @@ def main():
     flags_enabled = []
     if args.lowvram:
         flags_enabled.append("--lowvram")
+    if args.highvram:
+        flags_enabled.append("--highvram")
+    if args.normalvram:
+        flags_enabled.append("--normalvram")
+    if args.disable_smart_memory:
+        flags_enabled.append("--disable-smart-memory")
     if args.fast:
         flags_enabled.append("--fast")
     if args.gpu_only:

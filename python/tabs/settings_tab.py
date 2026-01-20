@@ -325,6 +325,14 @@ class SettingsTab(BaseTab):
         self.ui.ComfyUIFP16Accumulation.setChecked(get_setting("comfyui_fp16_accumulation"))
         self.ui.ComfyUILowVRAM.setChecked(get_setting("comfyui_lowvram"))
 
+        # ComfyUI memory management settings
+        if hasattr(self.ui, 'ComfyUIHighVRAM'):
+            self.ui.ComfyUIHighVRAM.setChecked(get_setting("comfyui_highvram"))
+        if hasattr(self.ui, 'ComfyUINormalVRAM'):
+            self.ui.ComfyUINormalVRAM.setChecked(get_setting("comfyui_normalvram"))
+        if hasattr(self.ui, 'ComfyUIDisableSmartMemory'):
+            self.ui.ComfyUIDisableSmartMemory.setChecked(get_setting("comfyui_disable_smart_memory"))
+
         # ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
             timeout_seconds = get_setting("comfyui_timeout")
@@ -621,6 +629,14 @@ class SettingsTab(BaseTab):
         set_setting("comfyui_fast_mode", self.ui.ComfyUIFastMode.isChecked())
         set_setting("comfyui_fp16_accumulation", self.ui.ComfyUIFP16Accumulation.isChecked())
         set_setting("comfyui_lowvram", self.ui.ComfyUILowVRAM.isChecked())
+
+        # Save ComfyUI memory management settings
+        if hasattr(self.ui, 'ComfyUIHighVRAM'):
+            set_setting("comfyui_highvram", self.ui.ComfyUIHighVRAM.isChecked())
+        if hasattr(self.ui, 'ComfyUINormalVRAM'):
+            set_setting("comfyui_normalvram", self.ui.ComfyUINormalVRAM.isChecked())
+        if hasattr(self.ui, 'ComfyUIDisableSmartMemory'):
+            set_setting("comfyui_disable_smart_memory", self.ui.ComfyUIDisableSmartMemory.isChecked())
 
         # Save ComfyUI timeout setting
         if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):

@@ -86,7 +86,10 @@
   "comfyui_use_user_subfolder": true,
   "comfyui_fast_mode": true,
   "comfyui_fp16_accumulation": true,
-  "comfyui_lowvram": true,
+  "comfyui_lowvram": false,
+  "comfyui_highvram": true,
+  "comfyui_normalvram": false,
+  "comfyui_disable_smart_memory": false,
   "restricted_tabs": [
     "comfyui",
     "comfyui_gallery"
