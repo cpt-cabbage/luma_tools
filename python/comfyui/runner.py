@@ -90,10 +90,23 @@ class TeeWriter:
         self.log_file.flush()
 
 
-def setup_logging(job_name: str = None) -> str:
-    """Set up file logging by redirecting stdout/stderr to also write to a log file."""
-    log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-    os.makedirs(log_dir, exist_ok=True)
+def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
+    """Set up file logging by redirecting stdout/stderr to also write to a log file.
+
+    Args:
+        job_name: Optional job name for log filename
+        network_output_dir: Optional network directory to write log (makes it accessible from all machines)
+
+    Returns:
+        Path to the log file
+    """
+    # Write log to network output dir if provided (accessible from all machines)
+    # Otherwise fall back to local user directory
+    if network_output_dir and os.path.isdir(network_output_dir):
+        log_dir = network_output_dir
+    else:
+        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if job_name:
@@ -305,7 +318,7 @@ def main():
 
     args = parser.parse_args()
 
-    setup_logging(args.output_prefix)
+    setup_logging(args.output_prefix, args.output_directory)
 
     # Determine paths based on mode
     if args.mode == "embedded":

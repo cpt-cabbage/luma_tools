@@ -625,11 +625,14 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         rendering_tasks = 0
         error_reports = 0
         error_message = ""
+        job_name = ""
 
         for line in output.split('\n'):
             line = line.strip()
             if line.startswith("Status="):
                 status = line.split('=', 1)[1]
+            elif line.startswith("Name="):
+                job_name = line.split('=', 1)[1]
             elif line.startswith("CompletedTasks=") or line.startswith("CompletedChunks="):
                 completed_tasks = int(line.split('=', 1)[1])
             elif line.startswith("FailedTasks=") or line.startswith("FailedChunks="):
@@ -680,18 +683,37 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         # Try to get detailed progress for rendering tasks
         task_progress = None
         is_loading_model = False
-        if status == "Rendering" and rendering_tasks > 0:
-            # Find the first rendering task (usually task 0-based index = completed_tasks)
-            active_task_id = completed_tasks
-            log_content = get_task_log(job_id, active_task_id)
+        if status in ("Rendering", "Active") and rendering_tasks > 0:
+            # First try to read the runner log from the network output directory
+            # This is available immediately and contains all ComfyUI output
+            log_content = None
+            if output_dir and job_name:
+                # Extract the output prefix from the job name (e.g., "LUMA TOOLS - luma_tools_job_xyz" -> "luma_tools_job_xyz")
+                if job_name.startswith("LUMA TOOLS - "):
+                    output_prefix = job_name[len("LUMA TOOLS - "):]
+                    log_content = get_runner_log_from_network(output_dir, output_prefix)
+                    if log_content:
+                        print(f"[Poll Debug] Job {job_id}: Got {len(log_content)} bytes from network log")
+
+            # Fall back to Deadline task log if network log not available
+            if not log_content:
+                active_task_id = completed_tasks
+                log_content = get_task_log(job_id, active_task_id)
+                if log_content:
+                    print(f"[Poll Debug] Job {job_id} task {active_task_id}: Got {len(log_content)} bytes from Deadline log")
+
             if log_content:
                 task_progress = extract_task_progress(log_content)
                 if task_progress:
                     is_loading_model = task_progress.get('is_loading_model', False)
                     if is_loading_model:
-                        print(f"[Poll Debug] Job {job_id} task {active_task_id}: Loading model...")
+                        print(f"[Poll Debug] Job {job_id}: Loading model...")
                     else:
-                        print(f"[Poll Debug] Job {job_id} task {active_task_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
+                        print(f"[Poll Debug] Job {job_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
+                else:
+                    print(f"[Poll Debug] Job {job_id}: No progress extracted from log")
+            else:
+                print(f"[Poll Debug] Job {job_id}: No log content available yet")
 
         return {
             "status": status,
@@ -741,6 +763,45 @@ def get_task_log(job_id: str, task_id: int) -> Optional[str]:
             return result.stdout
         return None
     except Exception:
+        return None
+
+
+def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]:
+    """
+    Get the ComfyUI runner log from the network output directory.
+
+    The runner writes logs to the network output directory with pattern:
+    comfyui_runner_{job_name}_{timestamp}.log
+
+    Args:
+        output_dir: Network output directory
+        job_name: Job name/output prefix
+
+    Returns:
+        Log file contents, or None if not found/readable
+    """
+    import glob
+    try:
+        if not output_dir or not os.path.isdir(output_dir):
+            return None
+
+        # Find the most recent log file matching the job name
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)[:50]
+        pattern = os.path.join(output_dir, f"comfyui_runner_{safe_name}_*.log")
+        log_files = glob.glob(pattern)
+
+        if not log_files:
+            return None
+
+        # Get the most recent log file
+        latest_log = max(log_files, key=os.path.getmtime)
+
+        # Read the log file
+        with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+
+    except Exception as e:
+        print(f"[Debug] Error reading runner log: {e}")
         return None
 
 

@@ -59,6 +59,7 @@ class PollingMixin:
         self._iterate_completed_tasks = 0
         self._iterate_total_tasks = 1
         self._iterate_start_time = None
+        self._iterate_rendering_start_time = None  # Track when rendering actually started
 
         # Batch mode state
         self._batch_poll_timer = None
@@ -155,6 +156,23 @@ class PollingMixin:
         is_loading_model = result.get("is_loading_model", False)
 
         display_total = max(total_tasks, self._iterate_total_tasks)
+
+        # Track when rendering actually starts
+        if status in ("Active", "Rendering") and self._iterate_rendering_start_time is None:
+            self._iterate_rendering_start_time = time.time()
+            self.log(f"[Iterate Poll] Rendering started at {time.time()}")
+
+        # Infer model loading if rendering but no progress for a while
+        # If we've been rendering for >5 seconds with no task progress, assume loading models
+        if status in ("Active", "Rendering") and not task_progress and self._iterate_rendering_start_time:
+            rendering_elapsed = time.time() - self._iterate_rendering_start_time
+            if rendering_elapsed > 5:  # After 5 seconds with no progress, assume loading models
+                is_loading_model = True
+                self.log(f"[Iterate Poll] Inferring model loading (rendering for {int(rendering_elapsed)}s with no progress)")
+
+        # If we got task progress, models are loaded - reset the flag for next job
+        if task_progress and task_progress.get('current_node', 0) > 0:
+            self._iterate_rendering_start_time = None
 
         self.log(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{display_total}")
 
