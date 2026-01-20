@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.4.6.1
+- Fix User feedback
+- Fix Prompt copy
+
 ## Version 0.4.6
 - Add multi-select support to ComfyUI Gallery
 - UI updates
