@@ -7,7 +7,7 @@ The actual implementations are in:
 - styles.py: Style constants (LoadingStyles, StatusColors)
 - spinners.py: Loading animations (SpinnerWidget, InlineSpinner, PulsingDotsWidget)
 - effects.py: Visual effects (TabGlowEffect, TabGlowManager, UIAnimations)
-- notifications.py: Notification widgets (ToastNotification, ComfyUIStatusBanner)
+- notifications.py: Notification widgets (ComfyUIStatusBanner)
 - layouts.py: Custom layouts (FlowLayout)
 - dialogs.py: Edit dialogs (EditItemDialog, EditModelDialog)
 - batch_selector.py: Image selection (BatchImageSelector)
@@ -28,7 +28,7 @@ from workers import Worker, WorkerSignals, ThreadedOperation, report_progress
 from styles import LoadingStyles, StatusColors, load_stylesheet as _load_simple_stylesheet, apply_stylesheet as _apply_simple_stylesheet
 from spinners import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner
 from effects import TabGlowEffect, TabGlowManager, UIAnimations
-from notifications import ToastNotification, ComfyUIStatusBanner
+from notifications import ComfyUIStatusBanner
 from layouts import FlowLayout
 from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog
 from batch_selector import BatchImageSelector

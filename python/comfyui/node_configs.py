@@ -209,6 +209,8 @@ SKIP_NODE_TYPES = [
     # Preview/display nodes that don't affect output
     # NOTE: Preview3D is NOT skipped - it can trigger execution of 3D pipelines
     'PreviewImage', 'PreviewBridge',
+    # rgthree UI-only control nodes
+    'Fast Groups Muter (rgthree)', 'Image Comparer (rgthree)',
 ]
 
 

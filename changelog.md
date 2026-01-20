@@ -1,5 +1,21 @@
 # Luma Tools Changelog
 
+## Version 0.4.5
+- Enhance batch image selector with visual pairing for multiple LoadImage nodes
+- Add square grid layout for batch image thumbnails 
+- Implement color-coded borders to show which images will pair with which nodes
+- Add drag-and-drop reordering of images in batch selector
+- Display order numbers in corner of each thumbnail
+- Show pairing statistics in count label (images per node)
+- Support double-click to remove images from batch selection
+- Remove toast notifications 
+
+## Version 0.4.4
+- Add model loading detection in ComfyUI polling with improved status messages
+- Implement horizontal layout for multiple image widgets in UI manager
+- Add image_viewed signals to gallery viewers
+- Update server defaults from global settings and improve encoding handling to handle all the emojis
+
 ## Version 0.4.3.7
 - Add Low VRAM mode setting for ComfyUI (--lowvram flag) 
 - ComfyUI server now reads global settings automatically (lowvram, fast mode) 

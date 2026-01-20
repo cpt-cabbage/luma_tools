@@ -466,31 +466,19 @@ class UIAnimations:
         if animation in self._animations:
             self._animations.remove(animation)
 
-    # Toast notification methods - import locally to avoid circular imports
+    # Logging methods (toast notifications removed)
     def show_success(self, message):
-        """Show a success toast notification."""
-        from notifications import ToastNotification
+        """Log a success message."""
         print(f"SUCCESS: {message}")
-        toast = ToastNotification(message, "success", self.parent)
-        toast.show_toast()
 
     def show_error(self, message):
-        """Show an error toast notification."""
-        from notifications import ToastNotification
+        """Log an error message."""
         print(f"ERROR: {message}")
-        toast = ToastNotification(message, "error", self.parent)
-        toast.show_toast()
 
     def show_warning(self, message):
-        """Show a warning toast notification."""
-        from notifications import ToastNotification
+        """Log a warning message."""
         print(f"WARNING: {message}")
-        toast = ToastNotification(message, "warning", self.parent)
-        toast.show_toast()
 
     def show_info(self, message):
-        """Show an info toast notification."""
-        from notifications import ToastNotification
+        """Log an info message."""
         print(f"INFO: {message}")
-        toast = ToastNotification(message, "info", self.parent)
-        toast.show_toast()

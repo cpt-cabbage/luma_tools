@@ -90,15 +90,25 @@ class ComfyUIWidgetManager:
 
         editable_nodes = extract_editable_nodes(workflow_path)
 
+        # Count total image nodes for pairing calculation
+        total_image_nodes = sum(1 for node in editable_nodes
+                               if node.widget_type == 'image'
+                               and node_overrides.get(str(node.node_id), node_overrides.get(node.title, {})).get("enabled", True))
+        print(f"[ComfyUI] Node overrides: {node_overrides}")
+        print(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
+
         # Collect image widgets separately for horizontal layout
         image_widgets = []  # List of (widget, node) tuples
 
         # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
             # Check if this node is disabled via overrides
-            override = node_overrides.get(node.title, {})
+            # Support both node_id (new, unique) and title (legacy, may not be unique)
+            # Prefer node_id if available, fall back to title
+            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
             if not override.get("enabled", True):
                 # Node is disabled, skip it
+                print(f"[ComfyUI] Skipping disabled node: {node.title} (ID: {node.node_id}, type: {node.widget_type})")
                 continue
 
             # Apply default value override if present (for text and string nodes)
@@ -107,7 +117,7 @@ class ComfyUIWidgetManager:
                 # Override the current_value with the default
                 node.current_value = default_value
 
-            widget = self._create_editable_node_widget(node)
+            widget = self._create_editable_node_widget(node, total_image_nodes)
             if widget:
                 # Store the node info on the widget for condition handling
                 widget.editable_node = node
@@ -120,7 +130,9 @@ class ComfyUIWidgetManager:
                     self.layout.addWidget(widget)
 
         # Add image widgets in a horizontal layout if there are multiple
+        print(f"[ComfyUI] Total image widgets to add: {len(image_widgets)}")
         if len(image_widgets) > 1:
+            print(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
             image_row_container = QWidget()
             image_row_layout = QHBoxLayout(image_row_container)
             image_row_layout.setContentsMargins(0, 5, 0, 5)
@@ -134,12 +146,17 @@ class ComfyUIWidgetManager:
             image_row_container.is_image_row = True
         elif len(image_widgets) == 1:
             # Single image widget - add normally (vertically)
-            self.layout.addWidget(image_widgets[0][0])
+            print(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
+            widget = image_widgets[0][0]
+            widget.setVisible(True)  # Explicitly set visible
+            self.layout.addWidget(widget)
+            print(f"[ComfyUI] Widget added to layout, visible: {widget.isVisible()}")
 
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:
             # Skip disabled nodes
-            override = node_overrides.get(node.title, {})
+            # Support both node_id (new, unique) and title (legacy)
+            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
             if not override.get("enabled", True):
                 continue
 
@@ -207,8 +224,13 @@ class ComfyUIWidgetManager:
             if widget:
                 widget.setVisible(checked)
 
-    def _create_editable_node_widget(self, node):
-        """Create a widget for an editable node."""
+    def _create_editable_node_widget(self, node, total_image_nodes=1):
+        """Create a widget for an editable node.
+
+        Args:
+            node: EditableNode object
+            total_image_nodes: Total number of image nodes in the workflow (for pairing)
+        """
         from ui_components import BatchImageSelector
         from ui.spell_checker import SpellCheckTextEdit
         from core.user_preferences import get_last_browse_directory
@@ -281,7 +303,7 @@ class ComfyUIWidgetManager:
             label = QLabel(f"{node.display_name}:")
             layout.addWidget(label)
 
-            input_widget = BatchImageSelector()
+            input_widget = BatchImageSelector(total_image_nodes=total_image_nodes)
             # Set last browse directory for image selector
             last_dir = get_last_browse_directory("comfyui_images")
             if last_dir:

@@ -784,6 +784,12 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
         r'Trellis.*Loading',
         r'Loading.*safetensors',
         r'Loading.*ckpt',
+        r'CLIP/text encoder model load device',
+        r'VAE load device',
+        r'model_type\s+FLUX',
+        r'Requested to load',
+        r'Using.*Ops for text encoder',
+        r'model weight dtype',
     ]
 
     # Check for model loading indicators

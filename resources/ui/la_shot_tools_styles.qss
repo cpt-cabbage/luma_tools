@@ -626,19 +626,6 @@ QLineEdit:focus {
  * MODERN COMPONENTS - EXTENSIONS
  * ============================================================================ */
 
-/* Toast Notifications */
-#ToastNotification {
-    background-color: rgba(33, 37, 43, 0.95);
-    border: 1px solid #4a9eff;
-    border-radius: 8px;
-    padding: 12px;
-}
-
-#ToastNotification QLabel {
-    color: #ffffff;
-    font-weight: 600;
-}
-
 /* ComfyUI Specifics */
 #ComfyUIStatusBanner {
     background-color: #2c3e50;

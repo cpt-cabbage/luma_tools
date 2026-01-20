@@ -1,40 +1,5 @@
 {
   "comfyui_workflow_presets": {
-    "Image Editing/Qwen Image Edit": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511.json",
-      "description": "",
-      "iteratable": false,
-      "note": "",
-      "full_restart": false,
-      "node_overrides": {},
-      "is_multi": true,
-      "workflows": {
-        "Fast": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511.json",
-          "note": "",
-          "iteratable": true,
-          "full_restart": false,
-          "node_overrides": {
-            "Negative Prompt_editable": {
-              "enabled": false,
-              "default_value": ""
-            }
-          }
-        },
-        "High Quality": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/Qwen_Image_Edit_2511_HQ.json",
-          "note": "",
-          "iteratable": true,
-          "full_restart": false,
-          "node_overrides": {
-            "Negative Prompt_editable": {
-              "enabled": false,
-              "default_value": ""
-            }
-          }
-        }
-      }
-    },
     "Geometry\\Trellis": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
       "description": "",
@@ -73,6 +38,40 @@
         }
       },
       "is_multi": false
+    },
+    "Qwen Image Edit 2511": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
+      "description": "",
+      "iteratable": false,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": true,
+      "workflows": {
+        "Single Input": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
+          "note": "",
+          "iteratable": true,
+          "full_restart": false,
+          "node_overrides": {
+            "218": {
+              "enabled": false,
+              "default_value": ""
+            },
+            "217": {
+              "enabled": false,
+              "default_value": ""
+            }
+          }
+        },
+        "Multi Input": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
+          "note": "",
+          "iteratable": true,
+          "full_restart": false,
+          "node_overrides": {}
+        }
+      }
     }
   },
   "comfyui_path": "C:\\ComfyUI\\",

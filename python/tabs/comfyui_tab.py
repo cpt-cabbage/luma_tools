@@ -717,7 +717,8 @@ class ComfyUITab(PollingMixin, BaseTab):
                     return
 
                 for node in editable_nodes:
-                    override = current_wf_node_overrides.get(node.title, {})
+                    # Support both node_id (new, unique) and title (legacy) for backwards compatibility
+                    override = current_wf_node_overrides.get(str(node.node_id), current_wf_node_overrides.get(node.title, {}))
                     is_enabled = override.get("enabled", True)
                     default_value = override.get("default_value", "")
 
@@ -750,7 +751,8 @@ class ComfyUITab(PollingMixin, BaseTab):
                         node_row_layout.addWidget(spacer, 1)
 
                     nodes_scroll_layout.addWidget(node_row)
-                    wf_node_override_widgets[node.title] = {
+                    # Use node_id as key instead of title to ensure uniqueness
+                    wf_node_override_widgets[str(node.node_id)] = {
                         "enable_check": enable_check,
                         "default_input": default_input,
                         "node": node
@@ -888,7 +890,8 @@ class ComfyUITab(PollingMixin, BaseTab):
 
             for node in editable_nodes:
                 # Get existing override for this node
-                override = current_node_overrides.get(node.title, {})
+                # Support both node_id (new, unique) and title (legacy) for backwards compatibility
+                override = current_node_overrides.get(str(node.node_id), current_node_overrides.get(node.title, {}))
                 is_enabled = override.get("enabled", True)
                 default_value = override.get("default_value", "")
 
@@ -909,7 +912,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 type_indicator = f" ({node.widget_type})" if node.widget_type != 'text' else ""
                 node_name_label = QLabel(f"{node.display_name}{type_indicator}")
                 node_name_label.setFixedWidth(180)
-                node_name_label.setToolTip(f"Node: {node.title}\nType: {node.node_type}\nWidget: {node.widget_type}")
+                node_name_label.setToolTip(f"Node: {node.title}\nID: {node.node_id}\nType: {node.node_type}\nWidget: {node.widget_type}")
                 node_row_layout.addWidget(node_name_label)
 
                 # Default value input - show for text and string nodes
@@ -928,7 +931,8 @@ class ComfyUITab(PollingMixin, BaseTab):
                 nodes_scroll_layout.addWidget(node_row)
 
                 # Store reference for later retrieval
-                node_override_widgets[node.title] = {
+                # Use node_id as key instead of title to ensure uniqueness
+                node_override_widgets[str(node.node_id)] = {
                     "enable_check": enable_check,
                     "default_input": default_input,
                     "node": node
@@ -1009,12 +1013,14 @@ class ComfyUITab(PollingMixin, BaseTab):
                         wf_node_overrides = {}
                         node_override_widgets = entry_data.get("node_override_widgets", {})
                         if node_override_widgets:
-                            for node_title, widgets in node_override_widgets.items():
+                            # node_override_widgets now uses node_id as key (see line 753)
+                            for node_key, widgets in node_override_widgets.items():
                                 is_enabled = widgets["enable_check"].isChecked()
                                 default_input = widgets["default_input"]
                                 default_value = default_input.text().strip() if default_input else ""
                                 if not is_enabled or default_value:
-                                    wf_node_overrides[node_title] = {
+                                    # Use node_id as key to ensure uniqueness
+                                    wf_node_overrides[node_key] = {
                                         "enabled": is_enabled,
                                         "default_value": default_value
                                     }
@@ -1051,12 +1057,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
                 # Collect node overrides from widgets
                 new_node_overrides = {}
-                for node_title, widgets in node_override_widgets.items():
+                # node_override_widgets now uses node_id as key (see line 933)
+                for node_key, widgets in node_override_widgets.items():
                     is_enabled = widgets["enable_check"].isChecked()
                     default_input = widgets["default_input"]
                     default_value = default_input.text().strip() if default_input else ""
                     if not is_enabled or default_value:
-                        new_node_overrides[node_title] = {
+                        # Use node_id as key to ensure uniqueness
+                        new_node_overrides[node_key] = {
                             "enabled": is_enabled,
                             "default_value": default_value
                         }
