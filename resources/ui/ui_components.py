@@ -69,7 +69,7 @@ class MetadataCopyMixin:
 
         try:
             clipboard = QApplication.clipboard()
-            clipboard.setText(prompt)
+            clipboard.setText(prompt, mode=clipboard.Mode.Clipboard)
             self._show_feedback(f"Prompt copied: {prompt[:50]}...")
         except Exception as e:
             print(f"Error copying prompt: {e}")

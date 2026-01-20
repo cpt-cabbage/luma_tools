@@ -887,7 +887,7 @@ class EmbeddedImageViewer(QWidget):
             metadata = get_image_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
-                clipboard.setText(metadata['prompt'])
+                clipboard.setText(metadata['prompt'], mode=clipboard.Mode.Clipboard)
                 self.filename_label.setText(f"{filename} - Prompt copied!")
                 QTimer.singleShot(1500, self._update_info)
             else:
@@ -1264,7 +1264,7 @@ class FullscreenImageViewer(QWidget):
             metadata = get_image_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
-                clipboard.setText(metadata['prompt'])
+                clipboard.setText(metadata['prompt'], mode=clipboard.Mode.Clipboard)
                 self.filename_label.setText(f"{filename} - Prompt copied!")
                 QTimer.singleShot(1500, self._update_info)
             else:

@@ -110,7 +110,8 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if job_name:
-        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)[:50]
+        # Don't truncate - UUIDs can be longer than 50 chars
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
         log_filename = f"comfyui_runner_{safe_name}_{timestamp}.log"
     else:
         log_filename = f"comfyui_runner_{timestamp}.log"
