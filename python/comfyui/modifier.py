@@ -92,8 +92,16 @@ def modify_workflow_api_format(
                 print(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
             elif widget_type == 'image':
                 if value:
-                    inputs['image'] = os.path.basename(value)
-                    print(f"  Set image node {node_id} ({node_type}): {os.path.basename(value)}")
+                    # Handle both string paths and lists (from batch selector)
+                    if isinstance(value, list):
+                        # If it's a list, use the first item
+                        image_path = value[0] if value else None
+                    else:
+                        image_path = value
+
+                    if image_path:
+                        inputs['image'] = os.path.basename(image_path)
+                        print(f"  Set image node {node_id} ({node_type}): {os.path.basename(image_path)}")
             elif widget_type == 'int':
                 inputs['seed'] = value
                 inputs['noise_seed'] = value
@@ -112,8 +120,15 @@ def modify_workflow_api_format(
             elif widget_type == '3d_model':
                 # 3D model file path
                 if value:
-                    inputs['model_file'] = os.path.basename(value)
-                    print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(value)}")
+                    # Handle both string paths and lists
+                    if isinstance(value, list):
+                        model_path = value[0] if value else None
+                    else:
+                        model_path = value
+
+                    if model_path:
+                        inputs['model_file'] = os.path.basename(model_path)
+                        print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
 
     # Build a map of toggle node names to their values (True/False)
     # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name
