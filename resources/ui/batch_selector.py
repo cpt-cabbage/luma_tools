@@ -167,6 +167,10 @@ class BatchImageSelector(QWidget):
         self._total_image_nodes = total_image_nodes  # Total number of LoadImage nodes
         self._dragged_widget = None
 
+        # Set size policy to expand vertically
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -197,12 +201,13 @@ class BatchImageSelector(QWidget):
                 background-color: #2c313a;
                 border: 2px dashed #3c414b;
                 border-radius: 6px;
-                min-height: 150px;
             }
             QFrame:hover {
                 border-color: #4a9eff;
             }
         """)
+        # Set size policy to expand vertically
+        self.drop_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_frame.setAcceptDrops(True)
 
         drop_layout = QVBoxLayout(self.drop_frame)
@@ -234,8 +239,8 @@ class BatchImageSelector(QWidget):
         self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.scroll_area.setWidget(self.grid_container)
 
-        drop_layout.addWidget(self.scroll_area)
-        self.main_layout.addWidget(self.drop_frame)
+        drop_layout.addWidget(self.scroll_area, 1)  # Stretch factor to expand
+        self.main_layout.addWidget(self.drop_frame, 1)  # Stretch factor to expand
 
         # Enable drag and drop
         self.setAcceptDrops(True)

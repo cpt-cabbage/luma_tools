@@ -578,6 +578,9 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_source_toggle(self):
         """Toggle between network folder and custom folder."""
+        # Always stay in network mode - toggle disabled
+        return
+
         # Close embedded viewer before switching source
         self._close_embedded_viewer()
 

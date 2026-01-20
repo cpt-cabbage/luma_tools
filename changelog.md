@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.4.5.1
+- Added job persistence/recovery
+- Luma tools should pick up running jobs if you close and open now.
+- Fix ComfyUI Gallery flashing when new images appear
+- UI Tweaks
+
 ## Version 0.4.5
 - Improve batch image selector with visual pairing for multiple LoadImage nodes
 - Add square grid layout for batch image thumbnails

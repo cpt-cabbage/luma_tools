@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy
 )
 
 
@@ -97,8 +97,9 @@ class ComfyUIWidgetManager:
         print(f"[ComfyUI] Node overrides: {node_overrides}")
         print(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
 
-        # Collect image widgets separately for horizontal layout
-        image_widgets = []  # List of (widget, node) tuples
+        # Collect widgets separately for horizontal layout
+        non_image_widgets = []  # List of (widget, node) tuples for text, toggles, etc.
+        image_widgets = []  # List of (widget, node) tuples for images
 
         # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
@@ -123,34 +124,76 @@ class ComfyUIWidgetManager:
                 widget.editable_node = node
                 self.dynamic_widgets[node.node_id] = widget
 
-                # Collect image widgets for horizontal layout
+                # Separate image widgets from non-image widgets
                 if node.widget_type == 'image':
                     image_widgets.append((widget, node))
                 else:
-                    self.layout.addWidget(widget)
+                    non_image_widgets.append((widget, node))
 
-        # Add image widgets in a horizontal layout if there are multiple
-        print(f"[ComfyUI] Total image widgets to add: {len(image_widgets)}")
-        if len(image_widgets) > 1:
-            print(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
-            image_row_container = QWidget()
-            image_row_layout = QHBoxLayout(image_row_container)
-            image_row_layout.setContentsMargins(0, 5, 0, 5)
-            image_row_layout.setSpacing(10)
+        # Layout strategy: if we have both non-image and image widgets, arrange horizontally
+        # (non-image on left, images on right). Otherwise, arrange vertically.
+        print(f"[ComfyUI] Non-image widgets: {len(non_image_widgets)}, Image widgets: {len(image_widgets)}")
 
+        if non_image_widgets and image_widgets:
+            # Mixed layout: Create horizontal container with left (non-image) and right (image) sections
+            print(f"[ComfyUI] Creating horizontal layout: {len(non_image_widgets)} non-image on left, {len(image_widgets)} image on right")
+            horizontal_container = QWidget()
+            horizontal_layout = QHBoxLayout(horizontal_container)
+            horizontal_layout.setContentsMargins(0, 0, 0, 0)
+            horizontal_layout.setSpacing(15)
+
+            # Left section: non-image widgets stacked vertically
+            left_container = QWidget()
+            left_layout = QVBoxLayout(left_container)
+            left_layout.setContentsMargins(0, 0, 0, 0)
+            left_layout.setSpacing(5)
+            for widget, node in non_image_widgets:
+                left_layout.addWidget(widget, 1)  # Add stretch factor to expand
+            left_layout.addStretch()
+            horizontal_layout.addWidget(left_container)
+
+            # Right section: image widgets stacked horizontally
+            right_container = QWidget()
+            right_layout = QHBoxLayout(right_container)
+            right_layout.setContentsMargins(0, 0, 0, 0)
+            right_layout.setSpacing(10)
             for widget, node in image_widgets:
-                image_row_layout.addWidget(widget)
+                right_layout.addWidget(widget, 1)  # Add stretch factor to expand
+            horizontal_layout.addWidget(right_container)
 
-            self.layout.addWidget(image_row_container)
-            # Store container reference for cleanup
-            image_row_container.is_image_row = True
-        elif len(image_widgets) == 1:
-            # Single image widget - add normally (vertically)
-            print(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
-            widget = image_widgets[0][0]
-            widget.setVisible(True)  # Explicitly set visible
-            self.layout.addWidget(widget)
-            print(f"[ComfyUI] Widget added to layout, visible: {widget.isVisible()}")
+            # Set stretch factors: give more space to images
+            horizontal_layout.setStretch(0, 1)  # Left section (non-image)
+            horizontal_layout.setStretch(1, 2)  # Right section (images)
+
+            self.layout.addWidget(horizontal_container)
+            horizontal_container.is_mixed_layout = True
+
+        elif image_widgets and not non_image_widgets:
+            # Only image widgets: arrange horizontally if multiple, vertically if single
+            if len(image_widgets) > 1:
+                print(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
+                image_row_container = QWidget()
+                image_row_layout = QHBoxLayout(image_row_container)
+                image_row_layout.setContentsMargins(0, 5, 0, 5)
+                image_row_layout.setSpacing(10)
+
+                for widget, node in image_widgets:
+                    image_row_layout.addWidget(widget, 1)  # Add stretch factor to expand
+
+                self.layout.addWidget(image_row_container, 1)  # Add stretch to container
+                image_row_container.is_image_row = True
+            else:
+                # Single image widget
+                print(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
+                widget = image_widgets[0][0]
+                widget.setVisible(True)
+                self.layout.addWidget(widget, 1)  # Add stretch factor
+
+        elif non_image_widgets and not image_widgets:
+            # Only non-image widgets: arrange vertically
+            print(f"[ComfyUI] Adding {len(non_image_widgets)} non-image widgets vertically")
+            for widget, node in non_image_widgets:
+                self.layout.addWidget(widget, 1)  # Add stretch factor for each widget
 
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:
@@ -278,37 +321,42 @@ class ComfyUIWidgetManager:
             container.input_widget = file_path_edit
 
         elif node.widget_type == 'text':
+            # Top row: Label and Presets button
+            top_row = QHBoxLayout()
             label = QLabel(f"{node.display_name}:")
-            layout.addWidget(label)
+            top_row.addWidget(label)
+            top_row.addStretch()
 
-            # Add preset row with button (will be connected by tab)
-            preset_row = QHBoxLayout()
             preset_btn = QPushButton("Presets")
             preset_btn.setFixedWidth(100)
-            preset_row.addWidget(preset_btn)
-            preset_row.addStretch()
-            layout.addLayout(preset_row)
+            top_row.addWidget(preset_btn)
+            layout.addLayout(top_row)
 
-            # Text input with spell checking
+            # Text input with spell checking - expands to fill available space
             input_widget = SpellCheckTextEdit()
             input_widget.setMinimumHeight(60)
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             if node.current_value:
                 input_widget.setPlainText(str(node.current_value))
-            layout.addWidget(input_widget)
+            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
             container.input_widget = input_widget
             container.node_type = node.node_type  # Store node type for preset lookup
             container.preset_btn = preset_btn  # Store button for signal connection
 
         elif node.widget_type == 'image':
-            label = QLabel(f"{node.display_name}:")
-            layout.addWidget(label)
-
+            # Create BatchImageSelector first so we can access its toolbar
             input_widget = BatchImageSelector(total_image_nodes=total_image_nodes)
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             # Set last browse directory for image selector
             last_dir = get_last_browse_directory("comfyui_images")
             if last_dir:
                 input_widget.set_last_browse_dir(last_dir)
-            layout.addWidget(input_widget)
+
+            # Insert label at the beginning of the BatchImageSelector's toolbar
+            label = QLabel(f"{node.display_name}:")
+            input_widget.toolbar_layout.insertWidget(0, label)
+
+            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
             container.input_widget = input_widget
 
         else:
