@@ -45,6 +45,20 @@ def modify_workflow_api_format(
     image_basename = os.path.basename(input_image) if input_image else None
     found_editable_prompt = False
 
+    # Convert PreviewImage nodes to SaveImage nodes so we can control the output filename
+    # PreviewImage saves to temp folder with temp names, SaveImage allows filename_prefix
+    preview_nodes_converted = []
+    for node_id, node_data in modified.items():
+        if isinstance(node_data, dict) and node_data.get('class_type') == 'PreviewImage':
+            node_data['class_type'] = 'SaveImage'
+            # SaveImage needs filename_prefix input (will be set later in EXPORT_NODE_TYPES handling)
+            if 'inputs' not in node_data:
+                node_data['inputs'] = {}
+            preview_nodes_converted.append(node_id)
+
+    if preview_nodes_converted:
+        print(f"Converted {len(preview_nodes_converted)} PreviewImage node(s) to SaveImage: {preview_nodes_converted}")
+
     # Build a lookup of node_id -> value from editable_values
     editable_by_node_id = {}
     if editable_values:
@@ -102,6 +116,10 @@ def modify_workflow_api_format(
                     if image_path:
                         inputs['image'] = os.path.basename(image_path)
                         print(f"  Set image node {node_id} ({node_type}): {os.path.basename(image_path)}")
+                else:
+                    # No image provided - bypass this loader node
+                    node_data['mode'] = 4  # 4 = bypassed
+                    print(f"  Bypassed image loader node {node_id} ({node_type}) - no image provided")
             elif widget_type == 'int':
                 inputs['seed'] = value
                 inputs['noise_seed'] = value
@@ -129,6 +147,10 @@ def modify_workflow_api_format(
                     if model_path:
                         inputs['model_file'] = os.path.basename(model_path)
                         print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
+                else:
+                    # No 3D model provided - bypass this loader node
+                    node_data['mode'] = 4  # 4 = bypassed
+                    print(f"  Bypassed 3D model loader node {node_id} ({node_type}) - no model provided")
 
     # Build a map of toggle node names to their values (True/False)
     # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name

@@ -179,9 +179,10 @@ def prewarm_model_thumbnails(items: List[Dict],
 
 def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
     """
-    Pre-warm the gallery by scanning and generating thumbnails.
+    Pre-warm the gallery by scanning the directory.
 
     This is the main entry point for gallery pre-warming during startup.
+    Only scans files - thumbnails are generated lazily when visible.
 
     Args:
         progress_callback: Optional callback(progress, message) for updates
@@ -201,7 +202,7 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     # Step 1: Get gallery path
     if progress_callback:
-        progress_callback(5, "Locating gallery folder...")
+        progress_callback(10, "Locating gallery folder...")
 
     output_dir = get_gallery_output_path()
     if not output_dir:
@@ -215,41 +216,16 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     # Step 2: Scan directory
     if progress_callback:
-        progress_callback(10, "Scanning gallery folder...")
+        progress_callback(30, "Scanning gallery folder...")
 
     items = scan_gallery_items(output_dir)
     result['items'] = items
 
     image_count = sum(1 for i in items if i['type'] == 'image')
     model_count = sum(1 for i in items if i['type'] == 'model')
-    total_count = len(items)
     print(f"[PreWarm] Found {image_count} images, {model_count} 3D models")
 
-    if progress_callback:
-        if model_count > 0:
-            progress_callback(25, f"Found {total_count} items ({model_count} 3D models)")
-        else:
-            progress_callback(25, f"Found {total_count} items")
-
-    # Step 3: Pre-generate model thumbnails (only for uncached models)
-    if model_count > 0:
-        def thumb_progress(pct, msg):
-            # Map 0-100 to 30-95 range
-            overall_pct = 30 + int(pct * 0.65)
-            if progress_callback:
-                progress_callback(overall_pct, msg)
-
-        generated = prewarm_model_thumbnails(items, thumb_progress, max_items=15)
-        result['thumbnails_generated'] = generated
-
-        if generated == 0:
-            # All were cached, skip to end quickly
-            if progress_callback:
-                progress_callback(95, f"All {model_count} model thumbnails cached")
-    else:
-        if progress_callback:
-            progress_callback(95, f"Found {image_count} images")
-
+    # 3D model thumbnails are generated lazily when visible in gallery
     if progress_callback:
         progress_callback(100, "Gallery ready")
 

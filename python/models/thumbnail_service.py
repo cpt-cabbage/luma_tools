@@ -1,18 +1,18 @@
 """
 Universal 3D Model Thumbnail Service for Luma Tools.
 
-Generates and caches thumbnails from 3D models (GLB, FBX, OBJ, USD, etc.).
-Uses a subprocess to avoid OpenGL context conflicts with Qt.
+Generates and caches thumbnails from 3D models (GLB, FBX, OBJ, etc.).
+Uses the Three.js viewer for rendering, avoiding OpenGL context conflicts.
 Designed for async loading with caching for performance.
 """
 
 import os
 import hashlib
-import subprocess
-import sys
+import base64
 from typing import Optional, Dict
 
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtCore import QEventLoop, QTimer
 
 # ============================================================================
 # CONFIGURATION
@@ -22,24 +22,11 @@ from PySide6.QtGui import QPixmap
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
 THUMBNAIL_SIZE = 150  # Square thumbnails for gallery
 
-# Path to the renderer script
-RENDERER_SCRIPT = os.path.join(os.path.dirname(__file__), "thumbnail_renderer.py")
-
-# Python executable - use the venv's Python explicitly (sys.executable may point to AYON's Python)
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_VENV_PYTHON = os.path.join(_SCRIPT_DIR, "venv", "Scripts", "python.exe") if sys.platform == 'win32' else os.path.join(_SCRIPT_DIR, "venv", "bin", "python")
-PYTHON_EXE = _VENV_PYTHON if os.path.exists(_VENV_PYTHON) else sys.executable
-
-# Supported extensions
+# Supported extensions (Three.js viewer supports these)
 SUPPORTED_EXTENSIONS = {
     '.glb', '.gltf',  # glTF
     '.fbx',           # Autodesk FBX
     '.obj',           # Wavefront OBJ
-    '.usd', '.usda', '.usdc', '.usdz',  # USD
-    '.dae',           # Collada
-    '.3ds',           # 3D Studio Max
-    '.stl',           # STL
-    '.ply',           # PLY
 }
 
 # Ensure cache directory exists
@@ -54,7 +41,7 @@ class ModelThumbnailService:
     """
     Generates and caches thumbnails from 3D models.
 
-    Uses a subprocess to render thumbnails, avoiding OpenGL conflicts with Qt.
+    Uses the Three.js viewer for rendering via QWebEngineView.
     Results are cached as PNG files using MD5 hash of file path.
 
     Usage:
@@ -63,13 +50,14 @@ class ModelThumbnailService:
         # Synchronous (cached only)
         pixmap = service.get_cached_thumbnail(model_path)
 
-        # Generate new thumbnail (runs subprocess)
+        # Generate new thumbnail (uses Three.js viewer)
         pixmap = service.generate_thumbnail_sync(model_path)
     """
 
     def __init__(self):
         self._cache: Dict[str, QPixmap] = {}  # In-memory cache
         self._pending: Dict[str, bool] = {}   # Tracks pending generations
+        self._thumbnail_viewer = None         # Reusable hidden viewer
 
     def get_cache_path(self, model_path: str) -> str:
         """
@@ -140,12 +128,32 @@ class ModelThumbnailService:
         ext = os.path.splitext(model_path)[1].lower()
         return ext in SUPPORTED_EXTENSIONS
 
+    def _get_or_create_viewer(self):
+        """Get or create a hidden Three.js viewer for thumbnail generation."""
+        if self._thumbnail_viewer is not None:
+            return self._thumbnail_viewer
+
+        try:
+            from models.threejs_viewer import ThreeJSViewerWidget, WEBENGINE_AVAILABLE
+            if not WEBENGINE_AVAILABLE:
+                print("[ThumbnailService] WebEngine not available")
+                return None
+
+            # Create hidden viewer
+            self._thumbnail_viewer = ThreeJSViewerWidget(prewarm=True)
+            self._thumbnail_viewer.setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+            self._thumbnail_viewer.hide()
+
+            return self._thumbnail_viewer
+        except Exception as e:
+            print(f"[ThumbnailService] Error creating viewer: {e}")
+            return None
+
     def generate_thumbnail_sync(self, model_path: str) -> Optional[QPixmap]:
         """
-        Generate a thumbnail from a 3D model file using subprocess.
+        Generate a thumbnail from a 3D model file using Three.js viewer.
 
-        This method runs synchronously but the actual rendering happens
-        in a separate process to avoid OpenGL conflicts.
+        This method blocks until the thumbnail is generated or timeout occurs.
 
         Args:
             model_path: Path to the 3D model file
@@ -154,55 +162,109 @@ class ModelThumbnailService:
             QPixmap of the thumbnail, or None if generation failed
         """
         if not os.path.exists(model_path):
-            print(f"Model file not found: {model_path}")
+            print(f"[ThumbnailService] Model file not found: {model_path}")
             return None
 
-        # Check renderer script exists
-        if not os.path.exists(RENDERER_SCRIPT):
-            print(f"Renderer script not found: {RENDERER_SCRIPT}")
+        if not self.is_supported(model_path):
+            print(f"[ThumbnailService] Unsupported format: {model_path}")
             return None
 
         cache_path = self.get_cache_path(model_path)
 
         try:
-            # Determine creation flags based on platform
-            creation_flags = 0
-            if sys.platform == 'win32':
-                creation_flags = subprocess.CREATE_NO_WINDOW
-
-            # Create clean environment for subprocess to avoid conflicts with parent's PYTHONPATH
-            # (e.g., AYON sets PYTHONPATH which can cause typing_extensions conflicts)
-            clean_env = os.environ.copy()
-            clean_env.pop('PYTHONPATH', None)
-            clean_env.pop('PYTHONHOME', None)
-
-            # Run the renderer in a subprocess
-            result = subprocess.run(
-                [PYTHON_EXE, RENDERER_SCRIPT, model_path, cache_path, str(THUMBNAIL_SIZE)],
-                capture_output=True,
-                text=True,
-                timeout=60,  # 60 second timeout for complex models
-                creationflags=creation_flags,
-                env=clean_env
-            )
-
-            if result.returncode != 0:
-                print(f"Model thumbnail renderer failed: {result.stderr}")
+            viewer = self._get_or_create_viewer()
+            if viewer is None:
+                print("[ThumbnailService] Could not create viewer")
                 return None
 
-            # Load the generated thumbnail
-            if os.path.exists(cache_path):
-                pixmap = QPixmap(cache_path)
-                if not pixmap.isNull():
-                    self._cache[model_path] = pixmap
-                    return pixmap
+            # Track state
+            result = {'pixmap': None, 'loaded': False, 'captured': False}
+            loop = QEventLoop()
 
-        except subprocess.TimeoutExpired:
-            print(f"Model thumbnail generation timed out for: {model_path}")
+            # Timeout after 30 seconds
+            timeout_timer = QTimer()
+            timeout_timer.setSingleShot(True)
+            timeout_timer.timeout.connect(loop.quit)
+
+            def on_model_loaded(path):
+                result['loaded'] = True
+                # Wait a bit for rendering to complete, then capture
+                QTimer.singleShot(500, capture_screenshot)
+
+            def on_load_error(error):
+                print(f"[ThumbnailService] Load error: {error}")
+                loop.quit()
+
+            def capture_screenshot():
+                viewer.capture_screenshot(THUMBNAIL_SIZE, on_screenshot_captured)
+
+            def on_screenshot_captured(data_url):
+                if data_url and data_url.startswith('data:image/png;base64,'):
+                    # Extract base64 data and convert to pixmap
+                    base64_data = data_url.split(',', 1)[1]
+                    image_data = base64.b64decode(base64_data)
+
+                    # Save to cache file
+                    try:
+                        with open(cache_path, 'wb') as f:
+                            f.write(image_data)
+
+                        # Load as pixmap
+                        pixmap = QPixmap(cache_path)
+                        if not pixmap.isNull():
+                            result['pixmap'] = pixmap
+                            self._cache[model_path] = pixmap
+                            result['captured'] = True
+                    except Exception as e:
+                        print(f"[ThumbnailService] Error saving thumbnail: {e}")
+
+                loop.quit()
+
+            # Connect signals
+            viewer.modelLoaded.connect(on_model_loaded)
+            viewer.loadError.connect(on_load_error)
+
+            # Wait for viewer to be ready
+            if not viewer._viewer_ready:
+                ready_loop = QEventLoop()
+                ready_timer = QTimer()
+                ready_timer.setSingleShot(True)
+                ready_timer.timeout.connect(ready_loop.quit)
+
+                def on_viewer_ready():
+                    ready_loop.quit()
+
+                viewer._bridge.viewerReady.connect(on_viewer_ready)
+                ready_timer.start(10000)  # 10s timeout for viewer ready
+                ready_loop.exec()
+                viewer._bridge.viewerReady.disconnect(on_viewer_ready)
+
+            if not viewer._viewer_ready:
+                print("[ThumbnailService] Viewer failed to initialize")
+                return None
+
+            # Load the model
+            viewer.load_file(model_path)
+
+            # Start timeout and wait
+            timeout_timer.start(30000)  # 30s timeout
+            loop.exec()
+            timeout_timer.stop()
+
+            # Disconnect signals
+            try:
+                viewer.modelLoaded.disconnect(on_model_loaded)
+                viewer.loadError.disconnect(on_load_error)
+            except:
+                pass
+
+            return result['pixmap']
+
         except Exception as e:
-            print(f"Model thumbnail generation error: {e}")
-
-        return None
+            print(f"[ThumbnailService] Thumbnail generation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def clear_cache(self, model_path: str = None):
         """
@@ -249,5 +311,3 @@ def get_model_thumbnail_service() -> ModelThumbnailService:
     if _model_thumbnail_service_instance is None:
         _model_thumbnail_service_instance = ModelThumbnailService()
     return _model_thumbnail_service_instance
-
-

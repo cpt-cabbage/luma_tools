@@ -118,31 +118,28 @@ class SettingsTab(BaseTab):
             ("Standalone", "standalone"),
         ]
 
-        # Check if user is supervisor (read-only access)
+        # Check if user is supervisor (can see user settings but not global settings)
         is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
-
-        if is_supervisor:
-            # Supervisors can only see the info section
-            self._hide_settings_for_supervisor()
 
         self._load_version_ui()
 
-        # Only load settings UI for admins
+        # Supervisors can see user settings, admins can see everything
+        self._load_default_passes_ui()
+        self._load_user_settings_ui()
+
+        # Only load global settings and admin sections for admins
         if not is_supervisor:
-            self._load_default_passes_ui()
-            self._load_user_settings_ui()
             self._load_global_settings_ui()
             self._load_admin_users_ui()
             self._load_sup_users_ui()
             self._load_restricted_tabs_ui()
             self._load_hdri_list_ui()
+        else:
+            # Hide global settings for supervisors
+            self._hide_global_settings_for_supervisor()
 
-    def _hide_settings_for_supervisor(self):
-        """Hide all settings sections except info for supervisor users."""
-        # Hide user settings group box
-        if hasattr(self.ui, 'userSettingsGroupBox'):
-            self.ui.userSettingsGroupBox.hide()
-
+    def _hide_global_settings_for_supervisor(self):
+        """Hide global settings section for supervisor users (they can still see user settings)."""
         # Hide global settings group box
         if hasattr(self.ui, 'globalSettingsGroupBox'):
             self.ui.globalSettingsGroupBox.hide()
@@ -263,6 +260,10 @@ class SettingsTab(BaseTab):
         # Generate 3D thumbnails checkbox
         if hasattr(self.ui, 'Generate3DThumbnails'):
             self.ui.Generate3DThumbnails.setChecked(get_setting("generate_3d_thumbnails"))
+
+        # Show tray notifications checkbox
+        if hasattr(self.ui, 'ShowTrayNotifications'):
+            self.ui.ShowTrayNotifications.setChecked(get_setting("show_tray_notifications"))
 
         # 3D Viewer zoom distance
         if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
@@ -503,6 +504,10 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'Generate3DThumbnails'):
             set_setting("generate_3d_thumbnails", self.ui.Generate3DThumbnails.isChecked())
 
+        # Save show tray notifications setting
+        if hasattr(self.ui, 'ShowTrayNotifications'):
+            set_setting("show_tray_notifications", self.ui.ShowTrayNotifications.isChecked())
+
         # Save 3D viewer zoom setting
         if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
             set_setting("viewer_3d_zoom_distance", self.ui.Viewer3DZoomSpinBox.value())
@@ -548,7 +553,7 @@ class SettingsTab(BaseTab):
                     # Clear widget cache to force thumbnail reload
                     if hasattr(gallery_tab, '_widget_cache'):
                         gallery_tab._widget_cache = {}
-                    gallery_tab._on_refresh()
+                    gallery_tab._on_refresh(force=True)
 
                 if hasattr(self.main_window, 'animator'):
                     self.main_window.animator.show_success("Thumbnail cache cleared")

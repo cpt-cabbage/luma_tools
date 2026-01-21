@@ -36,7 +36,10 @@
       "WebFetch",
       "Bash(git commit:*)",
       "Bash(pythonvenvScriptspython.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); sys.path.insert\\(0, ''resources/ui''\\); from tabs.comfyui_tab import ComfyUITab; print\\(''Import successful''\\)\")",
-      "Bash(deadlinecommand GetTaskLog:*)"
+      "Bash(deadlinecommand GetTaskLog:*)",
+      "Bash(grep:*)",
+      "Bash(pythonvenvScriptspython.exe -c \"import sys; sys.path.insert\\(0, ''resources/ui''\\); sys.path.insert\\(0, ''python''\\); from ui_components import StackedThumbnailWidget; print\\(''StackedThumbnailWidget from ui_components OK''\\)\")",
+      "Bash(pythonvenvScriptspython.exe -c \"import sys; sys.path.insert\\(0, ''python''\\); sys.path.insert\\(0, ''resources/ui''\\); from small_widgets import StackedThumbnailWidget; print\\(''Updated StackedThumbnailWidget loaded - fanned card effect added''\\)\")"
     ],
     "deny": [],
     "ask": []

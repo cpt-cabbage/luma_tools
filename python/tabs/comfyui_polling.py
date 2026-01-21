@@ -307,6 +307,15 @@ class PollingMixin:
             StatusColors.SUCCESS
         )
 
+        # Show system tray notification (if enabled)
+        from core.settings_manager import get_setting
+        if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+            self.main_window.show_system_notification(
+                "ComfyUI Complete",
+                f"{frames} image(s) generated in {elapsed_str}",
+                "success"
+            )
+
         output_files = []
         network_dir = self._iterate_network_output_dir
 
@@ -649,12 +658,28 @@ class PollingMixin:
                 f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} jobs in {elapsed_str}",
                 StatusColors.ERROR
             )
+            # Show system tray notification for failures (if enabled)
+            from core.settings_manager import get_setting
+            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                self.main_window.show_system_notification(
+                    "ComfyUI Failed",
+                    f"{failed_count}/{total_count} job(s) failed. {success_count} succeeded.",
+                    "warning"
+                )
         else:
             self.main_window.animator.show_success(f"All {total_count} ComfyUI submissions completed!")
             self.main_window.animator.update_status_animated(
                 f"ComfyUI Complete: {total_frames} jobs in {elapsed_str}",
                 StatusColors.SUCCESS
             )
+            # Show system tray notification for success (if enabled)
+            from core.settings_manager import get_setting
+            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                self.main_window.show_system_notification(
+                    "ComfyUI Complete",
+                    f"All {total_count} job(s) completed! {total_frames} images generated in {elapsed_str}",
+                    "success"
+                )
 
         self._batch_failed_jobs.clear()
 
@@ -886,6 +911,14 @@ class PollingMixin:
                     self._clear_running_job_state()
                     if status == "Completed":
                         self.main_window.animator.show_success("Previous ComfyUI job completed while app was closed")
+                        # Show system tray notification (if enabled)
+                        from core.settings_manager import get_setting
+                        if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                            self.main_window.show_system_notification(
+                                "ComfyUI Complete",
+                                "Previous job completed while app was closed",
+                                "success"
+                            )
             except Exception as e:
                 self.log(f"[Recovery] Error recovering iterate job: {e}")
                 import traceback
@@ -946,6 +979,14 @@ class PollingMixin:
                     self._clear_running_job_state()
                     completed_count = len(job_ids)
                     self.main_window.animator.show_success(f"{completed_count} ComfyUI job(s) completed while app was closed")
+                    # Show system tray notification (if enabled)
+                    from core.settings_manager import get_setting
+                    if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                        self.main_window.show_system_notification(
+                            "ComfyUI Complete",
+                            f"{completed_count} job(s) completed while app was closed",
+                            "success"
+                        )
             except Exception as e:
                 self.log(f"[Recovery] Error recovering batch jobs: {e}")
                 import traceback

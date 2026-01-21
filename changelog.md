@@ -1,5 +1,13 @@
 # Luma Tools Changelog
 
+
+## Version 0.4.6.6
+- Fix multi-input workflows - loader nodes without inputs are now bypassed instead of failing
+
+## Version 0.4.6.5
+- Job Persistence fixes
+- Fix copying of multiloader workflows
+
 ## Version 0.4.6.4
 - Fix path lists for multi image workflows
 

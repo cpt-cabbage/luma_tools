@@ -216,3 +216,57 @@ def get_comfyui_running_jobs() -> Optional[Dict[str, Any]]:
     """
     settings = load_user_settings()
     return settings.get("comfyui_running_jobs")
+
+
+# ============================================================================
+# GALLERY SETTINGS PERSISTENCE
+# ============================================================================
+
+def get_gallery_settings() -> Dict[str, Any]:
+    """Get persisted gallery settings.
+
+    Returns:
+        Dictionary with gallery settings:
+            - show_inputs: bool (default False)
+            - view_mode: str (default "stacked") - "stacked" or "grid"
+            - collapsed_sections: List[str] (section IDs that are collapsed)
+    """
+    settings = load_user_settings()
+    gallery = settings.get("gallery_settings", {})
+    view_mode = gallery.get("view_mode", "stacked")
+    # Migrate "sections" to "stacked" if user had it saved
+    if view_mode == "sections":
+        view_mode = "stacked"
+    return {
+        "show_inputs": gallery.get("show_inputs", False),
+        "view_mode": view_mode,
+        "collapsed_sections": gallery.get("collapsed_sections", [])
+    }
+
+
+def save_gallery_settings(
+    show_inputs: Optional[bool] = None,
+    view_mode: Optional[str] = None,
+    collapsed_sections: Optional[List[str]] = None
+):
+    """Save gallery settings.
+
+    Only saves values that are not None, preserving existing values for others.
+
+    Args:
+        show_inputs: Whether to show input images
+        view_mode: View mode - "stacked" or "grid"
+        collapsed_sections: List of section IDs that are collapsed
+    """
+    settings = load_user_settings()
+    if "gallery_settings" not in settings:
+        settings["gallery_settings"] = {}
+
+    if show_inputs is not None:
+        settings["gallery_settings"]["show_inputs"] = show_inputs
+    if view_mode is not None:
+        settings["gallery_settings"]["view_mode"] = view_mode
+    if collapsed_sections is not None:
+        settings["gallery_settings"]["collapsed_sections"] = collapsed_sections
+
+    save_user_settings(settings)

@@ -22,12 +22,30 @@ class FlowLayout(QLayout):
         self._v_spacing = spacing
 
     def __del__(self):
+        # Check if _item_list exists (may not if initialization failed or GC order issues)
+        if not hasattr(self, '_item_list'):
+            return
         item = self.takeAt(0)
         while item:
             item = self.takeAt(0)
 
     def addItem(self, item):
         self._item_list.append(item)
+
+    def insertItem(self, index, item):
+        """Insert a layout item at the specified index."""
+        if index < 0:
+            index = 0
+        elif index > len(self._item_list):
+            index = len(self._item_list)
+        self._item_list.insert(index, item)
+
+    def insertWidget(self, index, widget):
+        """Insert a widget at the specified index in the layout."""
+        from PySide6.QtWidgets import QWidgetItem
+        self.addChildWidget(widget)
+        item = QWidgetItem(widget)
+        self.insertItem(index, item)
 
     def horizontalSpacing(self):
         if self._h_spacing >= 0:

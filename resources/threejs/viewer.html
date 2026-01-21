@@ -132,8 +132,8 @@
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(3, 2, 3);
 
-            // Renderer
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // Renderer - preserveDrawingBuffer needed for screenshots
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
@@ -811,6 +811,41 @@
             errorDiv.style.display = 'block';
         }
 
+        // Capture screenshot as base64 PNG
+        function captureScreenshotImpl(size) {
+            if (!renderer || !scene || !camera) {
+                console.error('Cannot capture screenshot: viewer not ready');
+                return null;
+            }
+
+            // Store original size
+            const origWidth = renderer.domElement.width;
+            const origHeight = renderer.domElement.height;
+
+            // Resize renderer for thumbnail
+            const targetSize = size || 150;
+            renderer.setSize(targetSize, targetSize);
+            camera.aspect = 1;
+            camera.updateProjectionMatrix();
+
+            // Render to the resized canvas
+            renderer.render(scene, camera);
+
+            // Get image data
+            const dataUrl = renderer.domElement.toDataURL('image/png');
+
+            // Restore original size
+            renderer.setSize(origWidth, origHeight);
+            camera.aspect = origWidth / origHeight;
+            camera.updateProjectionMatrix();
+
+            // Render again at original size
+            renderer.render(scene, camera);
+
+            console.log('Screenshot captured at', targetSize, 'x', targetSize);
+            return dataUrl;
+        }
+
         // Expose functions to global scope
         // loadModel needs special handling for queuing during early load
         window.loadModel = function(url) {
@@ -830,6 +865,7 @@
         window.setShadingMode = setShadingModeImpl;
         window.loadHdri = loadHdriImpl;
         window.setLightStrength = setLightStrengthImpl;
+        window.captureScreenshot = captureScreenshotImpl;
 
         // Setup QWebChannel bridge
         if (typeof QWebChannel !== 'undefined') {

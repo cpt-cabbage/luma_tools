@@ -14,6 +14,70 @@ from .comfyui_gallery_loader import GalleryLoader, IMAGE_EXTENSIONS, MODEL_EXTEN
 from .comfyui_gallery_manager import GalleryManager
 
 
+class BoxSelectionEventFilter(QtCore.QObject):
+    """Event filter for box selection (rubber band) on scroll area viewport."""
+
+    def __init__(self, gallery_tab):
+        super().__init__()
+        self.gallery_tab = gallery_tab
+        self._mouse_moved = False
+
+    def eventFilter(self, watched, event):
+        """Handle mouse events for rubber band selection."""
+        from PySide6.QtCore import QEvent, QRect
+        from PySide6.QtWidgets import QRubberBand
+
+        if watched == self.gallery_tab.ui.galleryScrollArea.viewport():
+            if event.type() == QEvent.MouseButtonPress:
+                if event.button() == Qt.LeftButton:
+                    # Map from viewport coords to container coords
+                    container_pos = self.gallery_tab.ui.galleryThumbnailContainer.mapFrom(
+                        self.gallery_tab.ui.galleryScrollArea.viewport(),
+                        event.pos()
+                    )
+                    # Check if clicking on empty space (not on a thumbnail)
+                    child = self.gallery_tab.ui.galleryThumbnailContainer.childAt(container_pos)
+                    if child is None or child == self.gallery_tab.ui.galleryThumbnailContainer:
+                        # Track that we haven't moved yet
+                        self._mouse_moved = False
+                        # Clear selection unless Ctrl is held (for simple clicks)
+                        if not (event.modifiers() & Qt.ControlModifier):
+                            self.gallery_tab._clear_selection()
+                        # Prepare for potential rubber band selection
+                        self.gallery_tab._rubber_band_origin = event.pos()
+                        self.gallery_tab._rubber_band_active = True
+                        return True
+
+            elif event.type() == QEvent.MouseMove:
+                if self.gallery_tab._rubber_band_active:
+                    # Mark that mouse has moved (not just a click)
+                    if not self._mouse_moved:
+                        self._mouse_moved = True
+                        # Now create and show rubber band since we're dragging
+                        if not self.gallery_tab._rubber_band:
+                            self.gallery_tab._rubber_band = QRubberBand(QRubberBand.Rectangle, self.gallery_tab.ui.galleryScrollArea.viewport())
+                        self.gallery_tab._rubber_band.setGeometry(QRect(self.gallery_tab._rubber_band_origin, event.pos()))
+                        self.gallery_tab._rubber_band.show()
+                    else:
+                        # Update rubber band geometry
+                        self.gallery_tab._rubber_band.setGeometry(QRect(self.gallery_tab._rubber_band_origin, event.pos()).normalized())
+                    return True
+
+            elif event.type() == QEvent.MouseButtonRelease:
+                if event.button() == Qt.LeftButton and self.gallery_tab._rubber_band_active:
+                    # Only process selection if mouse was moved (dragged)
+                    if self._mouse_moved:
+                        self.gallery_tab._process_rubber_band_selection()
+                    # Hide rubber band
+                    if self.gallery_tab._rubber_band:
+                        self.gallery_tab._rubber_band.hide()
+                    self.gallery_tab._rubber_band_active = False
+                    self._mouse_moved = False
+                    return True
+
+        return super().eventFilter(watched, event)
+
+
 class ComfyUIGalleryTab(BaseTab):
     """Tab for viewing ComfyUI generated images."""
 
@@ -33,9 +97,13 @@ class ComfyUIGalleryTab(BaseTab):
         """Connect gallery tab signals."""
         self.ui.GallerySourceToggle.clicked.connect(self._on_source_toggle)
         self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
-        self.ui.GalleryRefresh.clicked.connect(self._on_refresh)
+        self.ui.GalleryRefresh.clicked.connect(self._on_refresh_button_clicked)
         self.ui.GallerySortButton.clicked.connect(self._on_sort_button_clicked)
         self.ui.GalleryUserButton.clicked.connect(self._on_user_button_clicked)
+
+    def _on_refresh_button_clicked(self):
+        """Handle manual refresh button click - force immediate refresh."""
+        self._on_refresh(force=True)
 
     def initialize(self):
         """Initialize the gallery tab."""
@@ -75,6 +143,22 @@ class ComfyUIGalleryTab(BaseTab):
         ]
         self._update_sort_button_text()
 
+        # Load gallery settings before creating UI elements that depend on them
+        from core.user_preferences import get_gallery_settings
+        gallery_settings = get_gallery_settings()
+        self._show_inputs = gallery_settings.get("show_inputs", False)
+        self._view_mode = gallery_settings.get("view_mode", "stacked")  # "stacked", "grid", or "sections"
+        self._collapsed_sections = set(gallery_settings.get("collapsed_sections", []))
+        self._section_items = {}  # section_id -> [paths]
+        self._expanded_stack_id = None  # Track if viewing expanded stack
+        self._pre_expansion_stacked = False  # Track state before expansion
+
+        # Create filter toggle button programmatically (after loading settings)
+        self._create_filter_button()
+
+        # Create view mode toggle button
+        self._create_stacked_toggle_button()
+
         # Track known images to detect new additions
         self._known_items = set()
         self._initial_scan_done = False
@@ -97,6 +181,13 @@ class ComfyUIGalleryTab(BaseTab):
         # Multi-select state
         self._selected_items = set()  # Set of selected image paths
         self._selection_toolbar = None  # Will be created when needed
+        self._last_selected_path = None  # Track last selected for shift-select
+        self._visible_items_ordered = []  # Ordered list of visible paths for range selection
+
+        # Box selection (rubber band) state
+        self._rubber_band = None
+        self._rubber_band_origin = None
+        self._rubber_band_active = False
 
         # Initialize user selector (async discovery)
         self._populate_user_selector()
@@ -110,6 +201,10 @@ class ComfyUIGalleryTab(BaseTab):
         # Use pre-warmed cache from splash screen (already scanned during startup)
         # This creates all widgets immediately since data is already available
         self._use_prewarm_cache_sync()
+
+        # Install event filter for box selection (rubber band)
+        self._box_selection_filter = BoxSelectionEventFilter(self)
+        self.ui.galleryScrollArea.viewport().installEventFilter(self._box_selection_filter)
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for gallery actions."""
@@ -130,6 +225,34 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Pass unhandled events to parent
         super().keyPressEvent(event)
+
+    def _process_rubber_band_selection(self):
+        """Select all items that intersect with the rubber band."""
+        from PySide6.QtCore import QRect
+
+        if not self._rubber_band or not self._rubber_band_origin:
+            return
+
+        # Get rubber band geometry in viewport coords
+        rubber_band_rect = self._rubber_band.geometry()
+
+        # Map to container coords
+        container_rect = QRect(
+            self.ui.galleryThumbnailContainer.mapFrom(
+                self.ui.galleryScrollArea.viewport(),
+                rubber_band_rect.topLeft()
+            ),
+            self.ui.galleryThumbnailContainer.mapFrom(
+                self.ui.galleryScrollArea.viewport(),
+                rubber_band_rect.bottomRight()
+            )
+        )
+
+        # Check each widget for intersection
+        for path, widget in self._widget_cache.items():
+            if widget.geometry().intersects(container_rect):
+                if hasattr(widget, 'set_selected'):
+                    widget.set_selected(True)
 
     def _select_all(self):
         """Select all items in the gallery."""
@@ -180,8 +303,6 @@ class ComfyUIGalleryTab(BaseTab):
 
         Used during initialization when we have pre-warmed data.
         """
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
-
         # Cache items for re-sorting without rescanning
         self._cached_items = items
 
@@ -189,73 +310,24 @@ class ComfyUIGalleryTab(BaseTab):
         self._known_items = set(item['path'] for item in items)
         self._initial_scan_done = True
 
-        # Sort items based on current sort mode
-        sorted_items = self._manager.sort_items(items, self._sort_mode)
+        # Connect scroll events for lazy loading (before display_items)
+        if not hasattr(self, '_scroll_connected') or not self._scroll_connected:
+            scroll_area = self.ui.galleryScrollArea
+            scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+            scroll_area.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+            self._scroll_connected = True
 
-        # Count by type for status
-        image_count = sum(1 for item in sorted_items if item['type'] == 'image')
-        model_count = sum(1 for item in sorted_items if item['type'] == 'model')
+        # Filter and sort items
+        filtered_items = self._filter_items(items)
+        sorted_items = self._manager.sort_items(filtered_items, self._sort_mode)
 
-        # Update status
-        total_count = len(sorted_items)
-        if total_count == 0:
-            self.ui.GalleryStatus.setText("No files found")
-        else:
-            parts = []
-            if image_count > 0:
-                parts.append(f"{image_count} image{'s' if image_count != 1 else ''}")
-            if model_count > 0:
-                parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
-            self.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
-
-        # Ensure widget cache exists
-        if not hasattr(self, '_widget_cache'):
-            self._widget_cache = {}
-
-        # Create all widgets synchronously (we're still in splash/loading phase)
-        container = self.ui.galleryThumbnailContainer
-        is_editable = self._is_own_gallery()
-
-        for item in sorted_items:
-            path = item['path']
-            file_type = item['type']
-            item_output_dir = os.path.dirname(path)
-
-            if file_type == 'model':
-                thumbnail = GLBThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False
-                )
-                thumbnail.clicked.connect(self._on_thumbnail_clicked)
-                thumbnail.deleted.connect(self._on_item_deleted)
-                thumbnail.viewed.connect(self._on_item_viewed)
-            else:
-                thumbnail = GalleryThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False
-                )
-                thumbnail.clicked.connect(self._on_thumbnail_clicked)
-                thumbnail.fullscreen_requested.connect(
-                    lambda img_path=path: self._open_viewer(img_path, fullscreen=True)
-                )
-                thumbnail.copy_settings_requested.connect(self._on_copy_settings_requested)
-                thumbnail.deleted.connect(self._on_item_deleted)
-                thumbnail.viewed.connect(self._on_item_viewed)
-
-            self._widget_cache[path] = thumbnail
-            self._flow_layout.addWidget(thumbnail)
-
-        # Connect scroll events for lazy loading
-        scroll_area = self.ui.galleryScrollArea
-        scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        scroll_area.horizontalScrollBar().valueChanged.connect(self._on_scroll)
-        self._scroll_connected = True
+        # Use manager to display items with stacked or grouped view
+        self._manager.display_items(
+            sorted_items,
+            incremental=False,
+            grouped=(self._view_mode == "sections"),
+            stacked=(self._view_mode == "stacked")
+        )
 
         print(f"[Gallery] Created {len(sorted_items)} widgets synchronously")
 
@@ -337,15 +409,170 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Re-sort and redisplay using cached items if available
         if self._cached_items:
-            sorted_items = self._manager.sort_items(self._cached_items, self._sort_mode)
-            # Use fast reorder if widgets are already loaded
-            if hasattr(self, '_widget_cache') and self._widget_cache:
-                self._manager.reorder_widgets(sorted_items)
-            else:
-                self._manager.display_items(sorted_items)
+            filtered_items = self._filter_items(self._cached_items)
+            sorted_items = self._manager.sort_items(filtered_items, self._sort_mode)
+            # Full redisplay when sort changes
+            self._manager.display_items(
+                sorted_items,
+                incremental=False,
+                grouped=(self._view_mode == "sections"),
+                stacked=(self._view_mode == "stacked")
+            )
         else:
             # No cache, need to rescan
             self._on_refresh()
+
+    # =========================================================================
+    # FILTER TOGGLE (Show/hide input images)
+    # =========================================================================
+
+    def _create_filter_button(self):
+        """Create the input filter toggle button programmatically."""
+        from PySide6.QtWidgets import QPushButton
+
+        # Create toggle button
+        self._filter_button = QPushButton("Inputs: Hidden")
+        self._filter_button.setMinimumWidth(120)
+        self._filter_button.setToolTip("Toggle visibility of input images")
+        self._filter_button.clicked.connect(self._on_filter_toggle)
+        self._update_filter_button_text()
+
+        # Insert after sort button in the header layout
+        header_layout = self.ui.galleryHeaderLayout
+        # Find position of sort button and insert after it
+        for i in range(header_layout.count()):
+            item = header_layout.itemAt(i)
+            if item and item.widget() == self.ui.GallerySortButton:
+                header_layout.insertWidget(i + 1, self._filter_button)
+                break
+
+    def _update_filter_button_text(self):
+        """Update the filter button text based on current state."""
+        if self._show_inputs:
+            self._filter_button.setText("Inputs: Shown")
+            self._filter_button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(16, 185, 129, 0.2);
+                    border: 1px solid #10b981;
+                }
+            """)
+        else:
+            self._filter_button.setText("Inputs: Hidden")
+            self._filter_button.setStyleSheet("")  # Default style
+
+    def _on_filter_toggle(self):
+        """Toggle input image visibility."""
+        self._show_inputs = not self._show_inputs
+        self._update_filter_button_text()
+        self.log(f"[Gallery] Input images: {'shown' if self._show_inputs else 'hidden'}")
+
+        # Save setting
+        from core.user_preferences import save_gallery_settings
+        save_gallery_settings(show_inputs=self._show_inputs)
+
+        # Re-filter and redisplay
+        self._redisplay_items()
+
+    # =========================================================================
+    # VIEW MODE TOGGLE (Stacked / Grid / Sections)
+    # =========================================================================
+
+    def _create_stacked_toggle_button(self):
+        """Create the view mode toggle button programmatically."""
+        from PySide6.QtWidgets import QPushButton
+
+        # View modes: "stacked", "grid"
+        self._view_modes = ["stacked", "grid"]
+        self._view_mode_labels = {
+            "stacked": "Stacked",
+            "grid": "Grid"
+        }
+
+        # Create toggle button
+        self._view_button = QPushButton("View: Stacked")
+        self._view_button.setMinimumWidth(120)
+        self._view_button.setToolTip("Click to toggle view: Stacked (photo piles) ↔ Grid (all items)")
+        self._view_button.clicked.connect(self._on_view_mode_toggle)
+        self._update_view_button_text()
+
+        # Insert after filter button in the header layout
+        header_layout = self.ui.galleryHeaderLayout
+        # Find position of filter button and insert after it
+        for i in range(header_layout.count()):
+            item = header_layout.itemAt(i)
+            if item and item.widget() == self._filter_button:
+                header_layout.insertWidget(i + 1, self._view_button)
+                break
+
+    def _update_view_button_text(self):
+        """Update the view button text based on current mode."""
+        label = self._view_mode_labels.get(self._view_mode, "Grid")
+        self._view_button.setText(f"View: {label}")
+
+        # Highlight when not in default grid mode
+        if self._view_mode != "grid":
+            self._view_button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(74, 158, 255, 0.2);
+                    border: 1px solid #4a9eff;
+                }
+            """)
+        else:
+            self._view_button.setStyleSheet("")  # Default style
+
+    def _on_view_mode_toggle(self):
+        """Toggle between view modes: stacked ↔ grid."""
+        # Find current index and move to next
+        try:
+            current_idx = self._view_modes.index(self._view_mode)
+        except ValueError:
+            current_idx = 0
+        next_idx = (current_idx + 1) % len(self._view_modes)
+        self._view_mode = self._view_modes[next_idx]
+
+        self._update_view_button_text()
+        self.log(f"[Gallery] View mode: {self._view_mode}")
+
+        # Save setting
+        from core.user_preferences import save_gallery_settings
+        save_gallery_settings(view_mode=self._view_mode)
+
+        # Clear any expanded state
+        self._expanded_stack_id = None
+        self._pre_expansion_stacked = False
+
+        # Re-display with new mode
+        self._redisplay_items()
+
+    def _redisplay_items(self):
+        """Re-filter, sort, and display items with current settings."""
+        if self._cached_items:
+            filtered_items = self._filter_items(self._cached_items)
+            sorted_items = self._manager.sort_items(filtered_items, self._sort_mode)
+            self._manager.display_items(
+                sorted_items,
+                incremental=False,
+                grouped=(self._view_mode == "sections"),
+                stacked=(self._view_mode == "stacked")
+            )
+        else:
+            self._on_refresh()
+
+    def _filter_items(self, items):
+        """Filter items based on current filter settings.
+
+        Args:
+            items: List of item dicts
+
+        Returns:
+            Filtered list of items
+        """
+        if self._show_inputs:
+            # Show all items
+            return items
+
+        # Hide input images (items where is_input=True)
+        return [item for item in items if not item.get('is_input', False)]
 
     def on_tab_activated(self):
         """Called when tab becomes visible - only refresh if needed."""
@@ -508,7 +735,7 @@ class ComfyUIGalleryTab(BaseTab):
         else:
             # No cache, need to scan
             self._cached_items = None
-            self._on_refresh()
+            self._on_refresh(force=True)
 
     def _is_own_gallery(self):
         """Check if currently viewing own gallery.
@@ -628,7 +855,7 @@ class ComfyUIGalleryTab(BaseTab):
             self._update_user_selector_visibility()
             self._update_view_only_indicator()
             self._update_gallery_path()
-            self._on_refresh()
+            self._on_refresh(force=True)
 
     def _browse_custom_folder(self):
         """Browse for a custom gallery folder."""
@@ -649,14 +876,34 @@ class ComfyUIGalleryTab(BaseTab):
             self._update_user_selector_visibility()
             self.ui.GalleryViewOnlyLabel.hide()
             self._update_gallery_path()
-            self._on_refresh()
+            self._on_refresh(force=True)
 
     # =========================================================================
     # REFRESH
     # =========================================================================
 
-    def _on_refresh(self):
-        """Refresh the gallery with images from the current directory."""
+    def _on_refresh(self, force=False):
+        """Refresh the gallery with images from the current directory.
+
+        Args:
+            force: If True, bypass debouncing and refresh immediately.
+        """
+        # Debounce refresh requests - multiple calls within a short window get consolidated
+        # This prevents flashing when file watcher, polling, and iterate all trigger refreshes
+        if not force:
+            if not hasattr(self, '_refresh_debounce_timer') or self._refresh_debounce_timer is None:
+                self._refresh_debounce_timer = QTimer(self.main_window)
+                self._refresh_debounce_timer.setSingleShot(True)
+                self._refresh_debounce_timer.timeout.connect(self._do_refresh)
+
+            # Reset the timer - will fire 500ms after the last refresh request
+            self._refresh_debounce_timer.start(500)
+            return
+
+        self._do_refresh()
+
+    def _do_refresh(self):
+        """Actually perform the gallery refresh (called after debounce)."""
         from ui_components import Worker
 
         # Skip if scan already in progress
@@ -736,11 +983,24 @@ class ComfyUIGalleryTab(BaseTab):
         if not self._initial_scan_done:
             self._initial_scan_done = True
 
-        # Sort items based on current sort mode
-        sorted_items = self._manager.sort_items(items, self._sort_mode)
+        # If no changes detected (no new items, no removed items), skip display update entirely
+        # This prevents unnecessary full rebuilds when file watcher/polling triggers redundant scans
+        filtered_items = self._filter_items(items)
+        if not new_items and hasattr(self, '_widget_cache') and len(self._widget_cache) == len(filtered_items):
+            # Just update the cached items for sorting purposes, but don't rebuild widgets
+            return
 
-        # Display the sorted items (incremental if possible)
-        self._manager.display_items(sorted_items, incremental=use_incremental)
+        # Sort filtered items based on current sort mode
+        sorted_items = self._manager.sort_items(filtered_items, self._sort_mode)
+
+        # Display the sorted items (stacked, grid, or sections view)
+        # Always do full rebuild for stacked/sections to ensure proper layout
+        self._manager.display_items(
+            sorted_items,
+            incremental=False,
+            grouped=(self._view_mode == "sections"),
+            stacked=(self._view_mode == "stacked")
+        )
 
 
 
@@ -769,13 +1029,50 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_selection_changed(self, image_path, is_selected):
         """Handle thumbnail selection state change."""
+        print(f"[DEBUG] _on_selection_changed: {os.path.basename(image_path)} selected={is_selected}")
         if is_selected:
             self._selected_items.add(image_path)
+            # Track last selected for shift-select
+            self._last_selected_path = image_path
         else:
             self._selected_items.discard(image_path)
 
+        print(f"[DEBUG] Total selected items: {len(self._selected_items)}")
+
         # Update toolbar visibility and state
         self._update_selection_toolbar()
+
+        # Update checkmark visibility for all selected items (show only if multiple selections)
+        self._update_checkmark_visibility()
+
+    def _on_shift_click_selection(self, clicked_path):
+        """Handle shift+click for range selection."""
+        if not self._last_selected_path or not self._visible_items_ordered:
+            # No previous selection, just select this item
+            if clicked_path in self._widget_cache:
+                self._widget_cache[clicked_path].set_selected(True)
+            return
+
+        try:
+            # Find indices of last selected and current clicked items
+            last_index = self._visible_items_ordered.index(self._last_selected_path)
+            current_index = self._visible_items_ordered.index(clicked_path)
+
+            # Select all items in the range
+            start = min(last_index, current_index)
+            end = max(last_index, current_index)
+
+            for i in range(start, end + 1):
+                item_path = self._visible_items_ordered[i]
+                if item_path in self._widget_cache:
+                    widget = self._widget_cache[item_path]
+                    if not widget.is_selected():
+                        widget.set_selected(True)
+
+        except ValueError:
+            # Path not found in ordered list, just select the clicked item
+            if clicked_path in self._widget_cache:
+                self._widget_cache[clicked_path].set_selected(True)
 
     def _clear_selection(self):
         """Clear all selected items."""
@@ -791,35 +1088,73 @@ class ComfyUIGalleryTab(BaseTab):
         """Create the floating selection toolbar."""
         from ui_components import GallerySelectionToolbar
 
-        self._selection_toolbar = GallerySelectionToolbar(self.ui.galleryThumbnailContainer)
+        # Parent to scroll area viewport so toolbar stays in visible area
+        viewport = self.ui.galleryScrollArea.viewport()
+        self._selection_toolbar = GallerySelectionToolbar(viewport)
         self._selection_toolbar.delete_selected.connect(self._on_delete_selected)
         self._selection_toolbar.publish_selected.connect(self._on_publish_selected)
         self._selection_toolbar.view_selected.connect(self._on_view_selected)
         self._selection_toolbar.clear_selection.connect(self._clear_selection)
         self._selection_toolbar.hide()
 
-        # Setup resize event to reposition toolbar
-        def on_container_resize(event):
+        # Setup resize event to reposition toolbar when viewport resizes
+        def on_viewport_resize(event):
             if self._selection_toolbar and self._selection_toolbar.isVisible():
-                self._selection_toolbar.position_at_bottom(self.ui.galleryThumbnailContainer)
+                self._position_toolbar_in_viewport()
             return original_resize_event(event)
 
-        original_resize_event = self.ui.galleryThumbnailContainer.resizeEvent
-        self.ui.galleryThumbnailContainer.resizeEvent = on_container_resize
+        original_resize_event = viewport.resizeEvent
+        viewport.resizeEvent = on_viewport_resize
+
+    def _position_toolbar_in_viewport(self):
+        """Position the selection toolbar at the bottom center of the scroll area viewport."""
+        if not self._selection_toolbar:
+            return
+
+        viewport = self.ui.galleryScrollArea.viewport()
+        viewport_width = viewport.width()
+        viewport_height = viewport.height()
+        toolbar_size = self._selection_toolbar.sizeHint()
+
+        # Center horizontally, position at bottom with padding
+        x = (viewport_width - toolbar_size.width()) // 2
+        y = viewport_height - toolbar_size.height() - 20
+
+        self._selection_toolbar.move(x, y)
+        self._selection_toolbar.raise_()
+        print(f"[DEBUG] Toolbar positioned at ({x}, {y}) in viewport ({viewport_width}x{viewport_height})")
 
     def _update_selection_toolbar(self):
         """Show/hide and update the selection toolbar based on selection state."""
-        if self._selected_items:
-            # Show toolbar if items are selected
+        print(f"[DEBUG] _update_selection_toolbar: {len(self._selected_items)} items selected")
+        # Only show toolbar for multi-select (2 or more items)
+        if len(self._selected_items) > 1:
+            print(f"[DEBUG] Showing toolbar with {len(self._selected_items)} items")
             if not self._selection_toolbar:
+                print("[DEBUG] Creating selection toolbar")
                 self._create_selection_toolbar()
             self._selection_toolbar.update_count(len(self._selected_items))
-            self._selection_toolbar.position_at_bottom(self.ui.galleryThumbnailContainer)
+            self._position_toolbar_in_viewport()
             self._selection_toolbar.show()
+            self._selection_toolbar.raise_()
+            print(f"[DEBUG] Toolbar visible: {self._selection_toolbar.isVisible()}, geometry: {self._selection_toolbar.geometry()}")
         else:
-            # Hide toolbar if no items selected
+            # Hide toolbar if 0 or 1 items selected
+            print("[DEBUG] Hiding toolbar")
             if self._selection_toolbar:
                 self._selection_toolbar.hide()
+
+    def _update_checkmark_visibility(self):
+        """Update checkmark visibility for all selected items (show only if multiple selections)."""
+        show_checkmarks = len(self._selected_items) > 1
+        for path in self._selected_items:
+            if path in self._widget_cache:
+                widget = self._widget_cache[path]
+                if hasattr(widget, 'selection_indicator'):
+                    if show_checkmarks:
+                        widget.selection_indicator.show()
+                    else:
+                        widget.selection_indicator.hide()
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion - remove from caches."""
@@ -860,19 +1195,31 @@ class ComfyUIGalleryTab(BaseTab):
 
     def _on_delete_selected(self):
         """Delete all selected items with confirmation."""
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox, QApplication
 
+        print(f"[DEBUG] _on_delete_selected called, selected_items={len(self._selected_items)}")
         if not self._selected_items:
+            print("[DEBUG] No items selected, returning")
             return
 
         count = len(self._selected_items)
+
+        # Get proper parent window for dialog
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        print(f"[DEBUG] Showing delete confirmation dialog for {count} items")
         reply = QMessageBox.question(
-            self,
+            parent_window,
             "Delete Selected Items",
             f"Are you sure you want to delete {count} selected item(s)?\n\nThis will permanently delete the files from disk.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
+        print(f"[DEBUG] Dialog reply: {reply}")
 
         if reply == QMessageBox.Yes:
             deleted_count = 0

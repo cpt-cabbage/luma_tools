@@ -34,6 +34,7 @@ from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog
 from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
+from small_widgets import GallerySectionHeader, StackedThumbnailWidget, show_popup_menu, browse_directory, browse_file
 
 
 # ============================================================================
@@ -125,13 +126,15 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     viewed = Signal(str)
     selection_changed = Signal(str, bool)  # path, is_selected
 
-    def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False):
+    def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None):
         super().__init__(parent)
         self.image_path = image_path
         self.output_dir = output_dir or os.path.dirname(image_path)
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._gallery_tab = gallery_tab
+        self._double_click_in_progress = False
         self._cached_metadata = None
         self._thumbnail_loaded = False
         self._tooltip_loaded = False
@@ -148,6 +151,8 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # Pass all mouse events to parent
+        self.thumbnail_label.setContextMenuPolicy(Qt.NoContextMenu)  # No context menu on child
         self._apply_thumbnail_style()
         self.thumbnail_label.setPixmap(self._create_placeholder("..."))
         layout.addWidget(self.thumbnail_label)
@@ -157,6 +162,8 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
         self.filename_label.setWordWrap(True)
         self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
+        self.filename_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # Pass all mouse events to parent
+        self.filename_label.setContextMenuPolicy(Qt.NoContextMenu)  # No context menu on child
         layout.addWidget(self.filename_label)
 
         self.note_indicator = QLabel(self.thumbnail_label)
@@ -173,6 +180,8 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         """)
         self.note_indicator.setFixedSize(18, 18)
         self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
+        self.note_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.note_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.note_indicator.hide()
 
         # Selection checkmark indicator
@@ -190,10 +199,9 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         """)
         self.selection_indicator.setFixedSize(24, 24)
         self.selection_indicator.move(4, 4)
+        self.selection_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.selection_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.selection_indicator.hide()
-
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _apply_thumbnail_style(self):
         if self._is_selected:
@@ -233,10 +241,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if self._is_selected != selected:
             self._is_selected = selected
             self._apply_thumbnail_style()
-            if selected:
-                self.selection_indicator.show()
-            else:
-                self.selection_indicator.hide()
+            # Note: Checkmark visibility will be updated by gallery tab after signal processing
             self.selection_changed.emit(self.image_path, selected)
 
     def is_selected(self):
@@ -252,10 +257,10 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             self._load_tooltip_async()
 
     def _load_tooltip_async(self):
-        worker = Worker(self._get_tooltip_data, self.output_dir, self.image_path)
-        worker.signals.result.connect(self._on_tooltip_loaded)
-        worker.signals.error.connect(lambda msg, tb: None)
-        QThreadPool.globalInstance().start(worker)
+        self._tooltip_worker = Worker(self._get_tooltip_data, self.output_dir, self.image_path)
+        self._tooltip_worker.signals.result.connect(self._on_tooltip_loaded)
+        self._tooltip_worker.signals.error.connect(lambda msg, tb: None)
+        QThreadPool.globalInstance().start(self._tooltip_worker)
 
     @staticmethod
     def _get_tooltip_data(output_dir, image_path):
@@ -282,10 +287,10 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if ext == '.exr':
             self.thumbnail_label.setPixmap(self._create_placeholder("EXR"))
             return
-        worker = Worker(self._load_image_data, self.image_path)
-        worker.signals.result.connect(self._on_thumbnail_loaded)
-        worker.signals.error.connect(lambda msg, tb: self._on_thumbnail_error())
-        QThreadPool.globalInstance().start(worker)
+        self._load_worker = Worker(self._load_image_data, self.image_path)
+        self._load_worker.signals.result.connect(self._on_thumbnail_loaded)
+        self._load_worker.signals.error.connect(lambda msg, tb: self._on_thumbnail_error())
+        QThreadPool.globalInstance().start(self._load_worker)
 
     @staticmethod
     def _load_image_data(image_path):
@@ -326,16 +331,53 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.thumbnail_label.setPixmap(self._create_placeholder("!"))
 
     def mousePressEvent(self, event):
+        print(f"[DEBUG GalleryThumbnailWidget] mousePressEvent button={event.button()} modifiers={event.modifiers()}")
         if event.button() == Qt.LeftButton:
-            # Check if Ctrl is held for multi-select
-            if event.modifiers() & Qt.ControlModifier:
-                # Toggle selection
+            # Skip if double-click is in progress
+            if self._double_click_in_progress:
+                super().mousePressEvent(event)
+                return
+
+            # Check for shift-click (range selection)
+            if event.modifiers() & Qt.ShiftModifier:
+                print("[DEBUG] Shift-click detected")
+                if self._gallery_tab:
+                    self._gallery_tab._on_shift_click_selection(self.image_path)
+            # Check for ctrl-click (toggle selection for multi-select)
+            elif event.modifiers() & Qt.ControlModifier:
+                print("[DEBUG] Ctrl-click detected - toggle selection")
                 self.set_selected(not self._is_selected)
             else:
-                # Normal click - mark as viewed and emit clicked signal
-                self.mark_as_viewed()
-                self.clicked.emit(self.image_path)
+                # Plain left-click: select only this item (clear others first)
+                print("[DEBUG] Plain click - clear and select one")
+                if self._gallery_tab:
+                    self._gallery_tab._clear_selection()
+                self.set_selected(True)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Set flag to prevent mousePressEvent from toggling selection
+            self._double_click_in_progress = True
+            # Mark as viewed and open in embedded viewer
+            self.mark_as_viewed()
+            self.clicked.emit(self.image_path)
+            # Clear flag after short delay
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(300, lambda: setattr(self, '_double_click_in_progress', False))
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Override to directly handle context menu (fixes child widget event capture)."""
+        print(f"[DEBUG GalleryThumbnailWidget] contextMenuEvent triggered for {os.path.basename(self.image_path)}")
+        # Check if this item is selected AND there are other selections
+        if self._gallery_tab and self._is_selected and len(self._gallery_tab._selected_items) > 1:
+            print(f"[DEBUG] Showing batch context menu, {len(self._gallery_tab._selected_items)} items selected")
+            self._show_batch_context_menu(event.pos())
+        else:
+            print(f"[DEBUG] Showing single item context menu")
+            self._show_context_menu(event.pos())
+        event.accept()
 
     def _get_metadata(self):
         if self._cached_metadata is None:
@@ -349,55 +391,101 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         return self._cached_metadata
 
     def _show_context_menu(self, pos):
+        try:
+            print(f"[DEBUG] _show_context_menu called with pos={pos}")
+            menu = QMenu(self)
+            open_action = menu.addAction("Open in Viewer")
+            open_action.triggered.connect(self._open_image)
+            fullscreen_action = menu.addAction("View Fullscreen")
+            fullscreen_action.triggered.connect(lambda: self.fullscreen_requested.emit(self.image_path))
+            edit_action = menu.addAction("Edit Item")
+            edit_action.triggered.connect(self._edit_item)
+            if not self._editable:
+                edit_action.setEnabled(False)
+                edit_action.setText("Edit Item (view only)")
+            open_folder_action = menu.addAction("Open Containing Folder")
+            open_folder_action.triggered.connect(self._open_folder)
+
+            # View Input option - show the source image used to generate this output
+            metadata = self._get_metadata()
+            input_image = metadata.get('input_image')
+            input_path = os.path.join(self.output_dir, input_image) if input_image else None
+            has_input = bool(input_path and os.path.exists(input_path))
+            view_input_action = menu.addAction("View Input")
+            view_input_action.triggered.connect(lambda: self._view_input(input_path))
+            view_input_action.setEnabled(has_input)
+            if not has_input and input_image:
+                view_input_action.setText("View Input (not found)")
+
+            menu.addSeparator()
+            has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
+            apply_settings_action = menu.addAction("Apply Settings")
+            apply_settings_action.triggered.connect(self._copy_settings)
+            apply_settings_action.setEnabled(has_settings)
+            if not has_settings:
+                apply_settings_action.setText("Apply Settings (no metadata)")
+            prompt = metadata.get('prompt', '')
+            copy_prompt_action = menu.addAction("Copy Prompt")
+            copy_prompt_action.triggered.connect(self._copy_prompt)
+            copy_prompt_action.setEnabled(bool(prompt))
+            copy_path_action = menu.addAction("Copy Path")
+            copy_path_action.triggered.connect(self._copy_path)
+
+            # Publish to AYON
+            menu.addSeparator()
+            publish_action = menu.addAction("Publish to AYON")
+            publish_action.triggered.connect(self._publish_to_ayon)
+
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete")
+            delete_action.triggered.connect(self._delete_item)
+            if not self._editable:
+                delete_action.setEnabled(False)
+                delete_action.setText("Delete (view only)")
+            global_pos = self.mapToGlobal(pos)
+            print(f"[DEBUG] Showing context menu at global position: {global_pos}")
+            menu.exec_(global_pos)
+            print(f"[DEBUG] Context menu closed")
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Exception in _show_context_menu: {e}")
+            traceback.print_exc()
+
+    def _show_batch_context_menu(self, pos):
+        """Show context menu for batch operations on multiple selected items."""
+        if not self._gallery_tab:
+            return
+
         menu = QMenu(self)
-        open_action = menu.addAction("Open in Viewer")
-        open_action.triggered.connect(self._open_image)
-        fullscreen_action = menu.addAction("View Fullscreen")
-        fullscreen_action.triggered.connect(lambda: self.fullscreen_requested.emit(self.image_path))
-        edit_action = menu.addAction("Edit Item")
-        edit_action.triggered.connect(self._edit_item)
-        if not self._editable:
-            edit_action.setEnabled(False)
-            edit_action.setText("Edit Item (view only)")
-        open_folder_action = menu.addAction("Open Containing Folder")
-        open_folder_action.triggered.connect(self._open_folder)
+        count = len(self._gallery_tab._selected_items)
 
-        # View Input option - show the source image used to generate this output
-        metadata = self._get_metadata()
-        input_image = metadata.get('input_image')
-        input_path = os.path.join(self.output_dir, input_image) if input_image else None
-        has_input = input_path and os.path.exists(input_path)
-        view_input_action = menu.addAction("View Input")
-        view_input_action.triggered.connect(lambda: self._view_input(input_path))
-        view_input_action.setEnabled(has_input)
-        if not has_input and input_image:
-            view_input_action.setText("View Input (not found)")
-
+        # Header showing selection count
+        header_action = menu.addAction(f"{count} items selected")
+        header_action.setEnabled(False)
         menu.addSeparator()
-        has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
-        apply_settings_action = menu.addAction("Apply Settings")
-        apply_settings_action.triggered.connect(self._copy_settings)
-        apply_settings_action.setEnabled(has_settings)
-        if not has_settings:
-            apply_settings_action.setText("Apply Settings (no metadata)")
-        prompt = metadata.get('prompt', '')
-        copy_prompt_action = menu.addAction("Copy Prompt")
-        copy_prompt_action.triggered.connect(self._copy_prompt)
-        copy_prompt_action.setEnabled(bool(prompt))
-        copy_path_action = menu.addAction("Copy Path")
-        copy_path_action.triggered.connect(self._copy_path)
+
+        # View selected
+        view_action = menu.addAction("View Selected")
+        view_action.triggered.connect(self._gallery_tab._on_view_selected)
 
         # Publish to AYON
         menu.addSeparator()
         publish_action = menu.addAction("Publish to AYON")
-        publish_action.triggered.connect(self._publish_to_ayon)
+        publish_action.triggered.connect(self._gallery_tab._on_publish_selected)
 
+        # Delete
         menu.addSeparator()
-        delete_action = menu.addAction("Delete")
-        delete_action.triggered.connect(self._delete_item)
+        delete_action = menu.addAction("Delete Selected")
+        delete_action.triggered.connect(self._gallery_tab._on_delete_selected)
         if not self._editable:
             delete_action.setEnabled(False)
-            delete_action.setText("Delete (view only)")
+            delete_action.setText("Delete Selected (view only)")
+
+        # Clear selection
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear Selection")
+        clear_action.triggered.connect(self._gallery_tab._clear_selection)
+
         menu.exec_(self.mapToGlobal(pos))
 
     def _publish_to_ayon(self):
@@ -437,6 +525,7 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             print(f"Error opening input image: {e}")
 
     def _delete_item(self):
+        print(f"[DEBUG] _delete_item called for {self.image_path}")
         from PySide6.QtWidgets import QMessageBox
         filename = os.path.basename(self.image_path)
         parent_window = None
@@ -500,13 +589,17 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
     clicked = Signal(str)
     deleted = Signal(str)
     viewed = Signal(str)
+    selection_changed = Signal(str, bool)  # path, is_selected
 
-    def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False):
+    def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None):
         super().__init__(parent)
         self.model_path = model_path
         self.output_dir = output_dir or os.path.dirname(model_path)
         self._editable = editable
         self._is_new = is_new
+        self._is_selected = False
+        self._gallery_tab = gallery_tab
+        self._double_click_in_progress = False
         self._thumbnail_loading = False
         self._thumbnail_loaded = False
         self._tooltip_loaded = False
@@ -524,6 +617,8 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(*self.THUMBNAIL_SIZE)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # Pass all mouse events to parent
+        self.thumbnail_label.setContextMenuPolicy(Qt.NoContextMenu)  # No context menu on child
         self._apply_thumbnail_style()
         layout.addWidget(self.thumbnail_label)
 
@@ -532,6 +627,8 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self._apply_filename_style()
         self.filename_label.setWordWrap(True)
         self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0])
+        self.filename_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # Pass all mouse events to parent
+        self.filename_label.setContextMenuPolicy(Qt.NoContextMenu)  # No context menu on child
         layout.addWidget(self.filename_label)
 
         self.note_indicator = QLabel(self.thumbnail_label)
@@ -548,13 +645,36 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         """)
         self.note_indicator.setFixedSize(18, 18)
         self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
+        self.note_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.note_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.note_indicator.hide()
 
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
+        # Selection checkmark indicator
+        self.selection_indicator = QLabel(self.thumbnail_label)
+        self.selection_indicator.setText("✓")
+        self.selection_indicator.setAlignment(Qt.AlignCenter)
+        self.selection_indicator.setStyleSheet("""
+            QLabel {
+                background-color: rgba(59, 130, 246, 0.95);
+                color: white;
+                border-radius: 12px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        self.selection_indicator.setFixedSize(24, 24)
+        self.selection_indicator.move(4, 4)
+        self.selection_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.selection_indicator.setContextMenuPolicy(Qt.NoContextMenu)
+        self.selection_indicator.hide()
 
     def _apply_thumbnail_style(self):
-        if self._is_new:
+        if self._is_selected:
+            # Selected state - blue border
+            self.thumbnail_label.setStyleSheet("""
+                QLabel { background-color: #2c313a; border: 3px solid #3b82f6; border-radius: 4px; }
+            """)
+        elif self._is_new:
             self.thumbnail_label.setStyleSheet("""
                 QLabel { background-color: #2c313a; border: 2px solid #10b981; border-radius: 4px; }
             """)
@@ -576,6 +696,18 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
             self._apply_filename_style()
             self.viewed.emit(self.model_path)
 
+    def set_selected(self, selected):
+        """Set selection state and update UI."""
+        if self._is_selected != selected:
+            self._is_selected = selected
+            self._apply_thumbnail_style()
+            # Note: Checkmark visibility will be updated by gallery tab after signal processing
+            self.selection_changed.emit(self.model_path, selected)
+
+    def is_selected(self):
+        """Check if this item is selected."""
+        return self._is_selected
+
     def load_thumbnail_if_needed(self):
         if not self._thumbnail_loaded:
             self._thumbnail_loaded = True
@@ -585,10 +717,10 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
             self._load_tooltip_async()
 
     def _load_tooltip_async(self):
-        worker = Worker(self._get_tooltip_data, self.output_dir, self.model_path)
-        worker.signals.result.connect(self._on_tooltip_loaded)
-        worker.signals.error.connect(lambda msg, tb: None)
-        QThreadPool.globalInstance().start(worker)
+        self._tooltip_worker = Worker(self._get_tooltip_data, self.output_dir, self.model_path)
+        self._tooltip_worker.signals.result.connect(self._on_tooltip_loaded)
+        self._tooltip_worker.signals.error.connect(lambda msg, tb: None)
+        QThreadPool.globalInstance().start(self._tooltip_worker)
 
     @staticmethod
     def _get_tooltip_data(output_dir, model_path):
@@ -626,6 +758,7 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self._generate_thumbnail_async()
 
     def _generate_thumbnail_async(self):
+        """Generate thumbnail on main thread (Three.js viewer requires it)."""
         if self._thumbnail_loading:
             return
         try:
@@ -637,19 +770,23 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         except Exception:
             pass
         self._thumbnail_loading = True
-        try:
-            worker = Worker(self._generate_thumbnail_sync)
-            worker.signals.result.connect(self._on_thumbnail_generated)
-            worker.signals.error.connect(self._on_thumbnail_error)
-            QThreadPool.globalInstance().start(worker)
-        except Exception as e:
-            print(f"Error starting thumbnail worker: {e}")
-            self._thumbnail_loading = False
 
-    def _generate_thumbnail_sync(self):
-        from models.thumbnail_service import get_model_thumbnail_service
-        service = get_model_thumbnail_service()
-        return service.generate_thumbnail_sync(self.model_path)
+        # Use QTimer to run on main thread (Three.js viewer requires Qt event loop)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._generate_thumbnail_on_main_thread)
+
+    def _generate_thumbnail_on_main_thread(self):
+        """Generate thumbnail - must run on main thread for Three.js viewer."""
+        if not isValid(self):
+            return
+        try:
+            from models.thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
+            pixmap = service.generate_thumbnail_sync(self.model_path)
+            self._on_thumbnail_generated(pixmap)
+        except Exception as e:
+            print(f"Error generating thumbnail: {e}")
+            self._on_thumbnail_error(str(e), "")
 
     def _on_thumbnail_generated(self, pixmap):
         self._thumbnail_loading = False
@@ -714,10 +851,53 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         return pixmap
 
     def mousePressEvent(self, event):
+        print(f"[DEBUG GLBThumbnailWidget] mousePressEvent button={event.button()} modifiers={event.modifiers()}")
         if event.button() == Qt.LeftButton:
+            # Skip if double-click is in progress
+            if self._double_click_in_progress:
+                super().mousePressEvent(event)
+                return
+
+            # Check for shift-click (range selection)
+            if event.modifiers() & Qt.ShiftModifier:
+                print("[DEBUG] Shift-click detected")
+                if self._gallery_tab:
+                    self._gallery_tab._on_shift_click_selection(self.model_path)
+            # Check for ctrl-click (toggle selection for multi-select)
+            elif event.modifiers() & Qt.ControlModifier:
+                print("[DEBUG] Ctrl-click detected - toggle selection")
+                self.set_selected(not self._is_selected)
+            else:
+                # Plain left-click: select only this item (clear others first)
+                print("[DEBUG] Plain click - clear and select one")
+                if self._gallery_tab:
+                    self._gallery_tab._clear_selection()
+                self.set_selected(True)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Set flag to prevent mousePressEvent from toggling selection
+            self._double_click_in_progress = True
+            # Mark as viewed and open in embedded viewer
             self.mark_as_viewed()
             self.clicked.emit(self.model_path)
-        super().mousePressEvent(event)
+            # Clear flag after short delay
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(300, lambda: setattr(self, '_double_click_in_progress', False))
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Override to directly handle context menu (fixes child widget event capture)."""
+        print(f"[DEBUG GLBThumbnailWidget] contextMenuEvent triggered for {os.path.basename(self.model_path)}")
+        # Check if this item is selected AND there are other selections
+        if self._gallery_tab and self._is_selected and len(self._gallery_tab._selected_items) > 1:
+            print(f"[DEBUG] Showing batch context menu, {len(self._gallery_tab._selected_items)} items selected")
+            self._show_batch_context_menu(event.pos())
+        else:
+            print(f"[DEBUG] Showing single item context menu")
+            self._show_context_menu(event.pos())
+        event.accept()
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)
@@ -743,6 +923,43 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         delete_action.triggered.connect(self._delete_model)
         if not self._editable:
             delete_action.setEnabled(False)
+        menu.exec_(self.mapToGlobal(pos))
+
+    def _show_batch_context_menu(self, pos):
+        """Show context menu for batch operations on multiple selected items."""
+        if not self._gallery_tab:
+            return
+
+        menu = QMenu(self)
+        count = len(self._gallery_tab._selected_items)
+
+        # Header showing selection count
+        header_action = menu.addAction(f"{count} items selected")
+        header_action.setEnabled(False)
+        menu.addSeparator()
+
+        # View selected
+        view_action = menu.addAction("View Selected")
+        view_action.triggered.connect(self._gallery_tab._on_view_selected)
+
+        # Publish to AYON
+        menu.addSeparator()
+        publish_action = menu.addAction("Publish to AYON")
+        publish_action.triggered.connect(self._gallery_tab._on_publish_selected)
+
+        # Delete
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete Selected")
+        delete_action.triggered.connect(self._gallery_tab._on_delete_selected)
+        if not self._editable:
+            delete_action.setEnabled(False)
+            delete_action.setText("Delete Selected (view only)")
+
+        # Clear selection
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear Selection")
+        clear_action.triggered.connect(self._gallery_tab._clear_selection)
+
         menu.exec_(self.mapToGlobal(pos))
 
     def _publish_to_ayon(self):

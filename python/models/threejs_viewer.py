@@ -75,12 +75,14 @@ class ThreeJSBridge(QObject):
         modelLoaded: Emitted when model loads successfully (path)
         loadError: Emitted when model fails to load (error message)
         animationInfo: Emitted with animation list after model loads
+        screenshotCaptured: Emitted with base64 screenshot data
     """
 
     viewerReady = Signal()
     modelLoaded = Signal(str)
     loadError = Signal(str)
     animationInfo = Signal(list)
+    screenshotCaptured = Signal(str)  # base64 data URL
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -189,6 +191,24 @@ class ThreeJSBridge(QObject):
         if self._web_view:
             js_code = f"setLightStrength({strength});"
             self._web_view.page().runJavaScript(js_code)
+
+    def capture_screenshot(self, size: int = 150, callback=None):
+        """Capture a screenshot of the current view.
+
+        Args:
+            size: Size of the square thumbnail (default 150)
+            callback: Optional callback function to receive the base64 data
+        """
+        if self._web_view:
+            js_code = f"captureScreenshot({size});"
+
+            def handle_result(result):
+                if result:
+                    self.screenshotCaptured.emit(result)
+                    if callback:
+                        callback(result)
+
+            self._web_view.page().runJavaScript(js_code, handle_result)
 
 
 class ThreeJSViewerWidget(QWidget):
@@ -412,6 +432,16 @@ class ThreeJSViewerWidget(QWidget):
     def get_current_path(self) -> Optional[str]:
         """Get the currently loaded model path."""
         return self._current_model_path
+
+    def capture_screenshot(self, size: int = 150, callback=None):
+        """Capture a screenshot of the current model.
+
+        Args:
+            size: Size of the square thumbnail (default 150)
+            callback: Optional callback function to receive the base64 data URL
+        """
+        if self._viewer_ready:
+            self._bridge.capture_screenshot(size, callback)
 
     def set_lighting_mode(self, mode: LightingMode):
         """

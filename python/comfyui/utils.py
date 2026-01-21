@@ -458,8 +458,18 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     - Trellis2ExportGLB nodes (filename_prefix)
     - UltraShapeRefine nodes (seed)
     - UltraShapeSaveGLB nodes (filename_prefix)
+    - PreviewImage nodes (converted to SaveImage)
     """
     modified = copy.deepcopy(workflow)
+
+    # Convert PreviewImage nodes to SaveImage nodes so we can control the output filename
+    # PreviewImage saves to temp folder with temp names, SaveImage allows filename_prefix
+    for node_id, node_data in modified.items():
+        if isinstance(node_data, dict) and node_data.get('class_type') == 'PreviewImage':
+            node_data['class_type'] = 'SaveImage'
+            if 'inputs' not in node_data:
+                node_data['inputs'] = {}
+            print(f"Converted PreviewImage node {node_id} to SaveImage")
 
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict) or 'class_type' not in node_data:

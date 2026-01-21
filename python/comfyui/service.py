@@ -1183,27 +1183,54 @@ def clear_gallery_metadata_cache(output_dir: str = None) -> None:
 
 
 def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
-    """Load gallery metadata from the output directory."""
+    """Load gallery metadata from the output directory.
+
+    Returns:
+        Dict with metadata, or empty dict if file missing/corrupted
+    """
     global _gallery_metadata_cache
 
-    metadata_path = _get_metadata_path(output_dir)
+    if not output_dir:
+        return {}
+
+    try:
+        metadata_path = _get_metadata_path(output_dir)
+    except Exception as e:
+        print(f"[Metadata] Error getting metadata path for {output_dir}: {e}")
+        return {}
+
     if not os.path.exists(metadata_path):
         return {}
 
     try:
         current_mtime = os.path.getmtime(metadata_path)
 
+        # Check cache
         if use_cache and output_dir in _gallery_metadata_cache:
-            cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
-            if cached_mtime == current_mtime:
-                return cached_data
+            try:
+                cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
+                if cached_mtime == current_mtime and isinstance(cached_data, dict):
+                    return cached_data
+            except Exception as e:
+                print(f"[Metadata] Error reading cache: {e}")
 
+        # Load from file
         with open(metadata_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
+            # Validate data is a dict
+            if not isinstance(data, dict):
+                print(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
+                return {}
+
             _gallery_metadata_cache[output_dir] = (current_mtime, data)
             return data
+
+    except json.JSONDecodeError as e:
+        print(f"[Metadata] Corrupted JSON in {metadata_path}: {e}")
+        return {}
     except Exception as e:
-        print(f"Error loading gallery metadata: {e}")
+        print(f"[Metadata] Error loading gallery metadata from {output_dir}: {e}")
         return {}
 
 
@@ -1233,43 +1260,129 @@ def add_image_metadata(
     workflow_preset: Optional[str] = None,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> bool:
-    """Add metadata for images that will be generated with a given prefix."""
+    """Add metadata for images that will be generated with a given prefix.
+
+    Enhanced to store:
+    - is_output: True (marks as generated output)
+    - job_prefix: Grouping key for gallery stacking
+    - source_images: All input images used in generation
+    - source_models: All 3D models used as inputs
+
+    Returns:
+        bool: True if metadata saved successfully, False otherwise
+    """
     from datetime import datetime
 
-    metadata = load_gallery_metadata(output_dir)
+    try:
+        metadata = load_gallery_metadata(output_dir)
+    except Exception as e:
+        print(f"[Metadata] Error loading metadata, starting fresh: {e}")
+        metadata = {}
+
+    # Extract all source images and models from editable values
+    source_images = []
+    source_models = []
+
+    # Helper to safely extract basename
+    def safe_basename(path):
+        try:
+            return os.path.basename(path) if path else None
+        except (TypeError, AttributeError):
+            return None
+
+    if input_image:
+        basename = safe_basename(input_image)
+        if basename:
+            source_images.append(basename)
 
     serialized_editable = {}
     if editable_values:
         for node_id, data in editable_values.items():
+            if not isinstance(data, dict):
+                continue
+
             node_info = data.get('node')
             value = data.get('value')
 
-            if node_info and node_info.widget_type == 'image':
+            # Safely get widget_type
+            widget_type = None
+            if node_info and hasattr(node_info, 'widget_type'):
+                widget_type = node_info.widget_type
+
+            # Collect source files
+            if widget_type == 'image':
+                # Don't serialize image widgets, but collect their paths
+                try:
+                    if isinstance(value, list):
+                        for v in value:
+                            basename = safe_basename(v)
+                            if basename:
+                                source_images.append(basename)
+                    elif value:
+                        basename = safe_basename(value)
+                        if basename:
+                            source_images.append(basename)
+                except Exception as e:
+                    print(f"[Metadata] Error extracting image paths: {e}")
                 continue
+            elif widget_type == '3d_model':
+                # Collect 3D model paths
+                try:
+                    if isinstance(value, list):
+                        for v in value:
+                            basename = safe_basename(v)
+                            if basename:
+                                source_models.append(basename)
+                    elif value:
+                        basename = safe_basename(value)
+                        if basename:
+                            source_models.append(basename)
+                except Exception as e:
+                    print(f"[Metadata] Error extracting model paths: {e}")
 
-            serialized_editable[str(node_id)] = {
-                "node_id": node_info.node_id if node_info else node_id,
-                "display_name": node_info.display_name if node_info else "",
-                "node_type": node_info.node_type if node_info else "",
-                "widget_type": node_info.widget_type if node_info else "text",
-                "value": value,
-            }
+            # Serialize editable value
+            try:
+                serialized_editable[str(node_id)] = {
+                    "node_id": getattr(node_info, 'node_id', node_id) if node_info else node_id,
+                    "display_name": getattr(node_info, 'display_name', "") if node_info else "",
+                    "node_type": getattr(node_info, 'node_type', "") if node_info else "",
+                    "widget_type": widget_type or "text",
+                    "value": value,
+                }
+            except Exception as e:
+                print(f"[Metadata] Error serializing editable value for node {node_id}: {e}")
 
-    entry = {
-        "prompt": prompt,
-        "workflow": workflow_name,
-        "workflow_preset": workflow_preset,
-        "input_image": os.path.basename(input_image) if input_image else None,
-        "timestamp": datetime.now().isoformat(),
-        "generation_count": generation_count,
-        "base_seed": base_seed,
-        "editable_values": serialized_editable if serialized_editable else None,
-    }
+    # Deduplicate source lists while preserving order
+    try:
+        source_images = list(dict.fromkeys(source_images))  # Remove dupes, keep order
+        source_models = list(dict.fromkeys(source_models))
+    except Exception as e:
+        print(f"[Metadata] Error deduplicating sources: {e}")
 
-    prefix_key = output_prefix.rstrip('_')
-    metadata[f"_prefix_{prefix_key}"] = entry
+    prefix_key = output_prefix.rstrip('_') if output_prefix else "unknown"
 
-    return save_gallery_metadata(output_dir, metadata)
+    try:
+        entry = {
+            "prompt": prompt,
+            "workflow": workflow_name,
+            "workflow_preset": workflow_preset,
+            "input_image": safe_basename(input_image),  # Keep for backward compat
+            "timestamp": datetime.now().isoformat(),
+            "generation_count": generation_count,
+            "base_seed": base_seed,
+            "editable_values": serialized_editable if serialized_editable else None,
+            # New fields for enhanced detection
+            "is_output": True,  # Explicitly mark as generated output
+            "job_prefix": prefix_key,  # Store grouping key
+            "source_images": source_images if source_images else None,  # All input images
+            "source_models": source_models if source_models else None,  # All 3D model inputs
+        }
+
+        metadata[f"_prefix_{prefix_key}"] = entry
+        return save_gallery_metadata(output_dir, metadata)
+    except Exception as e:
+        print(f"[Metadata] Error saving metadata: {e}")
+        return False
 
 
 def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
@@ -1279,17 +1392,47 @@ def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any
 
 
 def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) -> Optional[Dict[str, Any]]:
-    """Internal helper to look up metadata for a filename."""
+    """Internal helper to look up metadata for a filename.
+
+    Looks up by exact filename first, then by prefix match.
+
+    Args:
+        metadata: Gallery metadata dict
+        filename: Filename to look up
+
+    Returns:
+        Metadata dict for the file, or None if not found
+    """
+    # Validate inputs
+    if not isinstance(metadata, dict):
+        return None
+    if not filename or not isinstance(filename, str):
+        return None
+
+    # Try exact filename match first
     if filename in metadata:
-        return metadata[filename]
+        result = metadata[filename]
+        if isinstance(result, dict):
+            return result
 
-    basename = os.path.splitext(filename)[0]
+    # Try prefix matching
+    try:
+        basename = os.path.splitext(filename)[0]
+    except Exception:
+        return None
 
-    for key, value in metadata.items():
-        if key.startswith("_prefix_"):
-            prefix = key[8:]
+    # Look for matching prefix entries
+    try:
+        for key, value in metadata.items():
+            if not isinstance(key, str) or not key.startswith("_prefix_"):
+                continue
+
+            prefix = key[8:]  # Remove "_prefix_" prefix
             if basename.startswith(prefix):
-                return value
+                if isinstance(value, dict):
+                    return value
+    except Exception as e:
+        print(f"[Metadata] Error during prefix lookup for {filename}: {e}")
 
     return None
 
