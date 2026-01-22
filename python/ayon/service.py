@@ -12,8 +12,12 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, List, Callable
 
 from core.utils import normalize_path
-
-from core.config import *
+from core.config import (
+    AYON_COLORSPACE, AYON_CONSOLE, AYON_DEFAULT_FPS, AYON_DEFAULT_HEIGHT,
+    AYON_DEFAULT_WIDTH, AYON_DISPLAY, AYON_FAMILY, AYON_PRODUCT_TYPE, AYON_VIEW,
+    DEADLINE_CHUNK_SIZE, DEADLINE_DEPARTMENT, DEADLINE_GROUP, DEADLINE_PATH,
+    DEADLINE_POOL, DEADLINE_PRIORITY_BUILD, DEADLINE_PRIORITY_PUBLISH
+)
 
 # AYON imports
 try:
@@ -800,7 +804,8 @@ def submit_ayon_publish_to_deadline(
     try:
         deadline_settings = project_settings.get("deadline", {})
         server_name = deadline_settings.get("deadline_server", "default")
-    except:
+    except (KeyError, AttributeError, Exception) as e:
+        logger.warning(f"Could not get Deadline server from settings: {e}")
         server_name = "default"
 
     # Submit the job

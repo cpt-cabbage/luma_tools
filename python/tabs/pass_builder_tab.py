@@ -57,24 +57,17 @@ class PassBuilderTab(BaseTab):
 
     def _on_build_type_button_clicked(self):
         """Show popup menu with build type options."""
-        from PySide6.QtWidgets import QMenu
+        from small_widgets import show_popup_menu
 
-        menu = QMenu(self.main_window)
+        result = show_popup_menu(
+            self.main_window,
+            self.ui.BuildTypeButton,
+            self._build_type_options,
+            current=self._build_type
+        )
 
-        for label, mode in self._build_type_options:
-            action = menu.addAction(label)
-            action.setData(mode)
-            if mode == self._build_type:
-                action.setCheckable(True)
-                action.setChecked(True)
-
-        # Show menu below the button
-        action = menu.exec_(self.ui.BuildTypeButton.mapToGlobal(
-            self.ui.BuildTypeButton.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._build_type = action.data()
+        if result is not None:
+            self._build_type = result
             self._update_build_type_button_text()
 
     def _on_scan_renders_clicked(self):
@@ -129,7 +122,6 @@ class PassBuilderTab(BaseTab):
     def _detect_passes(self, render_file):
         """Detect passes in render file with spinner animation - runs on background thread."""
         from services.render_service import detect_passes
-        from ui_components import Worker
 
         self.ui.Passes.clear()
 
@@ -171,12 +163,8 @@ class PassBuilderTab(BaseTab):
             self.log(f"Pass detection error: {error_msg}")
             self.ui.BuildPasses.setEnabled(False)
 
-        # Create worker and run on background thread
-        # Store as instance attribute to prevent garbage collection
-        self._detect_passes_worker = Worker(detect_passes, render_file)
-        self._detect_passes_worker.signals.result.connect(on_result)
-        self._detect_passes_worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(self._detect_passes_worker)
+        # Use BaseTab helper for worker management
+        self.start_worker(detect_passes, render_file, on_result=on_result, on_error=on_error)
 
     def _select_saved_passes(self, passes_file):
         """Select previously saved passes in the UI."""
@@ -218,8 +206,7 @@ class PassBuilderTab(BaseTab):
         build_type_display = "Local" if build_type == "local" else "Farm"
 
         # Show status bar progress (no overlay so user can still interact)
-        self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
+        self.update_status_with_spinner(
             f"🔧 Pass Builder: Building passes ({build_type_display})...",
             StatusColors.INFO
         )
@@ -237,26 +224,23 @@ class PassBuilderTab(BaseTab):
 
         def on_result(result):
             """Called when build completes."""
-            self.main_window.stop_status_spinner()
             self.log(f"Build completed: {result}")
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
                 "✅ Pass Builder: Build completed successfully",
-                StatusColors.SUCCESS
+                StatusColors.SUCCESS,
+                start=False
             )
             self.main_window.animator.show_success("Build completed successfully")
 
         def on_error(error_msg, traceback_str):
             """Called when build fails."""
-            self.main_window.stop_status_spinner()
             self.log(f"Build failed: {error_msg}")
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
                 f"Pass Builder failed: {error_msg}",
-                StatusColors.ERROR
+                StatusColors.ERROR,
+                start=False
             )
             self.main_window.animator.show_error(f"Build failed: {error_msg}")
 
-        # Store as instance attribute to prevent garbage collection
-        self._build_worker = Worker(do_build)
-        self._build_worker.signals.result.connect(on_result)
-        self._build_worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(self._build_worker)
+        # Use BaseTab helper for worker management
+        self.start_worker(do_build, on_result=on_result, on_error=on_error)

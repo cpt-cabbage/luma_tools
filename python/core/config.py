@@ -244,5 +244,137 @@ DEFAULT_GLOBAL_SETTINGS_PATH = os.path.join(_ROOT_DIR, "global_settings")
 GLOBAL_SETTINGS_FILENAME = "global_settings.json"
 
 
+# ============================================================================
+# UI STYLING CONSTANTS
+# ============================================================================
+# Common colors used throughout the application UI.
+# Use these constants instead of hardcoding hex colors.
+
+class UIColors:
+    """Common UI color constants for consistent styling."""
+
+    # Backgrounds
+    BG_DARK = "#1e1e1e"
+    BG_DARK_ALT = "#1e1e22"  # Slight blue tint
+    BG_MEDIUM = "#2a2a2a"
+    BG_MEDIUM_ALT = "#2a2e36"  # Slight blue tint
+    BG_LIGHT = "#3c3c3c"
+    BG_LIGHT_ALT = "#3c414b"  # For buttons, borders
+    BG_HOVER = "#4a5160"
+
+    # Text colors
+    TEXT_WHITE = "#ffffff"
+    TEXT_LIGHT = "#e0e0e0"
+    TEXT_SECONDARY = "#aaaaaa"
+    TEXT_MUTED = "#888888"
+    TEXT_DARK_MUTED = "#666666"
+
+    # Accent colors
+    ACCENT_BLUE = "#4a9eff"
+    ACCENT_BLUE_HOVER = "#5aa9ff"
+    ACCENT_BLUE_ALT = "#6ab0ff"
+
+    # Status colors
+    SUCCESS = "#10b981"
+    SUCCESS_HOVER = "#14ce94"
+    ERROR = "#ef4444"
+    ERROR_ALT = "#ff6b6b"
+    WARNING = "#f59e0b"
+    WARNING_DARK = "#d97706"
+
+    # Border colors
+    BORDER = "#3c3c3c"
+    BORDER_FOCUS = "#4a9eff"
+
+
+class UIStyles:
+    """Common stylesheet snippets for consistent styling."""
+
+    # Label styles
+    LABEL_LIGHT = "color: #e0e0e0;"
+    LABEL_MUTED = "color: #888888;"
+    LABEL_SECONDARY = "color: #aaaaaa;"
+    LABEL_ITALIC_MUTED = "color: #888888; font-style: italic;"
+    LABEL_SMALL_MUTED = "color: #888888; font-size: 11px;"
+    LABEL_PATH = "color: white; font-size: 9pt;"
+
+    # Button base styles
+    BUTTON_PRIMARY = """
+        QPushButton {
+            background-color: #4a9eff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 15px;
+        }
+        QPushButton:hover { background-color: #5aa9ff; }
+        QPushButton:pressed { background-color: #3a8eef; }
+        QPushButton:disabled { background-color: #3c414b; color: #666; }
+    """
+
+    BUTTON_SUCCESS = """
+        QPushButton {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 15px;
+        }
+        QPushButton:hover { background-color: #14ce94; }
+        QPushButton:disabled { background-color: #3c414b; color: #6b6f78; }
+    """
+
+    BUTTON_SECONDARY = """
+        QPushButton {
+            background-color: #3c414b;
+            color: #e0e0e0;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 15px;
+        }
+        QPushButton:hover { background-color: #4a5160; }
+        QPushButton:pressed { background-color: #2a2e36; }
+        QPushButton:checked { background-color: #4a9eff; }
+        QPushButton:disabled { background-color: #2a2e36; color: #666; }
+    """
+
+    BUTTON_DANGER = """
+        QPushButton {
+            background-color: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 15px;
+        }
+        QPushButton:hover { background-color: #f87171; }
+    """
+
+    # Scroll area style
+    SCROLL_AREA = """
+        QScrollArea {
+            background-color: #1e1e1e;
+            border: 1px solid #3c3c3c;
+        }
+    """
+
+    # Input/ComboBox styles
+    COMBOBOX = """
+        QComboBox {
+            background-color: #3c414b;
+            color: #e0e0e0;
+            border: 1px solid #3c3c3c;
+            border-radius: 3px;
+            padding: 5px;
+        }
+        QComboBox:hover { background-color: #4a5160; }
+    """
+
+    # Dialog base style
+    DIALOG = """
+        QDialog { background-color: #1e1e22; }
+        QLabel { color: #e0e0e0; }
+    """
+
+
 
 

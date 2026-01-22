@@ -141,3 +141,65 @@ class BaseTab(ABC):
         if self.ui is None:
             return None
         return getattr(self.ui, name, None)
+
+    def start_worker(self, func, *args, on_result=None, on_error=None, on_progress=None):
+        """
+        Start a worker thread with standard signal connections.
+
+        This helper eliminates boilerplate for async operations. The worker is
+        stored on self._worker to prevent garbage collection.
+
+        Args:
+            func: The function to run in the worker thread
+            *args: Arguments to pass to the function
+            on_result: Optional callback for successful completion (receives result)
+            on_error: Optional callback for errors (receives (msg, traceback) tuple)
+            on_progress: Optional callback for progress updates (receives int, str)
+
+        Example:
+            self.start_worker(
+                my_long_operation, arg1, arg2,
+                on_result=self._on_operation_complete,
+                on_error=self._on_operation_error
+            )
+        """
+        from PySide6.QtCore import QThreadPool
+        from ui_components import Worker
+
+        self._worker = Worker(func, *args)
+
+        if on_result:
+            self._worker.signals.result.connect(on_result)
+        if on_error:
+            self._worker.signals.error.connect(on_error)
+        if on_progress:
+            self._worker.signals.progress.connect(on_progress)
+
+        QThreadPool.globalInstance().start(self._worker)
+
+    def update_status_with_spinner(self, message: str, color, start: bool = True):
+        """
+        Update status bar with animated message and control spinner.
+
+        This helper consolidates the common pattern of starting/stopping the status spinner
+        and updating the animated status message. It eliminates duplication across tabs.
+
+        Args:
+            message: Status message to display
+            color: StatusColors enum value (INFO, SUCCESS, WARNING, ERROR)
+            start: If True, starts the spinner; if False, stops it (default: True)
+
+        Example:
+            # Start operation
+            self.update_status_with_spinner("Processing data...", StatusColors.INFO)
+
+            # Complete operation
+            self.update_status_with_spinner("Processing complete!", StatusColors.SUCCESS, start=False)
+        """
+        if start:
+            self.main_window.start_status_spinner()
+        else:
+            self.main_window.stop_status_spinner()
+
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.update_status_animated(message, color)

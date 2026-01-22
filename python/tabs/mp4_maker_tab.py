@@ -79,52 +79,44 @@ class MP4MakerTab(BaseTab):
 
     def _on_source_button_clicked(self):
         """Show popup menu with source options."""
-        from PySide6.QtWidgets import QMenu
+        from small_widgets import show_popup_menu
 
-        menu = QMenu(self.main_window)
-
+        # Build display options with dynamic label for for_comp
+        display_options = []
         for label, value in self._source_options:
-            # Update label for for_comp if output_subdirectory is set
             display_label = label
             if value == "for_comp" and self.app_state.output_subdirectory:
                 display_label = self.app_state.output_subdirectory.title()
+            display_options.append((display_label, value))
 
-            action = menu.addAction(display_label)
-            action.setData(value)
-            if value == self._source:
-                action.setCheckable(True)
-                action.setChecked(True)
+        result = show_popup_menu(
+            self.main_window,
+            self.ui.MP4SourceButton,
+            display_options,
+            current=self._source
+        )
 
-        # Show menu below the button
-        action = menu.exec_(self.ui.MP4SourceButton.mapToGlobal(
-            self.ui.MP4SourceButton.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._source = action.data()
+        if result is not None:
+            self._source = result
             self._update_source_button_text()
             self._on_source_changed()
 
     def _on_quality_button_clicked(self):
         """Show popup menu with quality options."""
-        from PySide6.QtWidgets import QMenu
+        from small_widgets import show_popup_menu
 
-        menu = QMenu(self.main_window)
+        # Convert to (label, value) format for show_popup_menu
+        menu_options = [(label, index) for index, label, button_label in self._quality_options]
 
-        for index, label, button_label in self._quality_options:
-            action = menu.addAction(label)
-            action.setData(index)
-            if index == self._quality_index:
-                action.setCheckable(True)
-                action.setChecked(True)
+        result = show_popup_menu(
+            self.main_window,
+            self.ui.MP4QualityButton,
+            menu_options,
+            current=self._quality_index
+        )
 
-        # Show menu below the button
-        action = menu.exec_(self.ui.MP4QualityButton.mapToGlobal(
-            self.ui.MP4QualityButton.rect().bottomLeft()
-        ))
-
-        if action and action.data() is not None:
-            self._quality_index = action.data()
+        if result is not None:
+            self._quality_index = result
             self._update_quality_button_text()
 
     def _on_source_changed(self):
@@ -302,8 +294,7 @@ class MP4MakerTab(BaseTab):
         from services.mp4_maker import generate_mp4
 
         # Show status bar progress (no overlay so user can still interact)
-        self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
+        self.update_status_with_spinner(
             "🎬 MP4: Preparing to convert...",
             StatusColors.INFO
         )
@@ -312,10 +303,10 @@ class MP4MakerTab(BaseTab):
         # Get selected render
         sel0 = self.ui.MP4RendersList.currentRow()
         if sel0 < 0 or sel0 >= len(self.app_state.mp4_renders):
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
                 "No render selected",
-                StatusColors.ERROR
+                StatusColors.ERROR,
+                start=False
             )
             return
 
@@ -333,10 +324,10 @@ class MP4MakerTab(BaseTab):
         base_filename = os.path.basename(framename)
         parts = base_filename.split(".")
         if len(parts) < 3:
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
                 f"Unexpected filename format: {base_filename}",
-                StatusColors.ERROR
+                StatusColors.ERROR,
+                start=False
             )
             return
 
@@ -361,41 +352,40 @@ class MP4MakerTab(BaseTab):
 
         def on_result(success):
             """Called when MP4 generation completes."""
-            self.main_window.stop_status_spinner()
             if success:
-                self.main_window.animator.update_status_animated(
+                self.update_status_with_spinner(
                     f"✅ MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
-                    StatusColors.SUCCESS
+                    StatusColors.SUCCESS,
+                    start=False
                 )
                 self.main_window.animator.show_success("MP4 generation complete!")
             else:
-                self.main_window.animator.update_status_animated(
+                self.update_status_with_spinner(
                     "MP4 generation failed",
-                    StatusColors.ERROR
+                    StatusColors.ERROR,
+                    start=False
                 )
 
         def on_error(error_msg, traceback_str):
             """Called when MP4 generation fails."""
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
                 f"MP4 generation failed: {error_msg}",
-                StatusColors.ERROR
+                StatusColors.ERROR,
+                start=False
             )
             self.log(f"MP4 generation error: {error_msg}")
             self.log(traceback_str)
 
-        # Create worker and run MP4 generation on background thread
-        # Store as instance attribute to prevent garbage collection
-        self._mp4_worker = Worker(
+        # Use BaseTab helper for worker management
+        self.start_worker(
             generate_mp4,
             input_pattern,
             self.app_state.mp4_output_path,
             self.app_state.mp4_startframe,
             self.app_state.mp4_endframe,
             quality_index=quality_index,
-            burn_in_timecode=burn_in_timecode
+            burn_in_timecode=burn_in_timecode,
+            on_result=on_result,
+            on_error=on_error,
+            on_progress=on_progress
         )
-        self._mp4_worker.signals.result.connect(on_result)
-        self._mp4_worker.signals.error.connect(on_error)
-        self._mp4_worker.signals.progress.connect(on_progress)
-        QThreadPool.globalInstance().start(self._mp4_worker)

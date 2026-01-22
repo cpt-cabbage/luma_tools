@@ -166,7 +166,8 @@ class GalleryLoader:
             # Second pass: load metadata and create items
             # Import metadata functions once at the top
             try:
-                from comfyui.service import load_gallery_metadata, get_workflow_preset_for_files, _lookup_file_metadata
+                from comfyui.metadata import load_gallery_metadata, _lookup_file_metadata
+                from comfyui.service import get_workflow_preset_for_files
             except ImportError as e:
                 print(f"[Loader] Failed to import metadata functions: {e}")
                 load_gallery_metadata = None
@@ -215,9 +216,11 @@ class GalleryLoader:
                     is_output = None
                     job_prefix = None
                     source_images = []
+                    has_metadata = False  # Track if metadata was found for this file
 
                     if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
                         # Use metadata-based detection (reliable)
+                        has_metadata = True
                         try:
                             is_output = file_metadata.get('is_output', True)
                             job_prefix = file_metadata.get('job_prefix')
@@ -229,6 +232,7 @@ class GalleryLoader:
                             print(f"[Loader] Error reading metadata fields for {filename}: {e}")
                             is_output = None
                             job_prefix = None
+                            has_metadata = False
 
                     # Fall back to filename pattern detection if metadata missing or invalid
                     if is_output is None or job_prefix is None:
@@ -248,6 +252,7 @@ class GalleryLoader:
                         'job_prefix': job_prefix,
                         'is_input': not is_output,  # If not a generated output, treat as input
                         'source_images': source_images,  # Input images used
+                        'has_metadata': has_metadata,  # Whether metadata was found for this file
                     }
 
                 # Detect and bundle _view/_export pairs if enabled

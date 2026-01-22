@@ -407,9 +407,7 @@ class PollingMixin:
 
         self.log(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
 
-        self.main_window.start_status_spinner()
-
-        self.main_window.animator.update_status_animated(
+        self.update_status_with_spinner(
             f"ComfyUI Batch: {total_jobs} submission(s), {total_frames} job(s) - Waiting for workers...",
             StatusColors.INFO
         )

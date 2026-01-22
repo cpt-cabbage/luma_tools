@@ -126,13 +126,14 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     viewed = Signal(str)
     selection_changed = Signal(str, bool)  # path, is_selected
 
-    def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None):
+    def __init__(self, image_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None, has_metadata=False):
         super().__init__(parent)
         self.image_path = image_path
         self.output_dir = output_dir or os.path.dirname(image_path)
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._has_metadata = has_metadata
         self._gallery_tab = gallery_tab
         self._double_click_in_progress = False
         self._cached_metadata = None
@@ -204,30 +205,36 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.selection_indicator.hide()
 
     def _apply_thumbnail_style(self):
+        # Background color based on metadata status
+        # Blue for items with metadata, grey for items without
+        bg_color = "#1e3a5f" if self._has_metadata else "#2c313a"
+
         if self._is_selected:
             # Selected state - blue border
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
-                    background-color: #2c313a;
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color};
                     border: 3px solid #3b82f6;
                     border-radius: 4px;
-                }
+                }}
             """)
         elif self._is_new:
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
-                    background-color: #2c313a;
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color};
                     border: 2px solid #10b981;
                     border-radius: 4px;
-                }
+                }}
             """)
         else:
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
-                    background-color: #2c313a;
-                    border: 1px solid #3c414b;
+            # Default border color based on metadata status
+            border_color = "#4a6d8c" if self._has_metadata else "#3c414b"
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color};
+                    border: 2px solid {border_color};
                     border-radius: 4px;
-                }
+                }}
             """)
 
     def mark_as_viewed(self):
@@ -591,13 +598,14 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
     viewed = Signal(str)
     selection_changed = Signal(str, bool)  # path, is_selected
 
-    def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None):
+    def __init__(self, model_path, parent=None, output_dir=None, editable=True, is_new=False, gallery_tab=None, has_metadata=False):
         super().__init__(parent)
         self.model_path = model_path
         self.output_dir = output_dir or os.path.dirname(model_path)
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._has_metadata = has_metadata
         self._gallery_tab = gallery_tab
         self._double_click_in_progress = False
         self._thumbnail_loading = False
@@ -668,26 +676,51 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self.selection_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.selection_indicator.hide()
 
+        # 3D model cube indicator (bottom-left corner)
+        self.cube_indicator = QLabel(self.thumbnail_label)
+        self.cube_indicator.setText("⬣")  # Hexagon as cube symbol
+        self.cube_indicator.setAlignment(Qt.AlignCenter)
+        self.cube_indicator.setStyleSheet("""
+            QLabel {
+                background-color: rgba(74, 158, 255, 0.85);
+                color: white;
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        self.cube_indicator.setFixedSize(20, 20)
+        self.cube_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
+        self.cube_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.cube_indicator.setContextMenuPolicy(Qt.NoContextMenu)
+        self.cube_indicator.show()  # Always show for 3D models
+
     def _apply_thumbnail_style(self):
+        # Background color based on metadata status
+        # Blue for items with metadata, grey for items without
+        bg_color = "#1e3a5f" if self._has_metadata else "#2c313a"
+
         if self._is_selected:
             # Selected state - blue border
-            self.thumbnail_label.setStyleSheet("""
-                QLabel { background-color: #2c313a; border: 3px solid #3b82f6; border-radius: 4px; }
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{ background-color: {bg_color}; border: 3px solid #3b82f6; border-radius: 4px; }}
             """)
         elif self._is_new:
-            self.thumbnail_label.setStyleSheet("""
-                QLabel { background-color: #2c313a; border: 2px solid #10b981; border-radius: 4px; }
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{ background-color: {bg_color}; border: 2px solid #10b981; border-radius: 4px; }}
             """)
         else:
-            self.thumbnail_label.setStyleSheet("""
-                QLabel { background-color: #2c313a; border: 2px solid #4a9eff; border-radius: 4px; }
+            # Default border color based on metadata status
+            border_color = "#4a6d8c" if self._has_metadata else "#3c414b"
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 4px; }}
             """)
 
     def _apply_filename_style(self):
         if self._is_new:
             self.filename_label.setStyleSheet("color: #10b981; font-size: 10px; font-weight: bold;")
         else:
-            self.filename_label.setStyleSheet("color: #4a9eff; font-size: 10px;")
+            self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
 
     def mark_as_viewed(self):
         if self._is_new:

@@ -98,8 +98,8 @@ class ModelThumbnailService:
                     # Cache is stale, remove it
                     try:
                         os.remove(cache_path)
-                    except:
-                        pass
+                    except OSError:
+                        pass  # File already removed or no permission
                     return None
 
             pixmap = QPixmap(cache_path)
@@ -255,8 +255,8 @@ class ModelThumbnailService:
             try:
                 viewer.modelLoaded.disconnect(on_model_loaded)
                 viewer.loadError.disconnect(on_load_error)
-            except:
-                pass
+            except RuntimeError:
+                pass  # Signals already disconnected
 
             return result['pixmap']
 
@@ -284,8 +284,8 @@ class ModelThumbnailService:
             if os.path.exists(cache_path):
                 try:
                     os.remove(cache_path)
-                except:
-                    pass
+                except OSError:
+                    pass  # File already removed or no permission
         else:
             # Clear all model thumbnails (those starting with 'model_')
             self._cache.clear()
@@ -294,8 +294,8 @@ class ModelThumbnailService:
                 if cache_file.startswith("model_"):
                     try:
                         os.remove(os.path.join(CACHE_DIR, cache_file))
-                    except:
-                        pass
+                    except OSError:
+                        pass  # File already removed or no permission
 
 
 # ============================================================================

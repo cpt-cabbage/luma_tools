@@ -98,10 +98,14 @@ class ShotCleanerTab(BaseTab):
             self._deselect_renders_in_comp(result.get('renders_in_comp', []))
 
             # Stop spinner and update status
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
+
                 "✅ Shot Cleaner: Scan complete",
-                StatusColors.SUCCESS
+
+                StatusColors.SUCCESS,
+
+                start=False
+
             )
 
             # Call completion callback if provided
@@ -110,10 +114,14 @@ class ShotCleanerTab(BaseTab):
 
         def on_error(error_msg, traceback_str):
             """Called when scanning fails."""
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.update_status_animated(
+            self.update_status_with_spinner(
+
                 f"Shot Cleaner: Scan error - {error_msg}",
-                StatusColors.ERROR
+
+                StatusColors.ERROR,
+
+                start=False
+
             )
             self.log(f"Scanner error: {error_msg}")
             self.log(traceback_str)
@@ -123,10 +131,12 @@ class ShotCleanerTab(BaseTab):
                 on_complete()
 
         # Show status bar progress (no overlay so user can still interact)
-        self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
+        self.update_status_with_spinner(
+
             "🔍 Shot Cleaner: Scanning directories...",
+
             StatusColors.INFO
+
         )
 
         # Create worker and run scan on background thread

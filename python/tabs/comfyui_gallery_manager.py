@@ -5,8 +5,7 @@ Handles gallery UI management operations:
 - Item sorting and filtering
 - Widget creation and caching
 - Layout management
-- Display coordination
-- Section grouping and collapse state
+- Display coordination (stacked and grid views)
 """
 
 import os
@@ -27,10 +26,6 @@ class GalleryManager:
             tab: The ComfyUIGalleryTab instance
         """
         self.tab = tab
-        # Section collapse state: section_id -> is_expanded
-        self._section_states = {}
-        # Header widgets: section_id -> GallerySectionHeader
-        self._section_headers = {}
 
     def sort_items(self, items, sort_mode):
         """Sort items based on sort mode.
@@ -105,74 +100,26 @@ class GalleryManager:
 
         return result
 
-    def is_section_expanded(self, section_id):
-        """Check if a section is expanded (default: True for new sections).
-
-        Uses tab's _collapsed_sections set which is loaded from user preferences.
-        """
-        # Check if section is in collapsed set (collapsed = not expanded)
-        if hasattr(self.tab, '_collapsed_sections'):
-            return section_id not in self.tab._collapsed_sections
-        return self._section_states.get(section_id, True)
-
-    def set_section_expanded(self, section_id, expanded):
-        """Set section expanded state and update visibility."""
-        self._section_states[section_id] = expanded
-
-        # Update tab's collapsed sections set for persistence
-        if hasattr(self.tab, '_collapsed_sections'):
-            if expanded:
-                self.tab._collapsed_sections.discard(section_id)
-            else:
-                self.tab._collapsed_sections.add(section_id)
-
-    def on_section_toggled(self, section_id, is_expanded):
-        """Handle section header toggle.
-
-        Args:
-            section_id: The section being toggled
-            is_expanded: New expanded state
-        """
-        self.set_section_expanded(section_id, is_expanded)
-
-        # Save to user preferences
-        from core.user_preferences import save_gallery_settings
-        if hasattr(self.tab, '_collapsed_sections'):
-            save_gallery_settings(collapsed_sections=list(self.tab._collapsed_sections))
-
-        # Update visibility of items in this section
-        if hasattr(self.tab, '_section_items') and section_id in self.tab._section_items:
-            for path in self.tab._section_items[section_id]:
-                if path in self.tab._widget_cache:
-                    widget = self.tab._widget_cache[path]
-                    widget.setVisible(is_expanded)
-
-        # Trigger layout update
-        container = self.tab.ui.galleryThumbnailContainer
-        self.tab._flow_layout.invalidate()
-        container.updateGeometry()
-
-    def clear_section_headers(self):
-        """Remove all section header widgets."""
-        for header in self._section_headers.values():
-            header.setParent(None)
-            header.deleteLater()
-        self._section_headers.clear()
-
-    def display_items(self, items, incremental=False, grouped=False, stacked=False):
+    def display_items(self, items, view_mode=None, incremental=False):
         """Display items in the gallery.
 
         Args:
             items: List of item dicts (already sorted)
+            view_mode: View mode string - "stacked" or "grid" (default)
             incremental: If True, only add new items without clearing existing widgets
-            grouped: If True, display with section headers (uses job_prefix)
-            stacked: If True, display as stacked thumbnails (photo pile style)
         """
         container = self.tab.ui.galleryThumbnailContainer
 
-        # Stacked mode takes precedence
+        # Stacked mode
+        stacked = view_mode == "stacked"
+
         if stacked and items:
-            self._display_stacked_items(items)
+            if incremental and hasattr(self, '_stack_widgets') and self._stack_widgets:
+                # Incremental update for stacked mode
+                self._update_stacked_items_incrementally(items)
+            else:
+                # Full rebuild
+                self._display_stacked_items(items)
             self.update_status_count(items)
             self._connect_scroll_events()
             self.tab._visible_items_ordered = [item['path'] for item in items]
@@ -192,8 +139,7 @@ class GalleryManager:
         # Full refresh - clear and rebuild everything
         container.setUpdatesEnabled(False)
 
-        # Clear existing section headers and stacks
-        self.clear_section_headers()
+        # Clear existing stacks
         self._clear_stack_widgets()
 
         while self.tab._flow_layout.count():
@@ -205,16 +151,13 @@ class GalleryManager:
         self.tab._widget_cache = {}
         self.tab._section_items = {}  # section_id -> [paths]
 
-        if grouped and items:
-            # Group items and display with headers
-            self._display_grouped_items(items)
-        else:
-            # Store items for widget creation (non-grouped mode)
-            self.tab._pending_items = [(item['path'], item['type']) for item in items]
-            self.tab._load_index = 0
+        # Store items for widget creation (grid mode)
+        # Include has_metadata for proper styling
+        self.tab._pending_items = [(item['path'], item['type'], item.get('has_metadata', False)) for item in items]
+        self.tab._load_index = 0
 
-            # Create widgets in batches to avoid blocking UI (lazy load triggered after completion)
-            self.create_all_widgets()
+        # Create widgets in batches to avoid blocking UI (lazy load triggered after completion)
+        self.create_all_widgets()
 
         # Update status
         self.update_status_count(items)
@@ -256,7 +199,6 @@ class GalleryManager:
         container.setUpdatesEnabled(False)
 
         # Clear existing widgets
-        self.clear_section_headers()
         self._clear_stack_widgets()
 
         while self.tab._flow_layout.count():
@@ -303,6 +245,110 @@ class GalleryManager:
 
         # Trigger thumbnail loading after layout settles
         from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, self._load_visible_stack_thumbnails)
+
+    def _update_stacked_items_incrementally(self, items):
+        """Update stacked view incrementally without full rebuild.
+
+        Only adds new stacks/items, avoids clearing existing widgets.
+        This prevents the visual "flash" when new images are added.
+
+        Args:
+            items: List of item dicts with job_prefix field
+        """
+        from ui_components import StackedThumbnailWidget
+        from shiboken6 import isValid
+
+        container = self.tab.ui.galleryThumbnailContainer
+
+        # Group new items by prefix
+        new_groups = self.group_items_by_prefix(items)
+
+        # Get existing prefixes from stacks and single items
+        existing_stack_prefixes = set(self._stack_widgets.keys())
+
+        # For single items in widget_cache, extract their prefixes from section_items
+        existing_single_prefixes = set()
+        if hasattr(self.tab, '_section_items'):
+            for prefix, paths in self.tab._section_items.items():
+                if prefix not in existing_stack_prefixes and len(paths) == 1:
+                    existing_single_prefixes.add(prefix)
+
+        existing_prefixes = existing_stack_prefixes | existing_single_prefixes
+        new_prefixes = set(new_groups.keys())
+
+        # Find what's new
+        added_prefixes = new_prefixes - existing_prefixes
+
+        # Check for stacks that need updating (existing stacks with new items)
+        stacks_to_update = []
+        for prefix in existing_stack_prefixes:
+            if prefix in new_groups:
+                old_paths = set(self.tab._section_items.get(prefix, []))
+                new_paths = set(item['path'] for item in new_groups[prefix])
+                if new_paths != old_paths:
+                    stacks_to_update.append(prefix)
+
+        if not added_prefixes and not stacks_to_update:
+            # No changes - just update internal tracking
+            self.tab._section_items = {}
+            for prefix, group_items in new_groups.items():
+                self.tab._section_items[prefix] = [item['path'] for item in group_items]
+            return
+
+        # Disable updates during modifications
+        container.setUpdatesEnabled(False)
+
+        try:
+            # Update existing stacks that have new items
+            for prefix in stacks_to_update:
+                if prefix in self._stack_widgets:
+                    stack = self._stack_widgets[prefix]
+                    if isValid(stack):
+                        # Update the stack's items
+                        stack.update_items(new_groups[prefix])
+                        self.tab._section_items[prefix] = [item['path'] for item in new_groups[prefix]]
+
+            # Add new stacks/thumbnails at the beginning (most recent first)
+            insert_index = 0
+
+            for prefix in added_prefixes:
+                group_items = new_groups[prefix]
+
+                if len(group_items) > 1:
+                    # Create stacked thumbnail
+                    stack = StackedThumbnailWidget(
+                        stack_id=prefix,
+                        items=group_items,
+                        parent=container,
+                        gallery_tab=self.tab
+                    )
+                    stack.expanded.connect(self._on_stack_expanded)
+                    stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
+                    self._stack_widgets[prefix] = stack
+                    self.tab._flow_layout.insertWidget(insert_index, stack)
+                    insert_index += 1
+
+                    # Track items for this stack
+                    self.tab._section_items[prefix] = [item['path'] for item in group_items]
+                else:
+                    # Single item - show as regular thumbnail
+                    item = group_items[0]
+                    thumbnail = self._create_thumbnail_widget(item, container)
+                    if thumbnail:
+                        self.tab._widget_cache[item['path']] = thumbnail
+                        self.tab._flow_layout.insertWidget(insert_index, thumbnail)
+                        insert_index += 1
+                        # Track as section for consistency
+                        self.tab._section_items[prefix] = [item['path']]
+
+            if added_prefixes or stacks_to_update:
+                print(f"[Gallery] Incremental stacked update: {len(added_prefixes)} new, {len(stacks_to_update)} updated")
+
+        finally:
+            container.setUpdatesEnabled(True)
+
+        # Load thumbnails for new items
         QTimer.singleShot(50, self._load_visible_stack_thumbnails)
 
     def _load_visible_stack_thumbnails(self):
@@ -380,6 +426,8 @@ class GalleryManager:
         file_type = item['type']
         is_new = path in self.tab._new_items
         item_output_dir = os.path.dirname(path)
+        # Check if item has metadata
+        has_metadata = item.get('has_metadata', False)
 
         try:
             if file_type == 'model':
@@ -389,7 +437,8 @@ class GalleryManager:
                     output_dir=item_output_dir,
                     editable=is_editable,
                     is_new=is_new,
-                    gallery_tab=self.tab
+                    gallery_tab=self.tab,
+                    has_metadata=has_metadata
                 )
                 thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                 thumbnail.deleted.connect(self.tab._on_item_deleted)
@@ -402,7 +451,8 @@ class GalleryManager:
                     output_dir=item_output_dir,
                     editable=is_editable,
                     is_new=is_new,
-                    gallery_tab=self.tab
+                    gallery_tab=self.tab,
+                    has_metadata=has_metadata
                 )
                 thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                 thumbnail.fullscreen_requested.connect(
@@ -417,159 +467,6 @@ class GalleryManager:
         except Exception as e:
             print(f"[Gallery] Error creating thumbnail for {path}: {e}")
             return None
-
-    def _display_grouped_items(self, items):
-        """Display items organized in collapsible sections.
-
-        Args:
-            items: List of item dicts with job_prefix field
-        """
-        from ui_components import GallerySectionHeader, GalleryThumbnailWidget, GLBThumbnailWidget
-
-        container = self.tab.ui.galleryThumbnailContainer
-        is_editable = self.tab._is_own_gallery()
-
-        # Group items by prefix
-        groups = self.group_items_by_prefix(items)
-        print(f"[Gallery] Grouped {len(items)} items into {len(groups)} sections")
-        for section_id, group_items in list(groups.items())[:5]:  # Print first 5 groups
-            print(f"  - {section_id}: {len(group_items)} items")
-
-        # Create widgets for each group - headers and thumbnails together
-        for section_id, group_items in groups.items():
-            is_expanded = self.is_section_expanded(section_id)
-
-            # Create section header
-            header = GallerySectionHeader(
-                section_id=section_id,
-                title=section_id,
-                count=len(group_items),
-                expanded=is_expanded,
-                parent=container
-            )
-            header.toggled.connect(self.on_section_toggled)
-            self._section_headers[section_id] = header
-            self.tab._flow_layout.addWidget(header)
-
-            # Track items in this section
-            self.tab._section_items[section_id] = []
-
-            # Create thumbnails immediately after the header
-            for item in group_items:
-                path = item['path']
-                file_type = item['type']
-                self.tab._section_items[section_id].append(path)
-
-                is_new = path in self.tab._new_items
-                item_output_dir = os.path.dirname(path)
-
-                if file_type == 'model':
-                    thumbnail = GLBThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new,
-                        gallery_tab=self.tab
-                    )
-                    thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                    thumbnail.deleted.connect(self.tab._on_item_deleted)
-                    thumbnail.viewed.connect(self.tab._on_item_viewed)
-                    thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-                else:
-                    thumbnail = GalleryThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new,
-                        gallery_tab=self.tab
-                    )
-                    thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                    thumbnail.fullscreen_requested.connect(
-                        lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
-                    )
-                    thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-                    thumbnail.deleted.connect(self.tab._on_item_deleted)
-                    thumbnail.viewed.connect(self.tab._on_item_viewed)
-                    thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-
-                # Set visibility based on section state
-                thumbnail.setVisible(is_expanded)
-
-                self.tab._widget_cache[path] = thumbnail
-                self.tab._flow_layout.addWidget(thumbnail)
-
-        # Re-enable updates and trigger lazy loading
-        container.setUpdatesEnabled(True)
-        QTimer.singleShot(50, self.tab._load_visible_thumbnails)
-
-    def _create_grouped_widget_batch(self):
-        """Create widgets for grouped items in batches."""
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
-
-        container = self.tab.ui.galleryThumbnailContainer
-
-        if not hasattr(self.tab, '_pending_grouped_items'):
-            container.setUpdatesEnabled(True)
-            QTimer.singleShot(50, self.tab._load_visible_thumbnails)
-            return
-
-        if self.tab._grouped_widget_index >= len(self.tab._pending_grouped_items):
-            # Done creating widgets
-            container.setUpdatesEnabled(True)
-            QTimer.singleShot(50, self.tab._load_visible_thumbnails)
-            return
-
-        batch_size = 12
-        end_index = min(self.tab._grouped_widget_index + batch_size, len(self.tab._pending_grouped_items))
-
-        for i in range(self.tab._grouped_widget_index, end_index):
-            path, file_type, is_visible, section_id = self.tab._pending_grouped_items[i]
-            is_new = path in self.tab._new_items
-            item_output_dir = os.path.dirname(path)
-
-            if file_type == 'model':
-                thumbnail = GLBThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=self.tab._is_editable_cache,
-                    is_new=is_new,
-                    gallery_tab=self.tab
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-            else:
-                thumbnail = GalleryThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=self.tab._is_editable_cache,
-                    is_new=is_new,
-                    gallery_tab=self.tab
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                thumbnail.fullscreen_requested.connect(
-                    lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
-                )
-                thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-
-            # Set visibility based on section state
-            thumbnail.setVisible(is_visible)
-
-            self.tab._widget_cache[path] = thumbnail
-            self.tab._flow_layout.addWidget(thumbnail)
-
-        self.tab._grouped_widget_index = end_index
-
-        # Schedule next batch
-        QTimer.singleShot(10, self._create_grouped_widget_batch)
 
     def _insert_new_items_incrementally(self, sorted_items, new_items):
         """Insert new items at their correct positions without rebuilding the layout.
@@ -603,6 +500,8 @@ class GalleryManager:
                 file_type = item['type']
                 is_new = path in self.tab._new_items
                 item_output_dir = os.path.dirname(path)
+                # Check if item has metadata
+                has_metadata = item.get('has_metadata', False)
 
                 # Create the widget
                 if file_type == 'model':
@@ -612,7 +511,8 @@ class GalleryManager:
                         output_dir=item_output_dir,
                         editable=is_editable,
                         is_new=is_new,
-                        gallery_tab=self.tab
+                        gallery_tab=self.tab,
+                        has_metadata=has_metadata
                     )
                     thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                     thumbnail.deleted.connect(self.tab._on_item_deleted)
@@ -625,7 +525,8 @@ class GalleryManager:
                         output_dir=item_output_dir,
                         editable=is_editable,
                         is_new=is_new,
-                        gallery_tab=self.tab
+                        gallery_tab=self.tab,
+                        has_metadata=has_metadata
                     )
                     thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                     thumbnail.fullscreen_requested.connect(
@@ -725,7 +626,13 @@ class GalleryManager:
         end_index = min(self.tab._widget_create_index + self.tab._widget_batch_size, len(self.tab._pending_items))
 
         for i in range(self.tab._widget_create_index, end_index):
-            path, file_type = self.tab._pending_items[i]
+            pending_item = self.tab._pending_items[i]
+            # Support both old format (2 elements) and new format (3 elements with has_metadata)
+            if len(pending_item) == 3:
+                path, file_type, has_metadata = pending_item
+            else:
+                path, file_type = pending_item
+                has_metadata = False
             is_new = path in self.tab._new_items
             item_output_dir = os.path.dirname(path)
 
@@ -736,7 +643,8 @@ class GalleryManager:
                     output_dir=item_output_dir,
                     editable=self.tab._is_editable_cache,
                     is_new=is_new,
-                    gallery_tab=self.tab
+                    gallery_tab=self.tab,
+                    has_metadata=has_metadata
                 )
                 thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                 thumbnail.deleted.connect(self.tab._on_item_deleted)
@@ -749,7 +657,8 @@ class GalleryManager:
                     output_dir=item_output_dir,
                     editable=self.tab._is_editable_cache,
                     is_new=is_new,
-                    gallery_tab=self.tab
+                    gallery_tab=self.tab,
+                    has_metadata=has_metadata
                 )
                 thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                 thumbnail.fullscreen_requested.connect(

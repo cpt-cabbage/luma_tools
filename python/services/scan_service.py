@@ -129,9 +129,9 @@ class DirectoryScanner:
         """
         try:
             dirs = fast_scandir(self.state.lookdev_dir)
-        except:
+        except Exception as e:
             dirs = ()
-            print("No Renders Found")
+            print(f"No Renders Found: {e}")
 
         render_folders = []
         render_directory = ""
@@ -145,9 +145,9 @@ class DirectoryScanner:
                 render_directory = render_folders[0]
                 render_directory = remove_after(render_directory, r"lookdev\img\renders")
                 self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
-            except:
+            except (IndexError, Exception) as e:
                 self.signals.set_widget_enabled.emit('RendersList', False)
-                print("No Renders Found!")
+                print(f"No Renders Found: {e}")
         else:
             self.signals.set_label_text.emit('Renderlabel', 'Render Directory Not Found!')
             self.signals.set_widget_enabled.emit('CleanRender', False)
@@ -164,7 +164,8 @@ class DirectoryScanner:
         """
         try:
             dirs = fast_scandir(self.state.lookdev_dir)
-        except:
+        except Exception as e:
+            print(f"Error scanning directory: {e}")
             dirs = ()
 
         usd_folders = []
@@ -179,9 +180,9 @@ class DirectoryScanner:
                 usd_directory = usd_folders[0]
                 usd_directory = remove_after(usd_directory, r"lookdev\usd_files")
                 self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
-            except:
+            except (IndexError, Exception) as e:
                 usd_directory = ""
-                print("No USDs Found!")
+                print(f"No USDs Found: {e}")
         else:
             usd_directory = ""
             self.signals.set_label_text.emit('USDlabel', 'USD Directory Not Found!')
@@ -304,9 +305,9 @@ class DirectoryScanner:
         try:
             total_size = get_folder_size(self.state.lookdev_dir)
             self.signals.set_label_text.emit('FolderSize', f"Total Size: {str(total_size)}")
-        except:
-            self.signals.set_label_text.emit('FolderSize', 'Error calculating Size')
-            self.signals.set_label_text.emit('StatusLabel', 'Error calculating Size')
+        except Exception as e:
+            self.signals.set_label_text.emit('FolderSize', f'Error calculating Size: {e}')
+            self.signals.set_label_text.emit('StatusLabel', f'Error calculating Size: {e}')
 
     def scan_comp_files(self, hip_file):
         """
@@ -319,7 +320,8 @@ class DirectoryScanner:
 
         try:
             dirs = fast_scandir(comp_dir)
-        except:
+        except Exception as e:
+            print(f"Error scanning comp directory: {e}")
             dirs = ()
 
         comp_folders = []
@@ -339,8 +341,8 @@ class DirectoryScanner:
                 # Read comp file and deselect renders in use
                 renders_in_comp = read_comp_file(comp_directory + latestcomp, hip_file)
                 self._deselect_renders_in_comp(renders_in_comp)
-            except:
-                print("No Comp Dir Found!")
+            except Exception as e:
+                print(f"No Comp Dir Found: {e}")
         else:
             self.signals.set_label_text.emit('Complabel', 'Comp Directory Not Found!')
 

@@ -176,7 +176,7 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
         try:
             urllib.request.urlopen(url, timeout=2)
             time.sleep(0.5)
-        except:
+        except (urllib.error.URLError, OSError):
             down_detected = True
             break
 
@@ -191,8 +191,8 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
                 elapsed = int(time.time() - start_time)
                 print(f"Server restart complete after {elapsed}s")
                 return True
-        except:
-            pass
+        except (urllib.error.URLError, OSError):
+            pass  # Server not ready yet
         time.sleep(2)
 
     print(f"Timeout waiting for server restart after {timeout}s")

@@ -51,7 +51,7 @@ def detect_passes(render_file):
                 try:
                     key = remove_after(ch, ".")
                     key = key.replace(".", "")
-                except:
+                except (ValueError, AttributeError, Exception):
                     key = ch
             else:
                 key = ch

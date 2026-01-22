@@ -117,8 +117,10 @@ def read_comp_file(compfile, hip_file_name):
                         foundcomps = os.path.dirname(foundcomps)
                         try:
                             foundcomps = foundcomps.removesuffix(r'/for_comp')
-                        except:
-                            pass
+                        except AttributeError:
+                            # removesuffix not available in Python <3.9
+                            if foundcomps.endswith(r'/for_comp'):
+                                foundcomps = foundcomps[:-len(r'/for_comp')]
                         foundcomps = foundcomps.split(r"/")[-1]
                         renders_in_comp.append(foundcomps)
     except Exception as e:

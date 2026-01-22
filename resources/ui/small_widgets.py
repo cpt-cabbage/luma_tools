@@ -191,9 +191,20 @@ class StackedThumbnailWidget(QWidget):
         self._expanded_widgets = []  # List of expanded thumbnail widgets
         self._expanded_background = None  # Background frame behind expanded items
         self._gallery_tab = gallery_tab
+        # Check if items in this stack have metadata (source_images populated)
+        self._has_metadata = self._check_items_have_metadata(items)
+        # Check if top item is a 3D model (uses grey border, not blue)
+        self._is_top_item_model = self._top_item and self._top_item.get('type') == 'model'
 
         self._setup_ui()
         self.setToolTip(f"{stack_id}\n{self._count} items - Click to expand")
+
+    def _check_items_have_metadata(self, items):
+        """Check if any item in the list has metadata."""
+        for item in items:
+            if item.get('has_metadata', False):
+                return True
+        return False
 
     def _setup_ui(self):
         """Setup the widget UI with fanned card effect."""
@@ -239,26 +250,61 @@ class StackedThumbnailWidget(QWidget):
             label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
             # Style with gradient-like depth effect
+            # 3D models use grey, images use blue/grey based on metadata
             if i == 0:
                 # Top card (will show thumbnail)
-                label.setStyleSheet("""
-                    QLabel {
-                        background-color: #2d3139;
-                        border: 1px solid #4a9eff;
-                        border-radius: 8px;
-                    }
-                """)
+                if self._is_top_item_model:
+                    # Grey for 3D models (no blue border)
+                    label.setStyleSheet("""
+                        QLabel {
+                            background-color: #2d3139;
+                            border: 2px solid #4a4a4a;
+                            border-radius: 8px;
+                        }
+                    """)
+                elif self._has_metadata:
+                    # Blue tinted background for images with metadata
+                    label.setStyleSheet("""
+                        QLabel {
+                            background-color: #1e3a5f;
+                            border: 2px solid #4a6d8c;
+                            border-radius: 8px;
+                        }
+                    """)
+                else:
+                    # Grey background for images without metadata
+                    label.setStyleSheet("""
+                        QLabel {
+                            background-color: #2d3139;
+                            border: 2px solid #4a4a4a;
+                            border-radius: 8px;
+                        }
+                    """)
             else:
                 # Background cards with varying opacity effect
                 alpha = max(180, 255 - i * 30)
-                shade = max(35, 50 - i * 10)
-                label.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: rgb({shade}, {shade + 3}, {shade + 8});
-                        border: 1px solid rgba(80, 85, 95, {alpha});
-                        border-radius: 8px;
-                    }}
-                """)
+                if self._is_top_item_model or not self._has_metadata:
+                    # Grey shades for 3D models and non-metadata items
+                    shade = max(35, 50 - i * 10)
+                    label.setStyleSheet(f"""
+                        QLabel {{
+                            background-color: rgb({shade}, {shade + 3}, {shade + 8});
+                            border: 1px solid rgba(80, 85, 95, {alpha});
+                            border-radius: 8px;
+                        }}
+                    """)
+                else:
+                    # Blue tinted shades for images with metadata
+                    shade_r = max(20, 30 - i * 5)
+                    shade_g = max(45, 58 - i * 8)
+                    shade_b = max(70, 95 - i * 12)
+                    label.setStyleSheet(f"""
+                        QLabel {{
+                            background-color: rgb({shade_r}, {shade_g}, {shade_b});
+                            border: 1px solid rgba(74, 109, 140, {alpha});
+                            border-radius: 8px;
+                        }}
+                    """)
             self._stack_labels.append(label)
 
         # The top label shows the actual thumbnail
@@ -326,9 +372,11 @@ class StackedThumbnailWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw rounded rectangle background
+        # Blue for items with metadata, grey for items without
+        bg_color = "#1e3a5f" if self._has_metadata else "#2d3139"
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
-        painter.fillPath(path, QBrush(QColor("#2d3139")))
+        painter.fillPath(path, QBrush(QColor(bg_color)))
 
         # Draw text
         painter.setPen(QColor("#666666"))
@@ -345,6 +393,50 @@ class StackedThumbnailWidget(QWidget):
         # Load thumbnail shortly after becoming visible
         from PySide6.QtCore import QTimer
         QTimer.singleShot(50, self.load_thumbnail_if_needed)
+
+    def update_items(self, items):
+        """Update the items in this stack without recreating the widget.
+
+        Used for incremental updates when new items are added to the stack.
+
+        Args:
+            items: New list of item dicts
+        """
+        if not items:
+            return
+
+        # Check if anything actually changed
+        new_paths = set(item['path'] for item in items)
+        old_paths = set(item['path'] for item in self._items)
+        if new_paths == old_paths:
+            return
+
+        # Update internal state
+        self._items = items
+        self._count = len(items)
+        self._top_item = items[0]
+        # Recalculate metadata status and model type
+        self._has_metadata = self._check_items_have_metadata(items)
+        self._is_top_item_model = self._top_item and self._top_item.get('type') == 'model'
+
+        # Update count badge
+        self.count_badge.setText(str(self._count))
+        badge_width = max(22, 10 + len(str(self._count)) * 8)
+        self.count_badge.setFixedSize(badge_width, 20)
+
+        # Update tooltip
+        self.setToolTip(f"{self.stack_id}\n{self._count} items - Click to expand")
+
+        # If expanded, update the expanded view
+        if self._is_expanded and self._expanded_widgets:
+            # Close and reopen to refresh with new items
+            self._collapse_stack()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, self._expand_stack)
+        else:
+            # Update top thumbnail if we have a new top item
+            self._thumbnail_loaded = False
+            self.load_thumbnail_if_needed()
 
     def load_thumbnail_if_needed(self):
         """Load the thumbnail for the top item if not already loaded."""
@@ -486,9 +578,11 @@ class StackedThumbnailWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw rounded rectangle background
+        # Blue for items with metadata, grey for items without
+        bg_color = "#1e3a5f" if self._has_metadata else "#2a3040"
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
-        painter.fillPath(path, QBrush(QColor("#2a3040")))
+        painter.fillPath(path, QBrush(QColor(bg_color)))
 
         # Draw a simple 3D cube icon
         painter.setPen(QPen(QColor("#4a9eff"), 2))
@@ -526,25 +620,53 @@ class StackedThumbnailWidget(QWidget):
         if pixmap and self.thumbnail_label:
             self.thumbnail_label.setPixmap(pixmap)
             # Update style to match the fanned card design
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
-                    background-color: #2d3139;
-                    border: 1px solid #4a9eff;
-                    border-radius: 8px;
-                }
-            """)
+            # 3D models use grey, images use blue/grey based on metadata
+            if self._is_top_item_model:
+                # Grey for 3D models
+                self.thumbnail_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #2d3139;
+                        border: 2px solid #4a4a4a;
+                        border-radius: 8px;
+                    }
+                """)
+            elif self._has_metadata:
+                # Blue for images with metadata
+                self.thumbnail_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #1e3a5f;
+                        border: 2px solid #4a6d8c;
+                        border-radius: 8px;
+                    }
+                """)
+            else:
+                # Grey for images without metadata
+                self.thumbnail_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #2d3139;
+                        border: 2px solid #4a4a4a;
+                        border-radius: 8px;
+                    }
+                """)
 
     def enterEvent(self, event):
         """Handle mouse enter - highlight the stack."""
         super().enterEvent(event)
         if self.thumbnail_label and not self._is_expanded:
             # Brighten the border on hover
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
+            # 3D models use grey, images use blue/grey based on metadata
+            if self._is_top_item_model:
+                border_color = "#5a5f6a"  # Lighter grey for hover
+            elif self._has_metadata:
+                border_color = "#6bb3ff"  # Blue for images with metadata
+            else:
+                border_color = "#5a5f6a"  # Grey for images without metadata
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{
                     background-color: #353a45;
-                    border: 2px solid #6bb3ff;
+                    border: 2px solid {border_color};
                     border-radius: 8px;
-                }
+                }}
             """)
             # Increase shadow intensity
             effect = self.thumbnail_label.graphicsEffect()
@@ -557,13 +679,23 @@ class StackedThumbnailWidget(QWidget):
         """Handle mouse leave - restore normal state."""
         super().leaveEvent(event)
         if self.thumbnail_label and not self._is_expanded:
-            # Restore normal style
-            self.thumbnail_label.setStyleSheet("""
-                QLabel {
-                    background-color: #2d3139;
-                    border: 1px solid #4a9eff;
+            # Restore normal style based on type and metadata
+            # 3D models use grey, images use blue/grey based on metadata
+            if self._is_top_item_model:
+                bg_color = "#2d3139"
+                border_color = "#4a4a4a"  # Grey for 3D models
+            elif self._has_metadata:
+                bg_color = "#1e3a5f"
+                border_color = "#4a6d8c"  # Blue for images with metadata
+            else:
+                bg_color = "#2d3139"
+                border_color = "#4a4a4a"  # Grey for images without metadata
+            self.thumbnail_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color};
+                    border: 2px solid {border_color};
                     border-radius: 8px;
-                }
+                }}
             """)
             # Restore normal shadow
             effect = self.thumbnail_label.graphicsEffect()
@@ -578,6 +710,124 @@ class StackedThumbnailWidget(QWidget):
             self.clicked.emit(self.stack_id)
             self.toggle_expansion()
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Show batch context menu for all items in the stack."""
+        from PySide6.QtWidgets import QMenu
+
+        if not self._gallery_tab or not self._items:
+            return
+
+        menu = QMenu(self)
+        count = len(self._items)
+
+        # Header showing stack info
+        header_action = menu.addAction(f"Stack: {self.stack_id} ({count} items)")
+        header_action.setEnabled(False)
+        menu.addSeparator()
+
+        # Expand/Collapse
+        if self._is_expanded:
+            collapse_action = menu.addAction("Collapse Stack")
+            collapse_action.triggered.connect(self.collapse)
+        else:
+            expand_action = menu.addAction("Expand Stack")
+            expand_action.triggered.connect(self.expand)
+
+        menu.addSeparator()
+
+        # View all items in stack
+        view_action = menu.addAction(f"View All ({count} items)")
+        view_action.triggered.connect(self._view_all_items)
+
+        # Publish all to AYON
+        menu.addSeparator()
+        publish_action = menu.addAction(f"Publish All to AYON ({count} items)")
+        publish_action.triggered.connect(self._publish_all_items)
+
+        # Delete all
+        menu.addSeparator()
+        delete_action = menu.addAction(f"Delete All ({count} items)")
+        delete_action.triggered.connect(self._delete_all_items)
+
+        # Check if editable
+        is_editable = self._gallery_tab._is_own_gallery() if hasattr(self._gallery_tab, '_is_own_gallery') else True
+        if not is_editable:
+            delete_action.setEnabled(False)
+            delete_action.setText(f"Delete All (view only)")
+
+        menu.exec_(self.mapToGlobal(event.pos()))
+        event.accept()
+
+    def _view_all_items(self):
+        """Open viewer for all items in the stack."""
+        if not self._gallery_tab or not self._items:
+            return
+
+        # Get all paths from stack items
+        paths = [item['path'] for item in self._items]
+
+        # Use gallery tab's viewer if available
+        if hasattr(self._gallery_tab, '_open_viewer'):
+            # Open first item, the viewer can navigate through the rest
+            self._gallery_tab._open_viewer(paths[0])
+
+    def _publish_all_items(self):
+        """Publish all items in the stack to AYON."""
+        if not self._gallery_tab or not self._items:
+            return
+
+        # Get all paths from stack items
+        paths = [item['path'] for item in self._items]
+
+        # Use gallery tab's publish handler if available
+        if hasattr(self._gallery_tab, '_publish_items'):
+            self._gallery_tab._publish_items(paths)
+        elif hasattr(self._gallery_tab, '_on_publish_selected'):
+            # Temporarily set selected items to our stack items
+            original_selection = self._gallery_tab._selected_items.copy()
+            self._gallery_tab._selected_items = set(paths)
+            self._gallery_tab._on_publish_selected()
+            self._gallery_tab._selected_items = original_selection
+
+    def _delete_all_items(self):
+        """Delete all items in the stack."""
+        from PySide6.QtWidgets import QMessageBox, QApplication
+
+        if not self._gallery_tab or not self._items:
+            return
+
+        # Get all paths from stack items
+        paths = [item['path'] for item in self._items]
+        count = len(paths)
+
+        # Confirm deletion
+        parent_window = None
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                parent_window = widget
+                break
+
+        reply = QMessageBox.question(
+            parent_window, "Delete Stack",
+            f"Are you sure you want to delete all {count} items in this stack?\n\n"
+            f"Stack: {self.stack_id}\n\n"
+            "This will permanently delete the files from disk.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Use gallery tab's delete handler if available
+        if hasattr(self._gallery_tab, '_delete_items'):
+            self._gallery_tab._delete_items(paths)
+        elif hasattr(self._gallery_tab, '_on_delete_selected'):
+            # Temporarily set selected items to our stack items
+            original_selection = self._gallery_tab._selected_items.copy()
+            self._gallery_tab._selected_items = set(paths)
+            self._gallery_tab._on_delete_selected()
+            self._gallery_tab._selected_items = original_selection
 
     def toggle_expansion(self):
         """Toggle between expanded and collapsed state."""

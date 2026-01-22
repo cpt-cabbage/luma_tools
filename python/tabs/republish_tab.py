@@ -83,10 +83,10 @@ class RePublishTab(BaseTab):
 
     def _on_source_button_clicked(self):
         """Show popup menu with source options."""
-        from PySide6.QtWidgets import QMenu
+        from small_widgets import show_popup_menu
 
-        menu = QMenu(self.main_window)
-
+        # Build display options with filtering and dynamic labels
+        display_options = []
         for label, value in self._source_options:
             # In standalone mode, only show Custom option
             if self.app_state.standalone_mode and value != "custom":
@@ -96,43 +96,33 @@ class RePublishTab(BaseTab):
             display_label = label
             if value == "for_comp" and self.app_state.output_subdirectory:
                 display_label = self.app_state.output_subdirectory.title()
+            display_options.append((display_label, value))
 
-            action = menu.addAction(display_label)
-            action.setData(value)
-            if value == self._source:
-                action.setCheckable(True)
-                action.setChecked(True)
+        result = show_popup_menu(
+            self.main_window,
+            self.ui.RePublishSourceButton,
+            display_options,
+            current=self._source
+        )
 
-        # Show menu below the button
-        action = menu.exec_(self.ui.RePublishSourceButton.mapToGlobal(
-            self.ui.RePublishSourceButton.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._source = action.data()
+        if result is not None:
+            self._source = result
             self._update_source_button_text()
             self._on_source_changed()
 
     def _on_task_button_clicked(self):
         """Show popup menu with task options."""
-        from PySide6.QtWidgets import QMenu
+        from small_widgets import show_popup_menu
 
-        menu = QMenu(self.main_window)
+        result = show_popup_menu(
+            self.main_window,
+            self.ui.RePublishTaskButton,
+            self._task_options,
+            current=self._task
+        )
 
-        for label, value in self._task_options:
-            action = menu.addAction(label)
-            action.setData(value)
-            if value == self._task:
-                action.setCheckable(True)
-                action.setChecked(True)
-
-        # Show menu below the button
-        action = menu.exec_(self.ui.RePublishTaskButton.mapToGlobal(
-            self.ui.RePublishTaskButton.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._task = action.data()
+        if result is not None:
+            self._task = result
             self._update_task_button_text()
 
     def _on_source_changed(self):
@@ -319,10 +309,12 @@ class RePublishTab(BaseTab):
         self.ui.RePublishPublish.setEnabled(False)
 
         # Show status bar progress
-        self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
+        self.update_status_with_spinner(
+
             "AYON: Preparing files for publish...",
+
             StatusColors.INFO
+
         )
 
         # Check if user wants to use current AYON task context
