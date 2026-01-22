@@ -609,11 +609,29 @@ class LumaShotTools(QtWidgets.QWidget):
 
         if self._is_new_version:
             print(f"New version detected: v{APP_VERSION}")
+            # Clear thumbnail cache to regenerate with new version
+            self._clear_thumbnail_cache_for_new_version()
         else:
             print(f"Current version: v{APP_VERSION}")
 
         # Update the last opened version to current (will be saved on close)
         # We don't save immediately to avoid file I/O on every startup
+
+    def _clear_thumbnail_cache_for_new_version(self):
+        """Clear 3D model thumbnail cache when a new version is detected.
+
+        This ensures thumbnails are regenerated with any rendering improvements
+        in the new version. The prewarm system will automatically regenerate
+        thumbnails during startup.
+        """
+        try:
+            from models.thumbnail_service import get_model_thumbnail_service
+            service = get_model_thumbnail_service()
+            service.clear_cache()  # Clear all model thumbnails
+            print("Cleared thumbnail cache for new version")
+        except Exception as e:
+            # Non-critical - don't block startup
+            print(f"Could not clear thumbnail cache: {e}")
 
     def _check_deployed_version(self):
         """Periodically check if a new version has been deployed."""

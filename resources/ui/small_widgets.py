@@ -188,6 +188,7 @@ class StackedThumbnailWidget(QWidget):
         self._thumbnail_loaded = False
         self._top_item = items[0] if items else None
         self._is_expanded = False
+        self._is_selected = False  # Selection state for the whole stack
         self._expanded_widgets = []  # List of expanded thumbnail widgets
         self._expanded_background = None  # Background frame behind expanded items
         self._gallery_tab = gallery_tab
@@ -1060,6 +1061,72 @@ class StackedThumbnailWidget(QWidget):
     def get_expanded_widgets(self) -> list:
         """Return the list of expanded thumbnail widgets."""
         return getattr(self, '_expanded_widgets', [])
+
+    def set_selected(self, selected: bool):
+        """Set selection state for the entire stack.
+
+        When selected, all items in the stack are added to the gallery's selection.
+        Visual feedback is shown on the stack widget.
+        """
+        if self._is_selected == selected:
+            return
+
+        self._is_selected = selected
+
+        # Update visual style to show selection
+        if self.thumbnail_label:
+            if selected:
+                # Bright selection border
+                self.thumbnail_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #1e3a5f;
+                        border: 3px solid #5ba3ff;
+                        border-radius: 8px;
+                    }
+                """)
+            else:
+                # Restore normal style based on type and metadata
+                if self._is_top_item_model:
+                    self.thumbnail_label.setStyleSheet("""
+                        QLabel {
+                            background-color: #2d3139;
+                            border: 2px solid #4a4a4a;
+                            border-radius: 8px;
+                        }
+                    """)
+                elif self._has_metadata:
+                    self.thumbnail_label.setStyleSheet("""
+                        QLabel {
+                            background-color: #1e3a5f;
+                            border: 2px solid #4a6d8c;
+                            border-radius: 8px;
+                        }
+                    """)
+                else:
+                    self.thumbnail_label.setStyleSheet("""
+                        QLabel {
+                            background-color: #2d3139;
+                            border: 2px solid #4a4a4a;
+                            border-radius: 8px;
+                        }
+                    """)
+
+        # Update gallery selection state
+        if self._gallery_tab:
+            for item in self._items:
+                path = item['path']
+                if selected:
+                    self._gallery_tab._selected_items.add(path)
+                else:
+                    self._gallery_tab._selected_items.discard(path)
+
+            # Update toolbar and checkmarks
+            if hasattr(self._gallery_tab, '_selection_manager'):
+                self._gallery_tab._selection_manager._update_toolbar()
+
+    def is_selected(self) -> bool:
+        """Return whether the stack is currently selected."""
+        return self._is_selected
 
 
 # ============================================================================

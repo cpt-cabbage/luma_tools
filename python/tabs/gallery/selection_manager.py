@@ -62,7 +62,7 @@ class BoxSelectionEventFilter(QtCore.QObject):
                                 tab.ui.galleryScrollArea.viewport()
                             )
                         self.selection_manager._rubber_band.setGeometry(
-                            QRect(self.selection_manager._rubber_band_origin, event.pos())
+                            QRect(self.selection_manager._rubber_band_origin, event.pos()).normalized()
                         )
                         self.selection_manager._rubber_band.show()
                     else:
@@ -151,6 +151,13 @@ class SelectionManager:
             if path in self.tab._widget_cache:
                 widget = self.tab._widget_cache[path]
                 widget.set_selected(False)
+
+        # Also clear stack selections
+        if hasattr(self.tab, '_manager') and hasattr(self.tab._manager, '_stack_widgets'):
+            for stack in self.tab._manager._stack_widgets.values():
+                if hasattr(stack, 'set_selected') and stack.is_selected():
+                    stack.set_selected(False)
+
         self.tab._selected_items.clear()
         self._update_toolbar()
 
@@ -219,6 +226,21 @@ class SelectionManager:
             if widget.geometry().intersects(container_rect):
                 if hasattr(widget, 'set_selected'):
                     widget.set_selected(True)
+
+        # Also check stack widgets (in stacked view)
+        if hasattr(self.tab, '_manager') and hasattr(self.tab._manager, '_stack_widgets'):
+            for stack in self.tab._manager._stack_widgets.values():
+                if stack.geometry().intersects(container_rect):
+                    if hasattr(stack, 'is_expanded') and stack.is_expanded():
+                        # Stack is expanded - select its expanded widgets
+                        for widget in stack.get_expanded_widgets():
+                            if widget.geometry().intersects(container_rect):
+                                if hasattr(widget, 'set_selected'):
+                                    widget.set_selected(True)
+                    else:
+                        # Stack is collapsed - select all items in the stack
+                        if hasattr(stack, 'set_selected'):
+                            stack.set_selected(True)
 
     def create_toolbar(self):
         """Create the floating selection toolbar."""

@@ -64,17 +64,25 @@ def increment_version(current: str, update_type: str) -> str:
         else:
             return f"{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
     elif update_type == "m":  # Minor update: 0.4.1 -> 0.4.1.1, or 0.4.1.1 -> 0.4.1.2
-        if len(parts) <= 3:
+        if len(parts) == 2:
+            # 0.5 -> 0.5.0.1
+            return f"{parts[0]}.{parts[1]}.0.1"
+        elif len(parts) == 3:
+            # 0.5.1 -> 0.5.1.1
             return f"{current}.1"
         else:
+            # 0.5.1.1 -> 0.5.1.2
             parts[3] = str(int(parts[3]) + 1)
             return ".".join(parts)
     return current
 
 
-def update_changelog(new_version: str) -> None:
-    """Update changelog with git commit message."""
-    commit_msg = run_git_command(["log", "-1", "--pretty=%s"])
+def update_changelog(new_version: str, custom_msg: str | None = None) -> None:
+    """Update changelog with git commit message or custom message."""
+    if custom_msg:
+        commit_msg = custom_msg
+    else:
+        commit_msg = run_git_command(["log", "-1", "--pretty=%s"])
 
     # Format: replace " -" with newline + "-"
     formatted_msg = commit_msg.replace(" -", "\n-")
@@ -254,11 +262,10 @@ def copy_version_files(new_version: str) -> None:
     print(f"  Copied version.json and changelog.md")
 
 
-def copy_venv() -> None:
+def copy_venv(update: bool) -> None:
     """Optionally copy virtual environment."""
-    response = get_input("\nUpdate virtual environment? (y/n): ", ["y", "n"])
-    if response != "y":
-        print("Skipping virtual environment update.")
+    if not update:
+        print("\nSkipping virtual environment update.")
         return
 
     src_venv = SOURCE / "python" / "venv"
@@ -320,15 +327,26 @@ def main():
         commit_msg = run_git_command(["log", "-1", "--pretty=%s"])
         print(f"\nLast git commit: {commit_msg}")
 
-        response = get_input("Update changelog from git? (y/n): ", ["y", "n"])
-        if response == "y":
+        print("\nChangelog options:")
+        print("  g = Use git commit message")
+        print("  c = Custom message")
+        print("  n = No changelog update")
+        response = get_input("Changelog (g/c/n): ", ["g", "c", "n"])
+        if response == "g":
             update_changelog(new_version)
+        elif response == "c":
+            print("Enter changelog message (use ' -' to separate bullet points):")
+            custom_msg = input("> ").strip()
+            update_changelog(new_version, custom_msg)
+
+    # Ask about venv upfront
+    update_venv = get_input("\nUpdate virtual environment? (y/n): ", ["y", "n"]) == "y"
 
     # --- Copy Files ---
     copy_launcher()
     clean_python_modules()
     copy_python_modules()
-    copy_venv()
+    copy_venv(update_venv)
     copy_resources()
     copy_global_settings()
     copy_version_files(new_version)

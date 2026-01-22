@@ -103,6 +103,7 @@
         let bridge = null;
         let viewMode = 'textured';
         let gridHelper = null;
+        let axesHelper = null;
         let skeletonHelper = null;
         let initComplete = false;  // Track if Three.js init is done
         let cameraDistance = 3.5;  // Default camera distance (configurable via settings)
@@ -171,7 +172,7 @@
             scene.add(gridHelper);
 
             // Axis helper
-            const axesHelper = new THREE.AxesHelper(1);
+            axesHelper = new THREE.AxesHelper(1);
             scene.add(axesHelper);
 
             // Handle resize
@@ -822,6 +823,12 @@
             const origWidth = renderer.domElement.width;
             const origHeight = renderer.domElement.height;
 
+            // Hide grid and axis helpers for clean thumbnail
+            const gridWasVisible = gridHelper ? gridHelper.visible : false;
+            const axesWasVisible = axesHelper ? axesHelper.visible : false;
+            if (gridHelper) gridHelper.visible = false;
+            if (axesHelper) axesHelper.visible = false;
+
             // Resize renderer for thumbnail
             const targetSize = size || 150;
             renderer.setSize(targetSize, targetSize);
@@ -833,6 +840,10 @@
 
             // Get image data
             const dataUrl = renderer.domElement.toDataURL('image/png');
+
+            // Restore grid and axis visibility
+            if (gridHelper) gridHelper.visible = gridWasVisible;
+            if (axesHelper) axesHelper.visible = axesWasVisible;
 
             // Restore original size
             renderer.setSize(origWidth, origHeight);

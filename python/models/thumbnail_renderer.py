@@ -45,13 +45,38 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         if not mesh.has_vertex_colors():
             mesh.paint_uniform_color([0.7, 0.7, 0.7])
 
-        # Get bounding box for camera positioning
+        # Get bounding box for camera positioning with robust handling
         bbox = mesh.get_axis_aligned_bounding_box()
         center = bbox.get_center()
         extent = bbox.get_extent()
+
+        # Robust bounding box validation
+        # Check for invalid values (NaN, Inf, or degenerate bounds)
+        if (not np.isfinite(center).all() or not np.isfinite(extent).all() or
+            np.allclose(extent, 0)):
+            # Fallback: compute bounds directly from vertices
+            vertices = np.asarray(mesh.vertices)
+            if len(vertices) > 0:
+                # Filter out non-finite vertices
+                valid_mask = np.isfinite(vertices).all(axis=1)
+                valid_vertices = vertices[valid_mask]
+                if len(valid_vertices) > 0:
+                    bounds_min = np.min(valid_vertices, axis=0)
+                    bounds_max = np.max(valid_vertices, axis=0)
+                    center = (bounds_min + bounds_max) / 2
+                    extent = bounds_max - bounds_min
+                else:
+                    center = np.array([0.0, 0.0, 0.0])
+                    extent = np.array([1.0, 1.0, 1.0])
+            else:
+                center = np.array([0.0, 0.0, 0.0])
+                extent = np.array([1.0, 1.0, 1.0])
+
+        # Ensure each extent dimension has a minimum value to avoid flat views
+        extent = np.maximum(extent, 0.001)
         max_extent = max(extent)
 
-        if max_extent == 0:
+        if max_extent < 0.001:
             max_extent = 1.0
 
         # Create visualizer with hidden window
@@ -65,6 +90,8 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         render_opt = vis.get_render_option()
         render_opt.background_color = np.array([0.165, 0.188, 0.25])  # Dark theme
         render_opt.light_on = True
+        # Disable grid and axis lines for clean thumbnails
+        render_opt.show_coordinate_frame = False
 
         # Calculate camera position for 3/4 view
         distance = max_extent * 2.0
@@ -146,11 +173,28 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         if len(bone_positions) == 0:
             return False
 
-        # Calculate bounds
-        bounds_min = np.min(bone_positions, axis=0)
-        bounds_max = np.max(bone_positions, axis=0)
-        center = (bounds_min + bounds_max) / 2
-        extent = bounds_max - bounds_min
+        # Calculate bounds with robust handling
+        # Filter out any non-finite bone positions
+        valid_mask = np.isfinite(bone_positions).all(axis=1)
+        valid_positions = bone_positions[valid_mask]
+
+        if len(valid_positions) == 0:
+            # Fallback if no valid positions
+            center = np.array([0.0, 0.0, 0.0])
+            extent = np.array([1.0, 1.0, 1.0])
+        else:
+            bounds_min = np.min(valid_positions, axis=0)
+            bounds_max = np.max(valid_positions, axis=0)
+            center = (bounds_min + bounds_max) / 2
+            extent = bounds_max - bounds_min
+
+            # Handle degenerate bounds (all bones at same position or nearly so)
+            if not np.isfinite(center).all() or not np.isfinite(extent).all():
+                center = np.array([0.0, 0.0, 0.0])
+                extent = np.array([1.0, 1.0, 1.0])
+
+        # Ensure minimum extent in each dimension
+        extent = np.maximum(extent, 0.001)
         max_extent = max(max(extent), 0.1)
 
         # Create line set for bones
@@ -199,6 +243,8 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         render_opt.background_color = np.array([0.165, 0.188, 0.25])
         render_opt.light_on = True
         render_opt.line_width = 3.0
+        # Disable grid and axis lines for clean thumbnails
+        render_opt.show_coordinate_frame = False
 
         # Camera setup
         distance = max_extent * 3.0

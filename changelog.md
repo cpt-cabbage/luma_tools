@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.5.0.1
+- Gallery bug fixes
+
 ## Version 0.5
 - New stacked view based on job
 - New hide/show inputs button
