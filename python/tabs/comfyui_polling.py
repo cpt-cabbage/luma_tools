@@ -76,6 +76,7 @@ class PollingMixin:
         self._batch_poll_pending_results = 0
         self._batch_poll_results = {}
         self._batch_poll_workers = []
+        self._batch_recovery_mode = False  # Track if we're recovering from app restart
 
     # =========================================================================
     # ITERATE MODE POLLING
@@ -401,6 +402,7 @@ class PollingMixin:
         self._batch_generation_count = self.ui.ComfyUIGenerationCount.value()
         self._batch_poll_pending_results = 0
         self._batch_poll_results = {}
+        self._batch_recovery_mode = False  # New submission, not recovery
 
         total_jobs = len(job_ids)
         total_frames = total_jobs * self._batch_generation_count
@@ -626,6 +628,9 @@ class PollingMixin:
         from ui_components import StatusColors
         from comfyui.service import cleanup_job_temp_files
 
+        was_recovery = getattr(self, '_batch_recovery_mode', False)
+        self._batch_recovery_mode = False  # Reset recovery flag
+
         self._stop_batch_polling()
 
         network_dir = self._batch_network_output_dir
@@ -650,7 +655,23 @@ class PollingMixin:
         total_count = len(self._batch_job_ids)
         success_count = total_count - failed_count
 
-        if had_failures:
+        # Special handling for recovery mode - jobs completed while app was closed
+        if was_recovery and self._batch_poll_count <= 1:
+            self.log("[Recovery] All batch jobs were already complete")
+            self.main_window.animator.show_success(f"{total_count} ComfyUI job(s) completed while app was closed")
+            self.main_window.animator.update_status_animated(
+                f"Recovery: {total_count} job(s) already completed",
+                StatusColors.SUCCESS
+            )
+            # Show system tray notification (if enabled)
+            from core.settings_manager import get_setting
+            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                self.main_window.show_system_notification(
+                    "ComfyUI Complete",
+                    f"{total_count} job(s) completed while app was closed",
+                    "success"
+                )
+        elif had_failures:
             self.main_window.animator.show_error(f"ComfyUI: {failed_count}/{total_count} submission(s) failed!")
             self.main_window.animator.update_status_animated(
                 f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} jobs in {elapsed_str}",
@@ -846,22 +867,243 @@ class PollingMixin:
         self.log("[Recovery] Cleared persisted job state")
 
     def _attempt_job_recovery(self):
-        """Attempt to recover and resume polling for jobs that were running when app closed."""
+        """Attempt to recover and resume polling for jobs that were running when app closed.
+
+        This method performs two types of recovery:
+        1. Persisted state recovery: Checks settings file for jobs that were running when app closed
+        2. Deadline query recovery: Always checks Deadline for any running jobs from the current user
+
+        The Deadline query ensures we catch jobs even if:
+        - The settings file was corrupted or deleted
+        - Jobs were submitted from another machine/session
+        - The app crashed without saving state
+        """
         from core.user_preferences import get_comfyui_running_jobs
         from comfyui.service import poll_deadline_job_status
 
+        # First, try to recover from persisted state
+        job_state = None
+        mode = None
         try:
             job_state = get_comfyui_running_jobs()
-            if not job_state:
-                self.log("[Recovery] No persisted job state found")
-                return
-
-            mode = job_state.get("mode")
-            self.log(f"[Recovery] Found persisted {mode} mode job state from previous session")
+            if job_state:
+                mode = job_state.get("mode")
+                self.log(f"[Recovery] Found persisted {mode} mode job state from previous session")
         except Exception as e:
             self.log(f"[Recovery] Error reading persisted job state: {e}")
             import traceback
             traceback.print_exc()
+
+        # Always check Deadline for running jobs from the current user
+        # This catches jobs that may not be in persisted state
+        self._check_deadline_for_user_jobs(job_state)
+
+    def _check_deadline_for_user_jobs(self, persisted_state):
+        """Check Deadline directly for any running jobs from the current user.
+
+        This provides robust recovery by querying Deadline for running jobs,
+        regardless of whether we have persisted state.
+
+        Args:
+            persisted_state: The persisted job state from settings, or None
+        """
+        from comfyui.deadline_poller import find_user_running_jobs
+        from comfyui.service import poll_deadline_job_status
+
+        # Get current username
+        current_user = getattr(self.app_state, 'user', None)
+        if not current_user:
+            import os
+            current_user = os.environ.get("USERNAME", os.environ.get("USER", ""))
+
+        if not current_user:
+            self.log("[Recovery] Cannot determine current user, skipping Deadline check")
+            # Fall back to persisted state recovery only
+            if persisted_state:
+                self._recover_from_persisted_state(persisted_state)
+            return
+
+        self.log(f"[Recovery] Checking Deadline for running jobs from user: {current_user}")
+
+        try:
+            running_jobs = find_user_running_jobs(current_user)
+
+            if not running_jobs:
+                self.log("[Recovery] No running jobs found on Deadline for current user")
+                # If we have persisted state but no running jobs, the job must have completed
+                if persisted_state:
+                    self.log("[Recovery] Persisted state exists but no running jobs - clearing state")
+                    self._clear_running_job_state()
+                    # Check if persisted job completed
+                    mode = persisted_state.get("mode")
+                    if mode == "iterate":
+                        job_id = persisted_state.get("job_id")
+                        if job_id:
+                            result = poll_deadline_job_status(job_id, persisted_state.get("network_output_dir"))
+                            if result.get("status") == "Completed":
+                                self.main_window.animator.show_success("Previous ComfyUI job completed while app was closed")
+                    elif mode == "batch":
+                        self.main_window.animator.show_success("Previous ComfyUI batch completed while app was closed")
+                return
+
+            self.log(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")
+            for job in running_jobs:
+                self.log(f"[Recovery]   - {job['job_id']}: {job['name']} ({job['status']})")
+
+            # Get job IDs from persisted state for comparison
+            persisted_job_ids = set()
+            if persisted_state:
+                mode = persisted_state.get("mode")
+                if mode == "iterate":
+                    job_id = persisted_state.get("job_id")
+                    if job_id:
+                        persisted_job_ids.add(job_id)
+                elif mode == "batch":
+                    persisted_job_ids.update(persisted_state.get("job_ids", []))
+
+            # Get job IDs found on Deadline
+            deadline_job_ids = {job["job_id"] for job in running_jobs}
+
+            # Check if we found jobs that weren't in persisted state
+            new_jobs = deadline_job_ids - persisted_job_ids
+            if new_jobs:
+                self.log(f"[Recovery] Found {len(new_jobs)} job(s) not in persisted state - recovering from Deadline")
+
+            # Recover using jobs found on Deadline
+            self._recover_from_deadline_jobs(running_jobs, persisted_state)
+
+        except Exception as e:
+            self.log(f"[Recovery] Error checking Deadline for user jobs: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fall back to persisted state recovery
+            if persisted_state:
+                self._recover_from_persisted_state(persisted_state)
+
+    def _recover_from_deadline_jobs(self, running_jobs, persisted_state):
+        """Recover polling using jobs found on Deadline.
+
+        Args:
+            running_jobs: List of job dicts from find_user_running_jobs
+            persisted_state: Persisted job state for additional metadata, or None
+        """
+        from ui_components import StatusColors
+
+        if not running_jobs:
+            return
+
+        job_ids = [job["job_id"] for job in running_jobs]
+
+        # Try to get network_output_dir from persisted state or job output_dir
+        network_output_dir = ""
+        if persisted_state:
+            network_output_dir = persisted_state.get("network_output_dir", "")
+
+        # If no persisted output dir, try to get from job properties
+        if not network_output_dir:
+            for job in running_jobs:
+                if job.get("output_dir"):
+                    network_output_dir = job["output_dir"]
+                    break
+
+        # Get generation count from persisted state or default to 1
+        generation_count = 1
+        if persisted_state:
+            generation_count = persisted_state.get("generation_count", 1)
+
+        if len(job_ids) == 1:
+            # Single job - use iterate mode recovery
+            job_id = job_ids[0]
+            job = running_jobs[0]
+
+            self.log(f"[Recovery] Recovering single job {job_id} in iterate mode")
+
+            self._iterate_network_output_dir = network_output_dir
+            self._iterate_total_tasks = generation_count
+            self._iterate_start_time = time.time()
+            self._iterate_completed_tasks = 0
+            self._iterate_poll_count = 0
+            self.app_state.comfyui_current_job_id = job_id
+
+            if self._iterate_poll_timer is None:
+                self._iterate_poll_timer = QTimer(self.main_window)
+                self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
+
+            self._iterate_poll_timer.start(5000)
+            self._update_cancel_button_visibility()
+            self.main_window.start_status_spinner()
+
+            self.ui.ComfyUIIterateStatus.setText(f"Recovered: {job['status']}")
+            self.ui.ComfyUIIterateProgress.setValue(0)
+            self.main_window.animator.update_status_animated(
+                f"ComfyUI: Recovered job ({job['status']})",
+                StatusColors.INFO
+            )
+
+            # Save state for future recovery
+            self._save_running_job_state()
+
+            # Start immediate poll
+            self._poll_iterate_job()
+
+            self.main_window.animator.show_success(f"Recovered running ComfyUI job from Deadline")
+        else:
+            # Multiple jobs - use batch mode recovery
+            self.log(f"[Recovery] Recovering {len(job_ids)} jobs in batch mode")
+
+            # Build total_tasks dict
+            total_tasks = {}
+            if persisted_state and persisted_state.get("total_tasks"):
+                total_tasks = persisted_state.get("total_tasks", {})
+            for job_id in job_ids:
+                if job_id not in total_tasks:
+                    total_tasks[job_id] = generation_count
+
+            self._batch_job_ids = list(job_ids)
+            self._batch_pending_jobs = set(job_ids)
+            self._batch_failed_jobs = set()
+            self._batch_completed_tasks = {job_id: 0 for job_id in job_ids}
+            self._batch_total_tasks = total_tasks
+            self._batch_job_statuses = {job["job_id"]: job["status"] for job in running_jobs}
+            self._batch_network_output_dir = network_output_dir
+            self._batch_poll_count = 0
+            self._batch_start_time = time.time()
+            self._batch_generation_count = generation_count
+            self._batch_poll_pending_results = 0
+            self._batch_poll_results = {}
+            self._batch_recovery_mode = True
+
+            if self._batch_poll_timer is None:
+                self._batch_poll_timer = QTimer(self.main_window)
+                self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
+
+            self._batch_poll_timer.start(10000)
+            self._update_cancel_button_visibility()
+            self.main_window.start_status_spinner()
+
+            self.main_window.animator.update_status_animated(
+                f"ComfyUI: Recovered {len(job_ids)} job(s) from Deadline",
+                StatusColors.INFO
+            )
+
+            # Save state for future recovery
+            self._save_running_job_state()
+
+            # Start immediate poll
+            self._poll_batch_jobs()
+
+            self.main_window.animator.show_success(f"Recovered {len(job_ids)} running ComfyUI job(s) from Deadline")
+
+    def _recover_from_persisted_state(self, job_state):
+        """Recover using persisted state only (fallback when Deadline check fails).
+
+        Args:
+            job_state: The persisted job state dictionary
+        """
+        from comfyui.service import poll_deadline_job_status
+
+        mode = job_state.get("mode")
+        if not mode:
             return
 
         if mode == "iterate":
@@ -882,6 +1124,8 @@ class PollingMixin:
 
                 if status in ("Active", "Rendering", "Queued", "Pending"):
                     self.log(f"[Recovery] Job {job_id} is still {status}, resuming polling")
+                    from ui_components import StatusColors
+
                     # Restore iterate mode state and resume polling
                     self._iterate_network_output_dir = network_output_dir
                     self._iterate_total_tasks = total_tasks
@@ -898,8 +1142,16 @@ class PollingMixin:
                     self._iterate_poll_timer.start(5000)
                     self._update_cancel_button_visibility()
                     self.main_window.start_status_spinner()
+
+                    # Update both tab status and main status bar immediately
                     self.ui.ComfyUIIterateStatus.setText(f"Recovered: {status}")
                     self.ui.ComfyUIIterateProgress.setValue(0)
+                    self.main_window.animator.update_status_animated(
+                        f"ComfyUI: Recovering job ({status}) - {total_tasks} task(s)",
+                        StatusColors.INFO
+                    )
+
+                    # Start immediate poll to get current status
                     self._poll_iterate_job()
 
                     self.log("[Recovery] Iterate mode polling resumed successfully")
@@ -935,56 +1187,47 @@ class PollingMixin:
                     self._clear_running_job_state()
                     return
 
-                # Check which jobs are still active
-                still_active_jobs = []
-                for job_id in job_ids:
-                    self.log(f"[Recovery] Checking status of batch job {job_id}")
-                    status_result = poll_deadline_job_status(job_id, network_output_dir)
-                    status = status_result.get("status", "Unknown")
-                    if status in ("Active", "Rendering", "Queued", "Pending"):
-                        still_active_jobs.append(job_id)
+                # Fast recovery: Start polling immediately with all job IDs
+                # The polling mechanism will discover which jobs are still active/completed
+                # This avoids blocking the UI with synchronous status checks for each job
+                self.log(f"[Recovery] Fast-recovering {len(job_ids)} batch job(s), starting async polling...")
 
-                if still_active_jobs:
-                    self.log(f"[Recovery] {len(still_active_jobs)}/{len(job_ids)} batch jobs still active, resuming polling")
-                    # Restore batch mode state and resume polling
-                    self._batch_job_ids = still_active_jobs
-                    self._batch_pending_jobs = set(still_active_jobs)
-                    self._batch_failed_jobs = set()
-                    self._batch_completed_tasks = {job_id: 0 for job_id in still_active_jobs}
-                    self._batch_total_tasks = {job_id: total_tasks.get(job_id, generation_count) for job_id in still_active_jobs}
-                    self._batch_job_statuses = {job_id: "Pending" for job_id in still_active_jobs}
-                    self._batch_network_output_dir = network_output_dir
-                    self._batch_poll_count = 0
-                    self._batch_start_time = job_state.get("start_time", time.time())
-                    self._batch_generation_count = generation_count
-                    self._batch_poll_pending_results = 0
-                    self._batch_poll_results = {}
+                # Show immediate feedback
+                from ui_components import StatusColors
+                self.main_window.animator.update_status_animated(
+                    f"Recovering {len(job_ids)} ComfyUI job(s)...",
+                    StatusColors.INFO
+                )
 
-                    # Start polling without re-submitting
-                    if self._batch_poll_timer is None:
-                        self._batch_poll_timer = QTimer(self.main_window)
-                        self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
+                # Restore batch mode state with all persisted job IDs
+                self._batch_job_ids = list(job_ids)
+                self._batch_pending_jobs = set(job_ids)
+                self._batch_failed_jobs = set()
+                self._batch_completed_tasks = {job_id: 0 for job_id in job_ids}
+                self._batch_total_tasks = {job_id: total_tasks.get(job_id, generation_count) for job_id in job_ids}
+                self._batch_job_statuses = {job_id: "Recovering" for job_id in job_ids}
+                self._batch_network_output_dir = network_output_dir
+                self._batch_poll_count = 0
+                self._batch_start_time = job_state.get("start_time", time.time())
+                self._batch_generation_count = generation_count
+                self._batch_poll_pending_results = 0
+                self._batch_poll_results = {}
+                self._batch_recovery_mode = True  # Flag to track we're in recovery
 
-                    self._batch_poll_timer.start(10000)
-                    self._update_cancel_button_visibility()
-                    self.main_window.start_status_spinner()
-                    self._poll_batch_jobs()
+                # Start polling without re-submitting
+                if self._batch_poll_timer is None:
+                    self._batch_poll_timer = QTimer(self.main_window)
+                    self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
 
-                    self.log("[Recovery] Batch mode polling resumed successfully")
-                    self.main_window.animator.show_success(f"Recovered {len(still_active_jobs)} running ComfyUI job(s)")
-                else:
-                    self.log(f"[Recovery] No batch jobs still active, clearing state")
-                    self._clear_running_job_state()
-                    completed_count = len(job_ids)
-                    self.main_window.animator.show_success(f"{completed_count} ComfyUI job(s) completed while app was closed")
-                    # Show system tray notification (if enabled)
-                    from core.settings_manager import get_setting
-                    if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
-                        self.main_window.show_system_notification(
-                            "ComfyUI Complete",
-                            f"{completed_count} job(s) completed while app was closed",
-                            "success"
-                        )
+                self._batch_poll_timer.start(10000)
+                self._update_cancel_button_visibility()
+                self.main_window.start_status_spinner()
+
+                # Start immediate async poll to discover job states
+                self._poll_batch_jobs()
+
+                self.log("[Recovery] Batch mode polling started - job states will be discovered async")
+                self.main_window.animator.show_success(f"Recovering {len(job_ids)} ComfyUI job(s)...")
             except Exception as e:
                 self.log(f"[Recovery] Error recovering batch jobs: {e}")
                 import traceback

@@ -952,6 +952,27 @@ def main():
         except Exception as e:
             print(f"Warning: Could not pre-load settings: {e}")
 
+        # Check for running jobs to recover (show feedback in splash)
+        pending_job_recovery = None
+        try:
+            from core.user_preferences import get_comfyui_running_jobs
+            job_state = get_comfyui_running_jobs()
+            if job_state:
+                mode = job_state.get("mode", "unknown")
+                if mode == "iterate":
+                    job_id = job_state.get("job_id", "")
+                    splash.update_progress(22, "Loading", f"Found job to recover: {job_id[:8]}...")
+                    pending_job_recovery = {"mode": "iterate", "count": 1}
+                elif mode == "batch":
+                    job_ids = job_state.get("job_ids", [])
+                    count = len(job_ids)
+                    splash.update_progress(22, "Loading", f"Found {count} job(s) to recover...")
+                    pending_job_recovery = {"mode": "batch", "count": count}
+                app.processEvents()
+                print(f"[Startup] Found {mode} mode jobs to recover")
+        except Exception as e:
+            print(f"Warning: Could not check for job recovery: {e}")
+
         # Pre-scan gallery directory on worker thread while splash shows
         splash.update_progress(30, "Loading", "Scanning gallery...")
         app.processEvents()

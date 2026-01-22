@@ -47,7 +47,9 @@
       "Bash(set \"PYTHONPATH=python;resources\\\\ui\")",
       "Bash(\"python\\\\venv\\\\Scripts\\\\python.exe\":*)",
       "Bash(set \"PYTHONPATH=l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python;l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\")",
-      "Bash(cmd /c \"dir /b /o-d %USERPROFILE%\\\\.luma_tools\\\\logs\\\\*.log 2>nul | head -1\")"
+      "Bash(cmd /c \"dir /b /o-d %USERPROFILE%\\\\.luma_tools\\\\logs\\\\*.log 2>nul | head -1\")",
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythoncomfyuideadline_poller.py)",
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabscomfyui_polling.py)"
     ],
     "deny": [],
     "ask": []

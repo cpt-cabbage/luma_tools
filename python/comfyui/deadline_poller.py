@@ -515,6 +515,101 @@ def complete_deadline_job(job_id: str) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
+    """
+    Find all running luma_tools jobs for a specific user on Deadline.
+
+    Queries Deadline for Active, Rendering, Pending, and Queued jobs
+    submitted by the specified user that match luma_tools naming conventions.
+
+    Args:
+        username: The username to search for (case-insensitive)
+
+    Returns:
+        List of dicts with job info:
+            - job_id: Deadline job ID
+            - name: Job name
+            - status: Current status (Active, Rendering, Pending, Queued)
+            - submit_date: When the job was submitted
+            - output_dir: Extracted output directory from job properties (if available)
+    """
+    running_jobs = []
+
+    if not DEADLINE_PATH or not username:
+        return running_jobs
+
+    username_lower = username.lower()
+
+    try:
+        # Get all active/pending jobs from Deadline
+        for status_filter in ["Active", "Pending"]:
+            result = subprocess.run(
+                [DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+
+            if result.returncode != 0:
+                continue
+
+            job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+
+            for job_id in job_ids:
+                job_result = subprocess.run(
+                    [DEADLINE_PATH, "GetJob", job_id],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+
+                if job_result.returncode != 0:
+                    continue
+
+                job_name = ""
+                job_user = ""
+                job_status = status_filter
+                submit_date = ""
+                output_dir = ""
+
+                for line in job_result.stdout.split('\n'):
+                    line = line.strip()
+                    if line.startswith("Name="):
+                        job_name = line.split('=', 1)[1]
+                    elif line.startswith("User="):
+                        job_user = line.split('=', 1)[1]
+                    elif line.startswith("Status="):
+                        job_status = line.split('=', 1)[1]
+                    elif line.startswith("SubmitDate="):
+                        submit_date = line.split('=', 1)[1]
+                    elif line.startswith("OutputDirectory0="):
+                        output_dir = line.split('=', 1)[1]
+
+                # Check if this is a luma_tools job from the specified user
+                is_luma_job = (
+                    job_name.startswith("LUMA TOOLS - ") or
+                    job_name.endswith("_luma_tools") or
+                    job_name == "luma_tools_job"
+                )
+
+                if is_luma_job and job_user.lower() == username_lower:
+                    running_jobs.append({
+                        "job_id": job_id,
+                        "name": job_name,
+                        "status": job_status,
+                        "submit_date": submit_date,
+                        "output_dir": output_dir,
+                    })
+
+        # Sort by submit date (oldest first) so we process in order
+        running_jobs.sort(key=lambda x: x["submit_date"])
+
+    except Exception as e:
+        print(f"[find_user_running_jobs] Error: {e}")
+
+    return running_jobs
+
+
 def cancel_deadline_jobs(job_ids: List[str]) -> Tuple[int, int, List[str]]:
     """Cancel multiple Deadline jobs by completing them."""
     succeeded = 0

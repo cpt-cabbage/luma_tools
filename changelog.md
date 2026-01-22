@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.5.1.4
+- Job recovery now always checks Deadline for running jobs from the current user
+- Recovers jobs even if persisted state was lost or jobs were submitted from another session
+
+## Version 0.5.1.3
+- Fix potential crash while job is running
+
 ## Version 0.5.1.2
 - Selection Fixes
 
