@@ -52,6 +52,13 @@ class OperationsManager:
             success_count = 0
             failed_items = []
 
+            # Show status with spinner
+            from ui_components import StatusColors
+            self.tab.update_status_with_spinner(
+                f"Gallery: Deleting {count} item(s)...",
+                StatusColors.INFO
+            )
+
             # Make a copy of the set since we'll be modifying it
             items_to_delete = list(self.tab._selected_items)
 
@@ -81,10 +88,21 @@ class OperationsManager:
             self.tab._selected_items.clear()
             self.tab._selection_manager._update_toolbar()
 
-            # Show result
+            # Show result with status feedback
             if success_count == count:
+                self.tab.update_status_with_spinner(
+                    f"Gallery: Deleted {success_count} item(s)",
+                    StatusColors.SUCCESS,
+                    start=False
+                )
+                self.tab.main_window.animator.show_success(f"Deleted {success_count} item(s)")
                 self.tab.log(f"[Gallery] Deleted {success_count} item(s)")
             else:
+                self.tab.update_status_with_spinner(
+                    f"Gallery: Deleted {success_count}/{count} (partial)",
+                    StatusColors.WARNING,
+                    start=False
+                )
                 QMessageBox.warning(
                     parent_window,
                     "Partial Delete",
@@ -143,6 +161,13 @@ class OperationsManager:
         if reply != QMessageBox.Yes:
             return
 
+        # Show status with spinner
+        from ui_components import StatusColors
+        self.tab.update_status_with_spinner(
+            f"Gallery: Publishing {count} item(s)...",
+            StatusColors.INFO
+        )
+
         # Get list of paths to publish
         selected_paths = list(self.tab._selected_items)
 
@@ -175,18 +200,27 @@ class OperationsManager:
     def _on_publish_complete(self, results):
         """Handle publish batch completion."""
         from PySide6.QtWidgets import QMessageBox
+        from ui_components import StatusColors
 
         success_count = sum(1 for r in results if r['success'])
         failed_items = [os.path.basename(r['path']) for r in results if not r['success']]
 
         if success_count == len(results):
-            QMessageBox.information(
-                self.tab.main_window,
-                "Publish Complete",
-                f"Successfully published {success_count} item(s) to AYON."
+            # Stop spinner and show success
+            self.tab.update_status_with_spinner(
+                f"Gallery: Published {success_count} item(s) to AYON",
+                StatusColors.SUCCESS,
+                start=False
             )
+            self.tab.main_window.animator.show_success(f"Published {success_count} item(s) to AYON")
             self.tab.log(f"[Gallery] Published {success_count} items to AYON")
         else:
+            # Stop spinner and show warning
+            self.tab.update_status_with_spinner(
+                f"Gallery: Published {success_count}/{len(results)} (partial)",
+                StatusColors.WARNING,
+                start=False
+            )
             QMessageBox.warning(
                 self.tab.main_window,
                 "Partial Publish",

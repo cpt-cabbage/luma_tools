@@ -74,6 +74,7 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
     "generate_3d_thumbnails": SettingDef("generate_3d_thumbnails", True, "user"),
     "show_tray_notifications": SettingDef("show_tray_notifications", True, "user"),
+    "show_verbose_logs": SettingDef("show_verbose_logs", False, "user"),
     "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
     "viewer_3d_shading_mode": SettingDef("viewer_3d_shading_mode", "textured", "user"),
     "viewer_3d_lighting_mode": SettingDef("viewer_3d_lighting_mode", "studio", "user"),

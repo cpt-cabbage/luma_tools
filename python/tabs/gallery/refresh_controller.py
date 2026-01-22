@@ -39,16 +39,22 @@ class RefreshController:
         # Scan state
         self._scan_in_progress = False
 
-    def on_refresh(self, force=False):
+    def on_refresh(self, force=False, show_status=True):
         """
         Handle refresh request.
 
         Args:
             force: If True, bypass scan-in-progress check
+            show_status: If True, show status bar feedback (False for auto-refreshes)
         """
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
+            if hasattr(self.tab.main_window, 'animator'):
+                self.tab.main_window.animator.show_info("Refresh already in progress")
             return
+
+        # Store show_status for use in _do_refresh
+        self._pending_show_status = show_status
 
         # For non-forced refreshes, debounce multiple rapid requests
         if not force:
@@ -72,6 +78,10 @@ class RefreshController:
 
         self._scan_in_progress = True
 
+        # Get show_status flag (default True for backward compatibility)
+        show_status = getattr(self, '_pending_show_status', True)
+        self._current_scan_show_status = show_status  # Store for completion handler
+
         # Clear cached items to force fresh scan
         self.tab._cached_items = None
 
@@ -85,8 +95,8 @@ class RefreshController:
 
         self.tab.log(f"[Gallery] Scanning: {current_path}")
 
-        # Show status feedback
-        if hasattr(self.tab.main_window, 'animator'):
+        # Show status feedback only for user-initiated refreshes
+        if show_status and hasattr(self.tab.main_window, 'animator'):
             self.tab.main_window.animator.start_activity(
                 "gallery_scan", "Gallery: Scanning files"
             )
@@ -104,8 +114,9 @@ class RefreshController:
         """Handle scan completion."""
         self._scan_in_progress = False
 
-        # Show completion status
-        if hasattr(self.tab.main_window, 'animator'):
+        # Show completion status only if we showed start status
+        show_status = getattr(self, '_current_scan_show_status', True)
+        if show_status and hasattr(self.tab.main_window, 'animator'):
             count = len(items) if items else 0
             self.tab.main_window.animator.end_activity(
                 "gallery_scan", f"Gallery: Found {count} items"
@@ -118,8 +129,9 @@ class RefreshController:
         self._scan_in_progress = False
         self.tab.log(f"[Gallery] Scan error: {msg}")
 
-        # Show error status
-        if hasattr(self.tab.main_window, 'animator'):
+        # Show error status only if we showed start status
+        show_status = getattr(self, '_current_scan_show_status', True)
+        if show_status and hasattr(self.tab.main_window, 'animator'):
             self.tab.main_window.animator.end_activity("gallery_scan")
             self.tab.main_window.animator.show_error(f"Gallery scan failed: {msg}")
 
@@ -337,8 +349,8 @@ class RefreshController:
     def _on_directory_changed(self, path):
         """Handle file system change notification."""
         self.tab.log(f"[Gallery] Directory changed: {path}")
-        # Debounced refresh
-        self.on_refresh()
+        # Debounced refresh (silent - no status bar feedback for auto-refresh)
+        self.on_refresh(show_status=False)
 
     def stop_watcher(self):
         """Stop the file system watcher."""
@@ -369,9 +381,9 @@ class RefreshController:
 
     def _on_poll_refresh(self):
         """Handle polling timer tick."""
-        # Only refresh if tab is visible
+        # Only refresh if tab is visible (silent - no status bar feedback for auto-refresh)
         if self.tab.ui and self.tab.ui.isVisible():
-            self.on_refresh()
+            self.on_refresh(show_status=False)
 
     def _is_network_path(self, path):
         """Check if a path is a network path (UNC or mapped drive pointing to network)."""

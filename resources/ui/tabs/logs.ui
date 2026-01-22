@@ -35,6 +35,16 @@
       <item>
        <layout class="QHBoxLayout" name="logToolbarLayout">
         <item>
+         <widget class="QCheckBox" name="VerboseLogsCheckbox">
+          <property name="text">
+           <string>Show verbose logs</string>
+          </property>
+          <property name="toolTip">
+           <string>Show detailed debug messages (Detection, Poll Debug, Batch, etc.)</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="logHorizontalSpacer">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>

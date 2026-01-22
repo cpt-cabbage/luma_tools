@@ -238,9 +238,9 @@ class ComfyUIGalleryTab(BaseTab):
     # DELEGATED METHODS - Refresh
     # =========================================================================
 
-    def _on_refresh(self, force=False):
+    def _on_refresh(self, force=False, show_status=True):
         """Handle refresh request."""
-        self._refresh_controller.on_refresh(force)
+        self._refresh_controller.on_refresh(force, show_status=show_status)
 
     def _do_refresh(self):
         """Actually perform the refresh scan."""
@@ -498,8 +498,13 @@ class ComfyUIGalleryTab(BaseTab):
                 subprocess.run(["open", self._current_path])
             else:
                 subprocess.run(["xdg-open", self._current_path])
+            # Show success status
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info("Opened gallery folder")
         except Exception as e:
             self.log(f"[Gallery] Error opening explorer: {e}")
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_error(f"Could not open folder: {e}")
 
     def _on_source_toggle(self):
         """Toggle between network and custom source modes."""
@@ -511,6 +516,8 @@ class ComfyUIGalleryTab(BaseTab):
             self.ui.GallerySourceToggle.setText("📁 Network")
             self._update_gallery_path()
             self._on_refresh(force=True)
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info("Switched to network gallery")
 
     def _browse_custom_folder(self):
         """Browse for a custom gallery folder."""
@@ -528,3 +535,5 @@ class ComfyUIGalleryTab(BaseTab):
             self.ui.GallerySourceToggle.setText("📁 Custom")
             self._update_gallery_path()
             self._on_refresh(force=True)
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info(f"Custom: {os.path.basename(folder)}")

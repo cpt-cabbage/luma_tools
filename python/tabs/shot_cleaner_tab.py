@@ -204,9 +204,9 @@ class ShotCleanerTab(BaseTab):
             cleanup_hip_backups(self.app_state.lookdev_dir)
             self.ui.progressBar.setValue(100)
 
-        # Final status
+        # Final status - use show_success for proper priority queue handling
         if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.update_status_animated("Cleanup Done", StatusColors.SUCCESS)
+            self.main_window.animator.show_success("Cleanup complete")
 
         # Rescan after cleanup
         self.run_scanner()

@@ -75,6 +75,10 @@ class PassBuilderTab(BaseTab):
         from core.utils import update_path_version
         from services.file_operations import find_renders
 
+        # Show scanning status
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_info("Pass Builder: Scanning...")
+
         self.ui.RendersList.clear()
         self.ui.Passes.clear()
 
@@ -92,9 +96,14 @@ class PassBuilderTab(BaseTab):
             for render_seq in self.app_state.renders:
                 self.ui.RendersList.addItem(str(render_seq).split("\\")[-1])
             self.ui.RendersList.setEnabled(True)
+            # Show result
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info(f"Found {len(self.app_state.renders)} render(s)")
         else:
             self.ui.RendersList.addItem("No Renders Found")
             self.ui.RendersList.setEnabled(False)
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_warning("No renders found")
 
     def _on_render_selection_changed(self):
         """Update passes when selected render changes."""
@@ -125,8 +134,10 @@ class PassBuilderTab(BaseTab):
 
         self.ui.Passes.clear()
 
-        # Show inline spinner
+        # Show inline spinner and status
         self.passes_spinner.start()
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_info("Detecting passes...")
 
         def on_result(channels):
             """Called when pass detection completes."""
@@ -149,10 +160,11 @@ class PassBuilderTab(BaseTab):
             # Select previously saved passes (now that list is populated)
             self._select_saved_passes(self.app_state.passesfile)
 
-            # Enable build button
+            # Enable build button and show result
             if len(channels) >= 1:
                 self.ui.BuildPasses.setEnabled(True)
                 if hasattr(self.main_window, 'animator'):
+                    self.main_window.animator.show_info(f"Found {len(channels)} passes")
                     self.main_window.animator.pulse_button(self.ui.BuildPasses)
             else:
                 self.ui.BuildPasses.setEnabled(False)

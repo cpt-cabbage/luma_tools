@@ -5,6 +5,18 @@ Handles the terminal log output display and clear functionality.
 """
 
 from .base_tab import BaseTab
+from core.settings_manager import get_setting, set_setting
+
+# Prefixes that indicate verbose/debug messages
+# These are filtered out when "Show verbose logs" is unchecked
+VERBOSE_LOG_PREFIXES = (
+    "[Poll Debug]",
+    "[Detection]",
+    "[find_user_running_jobs]",
+    "[Batch Poll]",
+    "[Batch]",
+    "[TabAttention]",
+)
 
 
 class LogsTab(BaseTab):
@@ -13,6 +25,7 @@ class LogsTab(BaseTab):
     def __init__(self, main_window=None, app_state=None):
         self._paused = False
         self._paused_messages = []
+        self._show_verbose = False
         super().__init__(main_window, app_state)
 
     @property
@@ -31,6 +44,17 @@ class LogsTab(BaseTab):
         """Connect log tab signals."""
         self.ui.ClearLogButton.clicked.connect(self._on_clear_log_clicked)
         self.ui.PauseLogButton.clicked.connect(self._on_pause_log_clicked)
+        self.ui.VerboseLogsCheckbox.toggled.connect(self._on_verbose_logs_toggled)
+
+    def initialize(self):
+        """Initialize the logs tab with saved settings."""
+        self._show_verbose = get_setting("show_verbose_logs")
+        self.ui.VerboseLogsCheckbox.setChecked(self._show_verbose)
+
+    def _on_verbose_logs_toggled(self, checked: bool):
+        """Handle verbose logs checkbox toggle."""
+        self._show_verbose = checked
+        set_setting("show_verbose_logs", checked, verbose=False)
 
     def _on_clear_log_clicked(self):
         """Clear the log output."""
@@ -61,6 +85,11 @@ class LogsTab(BaseTab):
         h_scrollbar = self.ui.LogOutput.horizontalScrollBar()
         h_scrollbar.setValue(0)
 
+    def _is_verbose_message(self, message: str) -> bool:
+        """Check if a message is a verbose/debug message."""
+        stripped = message.lstrip()
+        return stripped.startswith(VERBOSE_LOG_PREFIXES)
+
     def append_log(self, message: str):
         """
         Append a message to the log output.
@@ -71,6 +100,10 @@ class LogsTab(BaseTab):
         if self.ui is None:
             return
         try:
+            # Filter verbose messages if setting is disabled
+            if not self._show_verbose and self._is_verbose_message(message):
+                return
+
             if self._paused:
                 self._paused_messages.append(message)
             else:

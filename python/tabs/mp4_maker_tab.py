@@ -151,11 +151,17 @@ class MP4MakerTab(BaseTab):
             self.ui.MP4CustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
             self.log(f"MP4 Maker: Custom path set to: {custom_dir}")
             set_last_browse_directory("mp4_custom", custom_dir)
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info(f"Custom: {os.path.basename(custom_dir)}")
             self._on_scan_renders_clicked()
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
         from core.utils import update_path_version, scan_exr_sequences
+
+        # Show scanning status
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_info("MP4: Scanning sequences...")
 
         self.ui.MP4RendersList.clear()
 
@@ -210,9 +216,14 @@ class MP4MakerTab(BaseTab):
                 display_name = full_path[-1]
                 self.ui.MP4RendersList.addItem(display_name)
             self.ui.MP4RendersList.setEnabled(True)
+            # Show result
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_info(f"Found {len(self.app_state.mp4_renders)} sequence(s)")
         else:
             self.ui.MP4RendersList.addItem("No Renders Found")
             self.ui.MP4RendersList.setEnabled(False)
+            if hasattr(self.main_window, 'animator'):
+                self.main_window.animator.show_warning("No sequences found")
 
     def _on_render_selection_changed(self):
         """Update MP4 state when selected render changes."""

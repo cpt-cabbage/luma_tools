@@ -355,7 +355,7 @@ class PollingMixin:
             gallery_tab = self.main_window.get_tab("comfyui_gallery")
             if gallery_tab:
                 self.log("[Iterate] Triggering gallery refresh...")
-                gallery_tab._on_refresh()
+                gallery_tab._on_refresh(show_status=False)
         else:
             self.log("[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
@@ -723,7 +723,7 @@ class PollingMixin:
         gallery_tab = self.main_window.get_tab("comfyui_gallery")
         if gallery_tab:
             self.log("[Batch] Triggering gallery refresh...")
-            gallery_tab._on_refresh()
+            gallery_tab._on_refresh(show_status=False)
 
     # =========================================================================
     # CANCEL JOBS
@@ -839,7 +839,7 @@ class PollingMixin:
             if current_user and hasattr(gallery_tab, '_user_cache') and current_user in gallery_tab._user_cache:
                 del gallery_tab._user_cache[current_user]
                 self.log(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
-            gallery_tab._on_refresh()
+            gallery_tab._on_refresh(show_status=False)
             gallery_tab.signals.request_attention.emit()
 
     # =========================================================================
