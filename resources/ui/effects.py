@@ -369,6 +369,210 @@ class ButtonNotificationBadge(QWidget):
         return self._visible
 
 
+class StatusMessageQueue(QObject):
+    """
+    Smart status message queue that handles rapid messages intelligently.
+
+    Features:
+    - Priority levels (URGENT > HIGH > NORMAL > LOW)
+    - Activity tracking with elapsed time display
+    - Smart message coalescing for similar rapid messages
+    - Minimum display time so users can read messages
+    - Progress message handling (X of Y)
+    """
+
+    # Priority levels
+    URGENT = 4   # Errors - always show immediately
+    HIGH = 3     # Warnings, completions
+    NORMAL = 2   # Info messages
+    LOW = 1      # Progress updates, can be coalesced
+
+    # Signals
+    message_ready = Signal(str, str)  # message, color
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._queue = []  # List of (priority, message, color, timestamp)
+        self._current_message = None
+        self._current_priority = 0
+        self._current_start_time = 0
+        self._min_display_ms = 800  # Minimum time to show a message
+        self._process_timer = QTimer(self)
+        self._process_timer.timeout.connect(self._process_queue)
+        self._process_timer.setInterval(100)  # Check every 100ms
+
+        # Activity tracking
+        self._current_activity = None  # (activity_id, message_template, start_time)
+        self._activity_timer = QTimer(self)
+        self._activity_timer.timeout.connect(self._update_activity_display)
+        self._activity_timer.setInterval(1000)  # Update every second
+
+        # Message coalescing
+        self._pending_similar = {}  # category -> (count, last_message, color)
+        self._coalesce_timer = QTimer(self)
+        self._coalesce_timer.timeout.connect(self._flush_coalesced)
+        self._coalesce_timer.setSingleShot(True)
+
+        import time
+        self._time = time
+
+    def start(self):
+        """Start the queue processor."""
+        self._process_timer.start()
+
+    def stop(self):
+        """Stop the queue processor."""
+        self._process_timer.stop()
+        self._activity_timer.stop()
+        self._coalesce_timer.stop()
+
+    def post(self, message: str, color: str, priority: int = None, category: str = None):
+        """
+        Post a message to the queue.
+
+        Args:
+            message: The status message
+            color: Hex color for the message
+            priority: Message priority (URGENT, HIGH, NORMAL, LOW)
+            category: Optional category for coalescing similar messages
+        """
+        if priority is None:
+            priority = self.NORMAL
+
+        current_time = self._time.time() * 1000  # ms
+
+        # Handle coalescing for LOW priority messages with categories
+        if priority == self.LOW and category:
+            if category in self._pending_similar:
+                count, _, _ = self._pending_similar[category]
+                self._pending_similar[category] = (count + 1, message, color)
+            else:
+                self._pending_similar[category] = (1, message, color)
+            # Start coalesce timer if not running
+            if not self._coalesce_timer.isActive():
+                self._coalesce_timer.start(200)  # Coalesce within 200ms
+            return
+
+        # For higher priority messages, check if we should interrupt
+        if priority >= self.HIGH or priority > self._current_priority:
+            # Clear lower priority messages from queue
+            self._queue = [(p, m, c, t) for p, m, c, t in self._queue if p >= priority]
+
+        self._queue.append((priority, message, color, current_time))
+        self._queue.sort(key=lambda x: (-x[0], x[3]))  # Sort by priority desc, then time
+
+        # If urgent or nothing showing, process immediately
+        if priority >= self.URGENT or self._current_message is None:
+            self._process_queue()
+
+    def _flush_coalesced(self):
+        """Flush any coalesced messages."""
+        for category, (count, message, color) in self._pending_similar.items():
+            if count > 1:
+                # Modify message to show count
+                coalesced_msg = f"{message} (+{count-1} more)"
+            else:
+                coalesced_msg = message
+            self._queue.append((self.LOW, coalesced_msg, color, self._time.time() * 1000))
+
+        self._pending_similar.clear()
+        self._queue.sort(key=lambda x: (-x[0], x[3]))
+        self._process_queue()
+
+    def _process_queue(self):
+        """Process the message queue."""
+        current_time = self._time.time() * 1000
+
+        # Check if current message has been displayed long enough
+        if self._current_message:
+            elapsed = current_time - self._current_start_time
+            # Allow higher priority to interrupt, but respect min display for same/lower
+            if self._queue:
+                next_priority = self._queue[0][0]
+                if next_priority <= self._current_priority and elapsed < self._min_display_ms:
+                    return  # Keep current message
+
+        # Get next message
+        if self._queue:
+            priority, message, color, _ = self._queue.pop(0)
+            self._current_message = message
+            self._current_priority = priority
+            self._current_start_time = current_time
+            self.message_ready.emit(message, color)
+
+    def start_activity(self, activity_id: str, message_template: str, color: str):
+        """
+        Start tracking an ongoing activity with elapsed time.
+
+        Args:
+            activity_id: Unique ID for this activity
+            message_template: Message with {elapsed} placeholder, e.g. "Processing... ({elapsed})"
+            color: Status color
+        """
+        self._current_activity = (activity_id, message_template, color, self._time.time())
+        self._update_activity_display()
+        self._activity_timer.start()
+
+    def update_activity(self, activity_id: str, message_template: str = None, extra: str = None):
+        """Update an ongoing activity's message."""
+        if self._current_activity and self._current_activity[0] == activity_id:
+            _, old_template, color, start_time = self._current_activity
+            template = message_template or old_template
+            self._current_activity = (activity_id, template, color, start_time)
+            if extra:
+                self._current_activity = (activity_id, template, color, start_time, extra)
+            self._update_activity_display()
+
+    def end_activity(self, activity_id: str):
+        """End an ongoing activity."""
+        if self._current_activity and self._current_activity[0] == activity_id:
+            self._current_activity = None
+            self._activity_timer.stop()
+
+    def _update_activity_display(self):
+        """Update the display for the current activity."""
+        if not self._current_activity:
+            return
+
+        activity_data = self._current_activity
+        activity_id, template, color = activity_data[0], activity_data[1], activity_data[2]
+        start_time = activity_data[3]
+        extra = activity_data[4] if len(activity_data) > 4 else ""
+
+        elapsed_secs = int(self._time.time() - start_time)
+        if elapsed_secs < 60:
+            elapsed_str = f"{elapsed_secs}s"
+        elif elapsed_secs < 3600:
+            mins, secs = divmod(elapsed_secs, 60)
+            elapsed_str = f"{mins}m {secs}s"
+        else:
+            hours, remainder = divmod(elapsed_secs, 3600)
+            mins = remainder // 60
+            elapsed_str = f"{hours}h {mins}m"
+
+        message = template.format(elapsed=elapsed_str)
+        if extra:
+            message = f"{message} - {extra}"
+
+        self.message_ready.emit(message, color)
+
+    def post_progress(self, current: int, total: int, message: str, color: str):
+        """
+        Post a progress message that updates in place.
+
+        Args:
+            current: Current item number
+            total: Total items
+            message: Base message (will append progress)
+            color: Status color
+        """
+        pct = int((current / max(total, 1)) * 100)
+        full_message = f"{message} ({current}/{total} - {pct}%)"
+
+        # Progress messages are low priority and coalesce
+        self.post(full_message, color, priority=self.LOW, category="progress")
+
+
 class UIAnimations:
     """
     Animation manager for the shot tools UI.
@@ -393,11 +597,20 @@ class UIAnimations:
         # Track buttons with "ready" styling applied
         self._ready_buttons = {}  # button -> original_style
 
+        # Status message queue for smart message handling
+        self._status_queue = StatusMessageQueue(parent_widget)
+        self._status_queue.message_ready.connect(self._on_queued_message)
+        self._status_queue.start()
+
     def setup_animations(self):
         """Setup all animations for the UI."""
         self._setup_button_hover_effects()
         self._setup_progress_animation()
         self._setup_status_animations()
+
+    def _on_queued_message(self, message: str, color: str):
+        """Handle messages from the status queue."""
+        self._apply_status_update(message, color)
 
     def _setup_button_hover_effects(self):
         """Add subtle hover effects to buttons."""
@@ -430,6 +643,7 @@ class UIAnimations:
         self.status_opacity.setOpacity(1.0)
         self._last_status_message = None
         self._last_status_color = None
+        self._last_status_context = None  # Track context for smart animation
 
     def animate_button_click(self, button):
         """Animate button click with scale effect."""
@@ -471,26 +685,70 @@ class UIAnimations:
         self.progress_animation.setDuration(duration)
         self.progress_animation.start()
 
-    def update_status_animated(self, message, color="#4a9eff"):
-        """Update status label with fade animation (only if changed)."""
+    def update_status_animated(self, message, color="#4a9eff", priority=None, use_queue=True):
+        """
+        Update status label with fade animation.
+
+        Args:
+            message: Status message to display
+            color: Hex color for the message
+            priority: Optional priority (URGENT, HIGH, NORMAL, LOW from StatusMessageQueue)
+            use_queue: If True, use the smart queue; if False, update immediately
+        """
+        if use_queue and hasattr(self, '_status_queue'):
+            # Route through the smart queue
+            self._status_queue.post(message, color, priority=priority)
+        else:
+            # Direct update (for backwards compatibility or urgent messages)
+            self._apply_status_update(message, color)
+
+    def _extract_context(self, message):
+        """Extract context/source from message for smart animation decisions.
+
+        Context is determined by:
+        - Message prefix before ':' (e.g., "ComfyUI:", "Gallery:", "Ready")
+        - Or the first word if no colon
+        """
+        if not message:
+            return None
+        # Check for prefix pattern like "ComfyUI:", "Gallery:", etc.
+        if ':' in message:
+            return message.split(':', 1)[0].strip()
+        # Use first word as context
+        return message.split()[0] if message.split() else None
+
+    def _apply_status_update(self, message, color):
+        """Apply status update directly to the UI.
+
+        Only animates (fades) when context/task changes.
+        Updates instantly when just the content changes within same context.
+        """
         if message == self._last_status_message and color == self._last_status_color:
             return
 
+        # Extract context to decide if we should animate
+        current_context = self._extract_context(message)
+        context_changed = current_context != self._last_status_context
+
         self._last_status_message = message
         self._last_status_color = color
+        self._last_status_context = current_context
 
+        # Update the label
         self.ui.StatusLabel.setText(message)
         self.ui.StatusLabel.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 10pt;")
 
-        fade_anim = QPropertyAnimation(self.status_opacity, b"opacity")
-        fade_anim.setDuration(300)
-        fade_anim.setStartValue(0.3)
-        fade_anim.setEndValue(1.0)
-        fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
-        fade_anim.start()
+        # Only animate if context changed (different task/source)
+        if context_changed:
+            fade_anim = QPropertyAnimation(self.status_opacity, b"opacity")
+            fade_anim.setDuration(300)
+            fade_anim.setStartValue(0.3)
+            fade_anim.setEndValue(1.0)
+            fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            fade_anim.start()
 
-        self._animations.append(fade_anim)
-        QTimer.singleShot(350, lambda: self._cleanup_animation(fade_anim))
+            self._animations.append(fade_anim)
+            QTimer.singleShot(350, lambda: self._cleanup_animation(fade_anim))
 
     def pulse_button(self, button):
         """
@@ -576,19 +834,147 @@ class UIAnimations:
         if animation in self._animations:
             self._animations.remove(animation)
 
-    # Logging methods (toast notifications removed)
-    def show_success(self, message):
-        """Log a success message."""
+    # =========================================================================
+    # STATUS MESSAGE METHODS
+    # =========================================================================
+
+    def show_success(self, message, show_in_status=True):
+        """
+        Show a success message in log and optionally status bar.
+
+        Args:
+            message: Success message
+            show_in_status: If True, also show in status bar
+        """
         print(f"SUCCESS: {message}")
+        if show_in_status and hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            self._status_queue.post(f"✓ {message}", StatusColors.SUCCESS,
+                                   priority=StatusMessageQueue.HIGH)
 
-    def show_error(self, message):
-        """Log an error message."""
+    def show_error(self, message, show_in_status=True):
+        """
+        Show an error message in log and optionally status bar.
+
+        Args:
+            message: Error message
+            show_in_status: If True, also show in status bar
+        """
         print(f"ERROR: {message}")
+        if show_in_status and hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            self._status_queue.post(f"✗ {message}", StatusColors.ERROR,
+                                   priority=StatusMessageQueue.URGENT)
 
-    def show_warning(self, message):
-        """Log a warning message."""
+    def show_warning(self, message, show_in_status=True):
+        """
+        Show a warning message in log and optionally status bar.
+
+        Args:
+            message: Warning message
+            show_in_status: If True, also show in status bar
+        """
         print(f"WARNING: {message}")
+        if show_in_status and hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            self._status_queue.post(f"⚠ {message}", StatusColors.WARNING,
+                                   priority=StatusMessageQueue.HIGH)
 
-    def show_info(self, message):
-        """Log an info message."""
+    def show_info(self, message, show_in_status=True):
+        """
+        Show an info message in log and optionally status bar.
+
+        Args:
+            message: Info message
+            show_in_status: If True, also show in status bar
+        """
         print(f"INFO: {message}")
+        if show_in_status and hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            self._status_queue.post(message, StatusColors.INFO,
+                                   priority=StatusMessageQueue.NORMAL)
+
+    # =========================================================================
+    # ACTIVITY TRACKING METHODS
+    # =========================================================================
+
+    def start_activity(self, activity_id: str, message: str, color: str = None):
+        """
+        Start tracking an ongoing activity with elapsed time display.
+
+        The status bar will show the message with elapsed time, e.g.:
+        "Loading files... (5s)" -> "Loading files... (1m 30s)"
+
+        Args:
+            activity_id: Unique identifier for this activity
+            message: Base message (elapsed time will be appended)
+            color: Status color (defaults to INFO blue)
+        """
+        if hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            color = color or StatusColors.INFO
+            template = f"{message} ({{elapsed}})"
+            self._status_queue.start_activity(activity_id, template, color)
+
+    def update_activity(self, activity_id: str, message: str = None, detail: str = None):
+        """
+        Update an ongoing activity's message or add detail.
+
+        Args:
+            activity_id: The activity to update
+            message: New base message (optional)
+            detail: Additional detail to append (optional)
+        """
+        if hasattr(self, '_status_queue'):
+            template = f"{message} ({{elapsed}})" if message else None
+            self._status_queue.update_activity(activity_id, template, detail)
+
+    def end_activity(self, activity_id: str, final_message: str = None, color: str = None):
+        """
+        End an ongoing activity and optionally show a final message.
+
+        Args:
+            activity_id: The activity to end
+            final_message: Message to show after activity ends (optional)
+            color: Color for final message (optional)
+        """
+        if hasattr(self, '_status_queue'):
+            self._status_queue.end_activity(activity_id)
+            if final_message:
+                from styles import StatusColors
+                color = color or StatusColors.SUCCESS
+                self._status_queue.post(final_message, color, priority=StatusMessageQueue.HIGH)
+
+    def show_progress(self, current: int, total: int, message: str, color: str = None):
+        """
+        Show progress in the status bar.
+
+        Args:
+            current: Current item number (1-based)
+            total: Total number of items
+            message: Base message
+            color: Status color (defaults to INFO)
+        """
+        if hasattr(self, '_status_queue'):
+            from styles import StatusColors
+            color = color or StatusColors.INFO
+            self._status_queue.post_progress(current, total, message, color)
+
+    def post_status(self, message: str, color: str, priority: str = "normal"):
+        """
+        Post a status message with explicit priority.
+
+        Args:
+            message: Status message
+            color: Hex color
+            priority: "urgent", "high", "normal", or "low"
+        """
+        if hasattr(self, '_status_queue'):
+            priority_map = {
+                "urgent": StatusMessageQueue.URGENT,
+                "high": StatusMessageQueue.HIGH,
+                "normal": StatusMessageQueue.NORMAL,
+                "low": StatusMessageQueue.LOW,
+            }
+            p = priority_map.get(priority.lower(), StatusMessageQueue.NORMAL)
+            self._status_queue.post(message, color, priority=p)

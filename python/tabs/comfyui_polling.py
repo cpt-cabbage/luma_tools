@@ -465,20 +465,32 @@ class PollingMixin:
     def _on_batch_poll_result_collected(self, job_id, result):
         """Collect a single job's poll result, then process all when complete."""
         import traceback
+        import sys
         try:
-            self.log(f"[Batch] Poll result collected for {job_id}: {result.get('status', 'Unknown')}, pending={self._batch_poll_pending_results - 1}")
+            # Early log with immediate flush to capture any crash point
+            status = result.get('status', 'Unknown') if isinstance(result, dict) else 'InvalidResult'
+            pending = self._batch_poll_pending_results - 1
+            print(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}", flush=True)
+            sys.stdout.flush()
+
+            self.log(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
             self._batch_poll_results[job_id] = result
             self._batch_poll_pending_results -= 1
 
             if self._batch_poll_pending_results <= 0:
                 self._process_collected_poll_results()
         except Exception as e:
-            print(f"ERROR in _on_batch_poll_result_collected: {e}")
+            print(f"ERROR in _on_batch_poll_result_collected: {e}", flush=True)
             traceback.print_exc()
+            sys.stdout.flush()
 
     def _process_collected_poll_results(self):
         """Process all collected poll results and update status bar once."""
+        import sys
         try:
+            print(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...", flush=True)
+            sys.stdout.flush()
+
             from ui_components import StatusColors
 
             self.log(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
@@ -599,9 +611,15 @@ class PollingMixin:
                 main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
                 status_color = StatusColors.INFO
 
+            print(f"[Batch Poll] Updating status bar...", flush=True)
             self.main_window.animator.update_status_animated(main_status, status_color)
+            print(f"[Batch Poll] Status update complete", flush=True)
         except Exception as e:
             import traceback
+            import sys
+            print(f"ERROR in _process_collected_poll_results: {e}", flush=True)
+            traceback.print_exc()
+            sys.stdout.flush()
             self.log(f"[Batch] ERROR in _process_collected_poll_results: {e}")
             self.log(traceback.format_exc())
 
@@ -909,8 +927,8 @@ class PollingMixin:
         Args:
             persisted_state: The persisted job state from settings, or None
         """
+        from ui_components import Worker
         from comfyui.deadline_poller import find_user_running_jobs
-        from comfyui.service import poll_deadline_job_status
 
         # Get current username
         current_user = getattr(self.app_state, 'user', None)
@@ -926,12 +944,59 @@ class PollingMixin:
             return
 
         self.log(f"[Recovery] Checking Deadline for running jobs from user: {current_user}")
+        self.log("[Recovery] Starting async Deadline query (this runs in background)...")
+
+        # Show status feedback for recovery
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.start_activity(
+                "job_recovery", "Checking Deadline for running jobs"
+            )
+
+        # Run the Deadline query in background to avoid blocking UI
+        # Store worker to prevent garbage collection
+        self._recovery_worker = Worker(find_user_running_jobs, current_user)
+        self._recovery_worker.signals.result.connect(
+            lambda jobs: self._on_deadline_jobs_found(jobs, persisted_state)
+        )
+        self._recovery_worker.signals.error.connect(
+            lambda msg, tb: self._on_deadline_query_error(msg, tb, persisted_state)
+        )
+        QThreadPool.globalInstance().start(self._recovery_worker)
+
+    def _on_deadline_query_error(self, error_msg, traceback_str, persisted_state):
+        """Handle error from Deadline job query."""
+        self.log(f"[Recovery] Error checking Deadline for user jobs: {error_msg}")
+        print(traceback_str)
+
+        # Update status
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.end_activity("job_recovery")
+            self.main_window.animator.show_warning(f"Could not check Deadline: {error_msg}", show_in_status=True)
+
+        # Fall back to persisted state recovery
+        if persisted_state:
+            self._recover_from_persisted_state(persisted_state)
+
+    def _on_deadline_jobs_found(self, running_jobs, persisted_state):
+        """Handle results from async Deadline job query."""
+        from comfyui.service import poll_deadline_job_status
+
+        # End the recovery activity
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.end_activity("job_recovery")
 
         try:
-            running_jobs = find_user_running_jobs(current_user)
+            running_jobs = running_jobs or []
 
             if not running_jobs:
                 self.log("[Recovery] No running jobs found on Deadline for current user")
+                # Show status
+                if hasattr(self.main_window, 'animator'):
+                    from ui_components import StatusColors
+                    self.main_window.animator.update_status_animated(
+                        "Ready", StatusColors.INFO
+                    )
+
                 # If we have persisted state but no running jobs, the job must have completed
                 if persisted_state:
                     self.log("[Recovery] Persisted state exists but no running jobs - clearing state")

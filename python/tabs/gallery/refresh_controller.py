@@ -85,6 +85,12 @@ class RefreshController:
 
         self.tab.log(f"[Gallery] Scanning: {current_path}")
 
+        # Show status feedback
+        if hasattr(self.tab.main_window, 'animator'):
+            self.tab.main_window.animator.start_activity(
+                "gallery_scan", "Gallery: Scanning files"
+            )
+
         # Scan in background thread
         def scan():
             return self.tab._loader.scan_directory(current_path)
@@ -97,12 +103,25 @@ class RefreshController:
     def _on_scan_complete(self, items):
         """Handle scan completion."""
         self._scan_in_progress = False
+
+        # Show completion status
+        if hasattr(self.tab.main_window, 'animator'):
+            count = len(items) if items else 0
+            self.tab.main_window.animator.end_activity(
+                "gallery_scan", f"Gallery: Found {count} items"
+            )
+
         self.tab._on_scan_complete_impl(items)
 
     def _on_scan_error(self, msg, tb):
         """Handle scan error."""
         self._scan_in_progress = False
         self.tab.log(f"[Gallery] Scan error: {msg}")
+
+        # Show error status
+        if hasattr(self.tab.main_window, 'animator'):
+            self.tab.main_window.animator.end_activity("gallery_scan")
+            self.tab.main_window.animator.show_error(f"Gallery scan failed: {msg}")
 
     def use_prewarm_cache_sync(self):
         """Use pre-warmed cache but defer display until after window is shown."""

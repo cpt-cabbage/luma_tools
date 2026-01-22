@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.5.2
+- New statusbar message queue system with priority levels and activity tracking, this fixes many messages not showing up
+- Make Deadline job query async to prevent blocking splash screen during recovery
+
+## Version 0.5.1.5
+- More job recovery improvements
+
 
 ## Version 0.5.1.4
 - Job recovery now always checks Deadline for running jobs from the current user
