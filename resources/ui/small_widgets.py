@@ -700,6 +700,11 @@ class StackedThumbnailWidget(QWidget):
         view_action = menu.addAction(f"View All ({count} items)")
         view_action.triggered.connect(self._view_all_items)
 
+        # Properties for top item
+        menu.addSeparator()
+        properties_action = menu.addAction("Properties (Top Item)")
+        properties_action.triggered.connect(self._show_properties)
+
         # Publish all to AYON
         menu.addSeparator()
         publish_action = menu.addAction(f"Publish All to AYON ({count} items)")
@@ -788,6 +793,50 @@ class StackedThumbnailWidget(QWidget):
             self._gallery_tab._selected_items = set(paths)
             self._gallery_tab._on_delete_selected()
             self._gallery_tab._selected_items = original_selection
+
+    def _show_properties(self):
+        """Show properties for the top item in the stack."""
+        if not self._top_item:
+            return
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            import os
+            
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+            
+            # Import here to avoid circular imports
+            from properties_dialog import PropertiesDialog
+            
+            # Get top item path and metadata
+            item_path = self._top_item['path']
+            output_dir = os.path.dirname(item_path)
+            
+            # Try to load metadata
+            metadata = {}
+            try:
+                from comfyui.service import get_image_metadata
+                filename = os.path.basename(item_path)
+                metadata = get_image_metadata(output_dir, filename) or {}
+            except Exception as e:
+                print(f"Could not load metadata for stack top item: {e}")
+            
+            dialog = PropertiesDialog(
+                item_path, 
+                output_dir, 
+                metadata=metadata,
+                parent=parent_window
+            )
+            
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            print(f"Error opening properties dialog for stack: {e}")
+            traceback.print_exc()
 
     def toggle_expansion(self):
         """Toggle between expanded and collapsed state."""

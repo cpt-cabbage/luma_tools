@@ -416,6 +416,11 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 view_input_action.setText("View Input (not found)")
 
             menu.addSeparator()
+            # Properties dialog - comprehensive information
+            properties_action = menu.addAction("Properties")
+            properties_action.triggered.connect(self._show_properties)
+
+            menu.addSeparator()
             has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
             apply_settings_action = menu.addAction("Apply Settings")
             apply_settings_action.triggered.connect(self._copy_settings)
@@ -576,6 +581,37 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 self._load_tooltip_async()
         except Exception as e:
             print(f"Error opening edit item dialog: {e}")
+
+    def _show_properties(self):
+        """Show comprehensive properties dialog for this item."""
+        try:
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+            
+            # Import here to avoid circular imports
+            from properties_dialog import PropertiesDialog
+            
+            # Pre-load metadata to avoid loading it twice
+            metadata = self._get_metadata()
+            
+            dialog = PropertiesDialog(
+                self.image_path, 
+                self.output_dir, 
+                metadata=metadata,
+                parent=parent_window
+            )
+            
+            # Connect the copy settings signal
+            dialog.copy_settings_requested.connect(self.copy_settings_requested)
+            
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            print(f"Error opening properties dialog: {e}")
+            traceback.print_exc()
 
 
 # ============================================================================
@@ -936,6 +972,10 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(self._open_folder)
         menu.addSeparator()
+        # Properties dialog
+        properties_action = menu.addAction("Properties")
+        properties_action.triggered.connect(self._show_properties)
+        menu.addSeparator()
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(self._copy_path)
 
@@ -1062,6 +1102,41 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
             dialog.exec()
         except Exception as e:
             print(f"Error opening edit model dialog: {e}")
+
+    def _show_properties(self):
+        """Show comprehensive properties dialog for this model."""
+        try:
+            parent_window = None
+            for widget in QApplication.topLevelWidgets():
+                if widget.isVisible() and hasattr(widget, 'windowTitle'):
+                    parent_window = widget
+                    break
+            
+            # Import here to avoid circular imports
+            from properties_dialog import PropertiesDialog
+            
+            # Pre-load metadata (models might not have metadata, but dialog handles this gracefully)
+            metadata = getattr(self, '_cached_metadata', None)
+            if metadata is None:
+                try:
+                    from comfyui.service import get_image_metadata
+                    filename = os.path.basename(self.model_path)
+                    metadata = get_image_metadata(self.output_dir, filename) or {}
+                except Exception:
+                    metadata = {}
+            
+            dialog = PropertiesDialog(
+                self.model_path, 
+                self.output_dir, 
+                metadata=metadata,
+                parent=parent_window
+            )
+            
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            print(f"Error opening properties dialog: {e}")
+            traceback.print_exc()
 
 
 # ============================================================================

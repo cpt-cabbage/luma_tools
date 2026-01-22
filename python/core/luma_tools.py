@@ -861,6 +861,26 @@ class LumaShotTools(QtWidgets.QWidget):
         # Show message for 5 seconds
         self._tray_icon.showMessage(title, message, icon, 5000)
 
+    def showEvent(self, event):
+        """Override show event to force cursor update when window is first shown."""
+        super().showEvent(event)
+
+        # Force cursor update by overriding and restoring
+        app = QApplication.instance()
+        app.setOverrideCursor(Qt.ArrowCursor)
+        QtCore.QTimer.singleShot(100, lambda: app.restoreOverrideCursor())
+
+        # Force widget under cursor to update cursor shape
+        def update_cursor():
+            from PySide6.QtGui import QCursor
+            pos = QCursor.pos()
+            widget = app.widgetAt(pos)
+            if widget:
+                widget.unsetCursor()
+                widget.update()
+
+        QtCore.QTimer.singleShot(150, update_cursor)
+
     def paintEvent(self, event):
         """Paint the rounded background and border."""
         painter = QPainter(self)
@@ -1004,14 +1024,7 @@ def main():
         except Exception as e:
             print(f"Warning: Could not set prewarm cache: {e}")
 
-        # Pre-initialize Three.js viewer during splash to avoid window flicker
-        # WebEngine initialization can cause visual glitches if done later
-        splash.update_progress(78, "Loading", "Initializing 3D viewer...")
-        app.processEvents()
 
-        # NOTE: QWebEngineView prewarm moved to AFTER window creation but BEFORE window.show()
-        # The view must be added to a layout before showing the window to prevent flash
-        _threejs_prewarm_viewer = None
 
         # Create main window
         splash.update_progress(88, "Loading", "Creating main window...")
@@ -1019,46 +1032,62 @@ def main():
 
         window = LumaShotTools()
 
-        # Pre-initialize 3D viewer AFTER window creation but BEFORE window.show()
-        # CRITICAL: QWebEngineView must be added to a layout before showing window
-        # to prevent Chromium's GPU process from creating a visible window flash.
-        # Just creating it floating in memory is NOT enough - it must be in widget hierarchy.
-        splash.update_progress(92, "Loading", "Initializing 3D viewer...")
-        app.processEvents()
-        try:
-            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
-            if is_threejs_viewer_available():
-                _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
-
-                # CRITICAL: Add to window's layout hierarchy (hidden) BEFORE show()
-                # This is what prevents the window flash - being in a layout matters
-                _threejs_prewarm_viewer.hide()
-                window.layout().addWidget(_threejs_prewarm_viewer)
-
-                # Store globally - will be retrieved and reparented by gallery later
-                set_prewarm_viewer(_threejs_prewarm_viewer)
-
-                # Wait for viewer to initialize
-                import time
-                start_time = time.time()
-                timeout = 3.0
-                while not _threejs_prewarm_viewer._viewer_ready and (time.time() - start_time) < timeout:
-                    app.processEvents()
-                    time.sleep(0.05)
-                print(f"Three.js viewer pre-initialized in {time.time() - start_time:.2f}s")
-        except Exception as e:
-            print(f"Warning: Could not pre-initialize Three.js viewer: {e}")
+        # NOTE: 3D viewer initialization moved to AFTER splash closes
+        # to prevent blocking the splash screen during WebEngine initialization
+        _threejs_prewarm_viewer = None
 
         splash.update_progress(95, "Loading", "Finalizing...")
         app.processEvents()
 
-        # Close splash and show main window
+        # Show main window first, then close splash
+        window.show()
+        app.processEvents()  # Ensure window is painted
         splash.stop_animation()
         splash.close()
-        window.show()
+        
+        # Fix cursor being stuck in I-beam mode when mouse is over text field on startup
+        # Method 1: Force cursor update by briefly overriding and restoring
+        app.setOverrideCursor(Qt.ArrowCursor)
+        QtCore.QTimer.singleShot(50, lambda: app.restoreOverrideCursor())
+        
+        # Method 2: Also force a mouse move event to update cursor
+        def force_cursor_update():
+            from PySide6.QtGui import QMouseEvent
+            from PySide6.QtCore import QPoint
+            from PySide6.QtGui import QCursor
+            # Create and post a synthetic mouse move event to force cursor update
+            pos = QCursor.pos()
+            global_pos = window.mapFromGlobal(pos)
+            event = QMouseEvent(QtCore.QEvent.Type.MouseMove, global_pos, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+            QtCore.QCoreApplication.postEvent(window, event)
+        
+        QtCore.QTimer.singleShot(100, force_cursor_update)
 
         # Enable log redirection after window is shown
         window.enable_log_redirect()
+
+        # Initialize 3D viewer asynchronously in the background (100ms delay)
+        # This prevents blocking the splash screen closure
+        def init_threejs_viewer():
+            """Initialize Three.js viewer in the background after UI is ready."""
+            try:
+                from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
+                if is_threejs_viewer_available():
+                    print("Starting async 3D viewer initialization...")
+                    _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
+
+                    # Add to window's layout hierarchy (hidden) to prevent window flash
+                    _threejs_prewarm_viewer.hide()
+                    window.layout().addWidget(_threejs_prewarm_viewer)
+
+                    # Store globally - will be retrieved and reparented by gallery later
+                    set_prewarm_viewer(_threejs_prewarm_viewer)
+                    print("3D viewer initialization started (running in background)")
+            except Exception as e:
+                print(f"Warning: Could not initialize 3D viewer: {e}")
+
+        # Schedule viewer initialization to run after event loop starts
+        QtCore.QTimer.singleShot(100, init_threejs_viewer)
 
         # Run the application
         logging.info("Application window shown, entering event loop")
