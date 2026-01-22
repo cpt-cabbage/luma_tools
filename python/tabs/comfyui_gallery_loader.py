@@ -331,7 +331,7 @@ class GalleryLoader:
         """
         # Import metadata functions with error handling
         try:
-            from comfyui.service import load_gallery_metadata, get_workflow_preset_for_files, _lookup_file_metadata
+            from comfyui.metadata import load_gallery_metadata, get_workflow_preset_for_files, _lookup_file_metadata
         except ImportError as e:
             print(f"[Prewarm] Failed to import metadata functions: {e}")
             # Fall back to filename pattern for all items

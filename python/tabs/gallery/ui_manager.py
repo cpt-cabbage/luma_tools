@@ -135,9 +135,8 @@ class UIManager:
         settings['show_inputs'] = self.tab._show_inputs
         save_gallery_settings(settings)
 
-        # Clear cache and rescan to apply filter
-        self.tab._cached_items = None
-        self.tab._refresh_controller.on_refresh(force=True)
+        # Re-filter and redisplay from cached items (no rescan needed)
+        self._redisplay_items()
 
     # =========================================================================
     # VIEW MODE CONTROLS

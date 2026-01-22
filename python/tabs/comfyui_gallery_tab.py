@@ -434,8 +434,7 @@ class ComfyUIGalleryTab(BaseTab):
         # Update ordered list for shift-select
         self._visible_items_ordered = [item['path'] for item in sorted_items]
 
-        # Update status count
-        self._manager.update_status_count(items)
+        # Note: display_items already updates status count with filtered items
 
         # Mark initial scan done
         self._initial_scan_done = True

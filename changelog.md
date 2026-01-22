@@ -1,5 +1,13 @@
 # Luma Tools Changelog
 
+## Version 0.5
+- New stacked view based on job
+- New hide/show inputs button
+- New features only apply to new generations going forward due to requred metadata
+- New files fully supported will show in blue, old non supported are grey
+- A few UI improvments to Gallery
+- Major refactor (hopefully last)
+
 
 ## Version 0.4.6.6
 - Fix multi-input workflows - loader nodes without inputs are now bypassed instead of failing
