@@ -146,17 +146,23 @@ class SelectionManager:
 
     def clear_selection(self):
         """Clear all selected items."""
-        # Update all selected widgets
+        # Update all selected widgets in widget cache
         for path in list(self.tab._selected_items):
             if path in self.tab._widget_cache:
                 widget = self.tab._widget_cache[path]
                 widget.set_selected(False)
 
-        # Also clear stack selections
+        # Also clear stack selections and their expanded widgets
         if hasattr(self.tab, '_manager') and hasattr(self.tab._manager, '_stack_widgets'):
             for stack in self.tab._manager._stack_widgets.values():
+                # Clear collapsed stack selection
                 if hasattr(stack, 'set_selected') and stack.is_selected():
                     stack.set_selected(False)
+                # Clear expanded widgets inside the stack
+                if hasattr(stack, '_expanded_widgets') and stack._expanded_widgets:
+                    for widget in stack._expanded_widgets:
+                        if hasattr(widget, 'set_selected') and widget.is_selected():
+                            widget.set_selected(False)
 
         self.tab._selected_items.clear()
         self._update_toolbar()
@@ -173,33 +179,112 @@ class SelectionManager:
         self._update_checkmark_visibility()
 
     def on_shift_click(self, clicked_path):
-        """Handle shift+click for range selection."""
-        if not self.tab._last_selected_path or not self.tab._visible_items_ordered:
+        """Handle shift+click for range selection.
+
+        Builds visual order from the actual flow layout to properly handle:
+        - Collapsed stacks (treated as single items)
+        - Expanded stacks (individual items are selectable)
+        - Mixed views with both stacked and non-stacked items
+        """
+        from small_widgets import StackedThumbnailWidget
+
+        if not self.tab._last_selected_path:
             # No previous selection, just select this item
-            if clicked_path in self.tab._widget_cache:
-                self.tab._widget_cache[clicked_path].set_selected(True)
+            self._select_item_by_path(clicked_path)
             return
 
-        try:
-            # Find indices of last selected and current clicked items
-            last_index = self.tab._visible_items_ordered.index(self.tab._last_selected_path)
-            current_index = self.tab._visible_items_ordered.index(clicked_path)
+        # Build visual order from flow layout
+        visual_order = []  # List of (path_or_id, widget, is_stack) tuples
 
-            # Select all items in the range
-            start = min(last_index, current_index)
-            end = max(last_index, current_index)
+        if hasattr(self.tab, '_flow_layout'):
+            for i in range(self.tab._flow_layout.count()):
+                item = self.tab._flow_layout.itemAt(i)
+                if not item:
+                    continue
+                widget = item.widget()
+                if not widget or not widget.isVisible():
+                    continue
 
-            for i in range(start, end + 1):
-                item_path = self.tab._visible_items_ordered[i]
-                if item_path in self.tab._widget_cache:
-                    widget = self.tab._widget_cache[item_path]
-                    if not widget.is_selected():
-                        widget.set_selected(True)
+                if isinstance(widget, StackedThumbnailWidget):
+                    if widget._is_expanded:
+                        # Skip the collapsed stack widget itself when expanded
+                        # (expanded items are shown as separate widgets)
+                        continue
+                    else:
+                        # Collapsed stack - use top item path as identifier
+                        if widget._top_item:
+                            visual_order.append((widget._top_item['path'], widget, True))
+                elif hasattr(widget, 'image_path'):
+                    # Regular image thumbnail
+                    visual_order.append((widget.image_path, widget, False))
+                elif hasattr(widget, 'model_path'):
+                    # GLB/3D model thumbnail
+                    visual_order.append((widget.model_path, widget, False))
 
-        except ValueError:
-            # Path not found in ordered list, just select the clicked item
-            if clicked_path in self.tab._widget_cache:
-                self.tab._widget_cache[clicked_path].set_selected(True)
+        if not visual_order:
+            # Fallback to old behavior if flow layout unavailable
+            self._select_item_by_path(clicked_path)
+            return
+
+        # Find indices of last selected and clicked items
+        last_index = -1
+        current_index = -1
+
+        for idx, (path, widget, is_stack) in enumerate(visual_order):
+            if path == self.tab._last_selected_path:
+                last_index = idx
+            if path == clicked_path:
+                current_index = idx
+
+            # Also check if paths are inside a collapsed stack
+            if is_stack:
+                stack_widget = widget
+                for stack_item in stack_widget._items:
+                    if last_index == -1 and stack_item['path'] == self.tab._last_selected_path:
+                        last_index = idx
+                    if current_index == -1 and stack_item['path'] == clicked_path:
+                        current_index = idx
+
+        if last_index == -1 or current_index == -1:
+            # Path not found, just select the clicked item
+            self._select_item_by_path(clicked_path)
+            return
+
+        # Select all items in the range
+        start = min(last_index, current_index)
+        end = max(last_index, current_index)
+
+        for i in range(start, end + 1):
+            path, widget, is_stack = visual_order[i]
+            if is_stack:
+                # Select entire collapsed stack
+                if hasattr(widget, 'set_selected') and not widget.is_selected():
+                    widget.set_selected(True)
+            else:
+                # Select individual item
+                if hasattr(widget, 'set_selected') and not widget.is_selected():
+                    widget.set_selected(True)
+
+        # Update last selected path to the clicked item for subsequent shift-clicks
+        self.tab._last_selected_path = clicked_path
+
+    def _select_item_by_path(self, path):
+        """Select a single item by its path, checking both widget cache and stacks."""
+        from small_widgets import StackedThumbnailWidget
+
+        # Check widget cache first
+        if path in self.tab._widget_cache:
+            self.tab._widget_cache[path].set_selected(True)
+            return
+
+        # Check if it's in a collapsed stack
+        if hasattr(self.tab, '_manager') and hasattr(self.tab._manager, '_stack_widgets'):
+            for stack in self.tab._manager._stack_widgets.values():
+                if isinstance(stack, StackedThumbnailWidget) and not stack._is_expanded:
+                    for item in stack._items:
+                        if item['path'] == path:
+                            stack.set_selected(True)
+                            return
 
     def process_rubber_band_selection(self):
         """Select all items that intersect with the rubber band."""

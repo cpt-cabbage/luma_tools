@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.5.1.1
+- Fix viewer not showing 3d objects when pressing next
+- Fix background frrame not updating correctly
+
 ## Version 0.5.1
 - Add comprehensive "Properties" dialog to context menus for all gallery items (images, models, stacks)
 - Properties shows: file info, metadata, workflow details, relationships (inputs/outputs), user notes

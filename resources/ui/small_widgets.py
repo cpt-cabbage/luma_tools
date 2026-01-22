@@ -665,11 +665,28 @@ class StackedThumbnailWidget(QWidget):
         self._apply_thumbnail_style()
 
     def mousePressEvent(self, event):
-        """Handle click - toggle expansion."""
+        """Handle click - selection based on modifiers, double-click for expansion."""
         if event.button() == Qt.LeftButton:
-            self.clicked.emit(self.stack_id)
-            self.toggle_expansion()
+            # Check for shift-click (range selection)
+            if event.modifiers() & Qt.ShiftModifier:
+                if self._gallery_tab and self._top_item:
+                    self._gallery_tab._on_shift_click_selection(self._top_item['path'])
+            # Check for ctrl-click (toggle selection)
+            elif event.modifiers() & Qt.ControlModifier:
+                self.set_selected(not self._is_selected)
+            else:
+                # Plain left-click: clear selection and select only this stack
+                if self._gallery_tab:
+                    self._gallery_tab._clear_selection()
+                self.set_selected(True)
+                self.clicked.emit(self.stack_id)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click - toggle expansion."""
+        if event.button() == Qt.LeftButton:
+            self.toggle_expansion()
+        super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
         """Show batch context menu for all items in the stack."""
@@ -1102,6 +1119,10 @@ class StackedThumbnailWidget(QWidget):
                     self._gallery_tab._selected_items.add(path)
                 else:
                     self._gallery_tab._selected_items.discard(path)
+
+            # Update last selected path for shift-select range functionality
+            if selected and self._top_item:
+                self._gallery_tab._last_selected_path = self._top_item['path']
 
             # Update toolbar and checkmarks
             if hasattr(self._gallery_tab, '_selection_manager'):

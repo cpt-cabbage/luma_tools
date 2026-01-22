@@ -7,8 +7,8 @@ from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect,
     QSequentialAnimationGroup, QObject, QRectF, Signal
 )
-from PySide6.QtWidgets import QGraphicsOpacityEffect
-from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
+from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush, QPen
 
 
 class TabGlowEffect(QObject):
@@ -257,6 +257,116 @@ class TabGlowManager(QObject):
         """Auto-stop glow when user navigates to the glowing tab."""
         if index in self._active_glows:
             self.stop_glow(index)
+
+
+class ButtonNotificationBadge(QWidget):
+    """
+    A notification badge that can be overlaid on a button.
+    Shows a small red dot in the top-right corner, similar to tab notification badges.
+
+    Usage:
+        badge = ButtonNotificationBadge(button)
+        badge.show_badge()
+        # Later:
+        badge.hide_badge()
+    """
+
+    def __init__(self, parent_button, size=10, color=QColor(255, 80, 80), offset=(4, 4)):
+        """
+        Initialize the notification badge.
+
+        Args:
+            parent_button: The QPushButton to attach the badge to
+            size: Diameter of the badge in pixels (default: 10)
+            color: QColor for the badge (default: bright red)
+            offset: Tuple (x, y) offset from top-right corner (default: (4, 4))
+        """
+        super().__init__(parent_button)
+        self._parent_button = parent_button
+        self._size = size
+        self._color = color
+        self._offset = offset
+        self._visible = False
+
+        # Set fixed size for the badge
+        self.setFixedSize(size + 4, size + 4)  # Extra space for glow
+
+        # Make transparent background
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # Initially hidden
+        self.hide()
+
+        # Connect to parent resize to reposition badge
+        parent_button.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Reposition badge when parent button resizes."""
+        if obj == self._parent_button and event.type() in (
+            event.Type.Resize, event.Type.Move, event.Type.Show
+        ):
+            self._update_position()
+        return super().eventFilter(obj, event)
+
+    def _update_position(self):
+        """Position the badge in the top-right corner of the parent button."""
+        if not self._parent_button:
+            return
+        parent_width = self._parent_button.width()
+        x = parent_width - self._size - self._offset[0]
+        y = self._offset[1]
+        self.move(x, y)
+
+    def paintEvent(self, event):
+        """Paint the notification badge."""
+        if not self._visible:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw outer glow
+        glow_color = QColor(self._color)
+        glow_color.setAlpha(80)
+        painter.setBrush(QBrush(glow_color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(0, 0, self._size + 4, self._size + 4)
+
+        # Draw main badge
+        painter.setBrush(QBrush(self._color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(2, 2, self._size, self._size)
+
+        # Draw highlight
+        highlight_color = QColor(255, 255, 255, 150)
+        painter.setBrush(QBrush(highlight_color))
+        highlight_size = self._size * 0.35
+        painter.drawEllipse(
+            int(2 + self._size * 0.2),
+            int(2 + self._size * 0.15),
+            int(highlight_size),
+            int(highlight_size)
+        )
+
+        painter.end()
+
+    def show_badge(self):
+        """Show the notification badge."""
+        self._visible = True
+        self._update_position()
+        self.show()
+        self.raise_()
+        self.update()
+
+    def hide_badge(self):
+        """Hide the notification badge."""
+        self._visible = False
+        self.hide()
+
+    def is_badge_visible(self):
+        """Check if badge is currently visible."""
+        return self._visible
 
 
 class UIAnimations:

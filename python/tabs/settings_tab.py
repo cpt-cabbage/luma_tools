@@ -154,24 +154,16 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'newVersionLabel'):
             self.ui.newVersionLabel.setVisible(False)
 
-        # Check if this is a new version and show notification on button
+        # Check if this is a new version and show notification badge on button
         if hasattr(self.ui, 'showVersionHistoryButton'):
             from core.user_preferences import is_new_version
             if is_new_version(version):
-                # Add notification indicator to button text
-                current_text = self.ui.showVersionHistoryButton.text()
-                if not current_text.endswith(" •"):
-                    self.ui.showVersionHistoryButton.setText(f"{current_text} •")
-                # Optionally change button style to highlight it
-                self.ui.showVersionHistoryButton.setStyleSheet("""
-                    QPushButton {
-                        background-color: #d97706;
-                        font-weight: bold;
-                    }
-                    QPushButton:hover {
-                        background-color: #f59e0b;
-                    }
-                """)
+                # Create and show notification badge
+                from effects import ButtonNotificationBadge
+                self._version_badge = ButtonNotificationBadge(
+                    self.ui.showVersionHistoryButton
+                )
+                self._version_badge.show_badge()
 
         # Load feature request UI
         self._load_feature_request_ui()
@@ -222,13 +214,9 @@ class SettingsTab(BaseTab):
 
     def _on_show_version_history(self):
         """Show version history dialog."""
-        # Clear notification from button when clicked
-        if hasattr(self.ui, 'showVersionHistoryButton'):
-            button_text = self.ui.showVersionHistoryButton.text()
-            if button_text.endswith(" •"):
-                self.ui.showVersionHistoryButton.setText(button_text.replace(" •", ""))
-            # Reset button style
-            self.ui.showVersionHistoryButton.setStyleSheet("")
+        # Hide notification badge when clicked
+        if hasattr(self, '_version_badge'):
+            self._version_badge.hide_badge()
 
         changelog = get_changelog()
 
@@ -819,18 +807,14 @@ class SettingsTab(BaseTab):
                 unread_count = get_unread_feature_request_count(self.app_state.user)
 
                 if unread_count > 0:
-                    # Add notification indicator
+                    # Add notification indicator with count in text
                     self.ui.viewFeatureRequestsButton.setText(f"View Requests ({unread_count})")
-                    # Add orange styling like version history
-                    self.ui.viewFeatureRequestsButton.setStyleSheet("""
-                        QPushButton {
-                            background-color: #d97706;
-                            color: white;
-                        }
-                        QPushButton:hover {
-                            background-color: #f59e0b;
-                        }
-                    """)
+                    # Create and show notification badge
+                    from effects import ButtonNotificationBadge
+                    self._feature_request_badge = ButtonNotificationBadge(
+                        self.ui.viewFeatureRequestsButton
+                    )
+                    self._feature_request_badge.show_badge()
                     # Request attention (pulsing glow)
                     self.signals.request_attention.emit()
 
@@ -930,10 +914,11 @@ class SettingsTab(BaseTab):
 
         from tabs.dialogs import FeatureRequestDialog
 
-        # Clear notification indicator
+        # Clear notification indicator and badge
         if hasattr(self.ui, 'viewFeatureRequestsButton'):
             self.ui.viewFeatureRequestsButton.setText("View Requests")
-            self.ui.viewFeatureRequestsButton.setStyleSheet("")
+        if hasattr(self, '_feature_request_badge'):
+            self._feature_request_badge.hide_badge()
 
         # Show dialog
         dialog = FeatureRequestDialog(
