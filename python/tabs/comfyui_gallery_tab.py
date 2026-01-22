@@ -66,12 +66,10 @@ class ComfyUIGalleryTab(BaseTab):
         self._custom_path = ""
         self._current_path = ""
 
-        # Sort mode
-        self._sort_mode = "date_desc"
-
         # Load gallery settings
         from core.user_preferences import get_gallery_settings
         gallery_settings = get_gallery_settings()
+        self._sort_mode = gallery_settings.get("sort_mode", "date_desc")
         self._show_inputs = gallery_settings.get("show_inputs", False)
         self._view_mode = gallery_settings.get("view_mode", "stacked")
         self._collapsed_sections = set(gallery_settings.get("collapsed_sections", []))

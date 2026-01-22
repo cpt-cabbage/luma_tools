@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QFont
+from thumbnail_styles import ThumbnailStyler
 
 
 # ============================================================================
@@ -189,6 +190,7 @@ class StackedThumbnailWidget(QWidget):
         self._top_item = items[0] if items else None
         self._is_expanded = False
         self._is_selected = False  # Selection state for the whole stack
+        self._is_hovered = False
         self._expanded_widgets = []  # List of expanded thumbnail widgets
         self._expanded_background = None  # Background frame behind expanded items
         self._gallery_tab = gallery_tab
@@ -196,6 +198,13 @@ class StackedThumbnailWidget(QWidget):
         self._has_metadata = self._check_items_have_metadata(items)
         # Check if top item is a 3D model (uses grey border, not blue)
         self._is_top_item_model = self._top_item and self._top_item.get('type') == 'model'
+        # Create styler for consistent styling
+        self._styler = ThumbnailStyler(
+            has_metadata=self._has_metadata,
+            is_model=self._is_top_item_model,
+            is_stacked=True,
+            border_radius=8
+        )
 
         self._setup_ui()
         self.setToolTip(f"{stack_id}\n{self._count} items - Click to expand")
@@ -620,90 +629,40 @@ class StackedThumbnailWidget(QWidget):
         """Handle thumbnail load completion."""
         if pixmap and self.thumbnail_label:
             self.thumbnail_label.setPixmap(pixmap)
-            # Update style to match the fanned card design
-            # 3D models use grey, images use blue/grey based on metadata
-            if self._is_top_item_model:
-                # Grey for 3D models
-                self.thumbnail_label.setStyleSheet("""
-                    QLabel {
-                        background-color: #2d3139;
-                        border: 2px solid #4a4a4a;
-                        border-radius: 8px;
-                    }
-                """)
-            elif self._has_metadata:
-                # Blue for images with metadata
-                self.thumbnail_label.setStyleSheet("""
-                    QLabel {
-                        background-color: #1e3a5f;
-                        border: 2px solid #4a6d8c;
-                        border-radius: 8px;
-                    }
-                """)
-            else:
-                # Grey for images without metadata
-                self.thumbnail_label.setStyleSheet("""
-                    QLabel {
-                        background-color: #2d3139;
-                        border: 2px solid #4a4a4a;
-                        border-radius: 8px;
-                    }
-                """)
+            # Apply current style state
+            self._apply_thumbnail_style()
 
-    def enterEvent(self, event):
-        """Handle mouse enter - highlight the stack."""
-        super().enterEvent(event)
+    def _apply_thumbnail_style(self):
+        """Apply the appropriate style based on current state using unified styler."""
         if self.thumbnail_label and not self._is_expanded:
-            # Brighten the border on hover
-            # 3D models use grey, images use blue/grey based on metadata
-            if self._is_top_item_model:
-                border_color = "#5a5f6a"  # Lighter grey for hover
-            elif self._has_metadata:
-                border_color = "#6bb3ff"  # Blue for images with metadata
-            else:
-                border_color = "#5a5f6a"  # Grey for images without metadata
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: #353a45;
-                    border: 2px solid {border_color};
-                    border-radius: 8px;
-                }}
-            """)
-            # Increase shadow intensity
+            style = self._styler.get_style(
+                selected=self._is_selected,
+                hover=self._is_hovered
+            )
+            self.thumbnail_label.setStyleSheet(style)
+
+            # Update shadow based on hover state
             effect = self.thumbnail_label.graphicsEffect()
             if effect:
                 from PySide6.QtGui import QColor
-                effect.setBlurRadius(16)
-                effect.setColor(QColor(74, 158, 255, 60))
+                if self._is_hovered:
+                    effect.setBlurRadius(16)
+                    effect.setColor(QColor(74, 158, 255, 60))
+                else:
+                    effect.setBlurRadius(12)
+                    effect.setColor(QColor(0, 0, 0, 80))
+
+    def enterEvent(self, event):
+        """Handle mouse enter - show hover state."""
+        super().enterEvent(event)
+        self._is_hovered = True
+        self._apply_thumbnail_style()
 
     def leaveEvent(self, event):
         """Handle mouse leave - restore normal state."""
         super().leaveEvent(event)
-        if self.thumbnail_label and not self._is_expanded:
-            # Restore normal style based on type and metadata
-            # 3D models use grey, images use blue/grey based on metadata
-            if self._is_top_item_model:
-                bg_color = "#2d3139"
-                border_color = "#4a4a4a"  # Grey for 3D models
-            elif self._has_metadata:
-                bg_color = "#1e3a5f"
-                border_color = "#4a6d8c"  # Blue for images with metadata
-            else:
-                bg_color = "#2d3139"
-                border_color = "#4a4a4a"  # Grey for images without metadata
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {bg_color};
-                    border: 2px solid {border_color};
-                    border-radius: 8px;
-                }}
-            """)
-            # Restore normal shadow
-            effect = self.thumbnail_label.graphicsEffect()
-            if effect:
-                from PySide6.QtGui import QColor
-                effect.setBlurRadius(12)
-                effect.setColor(QColor(0, 0, 0, 80))
+        self._is_hovered = False
+        self._apply_thumbnail_style()
 
     def mousePressEvent(self, event):
         """Handle click - toggle expansion."""
@@ -1073,43 +1032,8 @@ class StackedThumbnailWidget(QWidget):
 
         self._is_selected = selected
 
-        # Update visual style to show selection
-        if self.thumbnail_label:
-            if selected:
-                # Bright selection border
-                self.thumbnail_label.setStyleSheet("""
-                    QLabel {
-                        background-color: #1e3a5f;
-                        border: 3px solid #5ba3ff;
-                        border-radius: 8px;
-                    }
-                """)
-            else:
-                # Restore normal style based on type and metadata
-                if self._is_top_item_model:
-                    self.thumbnail_label.setStyleSheet("""
-                        QLabel {
-                            background-color: #2d3139;
-                            border: 2px solid #4a4a4a;
-                            border-radius: 8px;
-                        }
-                    """)
-                elif self._has_metadata:
-                    self.thumbnail_label.setStyleSheet("""
-                        QLabel {
-                            background-color: #1e3a5f;
-                            border: 2px solid #4a6d8c;
-                            border-radius: 8px;
-                        }
-                    """)
-                else:
-                    self.thumbnail_label.setStyleSheet("""
-                        QLabel {
-                            background-color: #2d3139;
-                            border: 2px solid #4a4a4a;
-                            border-radius: 8px;
-                        }
-                    """)
+        # Update visual style using unified styler
+        self._apply_thumbnail_style()
 
         # Update gallery selection state
         if self._gallery_tab:

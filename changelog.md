@@ -1,5 +1,10 @@
 # Luma Tools Changelog
 
+## Version 0.5.0.2
+- Thumbnails will now regenerate when new version detected to have latest renderer version rendered
+- Extend drag selection to handle grouped stack items
+- Gallery bug fixes
+
 ## Version 0.5.0.1
 - Gallery bug fixes
 

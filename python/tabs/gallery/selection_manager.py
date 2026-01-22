@@ -297,16 +297,15 @@ class SelectionManager:
                 self.tab._selection_toolbar.hide()
 
     def _update_checkmark_visibility(self):
-        """Update checkmark visibility for all selected items (show only if multiple selections)."""
+        """Update checkmark visibility for all widgets based on selection state."""
         show_checkmarks = len(self.tab._selected_items) > 1
-        for path in self.tab._selected_items:
-            if path in self.tab._widget_cache:
-                widget = self.tab._widget_cache[path]
-                if hasattr(widget, 'selection_indicator'):
-                    if show_checkmarks:
-                        widget.selection_indicator.show()
-                    else:
-                        widget.selection_indicator.hide()
+        # Iterate over ALL widgets, not just selected ones, to hide checkmarks on deselected items
+        for path, widget in self.tab._widget_cache.items():
+            if hasattr(widget, 'selection_indicator'):
+                if show_checkmarks and path in self.tab._selected_items:
+                    widget.selection_indicator.show()
+                else:
+                    widget.selection_indicator.hide()
 
     def on_item_deleted(self, item_path):
         """Handle item deletion from selection perspective."""

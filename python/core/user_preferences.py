@@ -230,24 +230,48 @@ def get_gallery_settings() -> Dict[str, Any]:
             - show_inputs: bool (default False)
             - view_mode: str (default "stacked") - "stacked" or "grid"
             - collapsed_sections: List[str] (section IDs that are collapsed)
+            - sort_mode: str (default "date_desc")
     """
     settings = load_user_settings()
     gallery = settings.get("gallery_settings", {})
+
+    # Ensure gallery is a dict (handle corrupted settings)
+    if not isinstance(gallery, dict):
+        gallery = {}
+
+    # Get values with type validation to handle corrupted settings
+    show_inputs = gallery.get("show_inputs", False)
+    if not isinstance(show_inputs, bool):
+        show_inputs = False
+
     view_mode = gallery.get("view_mode", "stacked")
+    if not isinstance(view_mode, str):
+        view_mode = "stacked"
     # Migrate "sections" to "stacked" if user had it saved
     if view_mode == "sections":
         view_mode = "stacked"
+
+    collapsed_sections = gallery.get("collapsed_sections", [])
+    if not isinstance(collapsed_sections, list):
+        collapsed_sections = []
+
+    sort_mode = gallery.get("sort_mode", "date_desc")
+    if not isinstance(sort_mode, str):
+        sort_mode = "date_desc"
+
     return {
-        "show_inputs": gallery.get("show_inputs", False),
+        "show_inputs": show_inputs,
         "view_mode": view_mode,
-        "collapsed_sections": gallery.get("collapsed_sections", [])
+        "collapsed_sections": collapsed_sections,
+        "sort_mode": sort_mode
     }
 
 
 def save_gallery_settings(
     show_inputs: Optional[bool] = None,
     view_mode: Optional[str] = None,
-    collapsed_sections: Optional[List[str]] = None
+    collapsed_sections: Optional[List[str]] = None,
+    sort_mode: Optional[str] = None
 ):
     """Save gallery settings.
 
@@ -257,6 +281,7 @@ def save_gallery_settings(
         show_inputs: Whether to show input images
         view_mode: View mode - "stacked" or "grid"
         collapsed_sections: List of section IDs that are collapsed
+        sort_mode: Sort mode - "date_desc", "date_asc", "name_asc", "name_desc", "workflow"
     """
     settings = load_user_settings()
     if "gallery_settings" not in settings:
@@ -268,5 +293,7 @@ def save_gallery_settings(
         settings["gallery_settings"]["view_mode"] = view_mode
     if collapsed_sections is not None:
         settings["gallery_settings"]["collapsed_sections"] = collapsed_sections
+    if sort_mode is not None:
+        settings["gallery_settings"]["sort_mode"] = sort_mode
 
     save_user_settings(settings)

@@ -28,6 +28,7 @@ from workers import Worker, WorkerSignals, ThreadedOperation, report_progress
 from styles import LoadingStyles, StatusColors, load_stylesheet as _load_simple_stylesheet, apply_stylesheet as _apply_simple_stylesheet
 from spinners import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner
 from effects import TabGlowEffect, TabGlowManager, UIAnimations
+from thumbnail_styles import ThumbnailStyler
 from notifications import ComfyUIStatusBanner
 from layouts import FlowLayout
 from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog
@@ -133,12 +134,14 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._is_hovered = False
         self._has_metadata = has_metadata
         self._gallery_tab = gallery_tab
         self._double_click_in_progress = False
         self._cached_metadata = None
         self._thumbnail_loaded = False
         self._tooltip_loaded = False
+        self._styler = ThumbnailStyler(has_metadata=has_metadata, is_model=False, border_radius=4)
         self._setup_ui()
         self.setToolTip(os.path.basename(image_path))
 
@@ -205,37 +208,13 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.selection_indicator.hide()
 
     def _apply_thumbnail_style(self):
-        # Background color based on metadata status
-        # Blue for items with metadata, grey for items without
-        bg_color = "#1e3a5f" if self._has_metadata else "#2c313a"
-
-        if self._is_selected:
-            # Selected state - blue border
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {bg_color};
-                    border: 3px solid #3b82f6;
-                    border-radius: 4px;
-                }}
-            """)
-        elif self._is_new:
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {bg_color};
-                    border: 2px solid #10b981;
-                    border-radius: 4px;
-                }}
-            """)
-        else:
-            # Default border color based on metadata status
-            border_color = "#4a6d8c" if self._has_metadata else "#3c414b"
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {bg_color};
-                    border: 2px solid {border_color};
-                    border-radius: 4px;
-                }}
-            """)
+        """Apply the appropriate style based on current state."""
+        style = self._styler.get_style(
+            selected=self._is_selected,
+            hover=self._is_hovered,
+            is_new=self._is_new
+        )
+        self.thumbnail_label.setStyleSheet(style)
 
     def mark_as_viewed(self):
         if self._is_new:
@@ -373,6 +352,18 @@ class GalleryThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(300, lambda: setattr(self, '_double_click_in_progress', False))
         super().mouseDoubleClickEvent(event)
+
+    def enterEvent(self, event):
+        """Handle mouse enter - show hover state."""
+        super().enterEvent(event)
+        self._is_hovered = True
+        self._apply_thumbnail_style()
+
+    def leaveEvent(self, event):
+        """Handle mouse leave - restore normal state."""
+        super().leaveEvent(event)
+        self._is_hovered = False
+        self._apply_thumbnail_style()
 
     def contextMenuEvent(self, event):
         """Override to directly handle context menu (fixes child widget event capture)."""
@@ -605,6 +596,7 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._is_hovered = False
         self._has_metadata = has_metadata
         self._gallery_tab = gallery_tab
         self._double_click_in_progress = False
@@ -612,6 +604,7 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self._thumbnail_loaded = False
         self._tooltip_loaded = False
         self._cached_metadata = None
+        self._styler = ThumbnailStyler(has_metadata=has_metadata, is_model=True, border_radius=4)
         self._setup_ui()
         self.setToolTip(os.path.basename(model_path))
 
@@ -696,25 +689,13 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
         self.cube_indicator.show()  # Always show for 3D models
 
     def _apply_thumbnail_style(self):
-        # Background color based on metadata status
-        # Blue for items with metadata, grey for items without
-        bg_color = "#1e3a5f" if self._has_metadata else "#2c313a"
-
-        if self._is_selected:
-            # Selected state - blue border
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{ background-color: {bg_color}; border: 3px solid #3b82f6; border-radius: 4px; }}
-            """)
-        elif self._is_new:
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{ background-color: {bg_color}; border: 2px solid #10b981; border-radius: 4px; }}
-            """)
-        else:
-            # Default border color based on metadata status
-            border_color = "#4a6d8c" if self._has_metadata else "#3c414b"
-            self.thumbnail_label.setStyleSheet(f"""
-                QLabel {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 4px; }}
-            """)
+        """Apply the appropriate style based on current state."""
+        style = self._styler.get_style(
+            selected=self._is_selected,
+            hover=self._is_hovered,
+            is_new=self._is_new
+        )
+        self.thumbnail_label.setStyleSheet(style)
 
     def _apply_filename_style(self):
         if self._is_new:
@@ -919,6 +900,18 @@ class GLBThumbnailWidget(BaseThumbnailWidget):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(300, lambda: setattr(self, '_double_click_in_progress', False))
         super().mouseDoubleClickEvent(event)
+
+    def enterEvent(self, event):
+        """Handle mouse enter - show hover state."""
+        super().enterEvent(event)
+        self._is_hovered = True
+        self._apply_thumbnail_style()
+
+    def leaveEvent(self, event):
+        """Handle mouse leave - restore normal state."""
+        super().leaveEvent(event)
+        self._is_hovered = False
+        self._apply_thumbnail_style()
 
     def contextMenuEvent(self, event):
         """Override to directly handle context menu (fixes child widget event capture)."""

@@ -105,8 +105,9 @@ class RefreshController:
         self.tab.log(f"[Gallery] Scan error: {msg}")
 
     def use_prewarm_cache_sync(self):
-        """Use pre-warmed cache synchronously during initialization."""
+        """Use pre-warmed cache but defer display until after window is shown."""
         from ui.gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
+        from PySide6.QtCore import QTimer
 
         prewarm_cache = get_prewarm_cache()
         if prewarm_cache is not None and prewarm_cache.get('items'):
@@ -116,16 +117,33 @@ class RefreshController:
             # Enrich items with additional data if needed
             items = self._enrich_prewarm_items(prewarm_items)
 
-            # Process the scan results synchronously
-            self._process_scan_results_sync(items)
+            # Store items for deferred processing after window is shown
+            # This prevents blocking the splash screen
+            self._deferred_prewarm_items = items
 
             # Clear the prewarm cache (one-time use)
             clear_prewarm_cache()
 
-            # Mark initial scan as done
-            self.tab._initial_scan_done = True
+            # Schedule display for after splash screen closes (100ms delay)
+            # This allows the main window to show first
+            QTimer.singleShot(100, self._process_deferred_prewarm)
         else:
             self.tab.log("[Gallery] No pre-warmed cache available, will scan on tab activation")
+
+    def _process_deferred_prewarm(self):
+        """Process deferred prewarm items (called after splash screen closes)."""
+        if not hasattr(self, '_deferred_prewarm_items') or not self._deferred_prewarm_items:
+            return
+
+        items = self._deferred_prewarm_items
+        del self._deferred_prewarm_items  # Free memory
+
+        # Now it's safe to create widgets and display without blocking splash
+        self._process_scan_results_sync(items)
+
+        # Mark initial scan as done
+        self.tab._initial_scan_done = True
+        self.tab.log(f"[Gallery] Displayed {len(items)} pre-warmed items")
 
     def _enrich_prewarm_items(self, items):
         """Add missing data to pre-warmed items (job_prefix, is_input, metadata)."""
