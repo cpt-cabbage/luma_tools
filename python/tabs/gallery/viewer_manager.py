@@ -205,13 +205,20 @@ class ViewerManager:
 
     def _get_image_paths(self):
         """Get list of all media paths (images, 3D models, videos) from current gallery."""
+        from small_widgets import StackedThumbnailWidget
+
         media_paths = []
         for i in range(self.tab._flow_layout.count()):
             item = self.tab._flow_layout.itemAt(i)
             if item and item.widget():
                 widget = item.widget()
+                # Handle stacked thumbnail widgets - extract all paths from the stack
+                if isinstance(widget, StackedThumbnailWidget):
+                    for stack_item in widget._items:
+                        if 'path' in stack_item:
+                            media_paths.append(stack_item['path'])
                 # Include all media: images and 3D models
-                if hasattr(widget, 'image_path'):
+                elif hasattr(widget, 'image_path'):
                     media_paths.append(widget.image_path)
                 elif hasattr(widget, 'model_path'):
                     media_paths.append(widget.model_path)

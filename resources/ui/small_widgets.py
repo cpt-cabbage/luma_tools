@@ -953,7 +953,17 @@ class StackedThumbnailWidget(QWidget):
         if not isValid(self) or not self._gallery_tab:
             return
 
+        # Clean up existing background first
+        if self._expanded_background:
+            self._expanded_background.setParent(None)
+            self._expanded_background.deleteLater()
+            self._expanded_background = None
+
         if not self._expanded_widgets:
+            return
+
+        # Check if we're still expanded (could have been collapsed during timer delay)
+        if not self._is_expanded:
             return
 
         container = self._gallery_tab.ui.galleryThumbnailContainer
@@ -965,7 +975,7 @@ class StackedThumbnailWidget(QWidget):
         max_y = 0
 
         for widget in self._expanded_widgets:
-            if isValid(widget):
+            if isValid(widget) and widget.isVisible():
                 geom = widget.geometry()
                 min_x = min(min_x, geom.x())
                 min_y = min(min_y, geom.y())

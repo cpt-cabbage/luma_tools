@@ -180,6 +180,9 @@ class GalleryManager:
         """Remove all stack widgets."""
         if hasattr(self, '_stack_widgets'):
             for stack in self._stack_widgets.values():
+                # Collapse first to clean up expanded background and widgets
+                if stack.is_expanded():
+                    stack.collapse()
                 stack.setParent(None)
                 stack.deleteLater()
         self._stack_widgets = {}

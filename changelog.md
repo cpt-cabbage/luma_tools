@@ -1,5 +1,17 @@
 # Luma Tools Changelog
 
+## Version 0.5.1
+- Add comprehensive "Properties" dialog to context menus for all gallery items (images, models, stacks)
+- Properties shows: file info, metadata, workflow details, relationships (inputs/outputs), user notes
+- Supports both single items and stacked items (shows top item properties)
+- Fix checkmarks not disappearing
+- Fix mouse hover deselecting items in some cases
+- Fix user directory filtering
+- Fix Splashscreen not dissappearing until thumbnails are generated even though that is a background task
+- Make 3D viewer initialization async to prevent splash screen blocking
+- Unify thumnail syling functions
+- Gallery UI tweaks
+
 ## Version 0.5.0.2
 - Thumbnails will now regenerate when new version detected to have latest renderer version rendered
 - Extend drag selection to handle grouped stack items
