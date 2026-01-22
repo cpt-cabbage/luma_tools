@@ -351,7 +351,7 @@ class RefreshController:
     def _on_poll_refresh(self):
         """Handle polling timer tick."""
         # Only refresh if tab is visible
-        if self.tab.isVisible():
+        if self.tab.ui and self.tab.ui.isVisible():
             self.on_refresh()
 
     def _is_network_path(self, path):

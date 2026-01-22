@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.5.1.2
+- Selection Fixes
+
 ## Version 0.5.1.1
 - Fix viewer not showing 3d objects when pressing next
 - Fix background frrame not updating correctly
