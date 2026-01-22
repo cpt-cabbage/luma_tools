@@ -896,7 +896,9 @@ class PollingMixin:
 
         # Always check Deadline for running jobs from the current user
         # This catches jobs that may not be in persisted state
-        self._check_deadline_for_user_jobs(job_state)
+        # Use QTimer.singleShot to defer until after window is fully initialized
+        # (animator and other components may not exist yet during tab init)
+        QTimer.singleShot(100, lambda: self._check_deadline_for_user_jobs(job_state))
 
     def _check_deadline_for_user_jobs(self, persisted_state):
         """Check Deadline directly for any running jobs from the current user.

@@ -535,7 +535,15 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     """
     running_jobs = []
 
-    if not DEADLINE_PATH or not username:
+    print(f"[find_user_running_jobs] Looking for jobs from user: '{username}'")
+    print(f"[find_user_running_jobs] DEADLINE_PATH: {DEADLINE_PATH}")
+
+    if not DEADLINE_PATH:
+        print("[find_user_running_jobs] No DEADLINE_PATH configured")
+        return running_jobs
+
+    if not username:
+        print("[find_user_running_jobs] No username provided")
         return running_jobs
 
     username_lower = username.lower()
@@ -543,6 +551,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     try:
         # Get all active/pending jobs from Deadline
         for status_filter in ["Active", "Pending"]:
+            print(f"[find_user_running_jobs] Querying Deadline for {status_filter} jobs...")
             result = subprocess.run(
                 [DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"],
                 capture_output=True,
@@ -551,9 +560,11 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
             )
 
             if result.returncode != 0:
+                print(f"[find_user_running_jobs] GetJobIdsFilter failed: {result.stderr}")
                 continue
 
             job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+            print(f"[find_user_running_jobs] Found {len(job_ids)} {status_filter} jobs on Deadline")
 
             for job_id in job_ids:
                 job_result = subprocess.run(
@@ -576,7 +587,11 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
                     line = line.strip()
                     if line.startswith("Name="):
                         job_name = line.split('=', 1)[1]
-                    elif line.startswith("User="):
+                    elif line.startswith("UserName="):
+                        # Deadline uses UserName= for the submitting user
+                        job_user = line.split('=', 1)[1]
+                    elif line.startswith("User=") and not job_user:
+                        # Fallback to User= if UserName= not found
                         job_user = line.split('=', 1)[1]
                     elif line.startswith("Status="):
                         job_status = line.split('=', 1)[1]
@@ -592,6 +607,10 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
                     job_name == "luma_tools_job"
                 )
 
+                # Debug: show luma_tools jobs we're checking
+                if is_luma_job:
+                    print(f"[find_user_running_jobs] Job {job_id}: name='{job_name}', user='{job_user}', user_match={job_user.lower() == username_lower}")
+
                 if is_luma_job and job_user.lower() == username_lower:
                     running_jobs.append({
                         "job_id": job_id,
@@ -603,9 +622,12 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
 
         # Sort by submit date (oldest first) so we process in order
         running_jobs.sort(key=lambda x: x["submit_date"])
+        print(f"[find_user_running_jobs] Total matching jobs found: {len(running_jobs)}")
 
     except Exception as e:
         print(f"[find_user_running_jobs] Error: {e}")
+        import traceback
+        traceback.print_exc()
 
     return running_jobs
 

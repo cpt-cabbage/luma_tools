@@ -1047,8 +1047,8 @@ def main():
 
 
 
-        # Create main window
-        splash.update_progress(88, "Loading", "Creating main window...")
+        # Create main window (includes job recovery check which queries Deadline for running jobs)
+        splash.update_progress(88, "Loading", "Checking for running jobs...")
         app.processEvents()
 
         window = LumaShotTools()
