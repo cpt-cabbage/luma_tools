@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.5.2.1
+Add "Show verbose logs" checkbox to logs tab with filtering for debug messages
+- More user feedback improvemnts/fixes
+
 ## Version 0.5.2
 - New statusbar message queue system with priority levels and activity tracking, this fixes many messages not showing up
 - Make Deadline job query async to prevent blocking splash screen during recovery

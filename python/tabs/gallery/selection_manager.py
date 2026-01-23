@@ -186,10 +186,15 @@ class SelectionManager:
         - Expanded stacks (individual items are selectable)
         - Mixed views with both stacked and non-stacked items
         """
+        import os
         from small_widgets import StackedThumbnailWidget
+
+        print(f"[DEBUG Shift-click] last_selected_path: {os.path.basename(self.tab._last_selected_path) if self.tab._last_selected_path else None}")
+        print(f"[DEBUG Shift-click] clicked_path: {os.path.basename(clicked_path)}")
 
         if not self.tab._last_selected_path:
             # No previous selection, just select this item
+            print("[DEBUG Shift-click] No previous selection, selecting clicked item only")
             self._select_item_by_path(clicked_path)
             return
 
@@ -221,8 +226,11 @@ class SelectionManager:
                     # GLB/3D model thumbnail
                     visual_order.append((widget.model_path, widget, False))
 
+        print(f"[DEBUG Shift-click] visual_order has {len(visual_order)} items")
+
         if not visual_order:
             # Fallback to old behavior if flow layout unavailable
+            print("[DEBUG Shift-click] Empty visual_order, selecting clicked item only")
             self._select_item_by_path(clicked_path)
             return
 
@@ -245,14 +253,18 @@ class SelectionManager:
                     if current_index == -1 and stack_item['path'] == clicked_path:
                         current_index = idx
 
+        print(f"[DEBUG Shift-click] last_index={last_index}, current_index={current_index}")
+
         if last_index == -1 or current_index == -1:
             # Path not found, just select the clicked item
+            print(f"[DEBUG Shift-click] Index not found (last={last_index}, current={current_index}), selecting clicked item only")
             self._select_item_by_path(clicked_path)
             return
 
         # Select all items in the range
         start = min(last_index, current_index)
         end = max(last_index, current_index)
+        print(f"[DEBUG Shift-click] Selecting range [{start}..{end}] = {end - start + 1} visual items")
 
         for i in range(start, end + 1):
             path, widget, is_stack = visual_order[i]

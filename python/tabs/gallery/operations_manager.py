@@ -62,18 +62,26 @@ class OperationsManager:
             # Make a copy of the set since we'll be modifying it
             items_to_delete = list(self.tab._selected_items)
 
+            # Track which stacks need updating after deletion
+            stacks_to_update = set()
+
             for item_path in items_to_delete:
                 try:
                     if os.path.exists(item_path):
                         os.remove(item_path)
                         success_count += 1
 
-                        # Remove widget from layout
+                        # Remove widget from layout (for non-stacked items)
                         if item_path in self.tab._widget_cache:
                             widget = self.tab._widget_cache[item_path]
                             self.tab._flow_layout.removeWidget(widget)
                             widget.deleteLater()
                             del self.tab._widget_cache[item_path]
+                        else:
+                            # Item might be in a stacked view - find which stack contains it
+                            stack_id = self._find_stack_containing_item(item_path)
+                            if stack_id:
+                                stacks_to_update.add(stack_id)
 
                         # Clean up caches via tab's method
                         self._on_item_deleted(item_path)
@@ -83,6 +91,9 @@ class OperationsManager:
                 except Exception as e:
                     self.tab.log(f"[Gallery] Error deleting {item_path}: {e}")
                     failed_items.append(f"{os.path.basename(item_path)}: {e}")
+
+            # Update or remove stacks that had items deleted
+            self._update_stacks_after_deletion(stacks_to_update)
 
             # Clear selection (items already removed from widget cache)
             self.tab._selected_items.clear()
@@ -108,6 +119,85 @@ class OperationsManager:
                     "Partial Delete",
                     f"Deleted {success_count} of {count} items.\n\nFailed:\n" + "\n".join(failed_items[:5])
                 )
+
+    def _find_stack_containing_item(self, item_path):
+        """Find the stack_id that contains the given item path.
+
+        Args:
+            item_path: Path to the item
+
+        Returns:
+            stack_id if found, None otherwise
+        """
+        if not hasattr(self.tab, '_manager') or not hasattr(self.tab._manager, '_stack_widgets'):
+            return None
+
+        for stack_id, stack_widget in self.tab._manager._stack_widgets.items():
+            if hasattr(stack_widget, '_items'):
+                for item in stack_widget._items:
+                    if item.get('path') == item_path:
+                        return stack_id
+        return None
+
+    def _update_stacks_after_deletion(self, stack_ids):
+        """Update or remove stacks after items have been deleted.
+
+        Args:
+            stack_ids: Set of stack_ids that need updating
+        """
+        from shiboken6 import isValid
+
+        if not stack_ids:
+            return
+
+        if not hasattr(self.tab, '_manager') or not hasattr(self.tab._manager, '_stack_widgets'):
+            return
+
+        stacks_to_remove = []
+
+        for stack_id in stack_ids:
+            if stack_id not in self.tab._manager._stack_widgets:
+                continue
+
+            stack_widget = self.tab._manager._stack_widgets[stack_id]
+            if not isValid(stack_widget):
+                stacks_to_remove.append(stack_id)
+                continue
+
+            # Filter out deleted items from the stack
+            if hasattr(stack_widget, '_items'):
+                # Keep only items that still exist on disk
+                remaining_items = [item for item in stack_widget._items if os.path.exists(item.get('path', ''))]
+
+                if len(remaining_items) == 0:
+                    # Stack is now empty - remove it
+                    stacks_to_remove.append(stack_id)
+                elif len(remaining_items) == 1:
+                    # Only one item left - convert to regular thumbnail
+                    stacks_to_remove.append(stack_id)
+                    # The single item will be shown on next refresh
+                else:
+                    # Update the stack with remaining items
+                    stack_widget.update_items(remaining_items)
+                    # Clear selection state since items were deleted
+                    if hasattr(stack_widget, 'set_selected'):
+                        stack_widget.set_selected(False)
+
+        # Remove empty/single-item stacks
+        for stack_id in stacks_to_remove:
+            if stack_id in self.tab._manager._stack_widgets:
+                stack_widget = self.tab._manager._stack_widgets[stack_id]
+                if isValid(stack_widget):
+                    # Collapse if expanded
+                    if hasattr(stack_widget, 'is_expanded') and stack_widget.is_expanded():
+                        stack_widget.collapse()
+                    self.tab._flow_layout.removeWidget(stack_widget)
+                    stack_widget.deleteLater()
+                del self.tab._manager._stack_widgets[stack_id]
+
+            # Also clean up section_items tracking
+            if hasattr(self.tab, '_section_items') and stack_id in self.tab._section_items:
+                del self.tab._section_items[stack_id]
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion - clean up all caches."""

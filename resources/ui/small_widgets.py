@@ -666,16 +666,20 @@ class StackedThumbnailWidget(QWidget):
 
     def mousePressEvent(self, event):
         """Handle click - selection based on modifiers, double-click for expansion."""
+        print(f"[DEBUG StackedThumbnailWidget] mousePressEvent button={event.button()} modifiers={event.modifiers()}")
         if event.button() == Qt.LeftButton:
             # Check for shift-click (range selection)
             if event.modifiers() & Qt.ShiftModifier:
+                print("[DEBUG] Shift-click on stack")
                 if self._gallery_tab and self._top_item:
                     self._gallery_tab._on_shift_click_selection(self._top_item['path'])
             # Check for ctrl-click (toggle selection)
             elif event.modifiers() & Qt.ControlModifier:
+                print(f"[DEBUG] Ctrl-click on stack - toggle selection (was: {self._is_selected})")
                 self.set_selected(not self._is_selected)
             else:
                 # Plain left-click: clear selection and select only this stack
+                print(f"[DEBUG] Plain click on stack '{self.stack_id}' - clear and select {self._count} items")
                 if self._gallery_tab:
                     self._gallery_tab._clear_selection()
                 self.set_selected(True)
