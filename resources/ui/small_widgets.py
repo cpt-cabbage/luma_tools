@@ -246,6 +246,7 @@ class StackedThumbnailWidget(QWidget):
             self.THUMBNAIL_SIZE[0] + total_h_offset,
             self.THUMBNAIL_SIZE[1] + total_v_offset
         )
+        self.thumbnail_container.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.thumbnail_container)
 
         # Create fanned card labels (back to front)
@@ -352,6 +353,7 @@ class StackedThumbnailWidget(QWidget):
         badge_x = self.THUMBNAIL_SIZE[0] - badge_width + 4
         self.count_badge.move(badge_x, -4)
         self.count_badge.raise_()
+        self.count_badge.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         # Filename label (shows stack name) - cleaner style
         display_name = self.stack_id if len(self.stack_id) <= 25 else self.stack_id[:22] + "..."
@@ -666,20 +668,19 @@ class StackedThumbnailWidget(QWidget):
 
     def mousePressEvent(self, event):
         """Handle click - selection based on modifiers, double-click for expansion."""
-        print(f"[DEBUG StackedThumbnailWidget] mousePressEvent button={event.button()} modifiers={event.modifiers()}")
+        from PySide6.QtWidgets import QApplication
+        # Use QApplication.keyboardModifiers() for more reliable modifier detection
+        mods = QApplication.keyboardModifiers()
         if event.button() == Qt.LeftButton:
             # Check for shift-click (range selection)
-            if event.modifiers() & Qt.ShiftModifier:
-                print("[DEBUG] Shift-click on stack")
+            if mods & Qt.ShiftModifier:
                 if self._gallery_tab and self._top_item:
                     self._gallery_tab._on_shift_click_selection(self._top_item['path'])
             # Check for ctrl-click (toggle selection)
-            elif event.modifiers() & Qt.ControlModifier:
-                print(f"[DEBUG] Ctrl-click on stack - toggle selection (was: {self._is_selected})")
+            elif mods & Qt.ControlModifier:
                 self.set_selected(not self._is_selected)
             else:
                 # Plain left-click: clear selection and select only this stack
-                print(f"[DEBUG] Plain click on stack '{self.stack_id}' - clear and select {self._count} items")
                 if self._gallery_tab:
                     self._gallery_tab._clear_selection()
                 self.set_selected(True)
@@ -702,8 +703,15 @@ class StackedThumbnailWidget(QWidget):
         menu = QMenu(self)
         count = len(self._items)
 
+        # Check if there's a multi-selection active
+        selected_count = len(self._gallery_tab._selected_items) if hasattr(self._gallery_tab, '_selected_items') else 0
+        has_multi_selection = selected_count > count  # More selected than just this stack
+
         # Header showing stack info
-        header_action = menu.addAction(f"Stack: {self.stack_id} ({count} items)")
+        if has_multi_selection:
+            header_action = menu.addAction(f"Selection: {selected_count} items selected")
+        else:
+            header_action = menu.addAction(f"Stack: {self.stack_id} ({count} items)")
         header_action.setEnabled(False)
         menu.addSeparator()
 
@@ -728,19 +736,27 @@ class StackedThumbnailWidget(QWidget):
 
         # Publish all to AYON
         menu.addSeparator()
-        publish_action = menu.addAction(f"Publish All to AYON ({count} items)")
-        publish_action.triggered.connect(self._publish_all_items)
+        if has_multi_selection:
+            publish_action = menu.addAction(f"Publish Selected ({selected_count} items)")
+            publish_action.triggered.connect(self._publish_selected_items)
+        else:
+            publish_action = menu.addAction(f"Publish All to AYON ({count} items)")
+            publish_action.triggered.connect(self._publish_all_items)
 
-        # Delete all
+        # Delete - use multi-selection if active
         menu.addSeparator()
-        delete_action = menu.addAction(f"Delete All ({count} items)")
-        delete_action.triggered.connect(self._delete_all_items)
+        if has_multi_selection:
+            delete_action = menu.addAction(f"Delete Selected ({selected_count} items)")
+            delete_action.triggered.connect(self._delete_selected_items)
+        else:
+            delete_action = menu.addAction(f"Delete All ({count} items)")
+            delete_action.triggered.connect(self._delete_all_items)
 
         # Check if editable
         is_editable = self._gallery_tab._is_own_gallery() if hasattr(self._gallery_tab, '_is_own_gallery') else True
         if not is_editable:
             delete_action.setEnabled(False)
-            delete_action.setText(f"Delete All (view only)")
+            delete_action.setText(f"Delete (view only)")
 
         menu.exec_(self.mapToGlobal(event.pos()))
         event.accept()
@@ -814,6 +830,24 @@ class StackedThumbnailWidget(QWidget):
             self._gallery_tab._selected_items = set(paths)
             self._gallery_tab._on_delete_selected()
             self._gallery_tab._selected_items = original_selection
+
+    def _delete_selected_items(self):
+        """Delete all selected items across all selected stacks."""
+        if not self._gallery_tab:
+            return
+
+        # Use the gallery tab's delete selected handler
+        if hasattr(self._gallery_tab, '_on_delete_selected'):
+            self._gallery_tab._on_delete_selected()
+
+    def _publish_selected_items(self):
+        """Publish all selected items across all selected stacks."""
+        if not self._gallery_tab:
+            return
+
+        # Use the gallery tab's publish selected handler
+        if hasattr(self._gallery_tab, '_on_publish_selected'):
+            self._gallery_tab._on_publish_selected()
 
     def _show_properties(self):
         """Show properties for the top item in the stack."""
@@ -895,7 +929,7 @@ class StackedThumbnailWidget(QWidget):
             return
 
         # Create thumbnail widgets and insert them right after the stack
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        from ui_components import ThumbnailWidget
         import os
 
         is_editable = False
@@ -909,38 +943,31 @@ class StackedThumbnailWidget(QWidget):
             path = item['path']
             file_type = item.get('type', 'image')
             item_output_dir = os.path.dirname(path)
+            has_metadata = item.get('has_metadata', False)
 
-            # Create the appropriate thumbnail widget
-            if file_type == 'model':
-                thumb = GLBThumbnailWidget(
-                    path, container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False,
-                    gallery_tab=self._gallery_tab
-                )
-                if hasattr(thumb, 'viewed'):
-                    thumb.viewed.connect(self._gallery_tab._on_item_viewed)
-            else:
-                thumb = GalleryThumbnailWidget(
-                    path, container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False,
-                    gallery_tab=self._gallery_tab
-                )
-                if hasattr(thumb, 'fullscreen_requested'):
-                    thumb.fullscreen_requested.connect(
-                        lambda img_path=path: self._gallery_tab._open_viewer(img_path, fullscreen=True)
-                    )
+            # Use unified ThumbnailWidget
+            thumb = ThumbnailWidget(
+                path,
+                item_type=file_type,
+                parent=container,
+                output_dir=item_output_dir,
+                editable=is_editable,
+                is_new=False,
+                gallery_tab=self._gallery_tab,
+                has_metadata=has_metadata
+            )
 
-            # Connect signals
-            if hasattr(thumb, 'clicked'):
-                thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
-            if hasattr(thumb, 'deleted'):
-                thumb.deleted.connect(self._on_item_deleted_in_stack)
-            if hasattr(thumb, 'selection_changed'):
-                thumb.selection_changed.connect(self._gallery_tab._on_selection_changed)
+            # Connect common signals
+            thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
+            thumb.deleted.connect(self._on_item_deleted_in_stack)
+            thumb.viewed.connect(self._gallery_tab._on_item_viewed)
+            thumb.selection_changed.connect(self._gallery_tab._on_selection_changed)
+
+            # Connect image-specific signals
+            if file_type == 'image':
+                thumb.fullscreen_requested.connect(
+                    lambda img_path=path: self._gallery_tab._open_viewer(img_path, fullscreen=True)
+                )
 
             # Mark as expanded widget for tracking
             thumb._from_expanded_stack = self.stack_id
@@ -1276,7 +1303,7 @@ class ExpandedStackContainer(QWidget):
 
     def _create_thumbnails(self):
         """Create thumbnail widgets for all items."""
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        from ui_components import ThumbnailWidget
         import os
 
         is_editable = False
@@ -1287,38 +1314,32 @@ class ExpandedStackContainer(QWidget):
             path = item['path']
             file_type = item.get('type', 'image')
             item_output_dir = os.path.dirname(path)
+            has_metadata = item.get('has_metadata', False)
 
-            # Create the appropriate thumbnail widget
-            if file_type == 'model':
-                thumb = GLBThumbnailWidget(
-                    path, self._thumb_container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False,
-                    gallery_tab=self._gallery_tab
-                )
-                if self._gallery_tab and hasattr(thumb, 'viewed'):
-                    thumb.viewed.connect(self._gallery_tab._on_item_viewed)
-            else:
-                thumb = GalleryThumbnailWidget(
-                    path, self._thumb_container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=False,
-                    gallery_tab=self._gallery_tab
-                )
-                if self._gallery_tab and hasattr(thumb, 'fullscreen_requested'):
-                    thumb.fullscreen_requested.connect(
-                        lambda img_path=path: self._gallery_tab._open_viewer(img_path, fullscreen=True)
-                    )
+            # Use unified ThumbnailWidget
+            thumb = ThumbnailWidget(
+                path,
+                item_type=file_type,
+                parent=self._thumb_container,
+                output_dir=item_output_dir,
+                editable=is_editable,
+                is_new=False,
+                gallery_tab=self._gallery_tab,
+                has_metadata=has_metadata
+            )
 
-            # Connect signals
-            if hasattr(thumb, 'clicked'):
-                thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
-            if hasattr(thumb, 'deleted'):
-                thumb.deleted.connect(self._on_thumb_deleted)
-            if self._gallery_tab and hasattr(thumb, 'selection_changed'):
+            # Connect common signals
+            thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
+            thumb.deleted.connect(self._on_thumb_deleted)
+            if self._gallery_tab:
+                thumb.viewed.connect(self._gallery_tab._on_item_viewed)
                 thumb.selection_changed.connect(self._gallery_tab._on_selection_changed)
+
+            # Connect image-specific signals
+            if file_type == 'image' and self._gallery_tab:
+                thumb.fullscreen_requested.connect(
+                    lambda img_path=path: self._gallery_tab._open_viewer(img_path, fullscreen=True)
+                )
 
             self._flow_layout.addWidget(thumb)
             self._thumbnail_widgets.append(thumb)

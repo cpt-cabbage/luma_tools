@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.5.2.2
+- Selection/ deletion fixes
+
 ## Version 0.5.2.1
 Add "Show verbose logs" checkbox to logs tab with filtering for debug messages
 - More user feedback improvemnts/fixes

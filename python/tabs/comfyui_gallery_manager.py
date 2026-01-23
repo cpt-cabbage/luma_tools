@@ -420,7 +420,7 @@ class GalleryManager:
         Returns:
             The created thumbnail widget, or None on error
         """
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        from ui_components import ThumbnailWidget
 
         if is_editable is None:
             is_editable = self.tab._is_own_gallery()
@@ -433,38 +433,28 @@ class GalleryManager:
         has_metadata = item.get('has_metadata', False)
 
         try:
-            if file_type == 'model':
-                thumbnail = GLBThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=is_new,
-                    gallery_tab=self.tab,
-                    has_metadata=has_metadata
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-            else:
-                thumbnail = GalleryThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=is_new,
-                    gallery_tab=self.tab,
-                    has_metadata=has_metadata
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+            # Use unified ThumbnailWidget with item_type parameter
+            thumbnail = ThumbnailWidget(
+                path,
+                item_type=file_type,  # 'image' or 'model'
+                parent=container,
+                output_dir=item_output_dir,
+                editable=is_editable,
+                is_new=is_new,
+                gallery_tab=self.tab,
+                has_metadata=has_metadata
+            )
+            thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+            thumbnail.deleted.connect(self.tab._on_item_deleted)
+            thumbnail.viewed.connect(self.tab._on_item_viewed)
+            thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+            # Connect image-specific signals
+            if file_type == 'image':
                 thumbnail.fullscreen_requested.connect(
                     lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
                 )
                 thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
 
             return thumbnail
         except Exception as e:
@@ -480,7 +470,7 @@ class GalleryManager:
             sorted_items: Full list of items in sorted order
             new_items: List of only the new items to add
         """
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        from ui_components import ThumbnailWidget
 
         container = self.tab.ui.galleryThumbnailContainer
         is_editable = self.tab._is_own_gallery()
@@ -503,42 +493,29 @@ class GalleryManager:
                 file_type = item['type']
                 is_new = path in self.tab._new_items
                 item_output_dir = os.path.dirname(path)
-                # Check if item has metadata
                 has_metadata = item.get('has_metadata', False)
 
-                # Create the widget
-                if file_type == 'model':
-                    thumbnail = GLBThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new,
-                        gallery_tab=self.tab,
-                        has_metadata=has_metadata
-                    )
-                    thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                    thumbnail.deleted.connect(self.tab._on_item_deleted)
-                    thumbnail.viewed.connect(self.tab._on_item_viewed)
-                    thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-                else:
-                    thumbnail = GalleryThumbnailWidget(
-                        path,
-                        container,
-                        output_dir=item_output_dir,
-                        editable=is_editable,
-                        is_new=is_new,
-                        gallery_tab=self.tab,
-                        has_metadata=has_metadata
-                    )
-                    thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+                # Use unified ThumbnailWidget
+                thumbnail = ThumbnailWidget(
+                    path,
+                    item_type=file_type,
+                    parent=container,
+                    output_dir=item_output_dir,
+                    editable=is_editable,
+                    is_new=is_new,
+                    gallery_tab=self.tab,
+                    has_metadata=has_metadata
+                )
+                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+                thumbnail.deleted.connect(self.tab._on_item_deleted)
+                thumbnail.viewed.connect(self.tab._on_item_viewed)
+                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+                if file_type == 'image':
                     thumbnail.fullscreen_requested.connect(
                         lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
                     )
                     thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-                    thumbnail.deleted.connect(self.tab._on_item_deleted)
-                    thumbnail.viewed.connect(self.tab._on_item_viewed)
-                    thumbnail.selection_changed.connect(self.tab._on_selection_changed)
 
                 # Add to cache
                 self.tab._widget_cache[path] = thumbnail
@@ -614,7 +591,7 @@ class GalleryManager:
 
     def create_widget_batch(self):
         """Create a batch of widgets, then schedule the next batch."""
-        from ui_components import GalleryThumbnailWidget, GLBThumbnailWidget
+        from ui_components import ThumbnailWidget
 
         container = self.tab.ui.galleryThumbnailContainer
 
@@ -639,38 +616,27 @@ class GalleryManager:
             is_new = path in self.tab._new_items
             item_output_dir = os.path.dirname(path)
 
-            if file_type == 'model':
-                thumbnail = GLBThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=self.tab._is_editable_cache,
-                    is_new=is_new,
-                    gallery_tab=self.tab,
-                    has_metadata=has_metadata
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-            else:
-                thumbnail = GalleryThumbnailWidget(
-                    path,
-                    container,
-                    output_dir=item_output_dir,
-                    editable=self.tab._is_editable_cache,
-                    is_new=is_new,
-                    gallery_tab=self.tab,
-                    has_metadata=has_metadata
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+            # Use unified ThumbnailWidget
+            thumbnail = ThumbnailWidget(
+                path,
+                item_type=file_type,
+                parent=container,
+                output_dir=item_output_dir,
+                editable=self.tab._is_editable_cache,
+                is_new=is_new,
+                gallery_tab=self.tab,
+                has_metadata=has_metadata
+            )
+            thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
+            thumbnail.deleted.connect(self.tab._on_item_deleted)
+            thumbnail.viewed.connect(self.tab._on_item_viewed)
+            thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+            if file_type == 'image':
                 thumbnail.fullscreen_requested.connect(
                     lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
                 )
                 thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
 
             self.tab._widget_cache[path] = thumbnail
             self.tab._flow_layout.addWidget(thumbnail)
