@@ -52,7 +52,7 @@ class ThumbnailColors:
 class ThumbnailStyler:
     """Generates consistent styles for thumbnail widgets."""
 
-    def __init__(self, has_metadata=False, is_model=False, is_stacked=False, border_radius=4):
+    def __init__(self, has_metadata=False, is_model=False, is_stacked=False, border_radius=4, group_color=None):
         """
         Initialize the styler.
 
@@ -61,11 +61,13 @@ class ThumbnailStyler:
             is_model: Whether the item is a 3D model
             is_stacked: Whether this is a stacked thumbnail widget
             border_radius: Border radius in pixels (4 for regular, 8 for stacked)
+            group_color: Hex color for group border (overrides default border color)
         """
         self.has_metadata = has_metadata
         self.is_model = is_model
         self.is_stacked = is_stacked
         self.border_radius = border_radius
+        self.group_color = group_color
 
     def get_background_color(self, hover=False, selected=False):
         """Get the appropriate background color."""
@@ -89,6 +91,13 @@ class ThumbnailStyler:
         if is_new:
             return ThumbnailColors.BORDER_NEW
 
+        # Group color takes precedence over default colors (but not selected/new)
+        if self.group_color:
+            if hover:
+                # Lighten group color slightly on hover
+                return self._lighten_color(self.group_color, 0.2)
+            return self.group_color
+
         if hover:
             if self.is_model:
                 return ThumbnailColors.BORDER_HOVER_MODEL
@@ -102,6 +111,17 @@ class ThumbnailStyler:
         if self.has_metadata:
             return ThumbnailColors.BORDER_WITH_METADATA
         return ThumbnailColors.BORDER_WITHOUT_METADATA
+
+    def _lighten_color(self, hex_color, factor=0.2):
+        """Lighten a hex color by a factor (0-1)."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        r = min(255, int(r + (255 - r) * factor))
+        g = min(255, int(g + (255 - g) * factor))
+        b = min(255, int(b + (255 - b) * factor))
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def get_border_width(self, selected=False):
         """Get border width - 3px when selected, 2px otherwise."""

@@ -100,6 +100,91 @@ class GalleryManager:
 
         return result
 
+    def group_items_by_groups(self, items, fallback_to_job=True, separate_inputs=True):
+        """Group items by their user-defined groups.
+
+        Args:
+            items: List of item dicts
+            fallback_to_job: If True, ungrouped items are stacked by job_prefix
+            separate_inputs: If True, group all input images into a separate "Inputs" group
+
+        Returns:
+            OrderedDict: {group_name: [items]} plus group_colors dict
+        """
+        from collections import OrderedDict
+
+        # Get favorites manager from tab
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager:
+            # Fall back to job prefix grouping if no favorites manager
+            return self.group_items_by_prefix(items, separate_inputs)
+
+        groups = {}  # group_id -> (group_def, most_recent_mtime, [items])
+        ungrouped = []  # Items not in any group
+        input_group = []  # Separate list for input images
+        input_max_mtime = 0
+
+        for item in items:
+            # Separate input images
+            if separate_inputs and item.get('is_input', False):
+                input_group.append(item)
+                if item['mtime'] > input_max_mtime:
+                    input_max_mtime = item['mtime']
+                continue
+
+            # Check if item is in any group
+            item_groups = favorites_manager.get_item_groups(item['path'])
+            if item_groups:
+                # Use primary (first) group
+                primary_group_id = item_groups[0]
+                group_def = favorites_manager.get_group(primary_group_id)
+                if group_def:
+                    if primary_group_id not in groups:
+                        groups[primary_group_id] = (group_def, item['mtime'], [item])
+                    else:
+                        _, current_max_mtime, group_items = groups[primary_group_id]
+                        group_items.append(item)
+                        if item['mtime'] > current_max_mtime:
+                            groups[primary_group_id] = (group_def, item['mtime'], group_items)
+                else:
+                    ungrouped.append(item)
+            else:
+                ungrouped.append(item)
+
+        # Sort groups by order, then by most recent item
+        sorted_groups = sorted(
+            groups.items(),
+            key=lambda x: (x[1][0].order, -x[1][1])  # (group_def.order, -mtime)
+        )
+
+        # Build ordered dict with items sorted within groups
+        result = OrderedDict()
+        group_colors = {}  # Store colors for stacked widget styling
+
+        for group_id, (group_def, _, group_items) in sorted_groups:
+            group_name = f"🏷 {group_def.name}"
+            result[group_name] = sorted(group_items, key=lambda x: x['mtime'], reverse=True)
+            group_colors[group_name] = group_def.color
+
+        # Handle ungrouped items
+        if ungrouped:
+            if fallback_to_job:
+                # Stack ungrouped items by job prefix
+                job_groups = self.group_items_by_prefix(ungrouped, separate_inputs=False)
+                for prefix, job_items in job_groups.items():
+                    result[prefix] = job_items
+            else:
+                result['Ungrouped'] = sorted(ungrouped, key=lambda x: x['mtime'], reverse=True)
+
+        # Add inputs group at the end
+        if input_group:
+            result['📥 Inputs'] = sorted(input_group, key=lambda x: x['mtime'], reverse=True)
+
+        # Store group colors on the manager for use by display methods
+        self._group_colors = group_colors
+
+        return result
+
     def display_items(self, items, view_mode=None, incremental=False):
         """Display items in the gallery.
 
@@ -152,8 +237,11 @@ class GalleryManager:
         self.tab._section_items = {}  # section_id -> [paths]
 
         # Store items for widget creation (grid mode)
-        # Include has_metadata for proper styling
-        self.tab._pending_items = [(item['path'], item['type'], item.get('has_metadata', False)) for item in items]
+        # Include has_metadata and job_prefix for proper styling
+        self.tab._pending_items = [
+            (item['path'], item['type'], item.get('has_metadata', False), item.get('job_prefix'))
+            for item in items
+        ]
         self.tab._load_index = 0
 
         # Create widgets in batches to avoid blocking UI (lazy load triggered after completion)
@@ -213,20 +301,34 @@ class GalleryManager:
         self.tab._widget_cache = {}
         self.tab._section_items = {}
         self._stack_widgets = {}
+        self._group_colors = {}
 
-        # Group items by prefix
-        groups = self.group_items_by_prefix(items)
+        # Get stacking mode from settings
+        from core.settings_manager import get_setting
+        stacking_mode = get_setting("gallery_stacking_mode")
+
+        # Group items based on stacking mode
+        if stacking_mode == "groups":
+            groups = self.group_items_by_groups(items, fallback_to_job=False)
+        elif stacking_mode == "both":
+            groups = self.group_items_by_groups(items, fallback_to_job=True)
+        else:  # Default to "job" stacking
+            groups = self.group_items_by_prefix(items)
 
         # Create stack widgets for groups with multiple items
         # Single items are shown as regular thumbnails
         for prefix, group_items in groups.items():
             if len(group_items) > 1:
+                # Get group color if available
+                group_color = self._group_colors.get(prefix)
+
                 # Create stacked thumbnail with gallery_tab reference for creating thumbnails
                 stack = StackedThumbnailWidget(
                     stack_id=prefix,
                     items=group_items,
                     parent=container,
-                    gallery_tab=self.tab
+                    gallery_tab=self.tab,
+                    group_color=group_color
                 )
                 # Connect signals for tracking expanded state
                 stack.expanded.connect(self._on_stack_expanded)
@@ -431,6 +533,7 @@ class GalleryManager:
         item_output_dir = os.path.dirname(path)
         # Check if item has metadata
         has_metadata = item.get('has_metadata', False)
+        job_prefix = item.get('job_prefix')
 
         try:
             # Use unified ThumbnailWidget with item_type parameter
@@ -442,12 +545,20 @@ class GalleryManager:
                 editable=is_editable,
                 is_new=is_new,
                 gallery_tab=self.tab,
-                has_metadata=has_metadata
+                has_metadata=has_metadata,
+                job_prefix=job_prefix
             )
             thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
             thumbnail.deleted.connect(self.tab._on_item_deleted)
             thumbnail.viewed.connect(self.tab._on_item_viewed)
             thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+            # Set favorites manager for likes/groups functionality
+            favorites_manager = getattr(self.tab, '_favorites_manager', None)
+            if favorites_manager:
+                thumbnail.set_favorites_manager(favorites_manager)
+                # Connect like toggle signal
+                thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
 
             # Connect image-specific signals
             if file_type == 'image':
@@ -460,6 +571,20 @@ class GalleryManager:
         except Exception as e:
             print(f"[Gallery] Error creating thumbnail for {path}: {e}")
             return None
+
+    def _on_thumbnail_like_toggled(self, path, is_liked):
+        """Handle like toggle from a thumbnail.
+
+        Args:
+            path: Path of the item
+            is_liked: New like state
+        """
+        # Show status message
+        if hasattr(self.tab, 'show_status_message'):
+            if is_liked:
+                self.tab.show_status_message("♥ Added to Likes")
+            else:
+                self.tab.show_status_message("Removed from Likes")
 
     def _insert_new_items_incrementally(self, sorted_items, new_items):
         """Insert new items at their correct positions without rebuilding the layout.
@@ -478,6 +603,9 @@ class GalleryManager:
         # Build a set of new paths for quick lookup
         new_paths = set(item['path'] for item in new_items)
 
+        # Get favorites manager once
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+
         # Disable updates during insertion
         container.setUpdatesEnabled(False)
 
@@ -494,6 +622,7 @@ class GalleryManager:
                 is_new = path in self.tab._new_items
                 item_output_dir = os.path.dirname(path)
                 has_metadata = item.get('has_metadata', False)
+                job_prefix = item.get('job_prefix')
 
                 # Use unified ThumbnailWidget
                 thumbnail = ThumbnailWidget(
@@ -504,12 +633,18 @@ class GalleryManager:
                     editable=is_editable,
                     is_new=is_new,
                     gallery_tab=self.tab,
-                    has_metadata=has_metadata
+                    has_metadata=has_metadata,
+                    job_prefix=job_prefix
                 )
                 thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
                 thumbnail.deleted.connect(self.tab._on_item_deleted)
                 thumbnail.viewed.connect(self.tab._on_item_viewed)
                 thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+                # Set favorites manager for likes/groups functionality
+                if favorites_manager:
+                    thumbnail.set_favorites_manager(favorites_manager)
+                    thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
 
                 if file_type == 'image':
                     thumbnail.fullscreen_requested.connect(
@@ -605,14 +740,21 @@ class GalleryManager:
 
         end_index = min(self.tab._widget_create_index + self.tab._widget_batch_size, len(self.tab._pending_items))
 
+        # Get favorites manager once for the batch
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+
         for i in range(self.tab._widget_create_index, end_index):
             pending_item = self.tab._pending_items[i]
-            # Support both old format (2 elements) and new format (3 elements with has_metadata)
-            if len(pending_item) == 3:
+            # Support formats: (path, type), (path, type, has_metadata), (path, type, has_metadata, job_prefix)
+            if len(pending_item) == 4:
+                path, file_type, has_metadata, job_prefix = pending_item
+            elif len(pending_item) == 3:
                 path, file_type, has_metadata = pending_item
+                job_prefix = None
             else:
                 path, file_type = pending_item
                 has_metadata = False
+                job_prefix = None
             is_new = path in self.tab._new_items
             item_output_dir = os.path.dirname(path)
 
@@ -625,12 +767,18 @@ class GalleryManager:
                 editable=self.tab._is_editable_cache,
                 is_new=is_new,
                 gallery_tab=self.tab,
-                has_metadata=has_metadata
+                has_metadata=has_metadata,
+                job_prefix=job_prefix
             )
             thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
             thumbnail.deleted.connect(self.tab._on_item_deleted)
             thumbnail.viewed.connect(self.tab._on_item_viewed)
             thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+
+            # Set favorites manager for likes/groups functionality
+            if favorites_manager:
+                thumbnail.set_favorites_manager(favorites_manager)
+                thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
 
             if file_type == 'image':
                 thumbnail.fullscreen_requested.connect(

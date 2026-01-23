@@ -154,16 +154,23 @@ class EmbeddedImageViewer(QWidget):
     copy_settings_requested = Signal(dict)
     image_deleted = Signal(str)  # Emitted when an image is deleted (path)
     image_viewed = Signal(str)  # Emitted when navigating to an image (path)
+    like_toggled = Signal(str, bool)  # Emitted when like status is toggled (path, is_liked)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
         self.image_paths = list(image_paths)
         self.current_index = start_index
         self.output_dir = output_dir
+        self._favorites_manager = None
 
         self._setup_ui()
         self._load_current_image()
         self.setFocusPolicy(Qt.StrongFocus)
+
+    def set_favorites_manager(self, manager):
+        """Set the favorites manager for like functionality."""
+        self._favorites_manager = manager
+        self._update_like_button()
 
     def _setup_ui(self):
         """Set up the embedded viewer UI."""
@@ -302,6 +309,15 @@ class EmbeddedImageViewer(QWidget):
         self.filename_label = QLabel()
         self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         info_layout.addWidget(self.filename_label)
+
+        # Like button
+        self.like_btn = QPushButton("♡")
+        self.like_btn.setFixedSize(32, 32)
+        self.like_btn.setToolTip("Like (L)")
+        self.like_btn.setCursor(Qt.PointingHandCursor)
+        self.like_btn.clicked.connect(self._toggle_like)
+        self._update_like_button_style(False)
+        info_layout.addWidget(self.like_btn)
 
         # 3D Model controls (hidden by default)
         # Shading Mode dropdown
@@ -629,6 +645,7 @@ class EmbeddedImageViewer(QWidget):
             self.image_stack.setCurrentWidget(self.message_label)
 
         self._update_info()
+        self._update_like_button()
 
     def _load_3d_model(self, media_path):
         """Load a 3D model into the Three.js viewer."""
@@ -964,8 +981,59 @@ class EmbeddedImageViewer(QWidget):
             self._on_fullscreen()
         elif key == Qt.Key_Delete:
             self._delete_current_image()
+        elif key == Qt.Key_L:
+            self._toggle_like()
         else:
             super().keyPressEvent(event)
+
+    def _toggle_like(self):
+        """Toggle like status for current image."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        is_liked = self._favorites_manager.toggle_like(path)
+        self._update_like_button_style(is_liked)
+        self.like_toggled.emit(path, is_liked)
+
+    def _update_like_button(self):
+        """Update like button based on current image's like status."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        is_liked = self._favorites_manager.is_liked(path)
+        self._update_like_button_style(is_liked)
+
+    def _update_like_button_style(self, is_liked):
+        """Update like button appearance based on liked state."""
+        if is_liked:
+            self.like_btn.setText("♥")
+            self.like_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(239, 68, 68, 0.9);
+                    color: white;
+                    border: none;
+                    border-radius: 16px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(239, 68, 68, 1.0);
+                }
+            """)
+        else:
+            self.like_btn.setText("♡")
+            self.like_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(60, 60, 60, 0.8);
+                    color: rgba(255, 255, 255, 0.7);
+                    border: none;
+                    border-radius: 16px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(239, 68, 68, 0.7);
+                    color: white;
+                }
+            """)
 
     def _delete_current_image(self):
         """Delete the current image file after confirmation."""

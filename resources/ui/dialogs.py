@@ -1,13 +1,16 @@
 """
 Dialog widgets for editing gallery items.
 
-Provides dialogs for editing notes on images and 3D models.
+Provides dialogs for editing notes on images and 3D models,
+and group management dialogs.
 """
 import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit,
+    QLineEdit, QGridLayout, QButtonGroup, QColorDialog
 )
+from PySide6.QtGui import QColor
 
 
 # Common dark theme stylesheet for edit dialogs
@@ -155,3 +158,197 @@ class EditModelDialog(BaseEditDialog):
     """Dialog for editing 3D model notes."""
     item_type_label = "Model"
     placeholder_text = "Add a note or description for this model..."
+
+
+# Group colors palette
+GROUP_COLORS = [
+    "#ef4444",  # Red
+    "#f97316",  # Orange
+    "#eab308",  # Yellow
+    "#22c55e",  # Green
+    "#06b6d4",  # Cyan
+    "#3b82f6",  # Blue
+    "#8b5cf6",  # Purple
+    "#ec4899",  # Pink
+]
+
+
+class ColorButton(QPushButton):
+    """A colored button for the color picker."""
+
+    def __init__(self, color, parent=None):
+        super().__init__(parent)
+        self.color = color
+        self.setFixedSize(36, 36)
+        self.setCheckable(True)
+        self._update_style()
+
+    def _update_style(self):
+        checked_border = "3px solid white" if self.isChecked() else f"2px solid {self.color}"
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.color};
+                border: {checked_border};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                border: 2px solid white;
+            }}
+        """)
+
+    def setChecked(self, checked):
+        super().setChecked(checked)
+        self._update_style()
+
+
+class GroupEditorDialog(QDialog):
+    """
+    Dialog for creating or editing a gallery group.
+
+    Provides:
+    - Name input field
+    - Color picker grid (8 preset colors in 4x2)
+    - Create/Save and Cancel buttons
+    """
+
+    def __init__(self, group=None, parent=None):
+        """
+        Initialize the group editor dialog.
+
+        Args:
+            group: Optional GroupDef to edit (None for creating new)
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.group = group
+        self._selected_color = group.color if group else GROUP_COLORS[0]
+        self._color_buttons = []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Set up the dialog UI."""
+        self.setWindowTitle("Edit Group" if self.group else "New Group")
+        self.setMinimumWidth(300)
+        self.setModal(True)
+        self.setStyleSheet(EDIT_DIALOG_STYLESHEET + """
+            QLineEdit {
+                background-color: #2c313a;
+                color: #e0e0e0;
+                border: 1px solid #3c414b;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #4a9eff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Name input
+        name_label = QLabel("Group Name:")
+        layout.addWidget(name_label)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Enter group name...")
+        if self.group:
+            self.name_input.setText(self.group.name)
+        layout.addWidget(self.name_input)
+
+        # Color picker
+        color_label = QLabel("Color:")
+        layout.addWidget(color_label)
+
+        color_layout = QHBoxLayout()
+        color_layout.setSpacing(8)
+
+        # Create 4x2 grid of color buttons
+        color_grid = QGridLayout()
+        color_grid.setSpacing(8)
+        self._button_group = QButtonGroup(self)
+        self._button_group.setExclusive(True)
+
+        for i, color in enumerate(GROUP_COLORS):
+            btn = ColorButton(color)
+            btn.setChecked(color == self._selected_color)
+            btn.clicked.connect(lambda checked, c=color: self._on_color_selected(c))
+            self._button_group.addButton(btn)
+            self._color_buttons.append(btn)
+            row = i // 4
+            col = i % 4
+            color_grid.addWidget(btn, row, col)
+
+        layout.addLayout(color_grid)
+
+        # Custom color button (optional)
+        custom_btn = QPushButton("Custom Color...")
+        custom_btn.clicked.connect(self._pick_custom_color)
+        layout.addWidget(custom_btn)
+
+        layout.addStretch()
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+
+        self.save_btn = QPushButton("Save" if self.group else "Create")
+        self.save_btn.setProperty("primary", True)
+        self.save_btn.clicked.connect(self._on_save)
+        button_layout.addWidget(self.save_btn)
+
+        layout.addLayout(button_layout)
+
+        # Focus on name input
+        self.name_input.setFocus()
+
+    def _on_color_selected(self, color):
+        """Handle color button selection."""
+        self._selected_color = color
+        for btn in self._color_buttons:
+            btn.setChecked(btn.color == color)
+
+    def _pick_custom_color(self):
+        """Open system color picker for custom color."""
+        color = QColorDialog.getColor(
+            QColor(self._selected_color),
+            self,
+            "Choose Group Color"
+        )
+        if color.isValid():
+            self._selected_color = color.name()
+            # Uncheck all preset buttons
+            for btn in self._color_buttons:
+                btn.setChecked(False)
+
+    def _on_save(self):
+        """Validate and accept the dialog."""
+        name = self.name_input.text().strip()
+        if not name:
+            self.name_input.setFocus()
+            self.name_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #2c313a;
+                    color: #e0e0e0;
+                    border: 2px solid #ef4444;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 12px;
+                }
+            """)
+            return
+        self.accept()
+
+    def get_result(self):
+        """Get the name and color from the dialog.
+
+        Returns:
+            Tuple of (name, color) or (None, None) if cancelled
+        """
+        return (self.name_input.text().strip(), self._selected_color)

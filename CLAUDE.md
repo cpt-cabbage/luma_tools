@@ -152,7 +152,7 @@ powershell -Command "Set-Location 'l:\path\to\luma_tools'; python\venv\Scripts\p
 ```
 
 ### Debugging
-Logs: `~/.luma_tools/logs/` (last 5 kept, UTF-8). Check worker GC if callbacks don't fire.
+**IMPORTANT: Always check the log files when debugging issues.** Logs are at `~/.luma_tools/logs/` (last 5 kept, UTF-8). On Windows: `C:\Users\<username>\.luma_tools\logs\`. Read the most recent log file using the Read tool - don't ask the user to copy/paste logs. Use Grep to search for errors: `Grep pattern="ERROR|Exception|Traceback" path="C:\Users\<username>\.luma_tools\logs\"`. Check worker GC if callbacks don't fire.
 
 ### UI Modifications
 Edit `.ui` files in Qt Designer, update tab logic in `python/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.

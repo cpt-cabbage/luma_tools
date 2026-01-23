@@ -173,7 +173,7 @@ class StackedThumbnailWidget(QWidget):
     # Offset for stacked visual effect
     STACK_OFFSET = 4
 
-    def __init__(self, stack_id: str, items: List[Dict], parent=None, gallery_tab=None):
+    def __init__(self, stack_id: str, items: List[Dict], parent=None, gallery_tab=None, group_color=None):
         """Initialize the stacked thumbnail widget.
 
         Args:
@@ -181,6 +181,7 @@ class StackedThumbnailWidget(QWidget):
             items: List of item dicts in this stack (first item is shown on top)
             parent: Parent widget
             gallery_tab: Reference to gallery tab for creating thumbnails
+            group_color: Optional hex color for group border styling
         """
         super().__init__(parent)
         self.stack_id = stack_id
@@ -194,6 +195,7 @@ class StackedThumbnailWidget(QWidget):
         self._expanded_widgets = []  # List of expanded thumbnail widgets
         self._expanded_background = None  # Background frame behind expanded items
         self._gallery_tab = gallery_tab
+        self._group_color = group_color  # Color for group stacking
         # Check if items in this stack have metadata (source_images populated)
         self._has_metadata = self._check_items_have_metadata(items)
         # Check if top item is a 3D model (uses grey border, not blue)
@@ -203,7 +205,8 @@ class StackedThumbnailWidget(QWidget):
             has_metadata=self._has_metadata,
             is_model=self._is_top_item_model,
             is_stacked=True,
-            border_radius=8
+            border_radius=8,
+            group_color=group_color
         )
 
         self._setup_ui()
@@ -330,30 +333,38 @@ class StackedThumbnailWidget(QWidget):
             shadow.setColor(QColor(0, 0, 0, 80))
             self.thumbnail_label.setGraphicsEffect(shadow)
 
-        # Count badge (top-right corner) - pill style
+        # Count badge (top-right corner) - outline style
         self.count_badge = QLabel(self.thumbnail_container)
         self.count_badge.setText(str(self._count))
         self.count_badge.setAlignment(Qt.AlignCenter)
         self.count_badge.setStyleSheet("""
             QLabel {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #5ba3ff, stop:1 #3d8bff);
-                color: white;
+                background-color: rgba(0, 0, 0, 0.5);
+                color: rgba(91, 163, 255, 0.95);
                 border-radius: 10px;
                 font-size: 11px;
                 font-weight: bold;
                 padding: 2px 6px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
+                border: 2px solid rgba(91, 163, 255, 0.7);
             }
         """)
         # Size based on digit count
         badge_width = max(22, 10 + len(str(self._count)) * 8)
         self.count_badge.setFixedSize(badge_width, 20)
-        # Position at top-right of the top card
-        badge_x = self.THUMBNAIL_SIZE[0] - badge_width + 4
-        self.count_badge.move(badge_x, -4)
+        # Position at top-right of the top card (keep inside container bounds)
+        badge_x = self.THUMBNAIL_SIZE[0] - badge_width - 4
+        self.count_badge.move(badge_x, 4)
         self.count_badge.raise_()
         self.count_badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+        # File type indicator (bottom-left corner)
+        self.type_indicator = QLabel(self.thumbnail_container)
+        self.type_indicator.setAlignment(Qt.AlignCenter)
+        self.type_indicator.setFixedSize(20, 20)
+        self.type_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
+        self.type_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._apply_type_indicator()
+        self.type_indicator.raise_()
 
         # Filename label (shows stack name) - cleaner style
         display_name = self.stack_id if len(self.stack_id) <= 25 else self.stack_id[:22] + "..."
@@ -430,6 +441,9 @@ class StackedThumbnailWidget(QWidget):
         # Recalculate metadata status and model type
         self._has_metadata = self._check_items_have_metadata(items)
         self._is_top_item_model = self._top_item and self._top_item.get('type') == 'model'
+
+        # Update type indicator for new top item
+        self._apply_type_indicator()
 
         # Update count badge
         self.count_badge.setText(str(self._count))
@@ -634,6 +648,32 @@ class StackedThumbnailWidget(QWidget):
             # Apply current style state
             self._apply_thumbnail_style()
 
+    def _apply_type_indicator(self):
+        """Apply the appropriate icon and style for the file type - outline style."""
+        if not self._top_item:
+            return
+        item_type = self._top_item.get('type', 'image')
+        # Type icon and color configuration (icon, border_color)
+        type_config = {
+            'image': ('▣', 'rgba(16, 185, 129, 0.8)'),   # Green squares
+            'video': ('▶', 'rgba(239, 68, 68, 0.8)'),    # Red play triangle
+            'audio': ('♫', 'rgba(168, 85, 247, 0.8)'),   # Purple music note
+            'model': ('⬣', 'rgba(74, 158, 255, 0.8)'),   # Blue hexagon/cube
+        }
+        icon, border_color = type_config.get(item_type, ('?', 'rgba(128, 128, 128, 0.8)'))
+        self.type_indicator.setText(icon)
+        self.type_indicator.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(0, 0, 0, 0.4);
+                color: {border_color};
+                border: 1px solid {border_color};
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+        """)
+        self.type_indicator.show()
+
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state using unified styler."""
         if self.thumbnail_label and not self._is_expanded:
@@ -714,6 +754,42 @@ class StackedThumbnailWidget(QWidget):
             header_action = menu.addAction(f"Stack: {self.stack_id} ({count} items)")
         header_action.setEnabled(False)
         menu.addSeparator()
+
+        # Like/Group options (for all items in the stack)
+        favorites_manager = getattr(self._gallery_tab, '_favorites_manager', None)
+        if favorites_manager:
+            # Get paths to operate on (selected items or all items in stack)
+            if has_multi_selection:
+                target_paths = list(self._gallery_tab._selected_items)
+            else:
+                target_paths = [item['path'] for item in self._items]
+
+            # Like toggle - check if all are liked
+            all_liked = all(favorites_manager.is_liked(p) for p in target_paths)
+            if all_liked:
+                like_action = menu.addAction(f"♥ Unlike All ({len(target_paths)})")
+                like_action.triggered.connect(lambda: self._unlike_items(target_paths))
+            else:
+                like_action = menu.addAction(f"♡ Like All ({len(target_paths)})")
+                like_action.triggered.connect(lambda: self._like_items(target_paths))
+
+            # Groups submenu
+            groups_menu = menu.addMenu("Add to Group")
+            groups = favorites_manager.get_groups()
+
+            for group in groups:
+                action = groups_menu.addAction(f"● {group.name}")
+                action.triggered.connect(
+                    lambda checked, gid=group.group_id, paths=target_paths: self._add_to_group(paths, gid)
+                )
+
+            if groups:
+                groups_menu.addSeparator()
+
+            new_group_action = groups_menu.addAction("+ New Group...")
+            new_group_action.triggered.connect(lambda: self._create_new_group(target_paths))
+
+            menu.addSeparator()
 
         # Expand/Collapse
         if self._is_expanded:
@@ -848,6 +924,57 @@ class StackedThumbnailWidget(QWidget):
         # Use the gallery tab's publish selected handler
         if hasattr(self._gallery_tab, '_on_publish_selected'):
             self._gallery_tab._on_publish_selected()
+
+    def _like_items(self, paths):
+        """Like multiple items."""
+        favorites_manager = getattr(self._gallery_tab, '_favorites_manager', None)
+        if not favorites_manager:
+            return
+
+        favorites_manager.like_items(paths)
+        self._gallery_tab._refresh_favorites_state()
+        if hasattr(self._gallery_tab, 'show_status_message'):
+            self._gallery_tab.show_status_message(f"♥ Liked {len(paths)} items")
+
+    def _unlike_items(self, paths):
+        """Unlike multiple items."""
+        favorites_manager = getattr(self._gallery_tab, '_favorites_manager', None)
+        if not favorites_manager:
+            return
+
+        favorites_manager.unlike_items(paths)
+        self._gallery_tab._refresh_favorites_state()
+        if hasattr(self._gallery_tab, 'show_status_message'):
+            self._gallery_tab.show_status_message(f"Unliked {len(paths)} items")
+
+    def _add_to_group(self, paths, group_id):
+        """Add items to a group."""
+        favorites_manager = getattr(self._gallery_tab, '_favorites_manager', None)
+        if not favorites_manager:
+            return
+
+        favorites_manager.add_items_to_group(paths, group_id)
+        group = favorites_manager.get_group(group_id)
+        self._gallery_tab._refresh_favorites_state()
+        if group and hasattr(self._gallery_tab, 'show_status_message'):
+            self._gallery_tab.show_status_message(f"Added {len(paths)} items to {group.name}")
+
+    def _create_new_group(self, paths):
+        """Create a new group and add items to it."""
+        favorites_manager = getattr(self._gallery_tab, '_favorites_manager', None)
+        if not favorites_manager:
+            return
+
+        from dialogs import GroupEditorDialog
+        dialog = GroupEditorDialog(parent=self)
+        if dialog.exec_():
+            name, color = dialog.get_result()
+            if name:
+                group_id = favorites_manager.create_group(name, color)
+                favorites_manager.add_items_to_group(paths, group_id)
+                self._gallery_tab._refresh_favorites_state()
+                if hasattr(self._gallery_tab, 'show_status_message'):
+                    self._gallery_tab.show_status_message(f"Created '{name}' with {len(paths)} items")
 
     def _show_properties(self):
         """Show properties for the top item in the stack."""

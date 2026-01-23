@@ -20,6 +20,8 @@ from .base_tab import BaseTab
 from .comfyui_gallery_loader import GalleryLoader, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, SUPPORTED_EXTENSIONS
 from .comfyui_gallery_manager import GalleryManager
 from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager
+from .gallery.favorites_manager import FavoritesManager
+from .gallery.groups_panel import GroupsFilterPanel
 
 
 class ComfyUIGalleryTab(BaseTab):
@@ -98,6 +100,15 @@ class ComfyUIGalleryTab(BaseTab):
         self._operations_manager = OperationsManager(self)
         self._refresh_controller = RefreshController(self)
         self._ui_manager = UIManager(self)
+
+        # Initialize favorites manager for likes and groups
+        self._favorites_manager = FavoritesManager(self)
+
+        # Current filter state: ("all", None), ("liked", None), ("group", group_id), ("ungrouped", None)
+        self._current_filter = ("all", None)
+
+        # Setup groups filter panel (collapsible sidebar)
+        self._setup_groups_panel()
 
         # Setup UI elements
         self._ui_manager.setup_ui()
@@ -434,6 +445,9 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Note: display_items already updates status count with filtered items
 
+        # Update filter counts in groups panel
+        self._update_filter_counts(items)
+
         # Mark initial scan done
         self._initial_scan_done = True
 
@@ -537,3 +551,213 @@ class ComfyUIGalleryTab(BaseTab):
             self._on_refresh(force=True)
             if hasattr(self.main_window, 'animator'):
                 self.main_window.animator.show_info(f"Custom: {os.path.basename(folder)}")
+
+    # =========================================================================
+    # GROUPS & LIKES FILTERING
+    # =========================================================================
+
+    def _setup_groups_panel(self):
+        """Set up the groups filter panel as a resizable sidebar."""
+        from PySide6.QtWidgets import QSplitter
+        from PySide6.QtCore import Qt
+
+        # Create groups panel
+        self._groups_panel = GroupsFilterPanel(self._favorites_manager, parent=self.ui)
+        self._groups_panel.filter_changed.connect(self._on_filter_changed)
+        self._groups_panel.status_message.connect(self.show_status_message)
+
+        # Make panel resizable (remove fixed width, set min/max)
+        self._groups_panel.setMinimumWidth(120)
+        self._groups_panel.setMaximumWidth(400)
+
+        # Get the main gallery area (scroll area)
+        scroll_area = self.ui.galleryScrollArea
+
+        # Create a splitter to hold panel + scroll area
+        from PySide6.QtWidgets import QSizePolicy
+        self._gallery_splitter = QSplitter(Qt.Horizontal)
+        self._gallery_splitter.setChildrenCollapsible(False)
+        self._gallery_splitter.setHandleWidth(4)
+        # Ensure splitter expands to fill available space like the scroll area did
+        self._gallery_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._gallery_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3c414b;
+            }
+            QSplitter::handle:hover {
+                background-color: #4a9eff;
+            }
+        """)
+
+        # Add groups panel on the left
+        self._gallery_splitter.addWidget(self._groups_panel)
+
+        # Take scroll area out of its current parent and add to splitter
+        main_layout = self.ui.galleryMainLayout
+
+        # Find scroll area index in main layout
+        scroll_index = -1
+        for i in range(main_layout.count()):
+            if main_layout.itemAt(i).widget() == scroll_area:
+                scroll_index = i
+                break
+
+        if scroll_index >= 0:
+            # Remove scroll area from main layout
+            main_layout.takeAt(scroll_index)
+
+            # Add scroll area to splitter
+            self._gallery_splitter.addWidget(scroll_area)
+
+            # Insert splitter at the same position with stretch factor
+            main_layout.insertWidget(scroll_index, self._gallery_splitter)
+            # Set stretch factor so splitter takes available space (like scroll area did)
+            main_layout.setStretchFactor(self._gallery_splitter, 1)
+
+            # Load saved splitter sizes from settings
+            from core.settings_manager import get_setting
+            try:
+                saved_sizes = get_setting("gallery_splitter_sizes")
+            except KeyError:
+                saved_sizes = None
+            if saved_sizes:
+                self._gallery_splitter.setSizes(saved_sizes)
+            else:
+                # Default: panel 200px, rest for gallery
+                self._gallery_splitter.setSizes([200, 800])
+
+            # Save splitter sizes when changed
+            self._gallery_splitter.splitterMoved.connect(self._save_splitter_sizes)
+
+        # Connect collapsed state signal
+        self._groups_panel.collapsed_changed.connect(self._on_sidebar_collapsed)
+
+        # Load collapsed state from settings
+        from core.settings_manager import get_setting
+        try:
+            collapsed = get_setting("gallery_sidebar_collapsed")
+        except KeyError:
+            collapsed = False
+        if collapsed:
+            self._groups_panel._toggle_collapse()
+
+    def _on_sidebar_collapsed(self, is_collapsed):
+        """Save sidebar collapsed state to settings."""
+        from core.settings_manager import set_setting
+        set_setting("gallery_sidebar_collapsed", is_collapsed)
+
+    def _save_splitter_sizes(self):
+        """Save splitter sizes to settings."""
+        from core.settings_manager import set_setting
+        if hasattr(self, '_gallery_splitter'):
+            set_setting("gallery_splitter_sizes", self._gallery_splitter.sizes())
+
+    def _on_filter_changed(self, filter_type, filter_id):
+        """Handle filter selection change from groups panel.
+
+        Args:
+            filter_type: "all", "liked", "group", "ungrouped"
+            filter_id: group_id for groups, empty string for others
+        """
+        self._current_filter = (filter_type, filter_id if filter_id else None)
+
+        # Save collapsed state when filter changes (if collapsed state changed)
+        from core.settings_manager import set_setting
+        set_setting("gallery_sidebar_collapsed", self._groups_panel._is_collapsed, verbose=False)
+
+        # Redisplay with filter applied
+        self._redisplay_items()
+
+    def _filter_items(self, items):
+        """Filter items based on current filter settings.
+
+        Applies both show_inputs filter and likes/groups/stacks filter.
+        """
+        filter_type, filter_id = self._current_filter
+
+        # Special case: "inputs" filter shows only input images (bypass show_inputs setting)
+        if filter_type == "inputs":
+            return [item for item in items if item.get('is_input', False)]
+
+        # Apply show_inputs filter for other filter types
+        if not self._show_inputs:
+            items = [item for item in items if not item.get('is_input', False)]
+
+        # Apply likes/groups/stacks filter
+        if filter_type == "all":
+            return items
+        elif filter_type == "liked":
+            return self._favorites_manager.filter_liked(items)
+        elif filter_type == "group" and filter_id:
+            return self._favorites_manager.filter_by_group(items, filter_id)
+        elif filter_type == "ungrouped":
+            return self._favorites_manager.filter_ungrouped(items)
+        elif filter_type == "stack" and filter_id:
+            # Filter by job_prefix (stack)
+            return [item for item in items if item.get('job_prefix') == filter_id]
+
+        return items
+
+    def _update_filter_counts(self, items):
+        """Update the counts shown in the groups panel.
+
+        Args:
+            items: List of all items (before likes/groups filtering)
+        """
+        if not hasattr(self, '_groups_panel'):
+            return
+
+        # Count inputs from all items (before filtering)
+        inputs_count = sum(1 for item in items if item.get('is_input', False))
+
+        # Apply show_inputs filter to get the base item set for other counts
+        if not self._show_inputs:
+            items = [item for item in items if not item.get('is_input', False)]
+
+        all_count = len(items)
+
+        # Count liked items
+        liked_count = len(self._favorites_manager.filter_liked(items))
+
+        # Count items per group
+        group_counts = {}
+        for group in self._favorites_manager.get_groups():
+            group_counts[group.group_id] = len(
+                self._favorites_manager.filter_by_group(items, group.group_id)
+            )
+
+        # Count ungrouped items
+        ungrouped_count = len(self._favorites_manager.filter_ungrouped(items))
+
+        # Count items per stack (job_prefix)
+        stack_counts = {}
+        for item in items:
+            job_prefix = item.get('job_prefix')
+            if job_prefix:
+                stack_counts[job_prefix] = stack_counts.get(job_prefix, 0) + 1
+
+        # Update panel
+        self._groups_panel.set_item_counts(all_count, liked_count, group_counts, ungrouped_count, inputs_count)
+        if hasattr(self._groups_panel, 'set_stacks_data'):
+            self._groups_panel.set_stacks_data(stack_counts)
+
+    def _refresh_favorites_state(self):
+        """Refresh the favorites state on all visible thumbnails."""
+        from shiboken6 import isValid
+
+        if not hasattr(self, '_widget_cache'):
+            return
+
+        for path, widget in self._widget_cache.items():
+            if isValid(widget) and hasattr(widget, 'update_favorites_state'):
+                widget.update_favorites_state()
+
+    def show_status_message(self, message, duration=2000):
+        """Show a status message in the statusbar.
+
+        Args:
+            message: Message to display
+            duration: Duration in milliseconds (default 2000)
+        """
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_info(message)

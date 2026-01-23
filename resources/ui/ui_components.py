@@ -31,7 +31,7 @@ from effects import TabGlowEffect, TabGlowManager, UIAnimations
 from thumbnail_styles import ThumbnailStyler
 from notifications import ComfyUIStatusBanner
 from layouts import FlowLayout
-from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog
+from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog, GroupEditorDialog
 from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
@@ -133,9 +133,11 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     deleted = Signal(str)
     viewed = Signal(str)
     selection_changed = Signal(str, bool)  # path, is_selected
+    like_toggled = Signal(str, bool)  # path, is_liked
 
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
-                 editable=True, is_new=False, gallery_tab=None, has_metadata=False):
+                 editable=True, is_new=False, gallery_tab=None, has_metadata=False,
+                 job_prefix=None):
         """
         Initialize thumbnail widget.
 
@@ -148,6 +150,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             is_new: Whether item is newly added (shows highlight)
             gallery_tab: Reference to gallery tab for selection callbacks
             has_metadata: Whether item has associated metadata (affects styling)
+            job_prefix: Job prefix for stack color lookup
         """
         super().__init__(parent)
         self.path = path
@@ -156,6 +159,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self._editable = editable
         self._is_new = is_new
         self._is_selected = False
+        self._job_prefix = job_prefix
         self._is_hovered = False
         self._has_metadata = has_metadata
         self._gallery_tab = gallery_tab
@@ -164,6 +168,11 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self._thumbnail_loaded = False
         self._thumbnail_loading = False
         self._tooltip_loaded = False
+
+        # Likes and groups state
+        self._is_liked = False
+        self._group_colors = []  # List of group colors this item belongs to
+        self._favorites_manager = None  # Set by gallery tab after creation
 
         # Styler uses is_model to determine border color
         self._styler = ThumbnailStyler(
@@ -208,14 +217,15 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.filename_label.setContextMenuPolicy(Qt.NoContextMenu)
         layout.addWidget(self.filename_label)
 
-        # Note indicator (top-right)
+        # Note indicator (top-right) - outline style
         self.note_indicator = QLabel(self.thumbnail_label)
         self.note_indicator.setText("N")
         self.note_indicator.setAlignment(Qt.AlignCenter)
         self.note_indicator.setStyleSheet("""
             QLabel {
-                background-color: rgba(74, 158, 255, 0.9);
-                color: white;
+                background-color: rgba(0, 0, 0, 0.4);
+                color: rgba(74, 158, 255, 0.9);
+                border: 1px solid rgba(74, 158, 255, 0.6);
                 border-radius: 9px;
                 font-size: 10px;
                 font-weight: bold;
@@ -227,14 +237,15 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.note_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.note_indicator.hide()
 
-        # Selection checkmark indicator (top-left)
+        # Selection checkmark indicator (top-left) - outline style
         self.selection_indicator = QLabel(self.thumbnail_label)
         self.selection_indicator.setText("✓")
         self.selection_indicator.setAlignment(Qt.AlignCenter)
         self.selection_indicator.setStyleSheet("""
             QLabel {
-                background-color: rgba(59, 130, 246, 0.95);
-                color: white;
+                background-color: rgba(0, 0, 0, 0.4);
+                color: rgba(59, 130, 246, 0.95);
+                border: 2px solid rgba(59, 130, 246, 0.8);
                 border-radius: 12px;
                 font-size: 14px;
                 font-weight: bold;
@@ -246,28 +257,37 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.selection_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.selection_indicator.hide()
 
-        # 3D model cube indicator (bottom-left) - only for models
-        self.cube_indicator = QLabel(self.thumbnail_label)
-        self.cube_indicator.setText("⬣")  # Hexagon as cube symbol
-        self.cube_indicator.setAlignment(Qt.AlignCenter)
-        self.cube_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(74, 158, 255, 0.85);
-                color: white;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-        """)
-        self.cube_indicator.setFixedSize(20, 20)
-        self.cube_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
-        self.cube_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.cube_indicator.setContextMenuPolicy(Qt.NoContextMenu)
-        # Only show cube for 3D models
-        if self.item_type == 'model':
-            self.cube_indicator.show()
-        else:
-            self.cube_indicator.hide()
+        # Like indicator (heart icon, below selection indicator) - outline style
+        self.like_indicator = QLabel(self.thumbnail_label)
+        self.like_indicator.setText("♥")
+        self.like_indicator.setAlignment(Qt.AlignCenter)
+        self.like_indicator.setFixedSize(22, 22)
+        self.like_indicator.move(4, 32)
+        self.like_indicator.setCursor(Qt.PointingHandCursor)
+        self.like_indicator.setContextMenuPolicy(Qt.NoContextMenu)
+        self.like_indicator.hide()
+        self._update_like_indicator_style()
+
+        # Group dots indicator (bottom-right, shows up to 3 colored dots)
+        self.group_dots_container = QWidget(self.thumbnail_label)
+        self.group_dots_container.setFixedSize(50, 14)
+        self.group_dots_container.move(self.THUMBNAIL_SIZE[0] - 54, self.THUMBNAIL_SIZE[1] - 18)
+        self.group_dots_container.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.group_dots_container.setContextMenuPolicy(Qt.NoContextMenu)
+        self._group_dots_layout = QHBoxLayout(self.group_dots_container)
+        self._group_dots_layout.setContentsMargins(0, 0, 0, 0)
+        self._group_dots_layout.setSpacing(3)
+        self._group_dots_layout.addStretch()
+        self.group_dots_container.hide()
+
+        # File type indicator (bottom-left)
+        self.type_indicator = QLabel(self.thumbnail_label)
+        self.type_indicator.setAlignment(Qt.AlignCenter)
+        self.type_indicator.setFixedSize(20, 20)
+        self.type_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
+        self.type_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.type_indicator.setContextMenuPolicy(Qt.NoContextMenu)
+        self._apply_type_indicator()
 
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state."""
@@ -283,6 +303,240 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             self.filename_label.setStyleSheet("color: #10b981; font-size: 10px; font-weight: bold;")
         else:
             self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+
+    def _apply_type_indicator(self):
+        """Apply the appropriate icon and style for the file type - outline style."""
+        # Type icon and color configuration (icon, border_color)
+        type_config = {
+            'image': ('▣', 'rgba(16, 185, 129, 0.8)'),   # Green squares
+            'video': ('▶', 'rgba(239, 68, 68, 0.8)'),    # Red play triangle
+            'audio': ('♫', 'rgba(168, 85, 247, 0.8)'),   # Purple music note
+            'model': ('⬣', 'rgba(74, 158, 255, 0.8)'),   # Blue hexagon/cube
+        }
+        icon, border_color = type_config.get(self.item_type, ('?', 'rgba(128, 128, 128, 0.8)'))
+        self.type_indicator.setText(icon)
+        self.type_indicator.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(0, 0, 0, 0.4);
+                color: {border_color};
+                border: 1px solid {border_color};
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+        """)
+        self.type_indicator.show()
+
+    # --- Likes and Groups ---
+    def set_favorites_manager(self, manager):
+        """Set the favorites manager and update visual state."""
+        self._favorites_manager = manager
+
+        # Connect to signals for live updates
+        if manager:
+            manager.item_groups_changed.connect(self._on_item_groups_changed)
+            manager.like_changed.connect(self._on_like_changed)
+
+        self.update_favorites_state()
+
+    def _on_item_groups_changed(self, path):
+        """Handle item group membership change."""
+        if path == self.path:
+            self.update_favorites_state()
+
+    def _on_like_changed(self, path, is_liked):
+        """Handle like state change."""
+        if path == self.path:
+            self.update_favorites_state()
+
+    def update_favorites_state(self):
+        """Update like and group visual state from favorites manager."""
+        if not self._favorites_manager:
+            return
+        # Update like state
+        self._is_liked = self._favorites_manager.is_liked(self.path)
+        self._update_like_indicator_style()
+        # Show like indicator if liked (always visible when liked)
+        if self._is_liked:
+            self.like_indicator.show()
+
+        # Update group colors
+        self._group_colors = self._favorites_manager.get_item_group_colors(self.path)
+        self._update_group_dots()
+        self._update_group_border()
+
+    def _update_like_indicator_style(self):
+        """Update the like indicator appearance based on liked state - outline style."""
+        if self._is_liked:
+            self.like_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(0, 0, 0, 0.4);
+                    color: rgba(239, 68, 68, 0.95);
+                    border: 2px solid rgba(239, 68, 68, 0.8);
+                    border-radius: 11px;
+                    font-size: 13px;
+                }
+            """)
+        else:
+            self.like_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(0, 0, 0, 0.3);
+                    color: rgba(255, 255, 255, 0.5);
+                    border: 1px solid rgba(255, 255, 255, 0.3);
+                    border-radius: 11px;
+                    font-size: 13px;
+                }
+                QLabel:hover {
+                    background-color: rgba(0, 0, 0, 0.4);
+                    color: rgba(239, 68, 68, 0.9);
+                    border: 2px solid rgba(239, 68, 68, 0.7);
+                }
+            """)
+
+    def _update_group_dots(self):
+        """Update the group dots display based on group membership."""
+        # Clear existing dots
+        while self._group_dots_layout.count() > 1:  # Keep the stretch
+            item = self._group_dots_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not self._group_colors:
+            self.group_dots_container.hide()
+            return
+
+        # Add colored dots (max 3) - outline style
+        for color in self._group_colors[:3]:
+            dot = QLabel()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"""
+                QLabel {{
+                    background-color: rgba(0, 0, 0, 0.4);
+                    border-radius: 5px;
+                    border: 2px solid {color};
+                }}
+            """)
+            dot.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self._group_dots_layout.insertWidget(self._group_dots_layout.count() - 1, dot)
+
+        self.group_dots_container.show()
+
+    def _update_group_border(self):
+        """Update thumbnail border color with priority: group > liked > stack."""
+        from core.settings_manager import get_setting
+
+        # Priority 1: Group color (highest)
+        if self._group_colors:
+            self._styler.group_color = self._group_colors[0]
+            self._apply_thumbnail_style()
+            return
+
+        # Priority 2: Liked color (if liked and has custom liked color)
+        if self._is_liked:
+            liked_color = get_setting("gallery_liked_color")
+            if liked_color:
+                self._styler.group_color = liked_color
+                self._apply_thumbnail_style()
+                return
+
+        # Priority 3: Stack color (if has job_prefix and custom stack color)
+        if self._job_prefix:
+            stack_colors = get_setting("gallery_stack_colors") or {}
+            stack_color = stack_colors.get(self._job_prefix)
+            if stack_color:
+                self._styler.group_color = stack_color
+                self._apply_thumbnail_style()
+                return
+
+        # No custom color - use default
+        self._styler.group_color = None
+        self._apply_thumbnail_style()
+
+    def _toggle_like(self):
+        """Toggle like state for this item."""
+        if not self._favorites_manager:
+            return
+        is_liked = self._favorites_manager.toggle_like(self.path)
+        self._is_liked = is_liked
+        self._update_like_indicator_style()
+        self.like_toggled.emit(self.path, is_liked)
+
+        # Animate the heart
+        self._animate_like()
+
+        # Show statusbar message
+        if self._gallery_tab and hasattr(self._gallery_tab, 'show_status_message'):
+            msg = "Added to Likes" if is_liked else "Removed from Likes"
+            self._gallery_tab.show_status_message(msg)
+
+    def _animate_like(self):
+        """Animate the like indicator with a scale bounce."""
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QRect
+        if not hasattr(self, '_like_anim') or self._like_anim is None:
+            self._like_anim = QPropertyAnimation(self.like_indicator, b"geometry")
+            self._like_anim.setDuration(150)
+            self._like_anim.setEasingCurve(QEasingCurve.OutBack)
+
+        original = self.like_indicator.geometry()
+        enlarged = QRect(
+            original.x() - 3,
+            original.y() - 3,
+            original.width() + 6,
+            original.height() + 6
+        )
+
+        self._like_anim.setKeyValueAt(0.0, original)
+        self._like_anim.setKeyValueAt(0.5, enlarged)
+        self._like_anim.setKeyValueAt(1.0, original)
+        self._like_anim.start()
+
+    def _toggle_group_membership(self, group_id):
+        """Toggle membership in a group."""
+        if not self._favorites_manager:
+            return
+        is_in_group = self._favorites_manager.toggle_group_membership(self.path, group_id)
+        self.update_favorites_state()
+
+        # Show feedback
+        group = self._favorites_manager.get_group(group_id)
+        if group and self._gallery_tab and hasattr(self._gallery_tab, 'show_status_message'):
+            msg = f"Added to {group.name}" if is_in_group else f"Removed from {group.name}"
+            self._gallery_tab.show_status_message(msg)
+
+        # Flash border in group color
+        self._flash_border(group.color if group else None)
+
+    def _create_new_group(self):
+        """Open dialog to create a new group and add this item to it."""
+        from dialogs import GroupEditorDialog
+        dialog = GroupEditorDialog(parent=self)
+        if dialog.exec_():
+            name, color = dialog.get_result()
+            if name and self._favorites_manager:
+                group_id = self._favorites_manager.create_group(name, color)
+                self._favorites_manager.add_to_group(self.path, group_id)
+                self.update_favorites_state()
+                if self._gallery_tab and hasattr(self._gallery_tab, 'show_status_message'):
+                    self._gallery_tab.show_status_message(f"Created group '{name}' and added item")
+
+    def _flash_border(self, color=None):
+        """Flash the border briefly in a color for feedback."""
+        if not color:
+            return
+        # Store original color
+        original_color = self._styler.group_color
+        # Set to flash color
+        self._styler.group_color = color
+        self._apply_thumbnail_style()
+        # Restore after delay
+        QTimer.singleShot(200, lambda: self._restore_border(original_color))
+
+    def _restore_border(self, original_color):
+        """Restore border after flash."""
+        if not isValid(self):
+            return
+        self._styler.group_color = original_color
+        self._apply_thumbnail_style()
 
     def mark_as_viewed(self):
         if self._is_new:
@@ -307,6 +561,10 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             self._thumbnail_loaded = True
             if self.item_type == 'model':
                 self._load_model_thumbnail()
+            elif self.item_type == 'video':
+                self._load_video_thumbnail()
+            elif self.item_type == 'audio':
+                self._load_audio_placeholder()
             else:
                 self._load_image_thumbnail()
         if not self._tooltip_loaded:
@@ -439,6 +697,130 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 *self.THUMBNAIL_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
             ))
 
+    # --- Video thumbnail loading ---
+    def _load_video_thumbnail(self):
+        """Load video thumbnail by extracting first frame."""
+        self.thumbnail_label.setPixmap(self._create_video_placeholder())
+        self._load_worker = Worker(self._extract_video_frame, self.path)
+        self._load_worker.signals.result.connect(self._on_video_thumbnail_loaded)
+        self._load_worker.signals.error.connect(lambda msg, tb: None)  # Keep placeholder on error
+        QThreadPool.globalInstance().start(self._load_worker)
+
+    @staticmethod
+    def _extract_video_frame(video_path):
+        """Extract first frame from video using FFmpeg."""
+        import subprocess
+        import tempfile
+        from core.config import FFMPEG_PATH
+        if not FFMPEG_PATH:
+            return None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp_path = tmp.name
+            cmd = [
+                FFMPEG_PATH, '-i', video_path,
+                '-vframes', '1', '-y', tmp_path
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=10)
+            from PySide6.QtGui import QImage
+            from PySide6.QtCore import QBuffer, QIODevice
+            image = QImage(tmp_path)
+            os.remove(tmp_path)
+            if image.isNull():
+                return None
+            scaled = image.scaled(
+                ThumbnailWidget.THUMBNAIL_SIZE[0],
+                ThumbnailWidget.THUMBNAIL_SIZE[1],
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            scaled.save(buffer, "PNG")
+            return buffer.data().data()
+        except Exception:
+            return None
+
+    def _on_video_thumbnail_loaded(self, image_data):
+        if not isValid(self):
+            return
+        if image_data is None:
+            return  # Keep the video placeholder
+        pixmap = QPixmap()
+        pixmap.loadFromData(image_data)
+        if not pixmap.isNull():
+            self.thumbnail_label.setPixmap(pixmap)
+
+    def _create_video_placeholder(self):
+        """Create a video placeholder with play icon."""
+        cache_key = "video_placeholder"
+        if cache_key in BaseThumbnailWidget._placeholder_cache:
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
+
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(QColor("#2a3040"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw play triangle
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor("#ef4444")))
+        center_x, center_y = 75, 65
+        size = 25
+        from PySide6.QtGui import QPolygon
+        from PySide6.QtCore import QPoint
+        triangle = QPolygon([
+            QPoint(center_x - size//2, center_y - size//2),
+            QPoint(center_x - size//2, center_y + size//2),
+            QPoint(center_x + size//2, center_y),
+        ])
+        painter.drawPolygon(triangle)
+
+        # Draw "VIDEO" text
+        painter.setPen(QColor("#ef4444"))
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "VIDEO")
+        painter.end()
+
+        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+        return pixmap
+
+    # --- Audio placeholder ---
+    def _load_audio_placeholder(self):
+        """Show audio placeholder (no thumbnail extraction for audio)."""
+        self.thumbnail_label.setPixmap(self._create_audio_placeholder())
+
+    def _create_audio_placeholder(self):
+        """Create an audio placeholder with music note icon."""
+        cache_key = "audio_placeholder"
+        if cache_key in BaseThumbnailWidget._placeholder_cache:
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
+
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(QColor("#2a3040"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw music note
+        painter.setPen(QColor("#a855f7"))
+        font = painter.font()
+        font.setPointSize(40)
+        painter.setFont(font)
+        painter.drawText(0, 20, self.THUMBNAIL_SIZE[0], 80, Qt.AlignCenter, "♫")
+
+        # Draw "AUDIO" text
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "AUDIO")
+        painter.end()
+
+        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+        return pixmap
+
     def _on_thumbnail_error(self):
         if not isValid(self):
             return
@@ -491,6 +873,15 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         from PySide6.QtWidgets import QApplication
         mods = QApplication.keyboardModifiers()
         if event.button() == Qt.LeftButton:
+            # Check if click is on like indicator
+            like_geom = self.like_indicator.geometry()
+            # Map click position to thumbnail_label coordinates
+            thumb_pos = self.thumbnail_label.mapFrom(self, event.pos())
+            if self.like_indicator.isVisible() and like_geom.contains(thumb_pos):
+                self._toggle_like()
+                event.accept()
+                return
+
             if self._double_click_in_progress:
                 super().mousePressEvent(event)
                 return
@@ -518,11 +909,16 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         super().enterEvent(event)
         self._is_hovered = True
         self._apply_thumbnail_style()
+        # Show like indicator on hover (hover-reveal)
+        self.like_indicator.show()
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self._is_hovered = False
         self._apply_thumbnail_style()
+        # Hide like indicator if not liked
+        if not self._is_liked:
+            self.like_indicator.hide()
 
     def contextMenuEvent(self, event):
         if self._gallery_tab and self._is_selected and len(self._gallery_tab._selected_items) > 1:
@@ -545,6 +941,39 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     def _show_context_menu(self, pos):
         try:
             menu = QMenu(self)
+
+            # Like option (at the top for quick access)
+            if self._favorites_manager:
+                is_liked = self._is_liked
+                like_action = menu.addAction("Unlike" if is_liked else "Like")
+                like_action.triggered.connect(self._toggle_like)
+                # Add heart icon visual
+                if is_liked:
+                    like_action.setText("♥ Unlike")
+                else:
+                    like_action.setText("♡ Like")
+
+                # Groups submenu
+                groups_menu = menu.addMenu("Add to Group")
+                groups = self._favorites_manager.get_groups()
+                item_group_ids = set(self._favorites_manager.get_item_groups(self.path))
+
+                for group in groups:
+                    action = groups_menu.addAction(f"● {group.name}")
+                    action.setCheckable(True)
+                    action.setChecked(group.group_id in item_group_ids)
+                    # Use colored text to indicate group color
+                    action.triggered.connect(
+                        lambda checked, gid=group.group_id: self._toggle_group_membership(gid)
+                    )
+
+                if groups:
+                    groups_menu.addSeparator()
+
+                new_group_action = groups_menu.addAction("+ New Group...")
+                new_group_action.triggered.connect(self._create_new_group)
+
+                menu.addSeparator()
 
             # View options
             open_action = menu.addAction("Open in Viewer")
@@ -632,6 +1061,32 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         header_action.setEnabled(False)
         menu.addSeparator()
 
+        # Batch like/unlike
+        if self._favorites_manager:
+            like_action = menu.addAction("♡ Like Selected")
+            like_action.triggered.connect(lambda: self._batch_like(True))
+
+            unlike_action = menu.addAction("♥ Unlike Selected")
+            unlike_action.triggered.connect(lambda: self._batch_like(False))
+
+            # Groups submenu for batch operations
+            groups_menu = menu.addMenu("Add Selected to Group")
+            groups = self._favorites_manager.get_groups()
+
+            for group in groups:
+                action = groups_menu.addAction(f"● {group.name}")
+                action.triggered.connect(
+                    lambda checked, gid=group.group_id: self._batch_add_to_group(gid)
+                )
+
+            if groups:
+                groups_menu.addSeparator()
+
+            new_group_action = groups_menu.addAction("+ New Group...")
+            new_group_action.triggered.connect(self._create_new_group_for_batch)
+
+            menu.addSeparator()
+
         view_action = menu.addAction("View Selected")
         view_action.triggered.connect(self._gallery_tab._on_view_selected)
 
@@ -651,6 +1106,47 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         clear_action.triggered.connect(self._gallery_tab._clear_selection)
 
         menu.exec_(self.mapToGlobal(pos))
+
+    def _batch_like(self, like=True):
+        """Like or unlike all selected items."""
+        if not self._favorites_manager or not self._gallery_tab:
+            return
+        paths = list(self._gallery_tab._selected_items)
+        if like:
+            self._favorites_manager.like_items(paths)
+            msg = f"Liked {len(paths)} items"
+        else:
+            self._favorites_manager.unlike_items(paths)
+            msg = f"Unliked {len(paths)} items"
+        # Update visuals for all selected widgets
+        self._gallery_tab._refresh_favorites_state()
+        if hasattr(self._gallery_tab, 'show_status_message'):
+            self._gallery_tab.show_status_message(msg)
+
+    def _batch_add_to_group(self, group_id):
+        """Add all selected items to a group."""
+        if not self._favorites_manager or not self._gallery_tab:
+            return
+        paths = list(self._gallery_tab._selected_items)
+        self._favorites_manager.add_items_to_group(paths, group_id)
+        group = self._favorites_manager.get_group(group_id)
+        self._gallery_tab._refresh_favorites_state()
+        if group and hasattr(self._gallery_tab, 'show_status_message'):
+            self._gallery_tab.show_status_message(f"Added {len(paths)} items to {group.name}")
+
+    def _create_new_group_for_batch(self):
+        """Create a new group and add all selected items to it."""
+        from dialogs import GroupEditorDialog
+        dialog = GroupEditorDialog(parent=self)
+        if dialog.exec_():
+            name, color = dialog.get_result()
+            if name and self._favorites_manager and self._gallery_tab:
+                group_id = self._favorites_manager.create_group(name, color)
+                paths = list(self._gallery_tab._selected_items)
+                self._favorites_manager.add_items_to_group(paths, group_id)
+                self._gallery_tab._refresh_favorites_state()
+                if hasattr(self._gallery_tab, 'show_status_message'):
+                    self._gallery_tab.show_status_message(f"Created '{name}' with {len(paths)} items")
 
     def _publish_to_ayon(self):
         """Publish this item to AYON."""

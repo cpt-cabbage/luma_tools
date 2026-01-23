@@ -288,8 +288,19 @@ class ButtonNotificationBadge(QWidget):
         self._offset = offset
         self._visible = False
 
-        # Set fixed size for the badge
-        self.setFixedSize(size + 4, size + 4)  # Extra space for glow
+        # Animation state
+        self._intensity = 0.0
+        self._direction = 1  # 1 = brightening, -1 = dimming
+        self._is_animating = False
+
+        # Timer for pulsing animation
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._animation_interval = 50  # 20 FPS
+        self._intensity_step = 0.08  # How much to change per frame
+
+        # Set fixed size for the badge (extra space for animated glow)
+        self.setFixedSize(size + 6, size + 6)  # Extra space for glow
 
         # Make transparent background
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -318,33 +329,62 @@ class ButtonNotificationBadge(QWidget):
         y = self._offset[1]
         self.move(x, y)
 
+    def _animate(self):
+        """Update the pulse intensity for animation."""
+        if not self._is_animating:
+            return
+
+        # Update intensity
+        self._intensity += self._intensity_step * self._direction
+
+        # Clamp and reverse direction at bounds
+        if self._intensity >= 1.0:
+            self._intensity = 1.0
+            self._direction = -1
+        elif self._intensity <= 0.0:
+            self._intensity = 0.0
+            self._direction = 1
+
+        self.update()
+
     def paintEvent(self, event):
-        """Paint the notification badge."""
+        """Paint the notification badge with pulsing animation."""
         if not self._visible:
             return
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Draw outer glow
+        # Calculate animated values based on intensity
+        size_boost = int(2 * self._intensity)  # Size varies by 0-2 pixels
+        base_alpha = 200 + int(55 * self._intensity)  # Alpha varies 200-255
+        glow_alpha = 60 + int(60 * self._intensity)  # Glow alpha varies 60-120
+
+        # Draw outer glow (pulsing)
         glow_color = QColor(self._color)
-        glow_color.setAlpha(80)
+        glow_color.setAlpha(glow_alpha)
         painter.setBrush(QBrush(glow_color))
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(0, 0, self._size + 4, self._size + 4)
+        glow_size = self._size + 4 + size_boost
+        painter.drawEllipse(0, 0, glow_size, glow_size)
 
-        # Draw main badge
-        painter.setBrush(QBrush(self._color))
+        # Draw main badge (pulsing)
+        badge_color = QColor(self._color)
+        badge_color.setAlpha(base_alpha)
+        painter.setBrush(QBrush(badge_color))
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(2, 2, self._size, self._size)
+        badge_offset = 2
+        badge_size = self._size + size_boost
+        painter.drawEllipse(badge_offset, badge_offset, badge_size, badge_size)
 
-        # Draw highlight
-        highlight_color = QColor(255, 255, 255, 150)
+        # Draw highlight (pulsing)
+        highlight_alpha = 120 + int(60 * self._intensity)
+        highlight_color = QColor(255, 255, 255, highlight_alpha)
         painter.setBrush(QBrush(highlight_color))
-        highlight_size = self._size * 0.35
+        highlight_size = badge_size * 0.35
         painter.drawEllipse(
-            int(2 + self._size * 0.2),
-            int(2 + self._size * 0.15),
+            int(badge_offset + badge_size * 0.2),
+            int(badge_offset + badge_size * 0.15),
             int(highlight_size),
             int(highlight_size)
         )
@@ -352,16 +392,22 @@ class ButtonNotificationBadge(QWidget):
         painter.end()
 
     def show_badge(self):
-        """Show the notification badge."""
+        """Show the notification badge with pulsing animation."""
         self._visible = True
+        self._is_animating = True
+        self._intensity = 0.0
+        self._direction = 1
         self._update_position()
         self.show()
         self.raise_()
+        self._timer.start(self._animation_interval)
         self.update()
 
     def hide_badge(self):
-        """Hide the notification badge."""
+        """Hide the notification badge and stop animation."""
         self._visible = False
+        self._is_animating = False
+        self._timer.stop()
         self.hide()
 
     def is_badge_visible(self):

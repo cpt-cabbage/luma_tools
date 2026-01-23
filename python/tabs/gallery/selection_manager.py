@@ -131,7 +131,134 @@ class SelectionManager:
                 self.clear_selection()
                 return True
 
+        # L: Toggle like on selected items
+        if event.key() == Qt.Key_L:
+            self._toggle_like_selected()
+            return True
+
+        # G: Open group menu for selected items
+        if event.key() == Qt.Key_G:
+            if event.modifiers() == Qt.ControlModifier:
+                # Ctrl+G: Create new group
+                self._create_new_group()
+            else:
+                # G: Show group menu
+                self._show_group_menu()
+            return True
+
+        # Number keys 1-9: Quick add to group by index
+        if Qt.Key_1 <= event.key() <= Qt.Key_9:
+            group_index = event.key() - Qt.Key_1
+            if event.modifiers() == Qt.ShiftModifier:
+                self._remove_from_group_by_index(group_index)
+            else:
+                self._add_to_group_by_index(group_index)
+            return True
+
         return False
+
+    def _toggle_like_selected(self):
+        """Toggle like status for all selected items."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager or not self.tab._selected_items:
+            return
+
+        paths = list(self.tab._selected_items)
+        # Check if any are liked - if all liked, unlike all; otherwise like all
+        all_liked = all(favorites_manager.is_liked(p) for p in paths)
+
+        if all_liked:
+            favorites_manager.unlike_items(paths)
+            msg = f"Unliked {len(paths)} items"
+        else:
+            favorites_manager.like_items(paths)
+            msg = f"Liked {len(paths)} items"
+
+        self.tab._refresh_favorites_state()
+        if hasattr(self.tab, 'show_status_message'):
+            self.tab.show_status_message(msg)
+
+    def _show_group_menu(self):
+        """Show a popup menu to add selected items to a group."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager or not self.tab._selected_items:
+            return
+
+        from PySide6.QtWidgets import QMenu, QCursor
+
+        menu = QMenu(self.tab)
+        groups = favorites_manager.get_groups()
+
+        for group in groups:
+            action = menu.addAction(f"● {group.name}")
+            action.triggered.connect(
+                lambda checked, gid=group.group_id: self._add_selected_to_group(gid)
+            )
+
+        if groups:
+            menu.addSeparator()
+
+        new_action = menu.addAction("+ New Group...")
+        new_action.triggered.connect(self._create_new_group)
+
+        menu.exec_(QCursor.pos())
+
+    def _create_new_group(self):
+        """Create a new group and add selected items to it."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager:
+            return
+
+        from dialogs import GroupEditorDialog
+        dialog = GroupEditorDialog(parent=self.tab)
+        if dialog.exec_():
+            name, color = dialog.get_result()
+            if name:
+                group_id = favorites_manager.create_group(name, color)
+                if self.tab._selected_items:
+                    paths = list(self.tab._selected_items)
+                    favorites_manager.add_items_to_group(paths, group_id)
+                    self.tab._refresh_favorites_state()
+                    if hasattr(self.tab, 'show_status_message'):
+                        self.tab.show_status_message(f"Created '{name}' with {len(paths)} items")
+
+    def _add_selected_to_group(self, group_id):
+        """Add all selected items to a group."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager or not self.tab._selected_items:
+            return
+
+        paths = list(self.tab._selected_items)
+        favorites_manager.add_items_to_group(paths, group_id)
+        group = favorites_manager.get_group(group_id)
+        self.tab._refresh_favorites_state()
+        if group and hasattr(self.tab, 'show_status_message'):
+            self.tab.show_status_message(f"Added {len(paths)} items to {group.name}")
+
+    def _add_to_group_by_index(self, index):
+        """Add selected items to group by its index (0-8 for keys 1-9)."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager or not self.tab._selected_items:
+            return
+
+        groups = favorites_manager.get_groups()
+        if index < len(groups):
+            self._add_selected_to_group(groups[index].group_id)
+
+    def _remove_from_group_by_index(self, index):
+        """Remove selected items from group by its index (0-8 for keys 1-9)."""
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if not favorites_manager or not self.tab._selected_items:
+            return
+
+        groups = favorites_manager.get_groups()
+        if index < len(groups):
+            group = groups[index]
+            paths = list(self.tab._selected_items)
+            favorites_manager.remove_items_from_group(paths, group.group_id)
+            self.tab._refresh_favorites_state()
+            if hasattr(self.tab, 'show_status_message'):
+                self.tab.show_status_message(f"Removed {len(paths)} items from {group.name}")
 
     def select_all(self):
         """Select all items in the gallery."""
@@ -142,10 +269,19 @@ class SelectionManager:
             if hasattr(widget, 'set_selected'):
                 widget.set_selected(True)
 
-        self.tab.log(f"[Gallery] Selected all {len(self.tab._selected_items)} items")
+        count = len(self.tab._selected_items)
+        self.tab.log(f"[Gallery] Selected all {count} items")
+        if hasattr(self.tab, 'show_status_message'):
+            self.tab.show_status_message(f"Selected all {count} items")
 
-    def clear_selection(self):
-        """Clear all selected items."""
+    def clear_selection(self, show_status=True):
+        """Clear all selected items.
+
+        Args:
+            show_status: Whether to show status message (default True)
+        """
+        had_selection = len(self.tab._selected_items) > 0
+
         # Update all selected widgets in widget cache
         for path in list(self.tab._selected_items):
             if path in self.tab._widget_cache:
@@ -166,6 +302,9 @@ class SelectionManager:
 
         self.tab._selected_items.clear()
         self._update_toolbar()
+
+        if show_status and had_selection and hasattr(self.tab, 'show_status_message'):
+            self.tab.show_status_message("Selection cleared")
 
     def on_selection_changed(self, image_path, is_selected):
         """Handle thumbnail selection state change."""

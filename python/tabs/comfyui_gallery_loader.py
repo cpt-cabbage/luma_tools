@@ -12,9 +12,11 @@ import os
 import re
 
 # Supported file extensions
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr', '.tiff', '.tif', '.bmp', '.gif'}
+VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm'}
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.ogg'}
 MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
-SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | MODEL_EXTENSIONS
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | MODEL_EXTENSIONS
 
 
 def extract_job_prefix(filename: str) -> tuple:
@@ -157,7 +159,15 @@ class GalleryLoader:
                             mtime = os.path.getmtime(full_path)
                         except OSError:
                             continue
-                        file_type = 'model' if ext in model_extensions else 'image'
+                        # Determine file type based on extension
+                        if ext in model_extensions:
+                            file_type = 'model'
+                        elif ext in VIDEO_EXTENSIONS:
+                            file_type = 'video'
+                        elif ext in AUDIO_EXTENSIONS:
+                            file_type = 'audio'
+                        else:
+                            file_type = 'image'
 
                         if root not in files_by_dir:
                             files_by_dir[root] = []

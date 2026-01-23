@@ -82,6 +82,10 @@ class ViewerManager:
         # Hide gallery elements
         self.tab.ui.galleryScrollArea.hide()
 
+        # Also hide groups panel if it exists
+        if hasattr(self.tab, '_groups_panel'):
+            self.tab._groups_panel.hide()
+
         # Check if viewer creation is already in progress
         if self._viewer_creation_pending:
             # Update the pending parameters for when creation completes
@@ -173,6 +177,12 @@ class ViewerManager:
         self._embedded_viewer.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
         self._embedded_viewer.image_viewed.connect(self.tab._on_item_viewed)
 
+        # Set favorites manager for like button functionality
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if favorites_manager:
+            self._embedded_viewer.set_favorites_manager(favorites_manager)
+            self._embedded_viewer.like_toggled.connect(self._on_viewer_like_toggled)
+
         # Insert viewer into the main layout (after header, before footer)
         self.tab.ui.galleryMainLayout.insertWidget(1, self._embedded_viewer)
 
@@ -181,6 +191,27 @@ class ViewerManager:
 
         # Clear creation-in-progress flag
         self._viewer_creation_pending = False
+
+    def _on_viewer_like_toggled(self, path, is_liked):
+        """Handle like toggle from the viewer.
+
+        Args:
+            path: Path of the item
+            is_liked: New like state
+        """
+        # Show status message
+        if hasattr(self.tab, 'show_status_message'):
+            if is_liked:
+                self.tab.show_status_message("♥ Added to Likes")
+            else:
+                self.tab.show_status_message("Removed from Likes")
+
+        # Update the thumbnail widget's like state if visible
+        if hasattr(self.tab, '_widget_cache') and path in self.tab._widget_cache:
+            from shiboken6 import isValid
+            widget = self.tab._widget_cache[path]
+            if isValid(widget) and hasattr(widget, 'update_favorites_state'):
+                widget.update_favorites_state()
 
     def close_embedded(self):
         """Close the embedded viewer and show gallery grid."""
@@ -198,6 +229,10 @@ class ViewerManager:
 
         # Show gallery elements
         self.tab.ui.galleryScrollArea.show()
+
+        # Show groups panel if it exists
+        if hasattr(self.tab, '_groups_panel'):
+            self.tab._groups_panel.show()
 
     def _on_view_fullscreen(self, image_path, index):
         """Handle request to view in fullscreen from embedded viewer."""

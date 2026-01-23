@@ -44,6 +44,9 @@ def _validate_server_wait_timeout(v):
 def _validate_server_behavior(v):
     return v if v in ("fail", "wait") else "fail"
 
+def _validate_stacking_mode(v):
+    return v if v in ("job", "groups", "both", "grid") else "job"
+
 # Registry of all simple settings (get/set only, no complex logic)
 SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # ComfyUI Global Settings
@@ -88,6 +91,18 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "last_opened_version": SettingDef("last_opened_version", "0.0.0", "user"),
     # Feature requests tracking
     "feature_requests_last_read": SettingDef("feature_requests_last_read", "", "user"),
+    # Gallery likes and groups
+    "gallery_liked_items": SettingDef("gallery_liked_items", [], "user"),
+    "gallery_groups": SettingDef("gallery_groups", {}, "user"),
+    "gallery_item_groups": SettingDef("gallery_item_groups", {}, "user"),
+    "gallery_multi_group_enabled": SettingDef("gallery_multi_group_enabled", True, "user"),
+    "gallery_stacking_mode": SettingDef("gallery_stacking_mode", "both", "user", _validate_stacking_mode),
+    "gallery_sidebar_collapsed": SettingDef("gallery_sidebar_collapsed", False, "user"),
+    "gallery_splitter_sizes": SettingDef("gallery_splitter_sizes", [200, 800], "user"),
+    "gallery_stack_colors": SettingDef("gallery_stack_colors", {}, "user"),
+    "gallery_liked_color": SettingDef("gallery_liked_color", None, "user"),
+    "gallery_stacks_data": SettingDef("gallery_stacks_data", {}, "user"),
+    "gallery_stacks_collapsed": SettingDef("gallery_stacks_collapsed", False, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery"], "global"),
 }
