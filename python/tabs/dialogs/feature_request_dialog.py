@@ -7,11 +7,12 @@ Allows administrators to mark requests as completed.
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialogButtonBox, QLabel, QCheckBox, QHBoxLayout, QPushButton, QMessageBox
+    QDialogButtonBox, QLabel, QCheckBox, QHBoxLayout, QPushButton
 )
 from PySide6.QtCore import Qt
 
 from core.feature_requests import get_feature_requests, mark_feature_requests_as_read, mark_request_completed
+from dialog_helpers import confirm_action, show_info
 
 
 class FeatureRequestDialog(QDialog):
@@ -170,29 +171,28 @@ class FeatureRequestDialog(QDialog):
                 selected_ids.append(req_id)
 
         if not selected_ids:
-            QMessageBox.information(self, "No Selection", "Please select pending requests to mark as completed.")
+            show_info("No Selection", "Please select pending requests to mark as completed.", self)
             return
 
         # Confirm
-        reply = QMessageBox.question(
-            self,
+        if not confirm_action(
             "Confirm Completion",
             f"Mark {len(selected_ids)} request(s) as completed?\n\nUsers will be notified.",
-            QMessageBox.Yes | QMessageBox.No
+            self
+        ):
+            return
+
+        success_count = 0
+        for req_id in selected_ids:
+            if mark_request_completed(req_id, self.user):
+                success_count += 1
+
+        show_info(
+            "Completed",
+            f"Marked {success_count} request(s) as completed.\nUsers will be notified when they open the app.",
+            self
         )
 
-        if reply == QMessageBox.Yes:
-            success_count = 0
-            for req_id in selected_ids:
-                if mark_request_completed(req_id, self.user):
-                    success_count += 1
-
-            QMessageBox.information(
-                self,
-                "Completed",
-                f"Marked {success_count} request(s) as completed.\nUsers will be notified when they open the app."
-            )
-
-            # Refresh the dialog
-            self.accept()
-            # Parent will handle reopening if needed
+        # Refresh the dialog
+        self.accept()
+        # Parent will handle reopening if needed

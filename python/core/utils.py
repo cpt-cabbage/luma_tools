@@ -1,7 +1,11 @@
 
 import re
 import os
+import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_trailing_number(s):
@@ -71,6 +75,89 @@ def ensure_directory(path):
         path: Directory path to ensure exists
     """
     os.makedirs(path, exist_ok=True)
+
+
+def remove_prefix(s, prefix):
+    """
+    Remove prefix from string (Python <3.9 compatible).
+
+    Args:
+        s: Input string
+        prefix: Prefix to remove
+
+    Returns:
+        str: String with prefix removed if present
+    """
+    if hasattr(s, 'removeprefix'):
+        return s.removeprefix(prefix)
+    return s[len(prefix):] if s.startswith(prefix) else s
+
+
+def remove_suffix(s, suffix):
+    """
+    Remove suffix from string (Python <3.9 compatible).
+
+    Args:
+        s: Input string
+        suffix: Suffix to remove
+
+    Returns:
+        str: String with suffix removed if present
+    """
+    if hasattr(s, 'removesuffix'):
+        return s.removesuffix(suffix)
+    return s[:-len(suffix)] if suffix and s.endswith(suffix) else s
+
+
+def load_json(path, default=None):
+    """
+    Load JSON file with error handling.
+
+    Args:
+        path: Path to JSON file
+        default: Default value if file doesn't exist or fails to load
+
+    Returns:
+        Loaded JSON data or default value
+    """
+    if not os.path.exists(path):
+        return default if default is not None else {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Error loading JSON from {path}: {e}")
+        return default if default is not None else {}
+
+
+def save_json(path, data, pretty=True):
+    """
+    Save JSON file with atomic write to prevent corruption.
+
+    Args:
+        path: Path to save JSON file
+        data: Data to save
+        pretty: If True, format with indentation (default: True)
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    ensure_directory(os.path.dirname(path))
+    temp_path = path + ".tmp"
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2 if pretty else None)
+        os.replace(temp_path, path)
+        return True
+    except Exception as e:
+        logger.warning(f"Error saving JSON to {path}: {e}")
+        # Clean up temp file if it exists
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        return False
 
 
 def get_folder_size(folder):
@@ -210,3 +297,34 @@ def scan_exr_sequences(path):
     except Exception as e:
         print(f"Error scanning EXR sequences in {path}: {e}")
         return []
+
+
+def extract_render_name(filename, strip_frame_padding=False):
+    """
+    Extract render name from a sequence filename.
+
+    This handles common sequence naming patterns:
+    - Simple: "render_name.0001.exr" -> "render_name"
+    - With padding: "render_name.####.exr" -> "render_name"
+
+    Args:
+        filename: Filename or basename to extract render name from
+        strip_frame_padding: If True, also strips frame padding markers (####)
+                           from the result. Use this for fileseq basenames.
+
+    Returns:
+        str: The render name (first part before dots)
+
+    Example:
+        >>> extract_render_name("beauty_v001.0042.exr")
+        'beauty_v001'
+        >>> extract_render_name("beauty_v001.####.exr", strip_frame_padding=True)
+        'beauty_v001'
+    """
+    if strip_frame_padding:
+        # Handle fileseq basenames with #### padding markers
+        parts = [p for p in filename.split('.') if p and not all(c == '#' for c in p)]
+        return parts[0] if parts else filename.replace("#", "").strip(".")
+    else:
+        # Simple extraction - just get first part before any dot
+        return filename.split(".")[0]

@@ -70,12 +70,6 @@ class SplashScreen(QWidget):
 
         logo_layout.addWidget(self.logo_label, alignment=Qt.AlignCenter)
 
-        # Title - removed for cleaner logo-only design
-        # self.title_label = QLabel("Luma Shot Tools")
-        # self.title_label.setAlignment(Qt.AlignCenter)
-        # self.title_label.setFont(LoadingStyles.TITLE_FONT)
-        # self.title_label.setStyleSheet(f"color: {LoadingStyles.PRIMARY_COLOR_STR};")
-
         # Spinner
         self.spinner = SpinnerWidget()
         spinner_container = QWidget()
@@ -110,8 +104,7 @@ class SplashScreen(QWidget):
         # Add widgets to layout
         layout.addStretch()
         layout.addWidget(logo_container)
-        layout.addStretch()  # Move logo up away from spinner
-        # Title label removed for cleaner design
+        layout.addStretch()
         layout.addWidget(spinner_container)
         layout.addWidget(self.main_label)
         layout.addWidget(self.sub_label)

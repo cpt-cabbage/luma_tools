@@ -49,7 +49,9 @@
       "Bash(set \"PYTHONPATH=l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python;l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\")",
       "Bash(cmd /c \"dir /b /o-d %USERPROFILE%\\\\.luma_tools\\\\logs\\\\*.log 2>nul | head -1\")",
       "Bash(pythonvenvScriptspython.exe -m py_compile pythoncomfyuideadline_poller.py)",
-      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabscomfyui_polling.py)"
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabscomfyui_polling.py)",
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabsmp4_maker_tab.py pythontabsrepublish_tab.py pythontabspass_builder_tab.py)",
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabsgalleryselection_manager.py pythontabsgalleryrefresh_controller.py pythontabsgalleryui_manager.py pythontabsgalleryfavorites_manager.py pythoncoreconfig.py)"
     ],
     "deny": [],
     "ask": []

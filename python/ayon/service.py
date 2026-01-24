@@ -11,7 +11,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, List, Callable
 
-from core.utils import normalize_path
+from core.utils import normalize_path, ensure_directory
 from core.config import (
     AYON_COLORSPACE, AYON_CONSOLE, AYON_DEFAULT_FPS, AYON_DEFAULT_HEIGHT,
     AYON_DEFAULT_WIDTH, AYON_DISPLAY, AYON_FAMILY, AYON_PRODUCT_TYPE, AYON_VIEW,
@@ -513,7 +513,7 @@ def write_metadata_file(metadata_dict, output_path):
 
     # Ensure directory exists (handle case where dirname returns empty string for filename-only paths)
     if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
+        ensure_directory(dir_path)
     else:
         # If no directory in path, use current working directory
         output_path = os.path.join(os.getcwd(), output_path)

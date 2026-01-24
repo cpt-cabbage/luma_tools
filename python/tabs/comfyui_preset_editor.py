@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QWidget, QFileDialog, QScrollArea
+    QPushButton, QWidget, QScrollArea
 )
 
 
@@ -234,11 +234,14 @@ class PresetEditorDialog(QDialog):
 
     def _on_browse_workflow(self):
         """Browse for workflow JSON file."""
-        file_path, _ = QFileDialog.getOpenFileName(
+        from file_dialogs import browse_file_with_memory
+
+        file_path = browse_file_with_memory(
             self,
-            "Select ComfyUI Workflow File",
-            os.path.expanduser("~"),
-            "JSON Files (*.json);;All Files (*)"
+            context="comfyui_workflow",
+            title="Select ComfyUI Workflow File",
+            file_filter="JSON Files (*.json);;All Files (*)",
+            fallback_path=os.path.expanduser("~")
         )
         if file_path:
             self.path_edit.setText(file_path)
@@ -556,11 +559,14 @@ class PresetEditorDialog(QDialog):
 
     def _on_browse_wf_path(self, path_edit: QLineEdit):
         """Browse for workflow path (for multi-workflow entries)."""
-        file_path, _ = QFileDialog.getOpenFileName(
+        from file_dialogs import browse_file_with_memory
+
+        file_path = browse_file_with_memory(
             self,
-            "Select ComfyUI Workflow File",
-            os.path.expanduser("~"),
-            "JSON Files (*.json);;All Files (*)"
+            context="comfyui_workflow",
+            title="Select ComfyUI Workflow File",
+            file_filter="JSON Files (*.json);;All Files (*)",
+            fallback_path=os.path.expanduser("~")
         )
         if file_path:
             path_edit.setText(file_path)

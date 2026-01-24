@@ -128,6 +128,32 @@ class BaseTab(ABC):
         """Emit a status update signal."""
         self.signals.status_update.emit(message)
 
+    def show_status(self, message: str, level: str = "info"):
+        """
+        Show a status message via the animator.
+
+        This helper eliminates the repeated `hasattr(self.main_window, 'animator')`
+        checks throughout tab code.
+
+        Args:
+            message: Message to display
+            level: One of "info", "success", "warning", "error"
+
+        Example:
+            self.show_status("File saved successfully", "success")
+            self.show_status("Invalid input", "warning")
+        """
+        if hasattr(self.main_window, 'animator'):
+            animator = self.main_window.animator
+            if level == "info":
+                animator.show_info(message)
+            elif level == "success":
+                animator.show_success(message)
+            elif level == "warning":
+                animator.show_warning(message)
+            elif level == "error":
+                animator.show_error(message)
+
     def get_widget(self, name: str):
         """
         Get a widget from the UI by name.
@@ -142,7 +168,15 @@ class BaseTab(ABC):
             return None
         return getattr(self.ui, name, None)
 
-    def start_worker(self, func, *args, on_result=None, on_error=None, on_progress=None):
+    def start_worker(
+        self,
+        func,
+        *args,
+        on_result=None,
+        on_error=None,
+        on_progress=None,
+        worker_kwargs=None
+    ):
         """
         Start a worker thread with standard signal connections.
 
@@ -155,6 +189,7 @@ class BaseTab(ABC):
             on_result: Optional callback for successful completion (receives result)
             on_error: Optional callback for errors (receives (msg, traceback) tuple)
             on_progress: Optional callback for progress updates (receives int, str)
+            worker_kwargs: Optional dict of keyword arguments to pass to the function
 
         Example:
             self.start_worker(
@@ -162,11 +197,21 @@ class BaseTab(ABC):
                 on_result=self._on_operation_complete,
                 on_error=self._on_operation_error
             )
+
+            # With keyword arguments:
+            self.start_worker(
+                submit_job,
+                worker_kwargs={"name": "MyJob", "priority": 50},
+                on_result=self._on_submit_complete
+            )
         """
         from PySide6.QtCore import QThreadPool
         from ui_components import Worker
 
-        self._worker = Worker(func, *args)
+        if worker_kwargs:
+            self._worker = Worker(func, *args, **worker_kwargs)
+        else:
+            self._worker = Worker(func, *args)
 
         if on_result:
             self._worker.signals.result.connect(on_result)
@@ -203,3 +248,99 @@ class BaseTab(ABC):
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.update_status_animated(message, color)
+
+    def on_worker_success(self, message: str, status_message: str = None, log_message: str = None):
+        """
+        Standard handler for worker success.
+
+        Stops spinner, shows success status, and optionally shows animator popup.
+
+        Args:
+            message: Short message for animator popup
+            status_message: Optional status bar message (defaults to message)
+            log_message: Optional log message (defaults to message)
+
+        Example:
+            self.start_worker(
+                my_operation,
+                on_result=lambda result: self.on_worker_success("Operation complete!")
+            )
+        """
+        from ui_components import StatusColors
+
+        self.update_status_with_spinner(
+            status_message or message,
+            StatusColors.SUCCESS,
+            start=False
+        )
+        if hasattr(self.main_window, 'animator'):
+            self.main_window.animator.show_success(message)
+        if log_message:
+            self.log(log_message)
+
+    def on_worker_error(
+        self,
+        error_msg: str,
+        traceback_str: str = None,
+        status_prefix: str = "",
+        show_dialog: bool = False
+    ):
+        """
+        Standard handler for worker errors.
+
+        Stops spinner, shows error status, logs the error, and optionally shows dialog.
+
+        Args:
+            error_msg: Error message
+            traceback_str: Optional traceback for logging
+            status_prefix: Prefix for status message (e.g., "MP4 Maker")
+            show_dialog: Whether to show an error dialog
+
+        Example:
+            self.start_worker(
+                my_operation,
+                on_error=lambda msg, tb: self.on_worker_error(msg, tb, "Build")
+            )
+        """
+        from ui_components import StatusColors
+
+        full_msg = f"{status_prefix}: {error_msg}" if status_prefix else error_msg
+
+        self.update_status_with_spinner(
+            full_msg,
+            StatusColors.ERROR,
+            start=False
+        )
+        self.log(f"Error: {error_msg}")
+        if traceback_str:
+            self.log(traceback_str)
+
+        if show_dialog:
+            from dialog_helpers import show_error
+            show_error("Error", error_msg, parent=self.main_window)
+
+    def pulse_button(self, widget):
+        """
+        Safely pulse a button using the animator.
+
+        This helper eliminates the repeated `hasattr(self.main_window, 'animator')`
+        checks throughout tab code.
+
+        Args:
+            widget: The button widget to pulse
+        """
+        if hasattr(self.main_window, 'animator') and self.main_window.animator:
+            self.main_window.animator.pulse_button(widget)
+
+    def enable_button(self, widget, enabled: bool = True):
+        """
+        Enable or disable a button widget.
+
+        Simple helper for consistent button state management.
+
+        Args:
+            widget: The button widget
+            enabled: Whether to enable (True) or disable (False)
+        """
+        if widget:
+            widget.setEnabled(enabled)

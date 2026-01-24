@@ -23,6 +23,7 @@ from core.config import (
     COMFYUI_SUPPORTED_EXTENSIONS,
 )
 from core.settings_manager import get_setting
+from core.utils import ensure_directory
 
 
 def submit_comfyui_to_deadline_server_mode(
@@ -380,9 +381,9 @@ def submit_comfyui_job(
 
     working_base_dir = network_output_dir if network_output_dir else output_dir
 
-    os.makedirs(output_dir, exist_ok=True)
+    ensure_directory(output_dir)
     if network_output_dir:
-        os.makedirs(network_output_dir, exist_ok=True)
+        ensure_directory(network_output_dir)
 
     all_job_ids = []
     errors = []
@@ -401,7 +402,7 @@ def submit_comfyui_job(
             current_job_name = job_name
             current_working_dir = working_base_dir
 
-        os.makedirs(current_working_dir, exist_ok=True)
+        ensure_directory(current_working_dir)
 
         if progress_callback:
             msg = f"Submitting {file_idx + 1}/{total_files}"

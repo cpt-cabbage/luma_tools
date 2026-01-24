@@ -37,7 +37,8 @@ def get_gallery_output_path() -> Optional[str]:
         # Create user's gallery folder if it doesn't exist
         if not os.path.isdir(user_path):
             try:
-                os.makedirs(user_path, exist_ok=True)
+                from core.utils import ensure_directory
+                ensure_directory(user_path)
                 print(f"[PreWarm] Created gallery directory: {user_path}")
             except Exception as e:
                 print(f"[PreWarm] Warning: Could not create gallery directory: {user_path} - {e}")

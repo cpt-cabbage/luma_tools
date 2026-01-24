@@ -6,9 +6,9 @@ Provides mixin classes for iterate and batch mode polling.
 import os
 import time
 from PySide6.QtCore import QTimer, QThreadPool
-from PySide6.QtWidgets import QMessageBox
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
+from dialog_helpers import confirm_action
 
 
 def format_elapsed_time(seconds):
@@ -350,7 +350,7 @@ class PollingMixin:
                 self.ui.ComfyUIIteratePreview.setPixmap(scaled)
 
             self.ui.ComfyUIUseAsInput.setEnabled(True)
-            self.main_window.animator.show_success("Image generated! Click 'Use as Input' to iterate.")
+            self.show_status("Image generated! Click 'Use as Input' to iterate.", "success")
 
             gallery_tab = self.main_window.get_tab("comfyui_gallery")
             if gallery_tab:
@@ -369,7 +369,7 @@ class PollingMixin:
         """Copy the generated image path to the input image field."""
         last_image = self.app_state.comfyui_last_generated_image
         if not last_image or not os.path.exists(last_image):
-            self.main_window.animator.show_error("No generated image available")
+            self.show_status("No generated image available", "error")
             return
 
         for node_id, container in self._comfyui_dynamic_widgets.items():
@@ -377,10 +377,10 @@ class PollingMixin:
             if input_widget and hasattr(input_widget, 'add_images'):
                 input_widget.clear_images()
                 input_widget.add_images([last_image])
-                self.main_window.animator.show_success("Image set as input for next iteration")
+                self.show_status("Image set as input for next iteration", "success")
                 return
 
-        self.main_window.animator.show_warning("No image input field found in current workflow")
+        self.show_status("No image input field found in current workflow", "warning")
 
     # =========================================================================
     # BATCH MODE POLLING
@@ -676,7 +676,7 @@ class PollingMixin:
         # Special handling for recovery mode - jobs completed while app was closed
         if was_recovery and self._batch_poll_count <= 1:
             self.log("[Recovery] All batch jobs were already complete")
-            self.main_window.animator.show_success(f"{total_count} ComfyUI job(s) completed while app was closed")
+            self.show_status(f"{total_count} ComfyUI job(s) completed while app was closed", "success")
             self.main_window.animator.update_status_animated(
                 f"Recovery: {total_count} job(s) already completed",
                 StatusColors.SUCCESS
@@ -690,7 +690,7 @@ class PollingMixin:
                     "success"
                 )
         elif had_failures:
-            self.main_window.animator.show_error(f"ComfyUI: {failed_count}/{total_count} submission(s) failed!")
+            self.show_status(f"ComfyUI: {failed_count}/{total_count} submission(s) failed!", "error")
             self.main_window.animator.update_status_animated(
                 f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} jobs in {elapsed_str}",
                 StatusColors.ERROR
@@ -704,7 +704,7 @@ class PollingMixin:
                     "warning"
                 )
         else:
-            self.main_window.animator.show_success(f"All {total_count} ComfyUI submissions completed!")
+            self.show_status(f"All {total_count} ComfyUI submissions completed!", "success")
             self.main_window.animator.update_status_animated(
                 f"ComfyUI Complete: {total_frames} jobs in {elapsed_str}",
                 StatusColors.SUCCESS
@@ -745,19 +745,15 @@ class PollingMixin:
 
         if not job_ids:
             self.log("[Cancel] No running jobs to cancel")
-            self.main_window.animator.show_warning("No running jobs to cancel")
+            self.show_status("No running jobs to cancel", "warning")
             return
 
-        reply = QMessageBox.question(
-            self.main_window,
+        if not confirm_action(
             "Cancel Jobs",
             f"Are you sure you want to cancel {len(job_ids)} running job(s)?\n\n"
             "This will complete all tasks immediately, triggering auto-deletion.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
+            self.main_window
+        ):
             return
 
         self.log(f"[Cancel] Cancelling {len(job_ids)} jobs...")
@@ -811,7 +807,7 @@ class PollingMixin:
         self.log(f"[Cancel] Error: {msg}")
         self.ui.ComfyUICancelJobs.setText("Cancel Jobs")
         self.ui.ComfyUICancelJobs.setEnabled(True)
-        self.main_window.animator.show_error(f"Failed to cancel jobs: {msg}")
+        self.show_status(f"Failed to cancel jobs: {msg}", "error")
 
     def _update_cancel_button_visibility(self):
         """Update the cancel button visibility based on running jobs."""
@@ -1008,9 +1004,9 @@ class PollingMixin:
                         if job_id:
                             result = poll_deadline_job_status(job_id, persisted_state.get("network_output_dir"))
                             if result.get("status") == "Completed":
-                                self.main_window.animator.show_success("Previous ComfyUI job completed while app was closed")
+                                self.show_status("Previous ComfyUI job completed while app was closed", "success")
                     elif mode == "batch":
-                        self.main_window.animator.show_success("Previous ComfyUI batch completed while app was closed")
+                        self.show_status("Previous ComfyUI batch completed while app was closed", "success")
                 return
 
             self.log(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")
@@ -1113,7 +1109,7 @@ class PollingMixin:
             # Start immediate poll
             self._poll_iterate_job()
 
-            self.main_window.animator.show_success(f"Recovered running ComfyUI job from Deadline")
+            self.show_status("Recovered running ComfyUI job from Deadline", "success")
         else:
             # Multiple jobs - use batch mode recovery
             self.log(f"[Recovery] Recovering {len(job_ids)} jobs in batch mode")
@@ -1159,7 +1155,7 @@ class PollingMixin:
             # Start immediate poll
             self._poll_batch_jobs()
 
-            self.main_window.animator.show_success(f"Recovered {len(job_ids)} running ComfyUI job(s) from Deadline")
+            self.show_status(f"Recovered {len(job_ids)} running ComfyUI job(s) from Deadline", "success")
 
     def _recover_from_persisted_state(self, job_state):
         """Recover using persisted state only (fallback when Deadline check fails).
@@ -1222,12 +1218,12 @@ class PollingMixin:
                     self._poll_iterate_job()
 
                     self.log("[Recovery] Iterate mode polling resumed successfully")
-                    self.main_window.animator.show_success(f"Recovered running ComfyUI job (status: {status})")
+                    self.show_status(f"Recovered running ComfyUI job (status: {status})", "success")
                 else:
                     self.log(f"[Recovery] Job {job_id} is {status}, clearing state")
                     self._clear_running_job_state()
                     if status == "Completed":
-                        self.main_window.animator.show_success("Previous ComfyUI job completed while app was closed")
+                        self.show_status("Previous ComfyUI job completed while app was closed", "success")
                         # Show system tray notification (if enabled)
                         from core.settings_manager import get_setting
                         if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
@@ -1294,7 +1290,7 @@ class PollingMixin:
                 self._poll_batch_jobs()
 
                 self.log("[Recovery] Batch mode polling started - job states will be discovered async")
-                self.main_window.animator.show_success(f"Recovering {len(job_ids)} ComfyUI job(s)...")
+                self.show_status(f"Recovering {len(job_ids)} ComfyUI job(s)...", "success")
             except Exception as e:
                 self.log(f"[Recovery] Error recovering batch jobs: {e}")
                 import traceback

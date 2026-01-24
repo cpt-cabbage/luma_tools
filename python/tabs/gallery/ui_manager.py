@@ -12,8 +12,10 @@ import os
 from PySide6.QtWidgets import QPushButton, QMenu, QCheckBox
 from PySide6.QtCore import QThreadPool
 
+from .base_manager import BaseGalleryManager
 
-class UIManager:
+
+class UIManager(BaseGalleryManager):
     """Manages UI controls for the gallery."""
 
     def __init__(self, tab):
@@ -23,7 +25,7 @@ class UIManager:
         Args:
             tab: Reference to the ComfyUIGalleryTab
         """
-        self.tab = tab
+        super().__init__(tab)
 
         # Sort options
         self._sort_options = [
@@ -290,12 +292,6 @@ class UIManager:
         """Handle user discovery completion."""
         self.tab._available_users = users
         self._update_user_button_visibility()
-
-        # Pre-cache other users' galleries in background
-        # (commented out for now to avoid excessive network traffic)
-        # for user in users:
-        #     if user != self.tab.app_state.user:
-        #         self._precache_user_gallery(user)
 
     def update_user_button_text(self):
         """Update user selector button text."""

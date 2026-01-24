@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy
 )
 
 
@@ -374,18 +374,17 @@ class ComfyUIWidgetManager:
 
     def _browse_3d_model(self, line_edit):
         """Open file browser for 3D model selection."""
-        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
+        from file_dialogs import browse_file_with_memory
 
-        last_dir = get_last_browse_directory("comfyui_3d_models") or ""
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path = browse_file_with_memory(
             self.main_window,
-            "Select 3D Model",
-            last_dir,
-            "3D Models (*.glb *.gltf *.obj *.fbx *.usd *.usda *.usdc *.usdz);;All Files (*)"
+            context="comfyui_3d_models",
+            title="Select 3D Model",
+            file_filter="3D Models (*.glb *.gltf *.obj *.fbx *.usd *.usda *.usdc *.usdz);;All Files (*)",
+            fallback_path=""
         )
         if file_path:
             line_edit.setText(file_path)
-            set_last_browse_directory("comfyui_3d_models", os.path.dirname(file_path))
 
     def _apply_pending_editable_values(self):
         """Apply pending editable values that were saved from a previous session."""

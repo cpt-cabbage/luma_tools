@@ -9,9 +9,10 @@ import os
 from typing import Optional, List, Tuple
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QCheckBox, QMessageBox
+    QComboBox, QCheckBox
 )
 from PySide6.QtCore import QThreadPool
+from dialog_helpers import show_warning, show_error, show_info
 
 
 def _run_publish_validators(
@@ -97,21 +98,21 @@ def publish_comfyui_asset_to_ayon(
         from core.state_manager import get_app_state
 
         if not AYON_AVAILABLE:
-            QMessageBox.warning(
-                parent_widget,
+            show_warning(
                 "AYON Not Available",
-                "AYON publishing requires AYON to be properly configured."
+                "AYON publishing requires AYON to be properly configured.",
+                parent_widget
             )
             return False
 
         app_state = get_app_state()
 
         if app_state.standalone_mode:
-            QMessageBox.warning(
-                parent_widget,
+            show_warning(
                 "Standalone Mode",
                 "Publishing to AYON is not available in standalone mode.\n\n"
-                "Please run the tool from within AYON context."
+                "Please run the tool from within AYON context.",
+                parent_widget
             )
             return False
 
@@ -135,10 +136,10 @@ def publish_comfyui_asset_to_ayon(
         )
 
         if not validators_passed:
-            QMessageBox.warning(
-                parent_widget,
+            show_warning(
                 "Validation Failed",
-                f"Publishing cannot proceed due to validation errors:\n\n{validator_error}"
+                f"Publishing cannot proceed due to validation errors:\n\n{validator_error}",
+                parent_widget
             )
             return False
 
@@ -180,11 +181,7 @@ def publish_comfyui_asset_to_ayon(
         metadata_path = write_metadata_file(metadata, metadata_path)
 
         if not metadata_path:
-            QMessageBox.critical(
-                parent_widget,
-                "Metadata Error",
-                "Failed to write AYON metadata file."
-            )
+            show_error("Metadata Error", "Failed to write AYON metadata file.", parent_widget)
             return False
 
         # Publish
@@ -208,23 +205,19 @@ def publish_comfyui_asset_to_ayon(
 
             if job_id:
                 print(f"[AYON Publish] Successfully submitted to Deadline: {job_id}")
-                QMessageBox.information(
-                    parent_widget,
+                show_info(
                     "Published to Farm",
                     f"Successfully submitted to Deadline.\n\n"
                     f"Job ID: {job_id}\n"
                     f"Product Type: {product_type}\n"
                     f"Product: {full_product_name}\n"
-                    f"Task: {task}"
+                    f"Task: {task}",
+                    parent_widget
                 )
                 success = True
             else:
                 print("[AYON Publish] Failed to submit to Deadline")
-                QMessageBox.critical(
-                    parent_widget,
-                    "Publish Failed",
-                    "Failed to submit job to Deadline."
-                )
+                show_error("Publish Failed", "Failed to submit job to Deadline.", parent_widget)
         else:
             # Publish locally using Worker thread to avoid freezing UI
             print("[AYON Publish] Publishing to AYON locally...")
@@ -270,20 +263,20 @@ def publish_comfyui_asset_to_ayon(
 
                 if result:
                     print("[AYON Publish] Successfully published to AYON")
-                    QMessageBox.information(
-                        parent_widget,
+                    show_info(
                         "Published Successfully",
                         f"Successfully published to AYON.\n\n"
                         f"Product Type: {product_type}\n"
                         f"Product: {full_product_name}\n"
-                        f"Task: {task}"
+                        f"Task: {task}",
+                        parent_widget
                     )
                 else:
                     print("[AYON Publish] Failed to publish to AYON")
-                    QMessageBox.critical(
-                        parent_widget,
+                    show_error(
                         "Publish Failed",
-                        "AYON publish command failed. Check logs for details."
+                        "AYON publish command failed. Check logs for details.",
+                        parent_widget
                     )
 
             def on_publish_error(error_tuple):
@@ -291,11 +284,7 @@ def publish_comfyui_asset_to_ayon(
                 progress_dialog.close()
                 error_msg = str(error_tuple[1]) if len(error_tuple) > 1 else "Unknown error"
                 print(f"[AYON Publish] Error: {error_msg}")
-                QMessageBox.critical(
-                    parent_widget,
-                    "Publish Error",
-                    f"Failed to publish to AYON:\n\n{error_msg}"
-                )
+                show_error("Publish Error", f"Failed to publish to AYON:\n\n{error_msg}", parent_widget)
 
             # Create and start worker
             # Store worker on progress_dialog to prevent garbage collection
@@ -314,11 +303,7 @@ def publish_comfyui_asset_to_ayon(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        QMessageBox.critical(
-            parent_widget,
-            "Publish Error",
-            f"Failed to publish to AYON:\n\n{str(e)}"
-        )
+        show_error("Publish Error", f"Failed to publish to AYON:\n\n{str(e)}", parent_widget)
         return False
 
 

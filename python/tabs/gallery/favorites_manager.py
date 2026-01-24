@@ -15,18 +15,10 @@ from typing import Dict, List, Optional, Set, Any
 from dataclasses import dataclass, field, asdict
 from PySide6.QtCore import QObject, Signal
 
+from core.config import UIColors
 
-# Color palette for groups
-GROUP_COLORS = [
-    "#ef4444",  # Red
-    "#f97316",  # Orange
-    "#eab308",  # Yellow
-    "#22c55e",  # Green
-    "#06b6d4",  # Cyan
-    "#3b82f6",  # Blue
-    "#8b5cf6",  # Purple
-    "#ec4899",  # Pink
-]
+# Import GROUP_COLORS from config for backwards compatibility
+GROUP_COLORS = UIColors.GROUP_COLORS
 
 
 @dataclass

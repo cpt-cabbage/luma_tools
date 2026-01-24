@@ -16,7 +16,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
 
 from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config, FRAME_PADDING
-from core.utils import normalize_path
+from core.utils import normalize_path, ensure_directory
 from ui_components import report_progress
 # Try to import Qt for processEvents
 try:
@@ -254,8 +254,8 @@ def generate_mp4(
 
         # Ensure output directory exists
         output_dir = os.path.dirname(output_mp4_path)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
+        if output_dir:
+            ensure_directory(output_dir)
 
         # Detect file extension to determine if we need OIIO conversion
         # Extract extension from the pattern (e.g., "render.%04d.exr" -> ".exr")

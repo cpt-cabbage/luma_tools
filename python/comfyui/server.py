@@ -38,7 +38,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
 # Import shared utilities
-from comfyui.utils import check_server_health, wait_for_server
+from comfyui.utils import check_server_health, wait_for_server, resolve_comfyui_paths
 
 
 # Server state
@@ -254,25 +254,8 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
                   mode: str = "embedded", python_path: str = None,
                   skip_dep_check: bool = False) -> subprocess.Popen:
     """Start ComfyUI process."""
-    if mode == "embedded":
-        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
-        main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
-    elif mode == "portable":
-        venv_locations = [
-            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),
-            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),
-        ]
-        main_py_locations = [
-            os.path.join(comfyui_path, "ComfyUI", "main.py"),
-        ]
-
-        python_exe = next((p for p in venv_locations if os.path.exists(p)), venv_locations[0])
-        main_py = next((p for p in main_py_locations if os.path.exists(p)), main_py_locations[0])
-    else:
-        if not python_path:
-            raise ValueError("Python path required for standalone mode")
-        python_exe = python_path
-        main_py = os.path.join(comfyui_path, "main.py")
+    # Use centralized path resolution
+    python_exe, main_py = resolve_comfyui_paths(comfyui_path, mode, python_path)
 
     if not os.path.exists(python_exe):
         raise FileNotFoundError(f"Python not found: {python_exe}")

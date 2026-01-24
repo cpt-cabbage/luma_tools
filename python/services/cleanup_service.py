@@ -8,6 +8,8 @@ import os
 import shutil
 from typing import List
 
+from core.error_handling import handle_errors, log_error
+
 
 def cleanup_renders(lookdev_dir, render_dirs_to_delete):
     """
@@ -25,15 +27,13 @@ def cleanup_renders(lookdev_dir, render_dirs_to_delete):
 
     for dir_name in render_dirs_to_delete:
         dir_path = os.path.join(renders_path, dir_name)
-        try:
-            if os.path.exists(dir_path):
-                shutil.rmtree(dir_path)
-                deleted.append(dir_name)
-                print(f"Removed render directory: {dir_path}")
-            else:
-                print(f"Directory not found: {dir_path}")
-        except Exception as e:
-            print(f"Error deleting render directory {dir_path}: {e}")
+        if not os.path.exists(dir_path):
+            print(f"Directory not found: {dir_path}")
+            continue
+        with handle_errors(f"deleting render directory {dir_path}"):
+            shutil.rmtree(dir_path)
+            deleted.append(dir_name)
+            print(f"Removed render directory: {dir_path}")
 
     return deleted
 
@@ -54,15 +54,13 @@ def cleanup_usd(lookdev_dir, usd_dirs_to_delete):
 
     for dir_name in usd_dirs_to_delete:
         dir_path = os.path.join(usd_path, dir_name)
-        try:
-            if os.path.exists(dir_path):
-                shutil.rmtree(dir_path)
-                deleted.append(dir_name)
-                print(f"Removed USD directory: {dir_path}")
-            else:
-                print(f"Directory not found: {dir_path}")
-        except Exception as e:
-            print(f"Error deleting USD directory {dir_path}: {e}")
+        if not os.path.exists(dir_path):
+            print(f"Directory not found: {dir_path}")
+            continue
+        with handle_errors(f"deleting USD directory {dir_path}"):
+            shutil.rmtree(dir_path)
+            deleted.append(dir_name)
+            print(f"Removed USD directory: {dir_path}")
 
     return deleted
 
@@ -79,17 +77,16 @@ def cleanup_hip_backups(lookdev_dir):
     """
     backup_path = os.path.join(lookdev_dir, "backup")
 
-    try:
-        if os.path.exists(backup_path):
-            shutil.rmtree(backup_path)
-            print(f"Removed backup directory: {backup_path}")
-            return True
-        else:
-            print(f"Backup directory not found: {backup_path}")
-            return False
-    except Exception as e:
-        print(f"Error deleting backup directory {backup_path}: {e}")
+    if not os.path.exists(backup_path):
+        print(f"Backup directory not found: {backup_path}")
         return False
+
+    with handle_errors(f"deleting backup directory {backup_path}"):
+        shutil.rmtree(backup_path)
+        print(f"Removed backup directory: {backup_path}")
+        return True
+
+    return False
 
 
 def calculate_cleanup_size(lookdev_dir, render_dirs, usd_dirs, include_backups):

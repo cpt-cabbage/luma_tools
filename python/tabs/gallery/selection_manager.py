@@ -10,10 +10,11 @@ Handles multi-select functionality including:
 - Keyboard shortcuts (Ctrl+A, Escape)
 """
 
-import os
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtWidgets import QRubberBand
+
+from .base_manager import BaseGalleryManager
 
 
 class BoxSelectionEventFilter(QtCore.QObject):
@@ -87,7 +88,7 @@ class BoxSelectionEventFilter(QtCore.QObject):
         return super().eventFilter(watched, event)
 
 
-class SelectionManager:
+class SelectionManager(BaseGalleryManager):
     """Manages multi-select functionality for the gallery."""
 
     def __init__(self, tab):
@@ -97,7 +98,7 @@ class SelectionManager:
         Args:
             tab: Reference to the ComfyUIGalleryTab
         """
-        self.tab = tab
+        super().__init__(tab)
 
         # Selection state (stored on tab for backwards compatibility)
         self.tab._selected_items = set()

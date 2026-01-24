@@ -35,7 +35,7 @@ from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog, GroupEditor
 from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
-from small_widgets import GallerySectionHeader, StackedThumbnailWidget, show_popup_menu, browse_directory, browse_file
+from small_widgets import GallerySectionHeader, StackedThumbnailWidget, show_popup_menu
 
 
 # ============================================================================

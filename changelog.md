@@ -1,5 +1,17 @@
 # Luma Tools Changelog
 
+## Version 0.5.3
+- Add favorites manager for handling liked items and user-defined groups
+- Implement groups filter panel as a collapsible sidebar
+- Add new stacking modes: grid, stack by job, stack by groups, stack by groups + job
+- Add like button to embedded viewer with keyboard shortcut (L)
+ -Add group management dialog for creating/editing groups with color selection
+- Add support for video and audio file types in gallery
+- Update thumbnail widgets with like indicator and group color borders
+- Add keyboard shortcuts for quick group actions (G, Ctrl+G, 1-9)
+- Add to group/likes context menu
+- Improved caching in gallery
+
 ## Version 0.5.2.3
 - More pesky selection/deletion fixes
 

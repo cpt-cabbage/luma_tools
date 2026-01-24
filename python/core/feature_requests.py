@@ -14,6 +14,8 @@ from .settings_manager import (
     load_user_settings, save_user_settings,
     get_global_settings_path
 )
+from .error_handling import log_error, handle_errors
+from .utils import ensure_directory
 
 
 # ============================================================================
@@ -66,7 +68,7 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         file_path = get_user_feature_requests_file(username)
 
         # Ensure the directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        ensure_directory(os.path.dirname(file_path))
 
         # Format timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -89,12 +91,9 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         # Read existing requests
         requests = []
         if os.path.exists(file_path):
-            try:
+            with handle_errors("reading existing requests"):
                 with open(file_path, 'r', encoding='utf-8') as f:
                     requests = json.load(f)
-            except Exception as e:
-                print(f"Error reading existing requests: {e}")
-                requests = []
 
         # Append new request
         requests.append(new_request)
@@ -107,7 +106,7 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         return True
 
     except Exception as e:
-        print(f"Error creating feature request: {e}")
+        log_error("creating feature request", e)
         return False
 
 
@@ -153,7 +152,7 @@ def get_feature_requests() -> List[Dict[str, str]]:
 
                         all_requests.extend(user_requests)
             except Exception as e:
-                print(f"Error reading feature request file {filename}: {e}")
+                log_error("reading feature request file", e, filename)
                 continue
 
         # Sort by timestamp
@@ -162,7 +161,7 @@ def get_feature_requests() -> List[Dict[str, str]]:
         return all_requests
 
     except Exception as e:
-        print(f"Error reading feature requests: {e}")
+        log_error("reading feature requests", e)
         return []
 
 
@@ -211,14 +210,14 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
                     return True
 
             except Exception as e:
-                print(f"Error processing file {filename}: {e}")
+                log_error("processing file", e, filename)
                 continue
 
         print(f"Request {request_id} not found")
         return False
 
     except Exception as e:
-        print(f"Error marking request as completed: {e}")
+        log_error("marking request as completed", e, request_id)
         return False
 
 
@@ -261,7 +260,7 @@ def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_use
         print(f"Notification created for {username}")
 
     except Exception as e:
-        print(f"Error creating notification for {username}: {e}")
+        log_error("creating notification for", e, username)
 
 
 # ============================================================================
@@ -291,7 +290,7 @@ def get_user_notifications(username: str) -> List[Dict[str, Any]]:
         return [n for n in notifications if not n.get('read', False)]
 
     except Exception as e:
-        print(f"Error reading notifications for {username}: {e}")
+        log_error("reading notifications for", e, username)
         return []
 
 
@@ -323,7 +322,7 @@ def mark_notifications_read(username: str):
         print(f"Marked all notifications as read for {username}")
 
     except Exception as e:
-        print(f"Error marking notifications as read: {e}")
+        log_error("marking notifications as read", e)
 
 
 # ============================================================================
@@ -376,7 +375,7 @@ def get_unread_feature_request_count(username: str) -> int:
         return unread_count
 
     except Exception as e:
-        print(f"Error counting unread feature requests: {e}")
+        log_error("counting unread feature requests", e)
         return 0
 
 
@@ -395,4 +394,4 @@ def mark_feature_requests_as_read(username: str):
         print(f"Marked feature requests as read for {username} at {timestamp}")
 
     except Exception as e:
-        print(f"Error marking feature requests as read: {e}")
+        log_error("marking feature requests as read", e)

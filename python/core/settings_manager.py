@@ -7,7 +7,7 @@ Uses a registry pattern to minimize boilerplate for simple settings.
 
 import os
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, Callable, List
 from .config import (
     USER_SETTINGS_DIR,
@@ -141,8 +141,9 @@ def clear_settings_cache():
 
 def ensure_settings_dir():
     """Ensure settings directory exists."""
+    from .utils import ensure_directory
     if not os.path.exists(USER_SETTINGS_DIR):
-        os.makedirs(USER_SETTINGS_DIR)
+        ensure_directory(USER_SETTINGS_DIR)
         print(f"Created settings directory: {USER_SETTINGS_DIR}")
 
 
@@ -232,9 +233,10 @@ def _get_global_settings_file() -> str:
 
 def _ensure_global_settings_dir():
     """Ensure global settings directory exists."""
+    from .utils import ensure_directory
     path = get_global_settings_path()
     if not os.path.exists(path):
-        os.makedirs(path)
+        ensure_directory(path)
         print(f"Created global settings directory: {path}")
 
 
@@ -407,28 +409,62 @@ def is_tab_restricted(tab_name: str) -> bool:
 # Supervisors (Sups): Can see ComfyUI and Gallery tabs (not Settings)
 # ============================================================================
 
+def _get_user_list(settings_key: str) -> List[str]:
+    """Get a user list from global settings."""
+    return _global_settings.get(settings_key, [])
+
+
+def _is_user_in_list(username: str, settings_key: str) -> bool:
+    """Check if username is in a user list (case-insensitive)."""
+    if not username:
+        return False
+    return username.lower() in [u.lower() for u in _get_user_list(settings_key)]
+
+
+def _add_user_to_list(username: str, settings_key: str, role_name: str):
+    """Add a user to a user list (generic helper)."""
+    if not username:
+        return
+    settings = load_global_settings()
+    if settings_key not in settings:
+        settings[settings_key] = []
+    existing_lower = [u.lower() for u in settings[settings_key]]
+    if username.lower() not in existing_lower:
+        settings[settings_key].append(username)
+        save_global_settings(settings)
+        print(f"Added {role_name} user: {username}")
+
+
+def _remove_user_from_list(username: str, settings_key: str, role_name: str):
+    """Remove a user from a user list (generic helper)."""
+    settings = load_global_settings()
+    if settings_key not in settings:
+        return
+    original_list = settings[settings_key]
+    settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
+    if len(settings[settings_key]) < len(original_list):
+        save_global_settings(settings)
+        print(f"Removed {role_name} user: {username}")
+
+
 def get_admin_users() -> List[str]:
     """Get the list of admin users from global settings."""
-    return _global_settings.get("admin_users", [])
+    return _get_user_list("admin_users")
 
 
 def get_sup_users() -> List[str]:
     """Get the list of supervisor users from global settings."""
-    return _global_settings.get("sup_users", [])
+    return _get_user_list("sup_users")
 
 
 def is_admin_user(username: str) -> bool:
     """Check if a username is in the admin list (case-insensitive)."""
-    if not username:
-        return False
-    return username.lower() in [u.lower() for u in get_admin_users()]
+    return _is_user_in_list(username, "admin_users")
 
 
 def is_sup_user(username: str) -> bool:
     """Check if a username is in the supervisor list (case-insensitive)."""
-    if not username:
-        return False
-    return username.lower() in [u.lower() for u in get_sup_users()]
+    return _is_user_in_list(username, "sup_users")
 
 
 def has_elevated_access(username: str) -> bool:
@@ -438,51 +474,19 @@ def has_elevated_access(username: str) -> bool:
 
 def add_admin_user(username: str):
     """Add a user to the admin list."""
-    if not username:
-        return
-    settings = load_global_settings()
-    if "admin_users" not in settings:
-        settings["admin_users"] = []
-    existing_lower = [u.lower() for u in settings["admin_users"]]
-    if username.lower() not in existing_lower:
-        settings["admin_users"].append(username)
-        save_global_settings(settings)
-        print(f"Added admin user: {username}")
+    _add_user_to_list(username, "admin_users", "admin")
 
 
 def remove_admin_user(username: str):
     """Remove a user from the admin list."""
-    settings = load_global_settings()
-    if "admin_users" not in settings:
-        return
-    original_list = settings["admin_users"]
-    settings["admin_users"] = [u for u in original_list if u.lower() != username.lower()]
-    if len(settings["admin_users"]) < len(original_list):
-        save_global_settings(settings)
-        print(f"Removed admin user: {username}")
+    _remove_user_from_list(username, "admin_users", "admin")
 
 
 def add_sup_user(username: str):
     """Add a user to the supervisor list."""
-    if not username:
-        return
-    settings = load_global_settings()
-    if "sup_users" not in settings:
-        settings["sup_users"] = []
-    existing_lower = [u.lower() for u in settings["sup_users"]]
-    if username.lower() not in existing_lower:
-        settings["sup_users"].append(username)
-        save_global_settings(settings)
-        print(f"Added supervisor user: {username}")
+    _add_user_to_list(username, "sup_users", "supervisor")
 
 
 def remove_sup_user(username: str):
     """Remove a user from the supervisor list."""
-    settings = load_global_settings()
-    if "sup_users" not in settings:
-        return
-    original_list = settings["sup_users"]
-    settings["sup_users"] = [u for u in original_list if u.lower() != username.lower()]
-    if len(settings["sup_users"]) < len(original_list):
-        save_global_settings(settings)
-        print(f"Removed supervisor user: {username}")
+    _remove_user_from_list(username, "sup_users", "supervisor")

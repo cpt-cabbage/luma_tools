@@ -10,14 +10,15 @@ import random
 import time
 
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import Qt, QTimer, QThreadPool
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QMenu, QMessageBox, QInputDialog, QDialog, QVBoxLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget, QFileDialog
+    QMenu, QInputDialog, QDialog, QVBoxLayout,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 )
 from PySide6.QtGui import QPixmap
 
 from .base_tab import BaseTab
+from dialog_helpers import confirm_action
 from .comfyui_polling import PollingMixin
 from .comfyui_ui_manager import ComfyUIWidgetManager
 from .comfyui_state_manager import ComfyUIStateManager
@@ -388,8 +389,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._validate_inputs()
             self._update_note_display()
             # Guard for animator not being initialized yet during tab initialization
-            if hasattr(self.main_window, 'animator') and self.main_window.animator:
-                self.main_window.animator.show_error(f"Workflow file not found: {workflow_path}")
+            self.show_status(f"Workflow file not found: {workflow_path}", "error")
 
     def _on_add_preset_clicked(self):
         """Add a new workflow preset."""
@@ -397,19 +397,18 @@ class ComfyUITab(PollingMixin, BaseTab):
             get_comfyui_workflow_presets,
             save_comfyui_workflow_preset
         )
-        from core.user_preferences import (
-            get_last_browse_directory,
-            set_last_browse_directory
-        )
+        from file_dialogs import browse_file_with_memory
 
         # Use last browsed directory for workflows
-        last_dir = get_last_browse_directory("comfyui_workflow")
-        file_path, _ = QFileDialog.getOpenFileName(
-            self.main_window, "Select ComfyUI Workflow", last_dir or "", "ComfyUI JSON (*.json)"
+        file_path = browse_file_with_memory(
+            self.main_window,
+            context="comfyui_workflow",
+            title="Select ComfyUI Workflow",
+            file_filter="ComfyUI JSON (*.json)",
+            fallback_path=""
         )
         if not file_path:
             return
-        set_last_browse_directory("comfyui_workflow", os.path.dirname(file_path))
 
         # Ask for a preset name
         name, ok = QInputDialog.getText(
@@ -421,33 +420,32 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         name = name.strip()
         if not name:
-            self.main_window.animator.show_error("Preset name cannot be empty")
+            self.show_status("Preset name cannot be empty", "error")
             return
 
         # Check if preset already exists
         presets = get_comfyui_workflow_presets()
         if name in presets:
-            reply = QMessageBox.question(
-                self.main_window, "Overwrite Preset",
+            if not confirm_action(
+                "Overwrite Preset",
                 f"Preset '{name}' already exists. Overwrite?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
+                self.main_window
+            ):
                 return
 
         # Ask if workflow supports iterate mode
-        iteratable = QMessageBox.question(
-            self.main_window, "Iterate Mode",
+        iteratable = confirm_action(
+            "Iterate Mode",
             "Does this workflow support Iterate mode?\n\n"
             "Iterate mode is automatically enabled when only 1 image is selected.\n"
             "It allows reviewing results and refining prompts between generations.",
-            QMessageBox.Yes | QMessageBox.No
-        ) == QMessageBox.Yes
+            self.main_window
+        )
 
         # Save the preset and select it
         save_comfyui_workflow_preset(name, file_path, iteratable=iteratable)
         self._select_preset(name)
-        self.main_window.animator.show_success(f"Workflow preset '{name}' saved")
+        self.show_status(f"Workflow preset '{name}' saved", "success")
 
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
@@ -461,7 +459,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from .comfyui_preset_editor import PresetEditorDialog
 
         if not self.state_manager.current_preset_name:
-            self.main_window.animator.show_error("No preset selected")
+            self.show_status("No preset selected", "error")
             return
 
         presets = get_comfyui_workflow_presets()
@@ -504,7 +502,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             # Check if name changed and new name already exists
             if new_name != current_name:
                 if new_name in presets:
-                    self.main_window.animator.show_error(f"A preset named '{new_name}' already exists")
+                    self.show_status(f"A preset named '{new_name}' already exists", "error")
                     return
 
                 # Delete old preset and create new one with new name
@@ -521,7 +519,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 self.state_manager.current_preset_name = new_name
                 self.state_manager.current_selected_workflow = None
                 self.ui.ComfyUICurrentPreset.setText(self._get_preset_display_name(new_name))
-                self.main_window.animator.show_success(f"Preset renamed to '{new_name}'")
+                self.show_status(f"Preset renamed to '{new_name}'", "success")
             else:
                 # Just update the existing preset
                 update_comfyui_workflow_preset(
@@ -534,7 +532,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                     is_multi=new_is_multi,
                     workflows=new_workflows
                 )
-                self.main_window.animator.show_success(f"Preset '{current_name}' updated")
+                self.show_status(f"Preset '{current_name}' updated", "success")
 
             # Refresh the UI with the (possibly new) preset name
             self.state_manager.current_selected_workflow = None
@@ -665,7 +663,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         current_text = text_widget.toPlainText().strip()
         if not current_text:
-            self.main_window.animator.show_error("Cannot save empty preset")
+            self.show_status("Cannot save empty preset", "error")
             return
 
         # Make node type more readable for display
@@ -680,10 +678,10 @@ class ComfyUITab(PollingMixin, BaseTab):
         if dialog.exec() == QInputDialog.Accepted:
             name = dialog.textValue().strip()
             if not name:
-                self.main_window.animator.show_error("Preset name cannot be empty")
+                self.show_status("Preset name cannot be empty", "error")
                 return
             save_comfyui_prompt_preset_for_node_type(node_type, name, current_text)
-            self.main_window.animator.show_success(f"Preset '{name}' saved")
+            self.show_status(f"Preset '{name}' saved", "success")
 
     def _delete_prompt_preset(self, preset_name, node_type):
         """Delete a prompt preset for a node type."""
@@ -692,14 +690,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Make node type more readable for display
         display_type = node_type.replace('Plus', '+')
 
-        reply = QMessageBox.question(
-            self.main_window, "Delete Preset",
+        if confirm_action(
+            "Delete Preset",
             f"Delete prompt preset '{preset_name}' from {display_type} nodes?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
+            self.main_window
+        ):
             delete_comfyui_prompt_preset_for_node_type(node_type, preset_name)
-            self.main_window.animator.show_info(f"Preset '{preset_name}' deleted")
+            self.show_status(f"Preset '{preset_name}' deleted", "info")
 
     # =========================================================================
     # TEXT/IMAGE CHANGE HANDLERS
@@ -740,7 +737,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_submit_clicked(self):
         """Submit the workflow to ComfyUI/Deadline."""
-        from ui_components import Worker, StatusColors
+        from ui_components import StatusColors
         from comfyui.service import submit_comfyui_job
         from core.settings_manager import get_setting
         from comfyui.presets_manager import get_workflow_config
@@ -750,13 +747,13 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
-            self.main_window.animator.show_error("No workflow selected")
+            self.show_status("No workflow selected", "error")
             return
 
         # Get network output path - always use user subfolder
         network_output_dir = get_setting("comfyui_network_output_path")
         if not network_output_dir:
-            self.main_window.animator.show_error("Network output path not configured in Settings")
+            self.show_status("Network output path not configured in Settings", "error")
             return
 
         network_output_dir = os.path.join(network_output_dir, self.app_state.user)
@@ -812,87 +809,99 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         self.log(f"[ComfyUI] Network output path: {network_output_dir}")
 
-        def on_result(result):
-            """Called when submission completes."""
-            try:
-                self.log(f"[ComfyUI] on_result called with: {result}")
-                # Stop spinner only if no jobs were submitted (polling will handle spinner otherwise)
-                job_ids, error_msg = result
-
-                if job_ids:
-                    job_count = len(job_ids)
-                    total_gens = job_count * generation_count
-                    self.main_window.animator.show_success(f"Submitted {job_count} job(s), {total_gens} generations")
-                    self.main_window.animator.update_status_animated(
-                        f"ComfyUI: {job_count} job(s) submitted",
-                        StatusColors.SUCCESS
-                    )
-                    self.log(f"ComfyUI submission complete: {job_ids}")
-
-                    # Start polling for job completion
-                    self.log(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
-                    if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
-                        self._start_iterate_polling(job_ids[0], network_output_dir)
-                    else:
-                        self._start_batch_polling(job_ids, network_output_dir)
-                else:
-                    self.main_window.stop_status_spinner()
-                    self.main_window.animator.show_error(f"Submission failed: {error_msg}")
-                    self.main_window.animator.update_status_animated(
-                        f"ComfyUI failed: {error_msg}",
-                        StatusColors.ERROR
-                    )
-            except Exception as e:
-                import traceback
-                self.log(f"[ComfyUI] ERROR in on_result: {e}")
-                self.log(traceback.format_exc())
-
-        def on_error(error_msg, traceback_str):
-            """Called when submission fails."""
-            self.main_window.stop_status_spinner()
-            self.main_window.animator.show_error(f"Submission error: {error_msg}")
-            self.main_window.animator.update_status_animated(
-                f"ComfyUI error: {error_msg}",
-                StatusColors.ERROR
-            )
-            self.log(f"ComfyUI submission error: {error_msg}")
-            self.log(traceback_str)
-
-        def on_progress(progress, message):
-            """Called for progress updates - show in status bar."""
-            self.main_window.animator.update_status_animated(
-                f"🎨 ComfyUI: {message}",
-                StatusColors.INFO
-            )
-
         # Get full_restart from workflow config
         full_restart = workflow_config.get("full_restart", False) if workflow_config else False
 
-        # Create worker and run submission on background thread
-        # Store worker as instance attribute to prevent garbage collection before completion
-        self._submit_worker = Worker(
+        # Store submission context for callbacks
+        self._submit_context = {
+            "network_output_dir": network_output_dir,
+            "generation_count": generation_count,
+        }
+
+        # Use start_worker helper for cleaner code
+        self.start_worker(
             submit_comfyui_job,
-            workflow_path=self.app_state.comfyui_workflow_path,
-            input_image=None,
-            prompt=None,
-            output_dir=network_output_dir,
-            generation_count=generation_count,
-            job_name=job_name,
-            editable_values=editable_values,
-            use_server_mode=use_server_mode,
-            base_seed=base_seed,
-            network_output_dir=network_output_dir,
-            workflow_preset=self.state_manager.current_preset_name,
-            full_restart=full_restart,
+            worker_kwargs={
+                "workflow_path": self.app_state.comfyui_workflow_path,
+                "input_image": None,
+                "prompt": None,
+                "output_dir": network_output_dir,
+                "generation_count": generation_count,
+                "job_name": job_name,
+                "editable_values": editable_values,
+                "use_server_mode": use_server_mode,
+                "base_seed": base_seed,
+                "network_output_dir": network_output_dir,
+                "workflow_preset": self.state_manager.current_preset_name,
+                "full_restart": full_restart,
+            },
+            on_result=self._on_submit_result,
+            on_error=self._on_submit_error,
+            on_progress=self._on_submit_progress
         )
-        # Store callbacks as instance attributes to prevent garbage collection
-        self._submit_on_result = on_result
-        self._submit_on_error = on_error
-        self._submit_on_progress = on_progress
-        self._submit_worker.signals.result.connect(self._submit_on_result)
-        self._submit_worker.signals.error.connect(self._submit_on_error)
-        self._submit_worker.signals.progress.connect(self._submit_on_progress)
-        QThreadPool.globalInstance().start(self._submit_worker)
+
+    def _on_submit_result(self, result):
+        """Handle ComfyUI job submission result."""
+        from ui_components import StatusColors
+
+        try:
+            self.log(f"[ComfyUI] on_result called with: {result}")
+            job_ids, error_msg = result
+            ctx = self._submit_context
+
+            if job_ids:
+                job_count = len(job_ids)
+                total_gens = job_count * ctx["generation_count"]
+                self.show_status(f"Submitted {job_count} job(s), {total_gens} generations", "success")
+                self.main_window.animator.update_status_animated(
+                    f"ComfyUI: {job_count} job(s) submitted",
+                    StatusColors.SUCCESS
+                )
+                self.log(f"ComfyUI submission complete: {job_ids}")
+
+                # Start polling for job completion
+                self.log(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
+                if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
+                    self._start_iterate_polling(job_ids[0], ctx["network_output_dir"])
+                else:
+                    self._start_batch_polling(job_ids, ctx["network_output_dir"])
+            else:
+                self.main_window.stop_status_spinner()
+                self.show_status(f"Submission failed: {error_msg}", "error")
+                self.main_window.animator.update_status_animated(
+                    f"ComfyUI failed: {error_msg}",
+                    StatusColors.ERROR
+                )
+        except Exception as e:
+            import traceback
+            self.log(f"[ComfyUI] ERROR in on_result: {e}")
+            self.log(traceback.format_exc())
+
+    def _on_submit_error(self, error_tuple):
+        """Handle ComfyUI job submission error."""
+        from ui_components import StatusColors
+
+        error_msg = error_tuple[1] if len(error_tuple) > 1 else str(error_tuple)
+        traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
+
+        self.main_window.stop_status_spinner()
+        self.show_status(f"Submission error: {error_msg}", "error")
+        self.main_window.animator.update_status_animated(
+            f"ComfyUI error: {error_msg}",
+            StatusColors.ERROR
+        )
+        self.log(f"ComfyUI submission error: {error_msg}")
+        if traceback_str:
+            self.log(traceback_str)
+
+    def _on_submit_progress(self, progress, message):
+        """Handle ComfyUI job submission progress."""
+        from ui_components import StatusColors
+
+        self.main_window.animator.update_status_animated(
+            f"🎨 ComfyUI: {message}",
+            StatusColors.INFO
+        )
 
     # =========================================================================
     # POLLING METHODS - See comfyui_polling.py (PollingMixin)
@@ -924,7 +933,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 - editable_values: Dict of node_id -> {display_name, value, ...}
         """
         if not metadata:
-            self.main_window.animator.show_warning("No settings metadata found for this image")
+            self.show_status("No settings metadata found for this image", "warning")
             return
 
         self.log(f"[ComfyUI] Applying settings from image metadata...")
@@ -940,7 +949,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self.widget_manager._apply_pending_editable_values()
             self.log(f"[ComfyUI] Applied {len(pending_values)} editable value(s)")
 
-        self.main_window.animator.show_success("Settings applied from image")
+        self.show_status("Settings applied from image", "success")
 
         # Switch to this tab
         self.main_window.switch_to_tab("comfyui")

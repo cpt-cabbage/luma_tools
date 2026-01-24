@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 
 from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
+from core.utils import ensure_directory
 
 
 # ============================================================================
@@ -27,7 +28,7 @@ def setup_file_logging():
     """
     # Create logs directory
     log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    ensure_directory(log_dir)
 
     # Create timestamped log file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

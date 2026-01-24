@@ -7,7 +7,7 @@ Handles cleanup of renders, USD files, and HIP backups.
 import os
 
 from PySide6 import QtWidgets
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt
 
 from .base_tab import BaseTab
 
@@ -79,72 +79,72 @@ class ShotCleanerTab(BaseTab):
         Args:
             on_complete: Optional callback to call when scanning completes
         """
-        from ui_components import Worker, StatusColors
+        from ui_components import StatusColors
 
         if not hasattr(self, 'scanner'):
             self._setup_scanner()
+
+        # Store callback for use in handlers
+        self._scan_on_complete = on_complete
 
         # Clear UI elements
         self.ui.CleanFiles.setEnabled(False)
         self.ui.USDSClean.clear()
         self.ui.RendersClean.clear()
 
-        def on_result(result):
-            """Called when scanning completes."""
-            # Enable clean button
-            self.ui.CleanFiles.setEnabled(True)
-
-            # Select all items by default
-            self._deselect_renders_in_comp(result.get('renders_in_comp', []))
-
-            # Stop spinner and update status
-            self.update_status_with_spinner(
-
-                "✅ Shot Cleaner: Scan complete",
-
-                StatusColors.SUCCESS,
-
-                start=False
-
-            )
-
-            # Call completion callback if provided
-            if on_complete:
-                on_complete()
-
-        def on_error(error_msg, traceback_str):
-            """Called when scanning fails."""
-            self.update_status_with_spinner(
-
-                f"Shot Cleaner: Scan error - {error_msg}",
-
-                StatusColors.ERROR,
-
-                start=False
-
-            )
-            self.log(f"Scanner error: {error_msg}")
-            self.log(traceback_str)
-
-            # Call completion callback even on error
-            if on_complete:
-                on_complete()
-
         # Show status bar progress (no overlay so user can still interact)
         self.update_status_with_spinner(
-
             "🔍 Shot Cleaner: Scanning directories...",
-
             StatusColors.INFO
-
         )
 
-        # Create worker and run scan on background thread
-        # Store as instance attribute to prevent garbage collection
-        self._scan_worker = Worker(self.scanner.scan_all)
-        self._scan_worker.signals.result.connect(on_result)
-        self._scan_worker.signals.error.connect(on_error)
-        QThreadPool.globalInstance().start(self._scan_worker)
+        # Use base class worker helper
+        self.start_worker(
+            self.scanner.scan_all,
+            on_result=self._on_scan_result,
+            on_error=self._on_scan_error
+        )
+
+    def _on_scan_result(self, result):
+        """Handle scan completion."""
+        from ui_components import StatusColors
+
+        # Enable clean button
+        self.ui.CleanFiles.setEnabled(True)
+
+        # Select all items by default
+        self._deselect_renders_in_comp(result.get('renders_in_comp', []))
+
+        # Stop spinner and update status
+        self.update_status_with_spinner(
+            "✅ Shot Cleaner: Scan complete",
+            StatusColors.SUCCESS,
+            start=False
+        )
+
+        # Call completion callback if provided
+        if hasattr(self, '_scan_on_complete') and self._scan_on_complete:
+            self._scan_on_complete()
+
+    def _on_scan_error(self, error_tuple):
+        """Handle scan error."""
+        from ui_components import StatusColors
+
+        error_msg = error_tuple[1] if len(error_tuple) > 1 else str(error_tuple)
+        traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
+
+        self.update_status_with_spinner(
+            f"Shot Cleaner: Scan error - {error_msg}",
+            StatusColors.ERROR,
+            start=False
+        )
+        self.log(f"Scanner error: {error_msg}")
+        if traceback_str:
+            self.log(traceback_str)
+
+        # Call completion callback even on error
+        if hasattr(self, '_scan_on_complete') and self._scan_on_complete:
+            self._scan_on_complete()
 
     def _deselect_renders_in_comp(self, renders_in_comp):
         """Deselect renders that are in use by comp files."""
@@ -205,8 +205,7 @@ class ShotCleanerTab(BaseTab):
             self.ui.progressBar.setValue(100)
 
         # Final status - use show_success for proper priority queue handling
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_success("Cleanup complete")
+        self.show_status("Cleanup complete", "success")
 
         # Rescan after cleanup
         self.run_scanner()

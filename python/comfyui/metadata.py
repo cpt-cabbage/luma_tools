@@ -14,6 +14,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 
 from core.config import COMFYUI_OUTPUT_EXTENSIONS
+from core.utils import ensure_directory
 
 
 # ============================================================================
@@ -176,7 +177,7 @@ def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) 
     metadata_path = _get_metadata_path(output_dir)
 
     try:
-        os.makedirs(output_dir, exist_ok=True)
+        ensure_directory(output_dir)
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, default=str)
         clear_gallery_metadata_cache(output_dir)

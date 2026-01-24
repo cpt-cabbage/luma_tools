@@ -44,6 +44,55 @@ except ImportError:
         print(f"Could not auto-install websocket-client: {_e}", flush=True)
 
 
+# =============================================================================
+# ComfyUI Path Resolution
+# =============================================================================
+
+def resolve_comfyui_paths(comfyui_path: str, mode: str = "embedded",
+                          python_path: Optional[str] = None) -> tuple:
+    """
+    Resolve ComfyUI Python executable and main.py paths based on installation mode.
+
+    This centralizes the path resolution logic that was previously duplicated
+    across runner.py, server.py, and deadline_submitter.py.
+
+    Args:
+        comfyui_path: Base path to ComfyUI installation
+        mode: One of "embedded", "portable", or "standalone"
+        python_path: Required for standalone mode - path to Python executable
+
+    Returns:
+        Tuple of (python_exe, main_py) paths
+
+    Raises:
+        ValueError: If mode is invalid or python_path not provided for standalone
+    """
+    if mode == "embedded":
+        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
+        main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
+    elif mode == "portable":
+        # Check common venv locations
+        venv_locations = [
+            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),
+            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),
+        ]
+        main_py_locations = [
+            os.path.join(comfyui_path, "ComfyUI", "main.py"),
+        ]
+
+        python_exe = next((p for p in venv_locations if os.path.exists(p)), venv_locations[0])
+        main_py = next((p for p in main_py_locations if os.path.exists(p)), main_py_locations[0])
+    elif mode == "standalone":
+        if not python_path:
+            raise ValueError("Python path required for standalone mode")
+        python_exe = python_path
+        main_py = os.path.join(comfyui_path, "main.py")
+    else:
+        raise ValueError(f"Invalid ComfyUI mode: {mode}. Must be 'embedded', 'portable', or 'standalone'")
+
+    return python_exe, main_py
+
+
 def _normalize_server_url(server_url: str = None, port: int = None) -> str:
     """Convert port to server_url if needed."""
     if server_url:

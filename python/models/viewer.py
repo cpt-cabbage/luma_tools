@@ -954,12 +954,8 @@ class ModelViewerDialog(QDialog):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(
-                self,
-                "Publish Error",
-                f"Failed to publish model to AYON:\n\n{str(e)}"
-            )
+            from dialog_helpers import show_error
+            show_error("Publish Error", f"Failed to publish model to AYON:\n\n{str(e)}", self)
 
     def keyPressEvent(self, event: QKeyEvent):
         """Handle keyboard events."""

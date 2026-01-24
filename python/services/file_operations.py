@@ -19,6 +19,7 @@ from core.config import (
     DENOISED_SUBDIRECTORY
 )
 from core.utils import remove_after
+from core.error_handling import safe_operation
 
 
 def fast_scandir(dirname):
@@ -183,6 +184,7 @@ def find_usd_directory(shot_path):
     return None, []
 
 
+@safe_operation("scanning render versions", return_on_error=[])
 def scan_render_versions(render_directory, hip_file_name):
     """
     Scan for render versions matching the HIP file name.
@@ -194,15 +196,12 @@ def scan_render_versions(render_directory, hip_file_name):
     Returns:
         list: List of render version directory names
     """
-    try:
-        render_dirs = sorted(next(os.walk(render_directory))[1])
-        matching_renders = [d for d in render_dirs if hip_file_name in d]
-        return matching_renders
-    except Exception as e:
-        print(f"Error scanning render versions: {e}")
-        return []
+    render_dirs = sorted(next(os.walk(render_directory))[1])
+    matching_renders = [d for d in render_dirs if hip_file_name in d]
+    return matching_renders
 
 
+@safe_operation("scanning USD versions", return_on_error=[])
 def scan_usd_versions(usd_directory):
     """
     Scan for USD versions.
@@ -213,12 +212,8 @@ def scan_usd_versions(usd_directory):
     Returns:
         list: List of USD version directory names
     """
-    try:
-        usd_dirs = sorted(next(os.walk(usd_directory))[1])
-        return usd_dirs
-    except Exception as e:
-        print(f"Error scanning USD versions: {e}")
-        return []
+    usd_dirs = sorted(next(os.walk(usd_directory))[1])
+    return usd_dirs
 
 
 def get_lookdev_directory(shot_path):

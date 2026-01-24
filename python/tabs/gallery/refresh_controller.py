@@ -11,8 +11,10 @@ Handles gallery content refresh mechanisms:
 import os
 from PySide6.QtCore import QTimer, QThreadPool, QFileSystemWatcher
 
+from .base_manager import BaseGalleryManager
 
-class RefreshController:
+
+class RefreshController(BaseGalleryManager):
     """Manages refresh and file watching for the gallery."""
 
     def __init__(self, tab):
@@ -22,7 +24,7 @@ class RefreshController:
         Args:
             tab: Reference to the ComfyUIGalleryTab
         """
-        self.tab = tab
+        super().__init__(tab)
 
         # File system watcher
         self._watcher = None
@@ -49,8 +51,7 @@ class RefreshController:
         """
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
-            if hasattr(self.tab.main_window, 'animator'):
-                self.tab.main_window.animator.show_info("Refresh already in progress")
+            self.show_status("Refresh already in progress", "info")
             return
 
         # Store show_status for use in _do_refresh
@@ -131,9 +132,10 @@ class RefreshController:
 
         # Show error status only if we showed start status
         show_status = getattr(self, '_current_scan_show_status', True)
-        if show_status and hasattr(self.tab.main_window, 'animator'):
-            self.tab.main_window.animator.end_activity("gallery_scan")
-            self.tab.main_window.animator.show_error(f"Gallery scan failed: {msg}")
+        if show_status:
+            if hasattr(self.tab.main_window, 'animator'):
+                self.tab.main_window.animator.end_activity("gallery_scan")
+            self.show_status(f"Gallery scan failed: {msg}", "error")
 
     def use_prewarm_cache_sync(self):
         """Use pre-warmed cache but defer display until after window is shown."""
@@ -197,7 +199,6 @@ class RefreshController:
             metadata_available = False
 
         # Group items by directory for metadata loading
-        import os
         files_by_dir = {}
         for item in items:
             dir_path = os.path.dirname(item['path'])

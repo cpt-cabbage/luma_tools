@@ -8,9 +8,11 @@ import os
 import json
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 
 from .base_tab import BaseTab
+from dialog_helpers import confirm_action, show_warning, show_error, show_info
+from core.utils import ensure_directory
 
 
 def get_version():
@@ -87,7 +89,7 @@ class SettingsTab(BaseTab):
         self.ui.BrowseComfyUIPath.clicked.connect(self._on_browse_comfyui_path)
         self.ui.BrowseComfyUIPython.clicked.connect(self._on_browse_comfyui_python)
         self.ui.BrowseComfyUINetworkOutput.clicked.connect(self._on_browse_comfyui_network_output)
-        self.ui.ComfyUIModeButton.clicked.connect(self._on_comfyui_mode_button_clicked)
+        # ComfyUI mode button connected in initialize() via manager
         self.ui.SaveGlobalSettings.clicked.connect(self._on_save_global_settings)
 
         # Admin user management
@@ -110,13 +112,21 @@ class SettingsTab(BaseTab):
 
     def initialize(self):
         """Initialize settings tab."""
-        # ComfyUI mode options
-        self._comfyui_mode = "embedded"  # Default
-        self._comfyui_mode_options = [
-            ("Embedded (python_embeded)", "embedded"),
-            ("Portable (venv)", "portable"),
-            ("Standalone", "standalone"),
-        ]
+        from option_button import OptionButtonManager
+
+        # ComfyUI mode option manager
+        self._comfyui_mode_manager = OptionButtonManager(
+            button=self.ui.ComfyUIModeButton,
+            options=[
+                ("Embedded (python_embeded)", "embedded"),
+                ("Portable (venv)", "portable"),
+                ("Standalone", "standalone"),
+            ],
+            initial_value="embedded",
+            on_changed=self._on_comfyui_mode_changed,
+            label_prefix="ComfyUI Mode: ",
+            parent_window=self.main_window
+        )
 
         # Check if user is supervisor (can see user settings but not global settings)
         is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
@@ -185,7 +195,6 @@ class SettingsTab(BaseTab):
     def _check_user_notifications(self):
         """Check if user has notifications about completed requests."""
         from core.feature_requests import get_user_notifications, mark_notifications_read
-        from PySide6.QtWidgets import QMessageBox
 
         try:
             notifications = get_user_notifications(self.app_state.user)
@@ -200,11 +209,7 @@ class SettingsTab(BaseTab):
                 if len(notifications) > 5:
                     message += f"... and {len(notifications) - 5} more"
 
-                QMessageBox.information(
-                    self.main_window,
-                    "Feature Requests Completed",
-                    message
-                )
+                show_info("Feature Requests Completed", message, self.main_window)
 
                 # Mark as read
                 mark_notifications_read(self.app_state.user)
@@ -367,35 +372,14 @@ class SettingsTab(BaseTab):
         for user in get_sup_users():
             self.ui.SupUsersList.addItem(user)
 
-    def _update_comfyui_mode_button_text(self):
-        """Update the ComfyUI mode button text to show current selection."""
-        for label, mode in self._comfyui_mode_options:
-            if mode == self._comfyui_mode:
-                self.ui.ComfyUIModeButton.setText(f"ComfyUI Mode: {label}")
-                break
+    # Property for backward compatibility
+    @property
+    def _comfyui_mode(self):
+        return self._comfyui_mode_manager.value if hasattr(self, '_comfyui_mode_manager') else "embedded"
 
-    def _on_comfyui_mode_button_clicked(self):
-        """Show popup menu with ComfyUI mode options."""
-        from PySide6.QtWidgets import QMenu
-
-        menu = QMenu(self.main_window)
-
-        for label, mode in self._comfyui_mode_options:
-            action = menu.addAction(label)
-            action.setData(mode)
-            if mode == self._comfyui_mode:
-                action.setCheckable(True)
-                action.setChecked(True)
-
-        # Show menu below the button
-        action = menu.exec_(self.ui.ComfyUIModeButton.mapToGlobal(
-            self.ui.ComfyUIModeButton.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._comfyui_mode = action.data()
-            self._update_comfyui_mode_button_text()
-            self._update_comfyui_python_visibility()
+    def _on_comfyui_mode_changed(self, value):
+        """Handle ComfyUI mode change."""
+        self._update_comfyui_python_visibility()
 
     def _update_comfyui_python_visibility(self):
         """Show/hide Python path field based on selected mode."""
@@ -452,13 +436,7 @@ class SettingsTab(BaseTab):
 
     def _on_reset_passes_clicked(self):
         """Reset default passes to system defaults."""
-        reply = QMessageBox.question(
-            self.main_window, "Reset Default Passes",
-            "Reset to default pass list?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+        if confirm_action("Reset Default Passes", "Reset to default pass list?", self.main_window):
             from core.config import DEFAULT_PASSES
             from core.user_preferences import set_default_passes
             set_default_passes(DEFAULT_PASSES.copy())
@@ -502,18 +480,16 @@ class SettingsTab(BaseTab):
 
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
-            self.main_window.animator.show_success("User settings saved")
+        self.show_status("User settings saved", "success")
 
     def _on_regenerate_thumbnails(self):
         """Clear all cached thumbnails and trigger regeneration."""
-        reply = QMessageBox.question(
-            self.main_window, "Regenerate Thumbnails",
+        if confirm_action(
+            "Regenerate Thumbnails",
             "This will clear all cached gallery thumbnails.\n"
             "They will be regenerated when you view the gallery.\n\nContinue?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+            self.main_window
+        ):
             try:
                 # Clear model thumbnail cache
                 from models.thumbnail_service import get_model_thumbnail_service
@@ -543,47 +519,61 @@ class SettingsTab(BaseTab):
                         gallery_tab._widget_cache = {}
                     gallery_tab._on_refresh(force=True)
 
-                if hasattr(self.main_window, 'animator'):
-                    self.main_window.animator.show_success("Thumbnail cache cleared")
+                self.show_status("Thumbnail cache cleared", "success")
 
             except Exception as e:
                 self.log(f"Error clearing thumbnails: {e}")
-                if hasattr(self.main_window, 'animator'):
-                    self.main_window.animator.show_error(f"Error: {e}")
+                self.show_status(f"Error: {e}", "error")
 
     def _on_browse_global_settings_path(self):
         """Browse for global settings directory."""
-        directory = QtWidgets.QFileDialog.getExistingDirectory(
-            self.main_window, "Select Global Settings Directory",
-            self.ui.GlobalSettingsPathEdit.text()
+        from file_dialogs import browse_directory_with_memory
+
+        directory = browse_directory_with_memory(
+            self.main_window,
+            context="global_settings_path",
+            title="Select Global Settings Directory",
+            fallback_path=self.ui.GlobalSettingsPathEdit.text()
         )
         if directory:
             self.ui.GlobalSettingsPathEdit.setText(directory)
 
     def _on_browse_comfyui_path(self):
         """Browse for ComfyUI installation directory."""
-        directory = QtWidgets.QFileDialog.getExistingDirectory(
-            self.main_window, "Select ComfyUI Installation Directory",
-            self.ui.ComfyUIPathEdit.text()
+        from file_dialogs import browse_directory_with_memory
+
+        directory = browse_directory_with_memory(
+            self.main_window,
+            context="comfyui_path",
+            title="Select ComfyUI Installation Directory",
+            fallback_path=self.ui.ComfyUIPathEdit.text()
         )
         if directory:
             self.ui.ComfyUIPathEdit.setText(directory)
 
     def _on_browse_comfyui_python(self):
         """Browse for Python executable."""
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self.main_window, "Select Python Executable",
-            self.ui.ComfyUIPythonEdit.text(),
-            "Executable (*.exe);;All Files (*)"
+        from file_dialogs import browse_file_with_memory
+
+        file_path = browse_file_with_memory(
+            self.main_window,
+            context="comfyui_python",
+            title="Select Python Executable",
+            file_filter="Executable (*.exe);;All Files (*)",
+            fallback_path=self.ui.ComfyUIPythonEdit.text()
         )
         if file_path:
             self.ui.ComfyUIPythonEdit.setText(file_path)
 
     def _on_browse_comfyui_network_output(self):
         """Browse for ComfyUI network output directory."""
-        directory = QtWidgets.QFileDialog.getExistingDirectory(
-            self.main_window, "Select Network Output Directory",
-            self.ui.ComfyUINetworkOutputEdit.text()
+        from file_dialogs import browse_directory_with_memory
+
+        directory = browse_directory_with_memory(
+            self.main_window,
+            context="comfyui_network_output",
+            title="Select Network Output Directory",
+            fallback_path=self.ui.ComfyUINetworkOutputEdit.text()
         )
         if directory:
             self.ui.ComfyUINetworkOutputEdit.setText(directory)
@@ -596,17 +586,15 @@ class SettingsTab(BaseTab):
         new_global_path = self.ui.GlobalSettingsPathEdit.text().strip()
         if new_global_path:
             if not os.path.exists(new_global_path):
-                reply = QMessageBox.question(
-                    self.main_window, "Create Directory",
+                if confirm_action(
+                    "Create Directory",
                     f"The directory '{new_global_path}' does not exist. Create it?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply == QMessageBox.Yes:
+                    self.main_window
+                ):
                     try:
-                        os.makedirs(new_global_path)
+                        ensure_directory(new_global_path)
                     except Exception as e:
-                        if hasattr(self.main_window, 'animator'):
-                            self.main_window.animator.show_error(f"Failed to create directory: {e}")
+                        self.show_status(f"Failed to create directory: {e}", "error")
                         return
                 else:
                     return
@@ -649,8 +637,7 @@ class SettingsTab(BaseTab):
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()
 
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_success("Global settings saved")
+        self.show_status("Global settings saved", "success")
 
     def _on_add_admin_user(self):
         """Add an admin user."""
@@ -669,7 +656,6 @@ class SettingsTab(BaseTab):
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
         from core.settings_manager import remove_admin_user
-        from PySide6.QtWidgets import QMessageBox
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
@@ -680,21 +666,17 @@ class SettingsTab(BaseTab):
 
         # Warn if removing self
         if username.lower() == self.app_state.user.lower():
-            reply = QMessageBox.warning(
-                self.main_window,
+            if not confirm_action(
                 "Remove Yourself?",
                 "You are about to remove yourself from the admin list.\n"
                 "You will lose access to admin features after restarting.\n\nContinue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
+                self.main_window
+            ):
                 return
 
         remove_admin_user(username)
         self._load_admin_users_ui()
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_success(f"Removed admin user: {username}")
+        self.show_status(f"Removed admin user: {username}", "success")
 
     def _on_add_sup_user(self):
         """Add a supervisor user."""
@@ -713,7 +695,6 @@ class SettingsTab(BaseTab):
     def _on_remove_sup_user(self):
         """Remove selected supervisor user."""
         from core.settings_manager import remove_sup_user
-        from PySide6.QtWidgets import QMessageBox
 
         if not hasattr(self.ui, 'SupUsersList'):
             return
@@ -727,21 +708,17 @@ class SettingsTab(BaseTab):
 
         # Warn if removing self
         if username.lower() == self.app_state.user.lower():
-            reply = QMessageBox.warning(
-                self.main_window,
+            if not confirm_action(
                 "Remove Yourself?",
                 "You are about to remove yourself from the supervisor list.\n"
                 "You will lose access to supervisor features after restarting.\n\nContinue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
+                self.main_window
+            ):
                 return
 
         remove_sup_user(username)
         self._load_sup_users_ui()
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_success(f"Removed supervisor: {username}")
+        self.show_status(f"Removed supervisor: {username}", "success")
 
     # =========================================================================
     # RESTRICTED TABS
@@ -820,7 +797,7 @@ class SettingsTab(BaseTab):
 
     def _on_submit_feature_request(self):
         """Show feature request submission dialog."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QComboBox, QTextEdit, QLabel, QDialogButtonBox, QMessageBox
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QComboBox, QTextEdit, QLabel, QDialogButtonBox
         from core.feature_requests import append_feature_request
 
         dialog = QDialog(self.main_window)
@@ -865,11 +842,7 @@ class SettingsTab(BaseTab):
             description = description_edit.toPlainText().strip()
 
             if not description:
-                QMessageBox.warning(
-                    self.main_window,
-                    "Empty Description",
-                    "Please enter a description for your request."
-                )
+                show_warning("Empty Description", "Please enter a description for your request.", self.main_window)
                 return
 
             # Submit request
@@ -877,19 +850,19 @@ class SettingsTab(BaseTab):
             success = append_feature_request(category, description, username)
 
             if success:
-                QMessageBox.information(
-                    self.main_window,
+                show_info(
                     "Request Submitted",
-                    "Your feature request has been submitted successfully.\nAdmins will be notified."
+                    "Your feature request has been submitted successfully.\nAdmins will be notified.",
+                    self.main_window
                 )
 
                 # Notify admins
                 self._notify_admins_of_new_request()
             else:
-                QMessageBox.critical(
-                    self.main_window,
+                show_error(
                     "Submission Failed",
-                    "Failed to submit feature request. Please try again or contact an admin."
+                    "Failed to submit feature request. Please try again or contact an admin.",
+                    self.main_window
                 )
 
     def _notify_admins_of_new_request(self):
@@ -905,11 +878,7 @@ class SettingsTab(BaseTab):
     def _on_view_feature_requests(self):
         """Show all feature requests dialog (admin only)."""
         if not self.app_state.is_admin:
-            QMessageBox.warning(
-                self.main_window,
-                "Access Denied",
-                "Only administrators can view feature requests."
-            )
+            show_warning("Access Denied", "Only administrators can view feature requests.", self.main_window)
             return
 
         from tabs.dialogs import FeatureRequestDialog
@@ -955,14 +924,16 @@ class SettingsTab(BaseTab):
     def _on_add_hdri(self):
         """Add a new HDRI to the global list."""
         from core.settings_manager import add_hdri_to_list
-        from PySide6.QtWidgets import QFileDialog, QInputDialog
+        from PySide6.QtWidgets import QInputDialog
+        from file_dialogs import browse_file_with_memory
 
         # Browse for HDRI file
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path = browse_file_with_memory(
             self.main_window,
-            "Select HDRI File",
-            "",
-            "HDRI Files (*.hdr *.exr);;All Files (*.*)"
+            context="hdri_files",
+            title="Select HDRI File",
+            file_filter="HDRI Files (*.hdr *.exr);;All Files (*.*)",
+            fallback_path=""
         )
 
         if not file_path:
@@ -989,11 +960,7 @@ class SettingsTab(BaseTab):
             self._load_hdri_list_ui()
             self.log(f"Added HDRI: {name}")
         except Exception as e:
-            QMessageBox.warning(
-                self.main_window,
-                "Error",
-                f"Failed to add HDRI: {e}"
-            )
+            show_warning("Error", f"Failed to add HDRI: {e}", self.main_window)
 
     def _on_remove_hdri(self):
         """Remove selected HDRI from the global list."""
@@ -1009,15 +976,11 @@ class SettingsTab(BaseTab):
 
         # Confirm deletion
         hdri_names = [item.text() for item in selected_items]
-        reply = QMessageBox.question(
-            self.main_window,
+        if not confirm_action(
             "Remove HDRI",
             f"Remove {len(hdri_names)} HDRI(s)?\n\n" + "\n".join(hdri_names),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
+            self.main_window
+        ):
             return
 
         # Remove from settings
@@ -1031,8 +994,4 @@ class SettingsTab(BaseTab):
 
             self._load_hdri_list_ui()
         except Exception as e:
-            QMessageBox.warning(
-                self.main_window,
-                "Error",
-                f"Failed to remove HDRI: {e}"
-            )
+            show_warning("Error", f"Failed to remove HDRI: {e}", self.main_window)

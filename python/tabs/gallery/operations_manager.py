@@ -11,8 +11,10 @@ Handles batch operations on gallery items:
 import os
 from typing import Dict, Any
 
+from .base_manager import BaseGalleryManager
 
-class OperationsManager:
+
+class OperationsManager(BaseGalleryManager):
     """Manages operations on gallery items."""
 
     def __init__(self, tab):
@@ -22,33 +24,22 @@ class OperationsManager:
         Args:
             tab: Reference to the ComfyUIGalleryTab
         """
-        self.tab = tab
+        super().__init__(tab)
 
     def delete_selected(self):
         """Delete all selected items with confirmation."""
-        from PySide6.QtWidgets import QMessageBox, QApplication
+        from dialog_helpers import confirm_action, show_warning
 
         if not self.tab._selected_items:
             return
 
         count = len(self.tab._selected_items)
 
-        # Get proper parent window for dialog
-        parent_window = None
-        for widget in QApplication.topLevelWidgets():
-            if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                parent_window = widget
-                break
-
-        reply = QMessageBox.question(
-            parent_window,
+        if confirm_action(
             "Delete Selected Items",
             f"Are you sure you want to delete {count} selected item(s)?\n\nThis will permanently delete the files from disk.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+            parent=self.tab.main_window
+        ):
             success_count = 0
             failed_items = []
 
@@ -106,7 +97,7 @@ class OperationsManager:
                     StatusColors.SUCCESS,
                     start=False
                 )
-                self.tab.main_window.animator.show_success(f"Deleted {success_count} item(s)")
+                self.show_status(f"Deleted {success_count} item(s)", "success")
                 self.tab.log(f"[Gallery] Deleted {success_count} item(s)")
             else:
                 self.tab.update_status_with_spinner(
@@ -114,10 +105,10 @@ class OperationsManager:
                     StatusColors.WARNING,
                     start=False
                 )
-                QMessageBox.warning(
-                    parent_window,
+                show_warning(
                     "Partial Delete",
-                    f"Deleted {success_count} of {count} items.\n\nFailed:\n" + "\n".join(failed_items[:5])
+                    f"Deleted {success_count} of {count} items.\n\nFailed:\n" + "\n".join(failed_items[:5]),
+                    parent=self.tab.main_window
                 )
 
     def _find_stack_containing_item(self, item_path):
@@ -220,7 +211,7 @@ class OperationsManager:
 
     def publish_selected(self):
         """Publish selected items to AYON."""
-        from PySide6.QtWidgets import QMessageBox
+        from dialog_helpers import confirm_action, show_warning, show_error
         from ui_components import Worker
         from PySide6.QtCore import QThreadPool
 
@@ -229,26 +220,22 @@ class OperationsManager:
 
         # Check if we're in own gallery (can only publish own items)
         if not self.tab._is_own_gallery():
-            QMessageBox.warning(
-                self.tab.main_window,
+            show_warning(
                 "Cannot Publish",
                 "You can only publish items from your own gallery.\n\n"
-                "Switch to your own gallery to publish items."
+                "Switch to your own gallery to publish items.",
+                parent=self.tab.main_window
             )
             return
 
         count = len(self.tab._selected_items)
 
         # Confirm publish
-        reply = QMessageBox.question(
-            self.tab.main_window,
+        if not confirm_action(
             "Publish Selected Items",
             f"Publish {count} selected item(s) to AYON?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
+            parent=self.tab.main_window
+        ):
             return
 
         # Show status with spinner
@@ -281,7 +268,7 @@ class OperationsManager:
         self._publish_worker = Worker(publish_batch, selected_paths)
         self._publish_worker.signals.result.connect(self._on_publish_complete)
         self._publish_worker.signals.error.connect(
-            lambda msg, tb: QMessageBox.critical(self.tab.main_window, "Publish Error", msg)
+            lambda msg, tb: show_error("Publish Error", msg, parent=self.tab.main_window)
         )
         QThreadPool.globalInstance().start(self._publish_worker)
 
@@ -289,7 +276,7 @@ class OperationsManager:
 
     def _on_publish_complete(self, results):
         """Handle publish batch completion."""
-        from PySide6.QtWidgets import QMessageBox
+        from dialog_helpers import show_warning
         from ui_components import StatusColors
 
         success_count = sum(1 for r in results if r['success'])
@@ -302,7 +289,7 @@ class OperationsManager:
                 StatusColors.SUCCESS,
                 start=False
             )
-            self.tab.main_window.animator.show_success(f"Published {success_count} item(s) to AYON")
+            self.show_status(f"Published {success_count} item(s) to AYON", "success")
             self.tab.log(f"[Gallery] Published {success_count} items to AYON")
         else:
             # Stop spinner and show warning
@@ -311,10 +298,10 @@ class OperationsManager:
                 StatusColors.WARNING,
                 start=False
             )
-            QMessageBox.warning(
-                self.tab.main_window,
+            show_warning(
                 "Partial Publish",
-                f"Published {success_count} of {len(results)} items.\n\nFailed:\n" + "\n".join(failed_items[:5])
+                f"Published {success_count} of {len(results)} items.\n\nFailed:\n" + "\n".join(failed_items[:5]),
+                parent=self.tab.main_window
             )
 
     def copy_settings_to_comfyui(self, metadata: Dict[str, Any]):

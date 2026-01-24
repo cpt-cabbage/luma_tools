@@ -23,24 +23,28 @@ python python/core/luma_tools.py
 
 ## Deployment
 
-`install.bat` auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Version stored in `version.json`.
+`install.bat` auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Current version in `version.json` (project root).
 
 ## Project Structure
 
 ```
 python/
 ├── core/         # luma_tools.py (main), config.py, state_manager.py, settings_manager.py, user_preferences.py
+│                 # error_handling.py, utils.py, import_utils.py
 ├── comfyui/      # service.py, workflow.py, node_configs.py, presets_manager.py, runner.py, server.py
-│                 # deadline_submitter.py, deadline_poller.py, metadata.py, ayon_publisher.py
+│                 # deadline_submitter.py, deadline_poller.py, metadata.py, ayon_publisher.py, utils.py
 ├── models/       # viewer.py, animation_controller.py, animation_utils.py, thumbnail_service.py
 │   └── loaders/  # base.py, factory.py, open3d_loader.py, trimesh_loader.py, assimp_loader.py, usd_loader.py, smpl_loader.py
 ├── ayon/         # service.py (Strategy Pattern), publisher_integration.py, validators/
 ├── services/     # pass_builder.py, render_service.py, mp4_maker.py, file_operations.py, deadline_utils.py
 ├── tabs/         # base_tab.py, *_tab.py, comfyui_*_manager.py, comfyui_polling.py (mixin)
-│   ├── gallery/  # selection_manager.py, viewer_manager.py, operations_manager.py, refresh_controller.py, ui_manager.py
+│   ├── gallery/  # base_manager.py, selection_manager.py, viewer_manager.py, operations_manager.py
+│   │             # refresh_controller.py, ui_manager.py, favorites_manager.py, groups_panel.py
+│   ├── mixins/   # render_scan_mixin.py (shared render tab functionality)
 │   └── dialogs/  # feature_request_dialog.py
 ├── ui/           # spell_checker.py, gallery_prewarm.py
-resources/ui/     # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py, file_dialogs.py
+resources/ui/     # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py
+                  # file_dialogs.py, dialog_helpers.py, option_button.py
 tests/            # test_loaders.py, test_animation_controller.py, test_config.py, test_file_dialogs.py
 ```
 
@@ -48,15 +52,21 @@ tests/            # test_loaders.py, test_animation_controller.py, test_config.p
 
 ```python
 from core.config import OIIO_PATH, FFMPEG_PATH, UIColors, UIStyles
-from core.state_manager import app_state
+from core.utils import ensure_directory, load_json, save_json, normalize_path
+from core.state_manager import app_state  # app_state.has_shot_context(), .has_elevated_access, .refresh_admin_status()
 from core.settings_manager import get_setting, set_setting
+from core.error_handling import safe_operation, handle_errors, log_error
 from comfyui.service import submit_comfyui_to_deadline
+from comfyui.utils import resolve_comfyui_paths
 from models.loaders.factory import load_model
 from ayon.service import create_ayon_metadata
 from services.pass_builder import PassBuilder
 
 # File dialogs with memory (remembers last directory per context)
 from file_dialogs import browse_file_with_memory, browse_directory_with_memory
+
+# Dialog helpers - use instead of raw QMessageBox
+from dialog_helpers import confirm_action, show_warning, show_error, show_info
 
 # UI components - MUST lazy import (inside functions) to avoid worker thread issues
 from ui_components import Worker  # resources/ui/ in PYTHONPATH
@@ -65,11 +75,26 @@ from ui_components import Worker  # resources/ui/ in PYTHONPATH
 ## Architecture Patterns
 
 ### Tabs (BaseTab)
-Inherit from `tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`tabs/__init__.py`) with `restrict_key` for access control.
+Inherit from `tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`tabs/__init__.py`) with `restrict_key` for access control (matches keys in `global_settings.json` → `restricted_tabs` to hide tabs from non-admin users).
 
 ### Threading (CRITICAL)
 
-**Worker Pattern:**
+**Worker Pattern (preferred - use BaseTab helper):**
+```python
+# Simple args
+self.start_worker(my_function, arg1, arg2, on_result=self._handle_result, on_error=self._handle_error)
+
+# With keyword arguments (use worker_kwargs)
+self.start_worker(
+    submit_job,
+    worker_kwargs={"name": "MyJob", "priority": 50, "path": "/path/to/file"},
+    on_result=self._on_submit_complete,
+    on_error=self._on_submit_error,
+    on_progress=self._on_progress
+)
+```
+
+**Manual Worker Pattern (when BaseTab helper unavailable):**
 ```python
 from ui_components import Worker  # Lazy import
 self._worker = Worker(func, arg1)  # MUST store reference to prevent GC
@@ -81,7 +106,7 @@ QThreadPool.globalInstance().start(self._worker)
 - Store worker on `self` or long-lived object (GC will delete if not stored)
 - Never update Qt widgets from worker threads (use signals)
 - `app_state` is thread-safe (RLock)
-- Workers auto-inject `progress_callback(int, str)` if in function signature
+- Workers auto-inject `progress_callback(percent: int, message: str)` if in function signature
 
 ### Settings
 
@@ -94,14 +119,29 @@ Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 `models/loaders/factory.py`: `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL). Each loader in `models/loaders/` implements `BaseModelLoader` ABC.
 
 ### Gallery Managers
-`tabs/gallery/` decomposes gallery functionality: `selection_manager.py` (multi-select), `viewer_manager.py` (viewer lifecycle), `operations_manager.py` (batch ops), `refresh_controller.py` (file watching), `ui_manager.py` (sort/filter/view mode).
+`tabs/gallery/` decomposes gallery functionality: `selection_manager.py` (multi-select), `viewer_manager.py` (viewer lifecycle), `operations_manager.py` (batch ops), `refresh_controller.py` (file watching), `ui_manager.py` (sort/filter/view mode), `favorites_manager.py` (likes/groups), `groups_panel.py` (sidebar UI).
 
 **Incremental Updates:** Gallery uses incremental display to avoid flashing when new items arrive. `display_items(items, view_mode, incremental=True)` adds only new items without clearing existing widgets. Stacked view uses `_update_stacked_items_incrementally()`.
 
 **Item Metadata:** Gallery items have `has_metadata` field indicating if ComfyUI metadata was found (for styling), `is_input` for source images, and `job_prefix` for grouping.
 
+**Likes & Groups:** Users can like items and organize them into color-coded groups. Data stored in `_gallery_favorites.json` per output directory.
+
+**Gallery Keyboard Shortcuts:** `L` (toggle like), `G` (quick add to group), `Ctrl+G` (group management dialog), `1-9` (quick assign to group by number).
+
 ### Mixin Pattern
 `PollingMixin` (`tabs/comfyui_polling.py`): Add via inheritance, call `_init_polling_state()` in `initialize()`, then `_start_iterate_polling()` or `_start_batch_polling(job_ids)`.
+
+`RenderScanMixin` (`tabs/mixins/render_scan_mixin.py`): For tabs working with render sequences. Provides source selection (for_comp/raw/custom), version handling, render scanning.
+```python
+class MyRenderTab(RenderScanMixin, BaseTab):
+    # Widget names to override
+    _render_list_widget = "MyRendersList"
+    _source_button = "MySourceButton"
+    # app_state attributes
+    _renders_attr = "my_renders"
+    _searchpath_attr = "my_searchpath"
+```
 
 ## Configuration
 
@@ -143,12 +183,18 @@ Manual testing required (both launcher modes, with/without AYON env)
 
 ### Windows PowerShell (for Claude Code)
 Always use PowerShell for Python scripts (Bash compatibility layer has path issues):
-```bash
-# Syntax check
-powershell -Command "Set-Location 'l:\path\to\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\tabs\file.py"
+```powershell
+# Syntax check a file
+powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\tabs\file.py"
 
-# Run tests
-powershell -Command "Set-Location 'l:\path\to\luma_tools'; python\venv\Scripts\python.exe -m pytest tests/"
+# Run all tests
+powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m pytest tests/ -v"
+
+# Run single test file
+powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m pytest tests\test_loaders.py -v"
+
+# Quick import check
+powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -c \"import sys; sys.path.insert(0, 'python'); sys.path.insert(0, 'resources/ui'); from tabs.my_tab import MyTab; print('OK')\""
 ```
 
 ### Debugging
@@ -179,16 +225,64 @@ Edit `.ui` files in Qt Designer, update tab logic in `python/tabs/`, styles in `
 ### Other Issues
 - **Threading:** Use signals for cross-thread GUI updates (never direct Qt widget calls from workers)
 - **Optional Deps:** Check `*_AVAILABLE` flags (AYON_AVAILABLE, DEADLINE_AVAILABLE, etc.) before using features
-- **Paths:** Use `normalize_path()` from `core.utils` (Windows backslash vs AYON forward slash)
+- **Paths:** Use `normalize_path()` from `core.utils` for AYON/Deadline compatibility; use `ensure_directory()` instead of `os.makedirs()`
 - **ComfyUI Workflows:** 2 formats (UI/nodes vs API), use `is_api_format()` to detect
 - **Imports:** Lazy import UI components inside functions (avoid module-level `from resources.ui...`)
 
 ## Utilities
 
-**core/config.py:** `UIColors` (background, text, accent, status colors), `UIStyles` (reusable stylesheet snippets)
+**core/utils.py:** Common helpers:
+- `ensure_directory(path)` - create directory if needed (prefer over `os.makedirs`)
+- `load_json(path, default)` / `save_json(path, data)` - with error handling and atomic writes
+- `remove_prefix(s, prefix)` / `remove_suffix(s, suffix)` - Python <3.9 compatible
+- `normalize_path(path)` - Windows backslash → forward slash for AYON/Deadline
+- `extract_render_name(filename, strip_frame_padding=False)` - extract render name from sequence filename
+
+**core/error_handling.py:** Consistent error handling utilities:
+- `@safe_operation(name, return_on_error)` - decorator for functions that may fail
+- `with handle_errors(name, reraise=False)` - context manager for error blocks
+- `log_error(operation, error, variable)` - consistent error logging format
+- `format_error(operation, error, variable, include_traceback)` - format error message string
+
+**core/config.py:** `UIColors` (background, text, accent, status colors, `GROUP_COLORS` for gallery groups), `UIStyles` (reusable stylesheet snippets)
 
 **core/import_utils.py:** `safe_import()`, `safe_import_multiple()` - graceful optional imports with `*_AVAILABLE` flags
 
-**resources/ui/file_dialogs.py:** `browse_file_with_memory()`, `browse_directory_with_memory()`, `save_file_with_memory()` - remembers last dir per context
+**resources/ui/dialog_helpers.py:** Wrapper functions for QMessageBox (use instead of raw QMessageBox):
+- `confirm_action(title, message, parent, detail, default_yes)` → bool - Yes/No confirmation
+- `show_warning(title, message, parent, detail)` - warning dialog
+- `show_error(title, message, parent, detail)` - error dialog
+- `show_info(title, message, parent, detail)` - info dialog
+
+**resources/ui/file_dialogs.py:** File dialogs with last-directory memory per context:
+- `browse_file_with_memory()`, `browse_directory_with_memory()`, `save_file_with_memory()`, `browse_multiple_files_with_memory()`
+- Context-specific helpers: `browse_workflow_file()`, `browse_images()`, `save_mp4_file()`, `browse_comfyui_output_dir()`, `browse_hdri_file()`, `browse_custom_renders_dir()`
+
+**resources/ui/option_button.py:** Reusable popup menu button pattern:
+```python
+from option_button import OptionButtonManager, IndexedOptionButtonManager
+
+self._source_manager = OptionButtonManager(
+    button=self.ui.SourceButton,
+    options=[("For Comp", "for_comp"), ("Raw", "raw")],
+    initial_value="for_comp",
+    on_changed=self._on_source_changed,
+    label_prefix="Source: "
+)
+# Access: self._source_manager.value, self._source_manager.set_value("raw")
+```
+
+**comfyui/utils.py:** ComfyUI utilities:
+- `resolve_comfyui_paths(comfyui_path, mode)` - get python exe and main.py for embedded/portable/standalone modes
+- `check_server_health()`, `wait_for_server()` - server management
 
 **models/animation_controller.py:** `AnimationController` (playback state, timing), `AnimationTransportBar` (play/pause/loop UI)
+
+**tabs/base_tab.py Helpers:**
+- `self.start_worker(func, *args, on_result=..., on_error=..., on_progress=..., worker_kwargs={})` - simplified worker thread management (use `worker_kwargs` for keyword arguments to function)
+- `self.show_status(message, level)` - status bar updates (info/success/warning/error)
+- `self.update_status_with_spinner(message, color, start=True)` - status bar with spinner control
+- `self.pulse_button(widget)` - safe button animation
+- `self.on_worker_success()` / `self.on_worker_error()` - standard completion handlers
+
+**tabs/gallery/base_manager.py:** Base class for gallery manager components with same helpers as BaseTab

@@ -14,6 +14,13 @@ import sys
 import os
 
 
+def _ensure_output_dir(path):
+    """Ensure the output directory exists."""
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+
 def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool:
     """
     Render a 3D model file to a PNG thumbnail using Open3D.
@@ -119,7 +126,7 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         vis.update_renderer()
 
         # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        _ensure_output_dir(output_path)
 
         # Capture to file
         vis.capture_screen_image(output_path, do_render=True)
@@ -269,7 +276,7 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         vis.poll_events()
         vis.update_renderer()
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        _ensure_output_dir(output_path)
         vis.capture_screen_image(output_path, do_render=True)
 
         vis.destroy_window()
@@ -346,7 +353,7 @@ def render_placeholder_thumbnail(output_path: str, size: int = 150, label: str =
         draw.text((cx - text_width // 2, cy + cube_size + 10), label, fill=(180, 180, 200, 255), font=font)
 
         # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        _ensure_output_dir(output_path)
 
         # Save
         img.save(output_path, format='PNG')

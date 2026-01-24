@@ -10,6 +10,7 @@ import json
 from typing import Dict, Any, List, Optional
 
 from comfyui.node_configs import WIDGET_MAPPINGS, SKIP_NODE_TYPES
+from core.utils import ensure_directory
 
 
 def load_workflow(workflow_path: str) -> Dict[str, Any]:
@@ -47,7 +48,7 @@ def save_workflow(
     import uuid
     from datetime import datetime
 
-    os.makedirs(output_dir, exist_ok=True)
+    ensure_directory(output_dir)
 
     # Generate unique job ID if not provided
     if not job_id:

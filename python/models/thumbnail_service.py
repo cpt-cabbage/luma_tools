@@ -14,6 +14,8 @@ from typing import Optional, Dict
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtCore import QEventLoop, QTimer
 
+from core.utils import ensure_directory
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -30,7 +32,7 @@ SUPPORTED_EXTENSIONS = {
 }
 
 # Ensure cache directory exists
-os.makedirs(CACHE_DIR, exist_ok=True)
+ensure_directory(CACHE_DIR)
 
 
 # ============================================================================

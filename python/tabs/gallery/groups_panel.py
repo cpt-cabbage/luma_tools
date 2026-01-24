@@ -768,15 +768,12 @@ class GroupsFilterPanel(QWidget):
         if not group:
             return
 
-        from PySide6.QtWidgets import QMessageBox
-        result = QMessageBox.question(
-            self,
+        from dialog_helpers import confirm_action
+        if confirm_action(
             "Delete Group",
             f"Delete group '{group.name}'?\n\nItems in this group will not be deleted.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        if result == QMessageBox.Yes:
+            self
+        ):
             group_name = group.name
             self._favorites_manager.delete_group(group_id)
             self.status_message.emit(f"Deleted group '{group_name}'")

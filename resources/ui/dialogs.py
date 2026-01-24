@@ -160,17 +160,9 @@ class EditModelDialog(BaseEditDialog):
     placeholder_text = "Add a note or description for this model..."
 
 
-# Group colors palette
-GROUP_COLORS = [
-    "#ef4444",  # Red
-    "#f97316",  # Orange
-    "#eab308",  # Yellow
-    "#22c55e",  # Green
-    "#06b6d4",  # Cyan
-    "#3b82f6",  # Blue
-    "#8b5cf6",  # Purple
-    "#ec4899",  # Pink
-]
+# Import GROUP_COLORS from config for backwards compatibility
+from core.config import UIColors
+GROUP_COLORS = UIColors.GROUP_COLORS
 
 
 class ColorButton(QPushButton):

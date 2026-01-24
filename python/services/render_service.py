@@ -12,7 +12,7 @@ import sys
 from typing import Dict, List
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
-from core.utils import substring_after, remove_after
+from core.utils import substring_after, remove_after, ensure_directory
 
 # Import UI utilities
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
@@ -97,7 +97,7 @@ def save_pass_config(pass_file, passes_dict):
         passes_dict: Dictionary of passes to save
     """
     # Ensure directory exists
-    os.makedirs(os.path.dirname(pass_file), exist_ok=True)
+    ensure_directory(os.path.dirname(pass_file))
 
     with open(pass_file, 'w') as fp:
         json.dump(passes_dict, fp, indent=2)

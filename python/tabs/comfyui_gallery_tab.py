@@ -17,7 +17,7 @@ from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QTimer, QThreadPool
 
 from .base_tab import BaseTab
-from .comfyui_gallery_loader import GalleryLoader, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, SUPPORTED_EXTENSIONS
+from .comfyui_gallery_loader import GalleryLoader
 from .comfyui_gallery_manager import GalleryManager
 from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager
 from .gallery.favorites_manager import FavoritesManager
@@ -404,20 +404,6 @@ class ComfyUIGalleryTab(BaseTab):
             self._on_refresh()
             self._initial_scan_done = True
 
-    def _filter_items(self, items):
-        """Filter items based on current filter settings."""
-        if self._show_inputs:
-            return items
-
-        # Filter out input images (non-output items)
-        # Items have 'is_input' field directly (not nested in metadata)
-        filtered = []
-        for item in items:
-            # Keep items that are NOT marked as input (i.e., outputs)
-            if not item.get('is_input', False):
-                filtered.append(item)
-        return filtered
-
     def _on_scan_complete_impl(self, items):
         """Implementation of scan complete handling."""
         # Store in cache
@@ -513,12 +499,10 @@ class ComfyUIGalleryTab(BaseTab):
             else:
                 subprocess.run(["xdg-open", self._current_path])
             # Show success status
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info("Opened gallery folder")
+            self.show_status("Opened gallery folder", "info")
         except Exception as e:
             self.log(f"[Gallery] Error opening explorer: {e}")
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_error(f"Could not open folder: {e}")
+            self.show_status(f"Could not open folder: {e}", "error")
 
     def _on_source_toggle(self):
         """Toggle between network and custom source modes."""
@@ -530,17 +514,17 @@ class ComfyUIGalleryTab(BaseTab):
             self.ui.GallerySourceToggle.setText("📁 Network")
             self._update_gallery_path()
             self._on_refresh(force=True)
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info("Switched to network gallery")
+            self.show_status("Switched to network gallery", "info")
 
     def _browse_custom_folder(self):
         """Browse for a custom gallery folder."""
-        from PySide6.QtWidgets import QFileDialog
+        from file_dialogs import browse_directory_with_memory
 
-        folder = QFileDialog.getExistingDirectory(
+        folder = browse_directory_with_memory(
             self.main_window,
-            "Select Gallery Folder",
-            self._current_path or ""
+            context="gallery_custom_folder",
+            title="Select Gallery Folder",
+            fallback_path=self._current_path or ""
         )
 
         if folder:
@@ -549,8 +533,7 @@ class ComfyUIGalleryTab(BaseTab):
             self.ui.GallerySourceToggle.setText("📁 Custom")
             self._update_gallery_path()
             self._on_refresh(force=True)
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info(f"Custom: {os.path.basename(folder)}")
+            self.show_status(f"Custom: {os.path.basename(folder)}", "info")
 
     # =========================================================================
     # GROUPS & LIKES FILTERING
@@ -759,5 +742,4 @@ class ComfyUIGalleryTab(BaseTab):
             message: Message to display
             duration: Duration in milliseconds (default 2000)
         """
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_info(message)
+        self.show_status(message, "info")

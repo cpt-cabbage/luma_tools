@@ -7,8 +7,7 @@ Handles MP4 generation from EXR sequences.
 import os
 
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QThreadPool, QTimer
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtCore import QTimer
 
 from .base_tab import BaseTab
 
@@ -32,92 +31,61 @@ class MP4MakerTab(BaseTab):
         """Connect MP4 maker tab signals."""
         self.ui.MP4ScanRenders.clicked.connect(self._on_scan_renders_clicked)
         self.ui.MP4CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
-        self.ui.MP4SourceButton.clicked.connect(self._on_source_button_clicked)
+        # Source and quality buttons connected in initialize() via managers
         self.ui.MP4BrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.MP4RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.MP4BrowseOutput.clicked.connect(self._on_browse_output)
         self.ui.MP4Generate.clicked.connect(self._on_generate_clicked)
-        self.ui.MP4QualityButton.clicked.connect(self._on_quality_button_clicked)
 
     def initialize(self):
         """Initialize MP4 maker tab."""
+        from option_button import OptionButtonManager, IndexedOptionButtonManager
+
         self.ui.MP4Generate.setEnabled(False)
 
-        # Source options (label, value)
-        self._source = "for_comp"  # Default
-        self._source_options = [
-            ("For Comp", "for_comp"),
-            ("Raw", "raw"),
-            ("Custom", "custom"),
-        ]
-        self._update_source_button_text()
+        # Source option manager with dynamic label function
+        def get_source_label(value):
+            labels = {"for_comp": "For Comp", "raw": "Raw", "custom": "Custom"}
+            if value == "for_comp" and self.app_state.output_subdirectory:
+                return self.app_state.output_subdirectory.title()
+            return labels.get(value, value)
 
-        # Quality options (index, label, button_label)
-        self._quality_index = 0  # Default: high quality
-        self._quality_options = [
-            (0, "High Quality (CRF 18)", "Quality: High (CRF 18)"),
-            (1, "Medium Quality (CRF 23)", "Quality: Medium (CRF 23)"),
-            (2, "Low Quality (CRF 28)", "Quality: Low (CRF 28)"),
-        ]
-        self._update_quality_button_text()
+        self._source_manager = OptionButtonManager(
+            button=self.ui.MP4SourceButton,
+            options=[("For Comp", "for_comp"), ("Raw", "raw"), ("Custom", "custom")],
+            initial_value="for_comp",
+            on_changed=self._on_source_changed,
+            label_prefix="Source: ",
+            parent_window=self.main_window,
+            label_func=get_source_label
+        )
+
+        # Quality option manager (indexed options)
+        self._quality_manager = IndexedOptionButtonManager(
+            button=self.ui.MP4QualityButton,
+            options=[
+                (0, "High Quality (CRF 18)", "Quality: High (CRF 18)"),
+                (1, "Medium Quality (CRF 23)", "Quality: Medium (CRF 23)"),
+                (2, "Low Quality (CRF 28)", "Quality: Low (CRF 28)"),
+            ],
+            initial_index=0,
+            on_changed=lambda idx: None,  # No additional action needed
+            parent_window=self.main_window
+        )
+
+    # Properties for backward compatibility with existing code
+    @property
+    def _source(self):
+        return self._source_manager.value if hasattr(self, '_source_manager') else "for_comp"
+
+    @property
+    def _quality_index(self):
+        return self._quality_manager.index if hasattr(self, '_quality_manager') else 0
 
     def _update_source_button_text(self):
-        """Update the source button text to show current selection."""
-        # Find label for current source value
-        label = next((l for l, v in self._source_options if v == self._source), self._source)
-        # Update with output_subdirectory if available and using for_comp
-        if self._source == "for_comp" and self.app_state.output_subdirectory:
-            label = self.app_state.output_subdirectory.title()
-        self.ui.MP4SourceButton.setText(f"Source: {label}")
-
-    def _update_quality_button_text(self):
-        """Update the quality button text to show current selection."""
-        for index, label, button_label in self._quality_options:
-            if index == self._quality_index:
-                self.ui.MP4QualityButton.setText(button_label)
-                break
-
-    def _on_source_button_clicked(self):
-        """Show popup menu with source options."""
-        from small_widgets import show_popup_menu
-
-        # Build display options with dynamic label for for_comp
-        display_options = []
-        for label, value in self._source_options:
-            display_label = label
-            if value == "for_comp" and self.app_state.output_subdirectory:
-                display_label = self.app_state.output_subdirectory.title()
-            display_options.append((display_label, value))
-
-        result = show_popup_menu(
-            self.main_window,
-            self.ui.MP4SourceButton,
-            display_options,
-            current=self._source
-        )
-
-        if result is not None:
-            self._source = result
-            self._update_source_button_text()
-            self._on_source_changed()
-
-    def _on_quality_button_clicked(self):
-        """Show popup menu with quality options."""
-        from small_widgets import show_popup_menu
-
-        # Convert to (label, value) format for show_popup_menu
-        menu_options = [(label, index) for index, label, button_label in self._quality_options]
-
-        result = show_popup_menu(
-            self.main_window,
-            self.ui.MP4QualityButton,
-            menu_options,
-            current=self._quality_index
-        )
-
-        if result is not None:
-            self._quality_index = result
-            self._update_quality_button_text()
+        """Refresh source button text (delegates to manager)."""
+        if hasattr(self, '_source_manager'):
+            self._source_manager.refresh_text()
 
     def _on_source_changed(self):
         """Handle source type change - show/hide custom path controls and trigger scan."""
@@ -132,17 +100,13 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Browse for custom directory containing image sequences."""
-        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
+        from file_dialogs import browse_directory_with_memory
 
-        default_dir = get_last_browse_directory("mp4_custom")
-        if not default_dir:
-            default_dir = os.path.join(os.path.expanduser("~"), "Videos")
-
-        custom_dir = QFileDialog.getExistingDirectory(
+        custom_dir = browse_directory_with_memory(
             self.main_window,
-            "Select Directory with Image Sequence",
-            default_dir,
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            context="mp4_custom",
+            title="Select Directory with Image Sequence",
+            fallback_path=os.path.join(os.path.expanduser("~"), "Videos")
         )
 
         if custom_dir:
@@ -150,9 +114,7 @@ class MP4MakerTab(BaseTab):
             self.ui.MP4CustomPathLabel.setText(f"Custom path: {custom_dir}")
             self.ui.MP4CustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
             self.log(f"MP4 Maker: Custom path set to: {custom_dir}")
-            set_last_browse_directory("mp4_custom", custom_dir)
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info(f"Custom: {os.path.basename(custom_dir)}")
+            self.show_status(f"Custom: {os.path.basename(custom_dir)}", "info")
             self._on_scan_renders_clicked()
 
     def _on_scan_renders_clicked(self):
@@ -160,8 +122,7 @@ class MP4MakerTab(BaseTab):
         from core.utils import update_path_version, scan_exr_sequences
 
         # Show scanning status
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_info("MP4: Scanning sequences...")
+        self.show_status("MP4: Scanning sequences...", "info")
 
         self.ui.MP4RendersList.clear()
 
@@ -217,13 +178,11 @@ class MP4MakerTab(BaseTab):
                 self.ui.MP4RendersList.addItem(display_name)
             self.ui.MP4RendersList.setEnabled(True)
             # Show result
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info(f"Found {len(self.app_state.mp4_renders)} sequence(s)")
+            self.show_status(f"Found {len(self.app_state.mp4_renders)} sequence(s)", "info")
         else:
             self.ui.MP4RendersList.addItem("No Renders Found")
             self.ui.MP4RendersList.setEnabled(False)
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_warning("No sequences found")
+            self.show_status("No sequences found", "warning")
 
     def _on_render_selection_changed(self):
         """Update MP4 state when selected render changes."""
@@ -244,7 +203,8 @@ class MP4MakerTab(BaseTab):
         # Automatically set output path to user's Videos folder
         framename = render_seq.frame(render_seq.start())
         filename = os.path.basename(framename)
-        render_name = filename.split(".")[0]
+        from core.utils import extract_render_name
+        render_name = extract_render_name(filename)
         default_filename = get_output_filename(render_name, self.app_state.shot)
         videos_folder = os.path.join(os.path.expanduser("~"), "Videos")
         self.app_state.mp4_output_path = os.path.join(videos_folder, default_filename)
@@ -260,7 +220,7 @@ class MP4MakerTab(BaseTab):
 
     def _on_browse_output(self):
         """Browse for MP4 output location."""
-        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
+        from file_dialogs import save_file_with_memory
         from services.mp4_maker import get_output_filename
 
         # Get current render name for default filename
@@ -271,27 +231,24 @@ class MP4MakerTab(BaseTab):
             subdir, render_seq = self.app_state.mp4_renders[sel0]
             framename = render_seq.frame(render_seq.start())
             filename = os.path.basename(framename)
-            render_name = filename.split(".")[0]
+            from core.utils import extract_render_name
+            render_name = extract_render_name(filename)
             default_filename = get_output_filename(render_name, self.app_state.shot)
 
-        # Use last browsed directory or default to user's Videos folder
-        last_dir = get_last_browse_directory("mp4_output")
-        if not last_dir:
-            last_dir = os.path.join(os.path.expanduser("~"), "Videos")
-
-        # Open file dialog with default location
-        output_file, _ = QFileDialog.getSaveFileName(
+        # Use save_file_with_memory helper
+        output_file = save_file_with_memory(
             self.main_window,
-            "Save MP4 As",
-            os.path.join(last_dir, default_filename),
-            "MP4 Video (*.mp4)"
+            context="mp4_output",
+            title="Save MP4 As",
+            default_filename=default_filename,
+            file_filter="MP4 Video (*.mp4)",
+            fallback_path=os.path.join(os.path.expanduser("~"), "Videos")
         )
 
         if output_file:
             self.app_state.mp4_output_path = output_file
             self.ui.MP4OutputPath.setText(output_file)
             self.ui.MP4OutputPath.setStyleSheet("color: white; font-size: 9pt;")
-            set_last_browse_directory("mp4_output", os.path.dirname(output_file))
 
             # Enable generate button if render is selected
             if self.ui.MP4RendersList.currentRow() >= 0:
@@ -369,7 +326,7 @@ class MP4MakerTab(BaseTab):
                     StatusColors.SUCCESS,
                     start=False
                 )
-                self.main_window.animator.show_success("MP4 generation complete!")
+                self.show_status("MP4 generation complete!", "success")
             else:
                 self.update_status_with_spinner(
                     "MP4 generation failed",

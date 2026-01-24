@@ -31,44 +31,31 @@ class PassBuilderTab(BaseTab):
         self.ui.RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.BuildPasses.pressed.connect(self._on_build_passes_clicked)
         self.ui.CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
-        self.ui.BuildTypeButton.clicked.connect(self._on_build_type_button_clicked)
+        # Build type button connected in initialize() via manager
 
     def initialize(self):
         """Initialize pass builder tab."""
+        from ui_components import InlineSpinner
+        from option_button import OptionButtonManager
+
         self.ui.BuildPasses.setEnabled(False)
         # Create inline spinner for pass detection (will be positioned in showEvent)
-        from ui_components import InlineSpinner
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
 
-        # Build type options
-        self._build_type = "local"  # Default: local
-        self._build_type_options = [
-            ("Local", "local"),
-            ("Farm", "farm"),
-        ]
-        self._update_build_type_button_text()
-
-    def _update_build_type_button_text(self):
-        """Update the build type button text to show current selection."""
-        for label, mode in self._build_type_options:
-            if mode == self._build_type:
-                self.ui.BuildTypeButton.setText(f"Location: {label}")
-                break
-
-    def _on_build_type_button_clicked(self):
-        """Show popup menu with build type options."""
-        from small_widgets import show_popup_menu
-
-        result = show_popup_menu(
-            self.main_window,
-            self.ui.BuildTypeButton,
-            self._build_type_options,
-            current=self._build_type
+        # Build type option manager
+        self._build_type_manager = OptionButtonManager(
+            button=self.ui.BuildTypeButton,
+            options=[("Local", "local"), ("Farm", "farm")],
+            initial_value="local",
+            on_changed=lambda val: None,  # No additional action needed
+            label_prefix="Location: ",
+            parent_window=self.main_window
         )
 
-        if result is not None:
-            self._build_type = result
-            self._update_build_type_button_text()
+    # Property for backward compatibility
+    @property
+    def _build_type(self):
+        return self._build_type_manager.value if hasattr(self, '_build_type_manager') else "local"
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
@@ -76,8 +63,7 @@ class PassBuilderTab(BaseTab):
         from services.file_operations import find_renders
 
         # Show scanning status
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_info("Pass Builder: Scanning...")
+        self.show_status("Pass Builder: Scanning...", "info")
 
         self.ui.RendersList.clear()
         self.ui.Passes.clear()
@@ -97,13 +83,11 @@ class PassBuilderTab(BaseTab):
                 self.ui.RendersList.addItem(str(render_seq).split("\\")[-1])
             self.ui.RendersList.setEnabled(True)
             # Show result
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_info(f"Found {len(self.app_state.renders)} render(s)")
+            self.show_status(f"Found {len(self.app_state.renders)} render(s)", "info")
         else:
             self.ui.RendersList.addItem("No Renders Found")
             self.ui.RendersList.setEnabled(False)
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.show_warning("No renders found")
+            self.show_status("No renders found", "warning")
 
     def _on_render_selection_changed(self):
         """Update passes when selected render changes."""
@@ -119,7 +103,8 @@ class PassBuilderTab(BaseTab):
         self.app_state.endframe = self.app_state.renders[index].end()
         framename = self.app_state.renders[index].frame(self.app_state.startframe)
         filename = os.path.basename(framename)
-        self.app_state.currentrender = filename.split(".")[0]
+        from core.utils import extract_render_name
+        self.app_state.currentrender = extract_render_name(filename)
         denoisedpath = os.path.dirname(framename) + f"\\{filename}"
 
         # Find passes (shows inline spinner automatically)
@@ -136,8 +121,7 @@ class PassBuilderTab(BaseTab):
 
         # Show inline spinner and status
         self.passes_spinner.start()
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_info("Detecting passes...")
+        self.show_status("Detecting passes...", "info")
 
         def on_result(channels):
             """Called when pass detection completes."""
@@ -163,8 +147,8 @@ class PassBuilderTab(BaseTab):
             # Enable build button and show result
             if len(channels) >= 1:
                 self.ui.BuildPasses.setEnabled(True)
+                self.show_status(f"Found {len(channels)} passes", "info")
                 if hasattr(self.main_window, 'animator'):
-                    self.main_window.animator.show_info(f"Found {len(channels)} passes")
                     self.main_window.animator.pulse_button(self.ui.BuildPasses)
             else:
                 self.ui.BuildPasses.setEnabled(False)
@@ -242,7 +226,7 @@ class PassBuilderTab(BaseTab):
                 StatusColors.SUCCESS,
                 start=False
             )
-            self.main_window.animator.show_success("Build completed successfully")
+            self.show_status("Build completed successfully", "success")
 
         def on_error(error_msg, traceback_str):
             """Called when build fails."""
@@ -252,7 +236,7 @@ class PassBuilderTab(BaseTab):
                 StatusColors.ERROR,
                 start=False
             )
-            self.main_window.animator.show_error(f"Build failed: {error_msg}")
+            self.show_status(f"Build failed: {error_msg}", "error")
 
         # Use BaseTab helper for worker management
         self.start_worker(do_build, on_result=on_result, on_error=on_error)

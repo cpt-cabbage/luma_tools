@@ -10,8 +10,10 @@ Handles embedded and fullscreen viewer lifecycle:
 
 from PySide6.QtCore import QTimer
 
+from .base_manager import BaseGalleryManager
 
-class ViewerManager:
+
+class ViewerManager(BaseGalleryManager):
     """Manages viewer lifecycle for the gallery."""
 
     def __init__(self, tab):
@@ -21,7 +23,7 @@ class ViewerManager:
         Args:
             tab: Reference to the ComfyUIGalleryTab
         """
-        self.tab = tab
+        super().__init__(tab)
 
         # Viewer state
         self._embedded_viewer = None

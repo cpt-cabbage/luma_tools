@@ -46,6 +46,7 @@ try:
         download_image_from_server,
         move_output_files,
         get_workflow_images,
+        resolve_comfyui_paths,
     )
 except ImportError:
     # When running standalone on farm, import from copied utils file
@@ -60,6 +61,7 @@ except ImportError:
         download_image_from_server,
         move_output_files,
         get_workflow_images,
+        resolve_comfyui_paths,
     )
 
 
@@ -106,6 +108,8 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
         log_dir = network_output_dir
     else:
         log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        # Use os.makedirs directly here since we're in standalone farm execution context
+        # where core.utils may not be importable
         os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -206,39 +210,11 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
 def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, port: int,
                          mode: str = "embedded", python_path: str = None, lowvram: bool = False) -> subprocess.Popen:
     """Start ComfyUI server process."""
-    if mode == "embedded":
-        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
-        main_py = os.path.join(comfyui_path, "ComfyUI", "main.py")
-    elif mode == "portable":
-        venv_locations = [
-            os.path.join(comfyui_path, "venv", "Scripts", "python.exe"),
-            os.path.join(comfyui_path, ".venv", "Scripts", "python.exe"),
-        ]
-        main_py_locations = [
-            os.path.join(comfyui_path, "ComfyUI", "main.py"),
-        ]
-
-        python_exe = None
-        for venv_path in venv_locations:
-            if os.path.exists(venv_path):
-                python_exe = venv_path
-                break
-        if not python_exe:
-            python_exe = venv_locations[0]
-
-        main_py = None
-        for main_path in main_py_locations:
-            if os.path.exists(main_path):
-                main_py = main_path
-                break
-        if not main_py:
-            main_py = main_py_locations[0]
-    else:
-        if not python_path:
-            print("ERROR: Python path required for standalone mode")
-            return None
-        python_exe = python_path
-        main_py = os.path.join(comfyui_path, "main.py")
+    try:
+        python_exe, main_py = resolve_comfyui_paths(comfyui_path, mode, python_path)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return None
 
     cmd = [
         python_exe,
@@ -321,26 +297,12 @@ def main():
 
     setup_logging(args.output_prefix, args.output_directory)
 
-    # Determine paths based on mode
-    if args.mode == "embedded":
-        python_exe = os.path.join(args.comfyui_path, "python_embeded", "python.exe")
-        main_py = os.path.join(args.comfyui_path, "ComfyUI", "main.py")
-    elif args.mode == "portable":
-        venv_locations = [
-            os.path.join(args.comfyui_path, "venv", "Scripts", "python.exe"),
-            os.path.join(args.comfyui_path, ".venv", "Scripts", "python.exe"),
-        ]
-        main_py_locations = [
-            os.path.join(args.comfyui_path, "ComfyUI", "main.py"),
-        ]
-        python_exe = next((p for p in venv_locations if os.path.exists(p)), venv_locations[0])
-        main_py = next((p for p in main_py_locations if os.path.exists(p)), main_py_locations[0])
-    else:
-        if not args.python_path:
-            print("ERROR: --python-path required for standalone mode")
-            sys.exit(1)
-        python_exe = args.python_path
-        main_py = os.path.join(args.comfyui_path, "main.py")
+    # Determine paths based on mode (using centralized path resolution)
+    try:
+        python_exe, main_py = resolve_comfyui_paths(args.comfyui_path, args.mode, args.python_path)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
 
     # Verify paths
     if not os.path.exists(python_exe):

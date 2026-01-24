@@ -7,8 +7,6 @@ Handles republishing renders to AYON.
 import os
 
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QThreadPool
-from PySide6.QtWidgets import QFileDialog
 
 from .base_tab import BaseTab
 from ui_components import StatusColors
@@ -33,99 +31,72 @@ class RePublishTab(BaseTab):
         """Connect rePublish tab signals."""
         self.ui.RePublishScanRenders.clicked.connect(self._on_scan_renders_clicked)
         self.ui.RePublishCurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
-        self.ui.RePublishSourceButton.clicked.connect(self._on_source_button_clicked)
+        # Source and task buttons are connected via OptionButtonManager in initialize()
         self.ui.RePublishBrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.RePublishRendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.RePublishPublish.clicked.connect(self._on_publish_clicked)
-        self.ui.RePublishTaskButton.clicked.connect(self._on_task_button_clicked)
 
     def initialize(self):
         """Initialize rePublish tab."""
+        from option_button import OptionButtonManager
+
         self.ui.RePublishPublish.setEnabled(False)
 
-        # Source options (label, value)
-        self._source = "for_comp"  # Default
-        self._source_options = [
+        # Source options - determine available options based on mode
+        source_options = [
             ("For Comp", "for_comp"),
             ("Raw", "raw"),
             ("Custom", "custom"),
         ]
-        self._update_source_button_text()
-
-        # Task options
-        self._task = "lighting"  # Default
-        self._task_options = [
-            ("lighting", "lighting"),
-            ("compositing", "compositing"),
-            ("fx", "fx"),
-        ]
-        self._update_task_button_text()
 
         # In standalone mode, only allow custom directory selection
         if self.app_state.standalone_mode:
-            self._source = "custom"
-            self._update_source_button_text()
+            source_options = [("Custom", "custom")]
             self.ui.RePublishBrowseCustomPath.setVisible(True)
             print("Republish tab: Standalone mode - only custom directory selection allowed")
 
-    def _update_task_button_text(self):
-        """Update the task button text to show current selection."""
-        self.ui.RePublishTaskButton.setText(f"Task: {self._task}")
-
-    def _update_source_button_text(self):
-        """Update the source button text to show current selection."""
-        # Find label for current source value
-        label = next((l for l, v in self._source_options if v == self._source), self._source)
-        # Update with output_subdirectory if available and using for_comp
-        if self._source == "for_comp" and self.app_state.output_subdirectory:
-            label = self.app_state.output_subdirectory.title()
-        self.ui.RePublishSourceButton.setText(f"Source: {label}")
-
-    def _on_source_button_clicked(self):
-        """Show popup menu with source options."""
-        from small_widgets import show_popup_menu
-
-        # Build display options with filtering and dynamic labels
-        display_options = []
-        for label, value in self._source_options:
-            # In standalone mode, only show Custom option
-            if self.app_state.standalone_mode and value != "custom":
-                continue
-
-            # Update label for for_comp if output_subdirectory is set
-            display_label = label
-            if value == "for_comp" and self.app_state.output_subdirectory:
-                display_label = self.app_state.output_subdirectory.title()
-            display_options.append((display_label, value))
-
-        result = show_popup_menu(
-            self.main_window,
-            self.ui.RePublishSourceButton,
-            display_options,
-            current=self._source
+        # Source button manager with dynamic label function
+        self._source_manager = OptionButtonManager(
+            button=self.ui.RePublishSourceButton,
+            options=source_options,
+            initial_value="custom" if self.app_state.standalone_mode else "for_comp",
+            on_changed=self._on_source_changed,
+            label_prefix="Source: ",
+            parent_window=self.main_window,
+            label_func=self._get_source_label
         )
 
-        if result is not None:
-            self._source = result
-            self._update_source_button_text()
-            self._on_source_changed()
-
-    def _on_task_button_clicked(self):
-        """Show popup menu with task options."""
-        from small_widgets import show_popup_menu
-
-        result = show_popup_menu(
-            self.main_window,
-            self.ui.RePublishTaskButton,
-            self._task_options,
-            current=self._task
+        # Task button manager
+        self._task_manager = OptionButtonManager(
+            button=self.ui.RePublishTaskButton,
+            options=[
+                ("lighting", "lighting"),
+                ("compositing", "compositing"),
+                ("fx", "fx"),
+            ],
+            initial_value="lighting",
+            on_changed=lambda v: None,  # No special action on task change
+            label_prefix="Task: ",
+            parent_window=self.main_window
         )
 
-        if result is not None:
-            self._task = result
-            self._update_task_button_text()
+    def _get_source_label(self, value):
+        """Get dynamic label for source button."""
+        if value == "for_comp" and self.app_state.output_subdirectory:
+            return self.app_state.output_subdirectory.title()
+        return {"for_comp": "For Comp", "raw": "Raw", "custom": "Custom"}.get(value, value)
 
-    def _on_source_changed(self):
+    @property
+    def _source(self):
+        """Get current source value from manager."""
+        return self._source_manager.value if hasattr(self, '_source_manager') else "for_comp"
+
+    @property
+    def _task(self):
+        """Get current task value from manager."""
+        return self._task_manager.value if hasattr(self, '_task_manager') else "lighting"
+
+    def _on_source_changed(self, value=None):
         """Handle rePublish source type changes."""
         is_custom = self._source == "custom"
 
@@ -156,26 +127,19 @@ class RePublishTab(BaseTab):
 
     def _on_browse_custom_path(self):
         """Handle custom path browse button click for rePublish."""
-        from core.user_preferences import get_last_browse_directory, set_last_browse_directory
+        from file_dialogs import browse_directory_with_memory
 
-        default_path = get_last_browse_directory("republish_custom")
-        if not default_path:
-            default_path = os.path.join(os.path.expanduser("~"), "Videos")
-            if not os.path.exists(default_path):
-                default_path = os.path.expanduser("~")
-
-        custom_dir = QFileDialog.getExistingDirectory(
+        custom_dir = browse_directory_with_memory(
             self.main_window,
-            "Select Custom Render Directory",
-            default_path,
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            context="republish_custom",
+            title="Select Custom Render Directory",
+            fallback_path=os.path.join(os.path.expanduser("~"), "Videos")
         )
 
         if custom_dir:
             self.app_state.republish_custom_path = custom_dir
             self.ui.RePublishCustomPathLabel.setText(f"Custom path: {custom_dir}")
             self.ui.RePublishCustomPathLabel.setStyleSheet("color: white; font-size: 9pt;")
-            set_last_browse_directory("republish_custom", custom_dir)
             self._on_scan_renders_clicked()
 
     def _on_scan_renders_clicked(self):
@@ -275,9 +239,8 @@ class RePublishTab(BaseTab):
         )
 
         # Set product name from render
-        base = seq.basename()
-        parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
-        render_name = parts[0] if parts else base.replace("#", "").strip(".")
+        from core.utils import extract_render_name
+        render_name = extract_render_name(seq.basename(), strip_frame_padding=True)
         self.ui.RePublishProductName.setText(render_name)
 
         # Enable publish button
@@ -301,9 +264,11 @@ class RePublishTab(BaseTab):
         product_name = self.ui.RePublishProductName.text().strip()
 
         if not product_name:
-            base = self.app_state.republish_selected_render.basename()
-            parts = [p for p in base.split('.') if p and not all(c == '#' for c in p)]
-            product_name = parts[0] if parts else base.replace("#", "").strip(".")
+            from core.utils import extract_render_name
+            product_name = extract_render_name(
+                self.app_state.republish_selected_render.basename(),
+                strip_frame_padding=True
+            )
 
         # Disable button during processing
         self.ui.RePublishPublish.setEnabled(False)
@@ -324,20 +289,17 @@ class RePublishTab(BaseTab):
             self.app_state.has_shot_context()
         )
 
-        # Start worker thread - store reference to prevent garbage collection
-        from ui_components import Worker
-        self._publish_worker_ref = Worker(
+        # Use BaseTab helper for worker management
+        self.start_worker(
             self._publish_worker,
             task,
             use_farm,
             product_name,
-            use_current_task
+            use_current_task,
+            on_result=self._on_publish_complete,
+            on_error=self._on_publish_error,
+            on_progress=self._on_publish_progress
         )
-        self._publish_worker_ref.signals.result.connect(self._on_publish_complete)
-        self._publish_worker_ref.signals.error.connect(self._on_publish_error)
-        self._publish_worker_ref.signals.progress.connect(self._on_publish_progress)
-        self._publish_worker_ref.signals.finished.connect(self._on_publish_finished)
-        QThreadPool.globalInstance().start(self._publish_worker_ref)
 
     def _publish_worker(self, task, use_farm, product_name, use_current_task, progress_callback):
         """Worker thread function for publishing to AYON."""
@@ -513,13 +475,12 @@ class RePublishTab(BaseTab):
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
         # Stop spinner and show success
-        self.main_window.stop_status_spinner()
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.update_status_animated(
-                f"AYON: {result['message']}",
-                StatusColors.SUCCESS
-            )
-            self.main_window.animator.show_success(result['message'])
+        self.update_status_with_spinner(
+            f"AYON: {result['message']}",
+            StatusColors.SUCCESS,
+            start=False
+        )
+        self.show_status(result['message'], "success")
 
     def _on_publish_error(self, error_msg, traceback_str):
         """Handle publish errors."""
@@ -529,21 +490,12 @@ class RePublishTab(BaseTab):
         self.ui.RePublishStatusLabel.setText(f"Status: {full_error_msg}")
 
         # Stop spinner and show error
-        self.main_window.stop_status_spinner()
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.update_status_animated(
-                f"AYON: {full_error_msg}",
-                StatusColors.ERROR
-            )
+        self.update_status_with_spinner(
+            f"AYON: {full_error_msg}",
+            StatusColors.ERROR,
+            start=False
+        )
 
         self.log(f"Publish error: {error_msg}")
         if traceback_str:
             print(traceback_str)
-
-    def _on_publish_finished(self):
-        """Handle worker finished - ensures cleanup happens."""
-        # Re-enable button and stop spinner as fallback
-        self.ui.RePublishPublish.setEnabled(True)
-        self.main_window.stop_status_spinner()
-        # Clear worker reference
-        self._publish_worker_ref = None
