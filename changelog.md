@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.5.3.1
+- Bug fixes
+- UI updates
+
 ## Version 0.5.3
 - Add favorites manager for handling liked items and user-defined groups
 - Implement groups filter panel as a collapsible sidebar

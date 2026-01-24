@@ -176,6 +176,10 @@ class EmbeddedImageViewer(QWidget):
         """Set up the embedded viewer UI."""
         self.setStyleSheet("background-color: #1a1a1a;")
 
+        # Set size policy to expand and fill available space
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         # Main layout - single container fills everything
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -183,7 +187,8 @@ class EmbeddedImageViewer(QWidget):
 
         # Main container for content and overlays
         self.image_container = QWidget()
-        layout.addWidget(self.image_container)
+        self.image_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.image_container, stretch=1)
 
         # Content layout inside container
         content_layout = QHBoxLayout(self.image_container)

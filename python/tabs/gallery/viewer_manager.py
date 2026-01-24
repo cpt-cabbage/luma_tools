@@ -81,12 +81,14 @@ class ViewerManager(BaseGalleryManager):
 
     def _show_embedded(self, image_paths, start_index):
         """Show the embedded image viewer, hiding the gallery grid."""
-        # Hide gallery elements
-        self.tab.ui.galleryScrollArea.hide()
-
-        # Also hide groups panel if it exists
-        if hasattr(self.tab, '_groups_panel'):
-            self.tab._groups_panel.hide()
+        # Hide the gallery splitter (contains scroll area and groups panel)
+        if hasattr(self.tab, '_gallery_splitter'):
+            self.tab._gallery_splitter.hide()
+        else:
+            # Fallback for layouts without splitter
+            self.tab.ui.galleryScrollArea.hide()
+            if hasattr(self.tab, '_groups_panel'):
+                self.tab._groups_panel.hide()
 
         # Check if viewer creation is already in progress
         if self._viewer_creation_pending:
@@ -144,6 +146,8 @@ class ViewerManager(BaseGalleryManager):
 
             # Insert into main layout
             self.tab.ui.galleryMainLayout.insertWidget(1, self._viewer_loading_widget)
+            # Set stretch factor so loading widget expands to fill available space
+            self.tab.ui.galleryMainLayout.setStretch(1, 1)
 
         # Start spinner animation
         if self._viewer_loading_spinner:
@@ -187,6 +191,8 @@ class ViewerManager(BaseGalleryManager):
 
         # Insert viewer into the main layout (after header, before footer)
         self.tab.ui.galleryMainLayout.insertWidget(1, self._embedded_viewer)
+        # Set stretch factor so viewer expands to fill available space
+        self.tab.ui.galleryMainLayout.setStretch(1, 1)
 
         self._embedded_viewer.show()
         self._embedded_viewer.setFocus()
@@ -229,12 +235,14 @@ class ViewerManager(BaseGalleryManager):
         if self._embedded_viewer:
             self._embedded_viewer.hide()
 
-        # Show gallery elements
-        self.tab.ui.galleryScrollArea.show()
-
-        # Show groups panel if it exists
-        if hasattr(self.tab, '_groups_panel'):
-            self.tab._groups_panel.show()
+        # Show the gallery splitter (contains scroll area and groups panel)
+        if hasattr(self.tab, '_gallery_splitter'):
+            self.tab._gallery_splitter.show()
+        else:
+            # Fallback for layouts without splitter
+            self.tab.ui.galleryScrollArea.show()
+            if hasattr(self.tab, '_groups_panel'):
+                self.tab._groups_panel.show()
 
     def _on_view_fullscreen(self, image_path, index):
         """Handle request to view in fullscreen from embedded viewer."""
