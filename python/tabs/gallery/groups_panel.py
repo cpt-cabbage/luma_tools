@@ -7,7 +7,7 @@ Collapsible sidebar for filtering gallery by likes and groups.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QSizePolicy, QMenu
+    QScrollArea, QFrame, QSizePolicy, QMenu, QCheckBox
 )
 
 

@@ -305,9 +305,9 @@ class SettingsTab(BaseTab):
         self.ui.GlobalSettingsPathEdit.setText(global_path)
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
-        # ComfyUI mode
-        self._comfyui_mode = get_setting("comfyui_mode")
-        self._update_comfyui_mode_button_text()
+        # ComfyUI mode - set via manager
+        comfyui_mode = get_setting("comfyui_mode")
+        self._comfyui_mode_manager.set_value(comfyui_mode)
 
         # ComfyUI paths
         self.ui.ComfyUIPathEdit.setText(get_setting("comfyui_path"))

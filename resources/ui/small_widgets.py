@@ -195,6 +195,9 @@ class StackedThumbnailWidget(QWidget):
         self._expanded_background = None  # Background frame behind expanded items
         self._gallery_tab = gallery_tab
         self._group_color = group_color  # Color for group stacking
+        self._favorites_manager = None  # Will be set via set_favorites_manager
+        self._is_all_liked = False  # Track if all items in stack are liked
+        self._common_group_color = None  # Color if all items share a group
         # Check if items in this stack have metadata (source_images populated)
         self._has_metadata = self._check_items_have_metadata(items)
         # Check if top item is a 3D model (uses grey border, not blue)
@@ -217,6 +220,217 @@ class StackedThumbnailWidget(QWidget):
             if item.get('has_metadata', False):
                 return True
         return False
+
+    def set_favorites_manager(self, manager):
+        """Set the favorites manager for like/group tracking.
+
+        Args:
+            manager: FavoritesManager instance
+        """
+        self._favorites_manager = manager
+        if manager:
+            # Connect to like_changed signal to update when likes change
+            manager.like_changed.connect(self._on_like_changed)
+            # Connect to item_groups_changed signal to update when group membership changes
+            manager.item_groups_changed.connect(self._on_item_groups_changed)
+            # Check initial state
+            self._update_favorites_state()
+
+    def _on_like_changed(self, path, is_liked):
+        """Handle like change signal from favorites manager."""
+        # Check if this path is in our stack
+        item_paths = [item['path'] for item in self._items]
+        if path in item_paths:
+            self._update_favorites_state()
+
+    def _on_item_groups_changed(self, path):
+        """Handle item group membership change signal from favorites manager."""
+        # Check if this path is in our stack
+        item_paths = [item['path'] for item in self._items]
+        if path in item_paths:
+            self._update_favorites_state()
+
+    def _update_favorites_state(self):
+        """Update like and group visual state from favorites manager."""
+        self._check_all_liked()
+        self._check_common_group()
+        self._update_border_color()
+
+    def _check_all_liked(self):
+        """Check if all items in the stack are liked."""
+        if not self._favorites_manager or not self._items:
+            self._is_all_liked = False
+            return
+
+        # Check if every item in the stack is liked
+        self._is_all_liked = all(
+            self._favorites_manager.is_liked(item['path'])
+            for item in self._items
+        )
+
+    def _check_common_group(self):
+        """Check if all items in the stack belong to a common group.
+
+        Sets self._common_group_color if all items share at least one group.
+        """
+        self._common_group_color = None
+
+        if not self._favorites_manager or not self._items:
+            return
+
+        # Get groups for first item
+        first_path = self._items[0]['path']
+        first_groups = set(self._favorites_manager.get_item_groups(first_path))
+
+        if not first_groups:
+            return
+
+        # Find groups common to ALL items
+        common_groups = first_groups
+        for item in self._items[1:]:
+            item_groups = set(self._favorites_manager.get_item_groups(item['path']))
+            common_groups = common_groups & item_groups
+            if not common_groups:
+                return
+
+        # Use the first common group's color
+        if common_groups:
+            group_id = next(iter(common_groups))
+            group = self._favorites_manager.get_group(group_id)
+            if group:
+                self._common_group_color = group.color
+
+    def _update_border_color(self):
+        """Update thumbnail border color with priority: group > liked > stack.
+
+        Similar to ThumbnailWidget._update_group_border().
+        """
+        from core.settings_manager import get_setting
+
+        custom_color = None
+
+        # Priority 1: Common group color (all items share a group from favorites manager)
+        common_group_color = getattr(self, '_common_group_color', None)
+        if common_group_color:
+            custom_color = common_group_color
+
+        # Priority 2: Explicit group color (from group stacking mode at creation)
+        elif self._group_color:
+            custom_color = self._group_color
+
+        # Priority 3: Liked color (if ALL items are liked)
+        elif self._is_all_liked:
+            liked_color = get_setting("gallery_liked_color")
+            # Default to green if no custom liked color is set
+            custom_color = liked_color or "#10b981"
+
+        # Priority 4: Stack color (if has stack_id and custom stack color in settings)
+        else:
+            stack_colors = get_setting("gallery_stack_colors") or {}
+            stack_color = stack_colors.get(self.stack_id)
+            if stack_color:
+                custom_color = stack_color
+
+        # Apply the color to all stack cards
+        self._apply_stack_colors(custom_color)
+
+    def _apply_stack_colors(self, custom_color=None):
+        """Apply colors to all stack card labels.
+
+        Args:
+            custom_color: Optional hex color to use as base. If None, uses default blue/grey.
+        """
+        if not hasattr(self, '_stack_labels') or not self._stack_labels:
+            return
+
+        # Derive colors from custom_color or use defaults
+        if custom_color:
+            # Parse the custom color and create darker/lighter variants
+            bg_color, border_color = self._derive_colors_from_hex(custom_color)
+        elif self._is_top_item_model or not self._has_metadata:
+            # Grey for 3D models and non-metadata items
+            bg_color = "#2d3139"
+            border_color = "#4a4a4a"
+        else:
+            # Blue for images with metadata
+            bg_color = "#1e3a5f"
+            border_color = "#4a6d8c"
+
+        # Apply to all stack labels
+        stack_depth = len(self._stack_labels) - 1
+        for idx, label in enumerate(self._stack_labels):
+            # Labels are stored back-to-front, so index 0 is back card, last is top
+            i = stack_depth - idx  # Reverse to get depth from back
+
+            if i == 0:
+                # Top card - use full colors
+                label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {bg_color};
+                        border: 2px solid {border_color};
+                        border-radius: 8px;
+                    }}
+                """)
+            else:
+                # Background cards - derive darker shades
+                alpha = max(180, 255 - i * 30)
+                darker_bg = self._darken_color(bg_color, 0.15 * i)
+                darker_border = self._darken_color(border_color, 0.1 * i)
+                label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {darker_bg};
+                        border: 1px solid {self._color_with_alpha(darker_border, alpha)};
+                        border-radius: 8px;
+                    }}
+                """)
+
+        # Also update the styler for hover/selection states
+        self._styler.group_color = custom_color
+        self._apply_thumbnail_style()
+
+    def _derive_colors_from_hex(self, hex_color):
+        """Derive background and border colors from a hex color.
+
+        Returns a darker background and the original as border.
+        """
+        # Parse hex
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+
+        # Background: darken significantly for a tinted look
+        bg_r = int(r * 0.3)
+        bg_g = int(g * 0.3)
+        bg_b = int(b * 0.3)
+        bg_color = f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
+
+        # Border: slightly darkened original
+        border_r = int(min(255, r * 0.7))
+        border_g = int(min(255, g * 0.7))
+        border_b = int(min(255, b * 0.7))
+        border_color = f"#{border_r:02x}{border_g:02x}{border_b:02x}"
+
+        return bg_color, border_color
+
+    def _darken_color(self, hex_color, factor):
+        """Darken a hex color by a factor (0-1)."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        r = max(0, int(r * (1 - factor)))
+        g = max(0, int(g * (1 - factor)))
+        b = max(0, int(b * (1 - factor)))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _color_with_alpha(self, hex_color, alpha):
+        """Convert hex color to rgba string with alpha (0-255)."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f"rgba({r}, {g}, {b}, {alpha})"
 
     def _setup_ui(self):
         """Setup the widget UI with fanned card effect."""
@@ -261,67 +475,13 @@ class StackedThumbnailWidget(QWidget):
             y_offset = i * vertical_offset
             label.move(x_offset, y_offset)
             label.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-            # Style with gradient-like depth effect
-            # 3D models use grey, images use blue/grey based on metadata
-            if i == 0:
-                # Top card (will show thumbnail)
-                if self._is_top_item_model:
-                    # Grey for 3D models (no blue border)
-                    label.setStyleSheet("""
-                        QLabel {
-                            background-color: #2d3139;
-                            border: 2px solid #4a4a4a;
-                            border-radius: 8px;
-                        }
-                    """)
-                elif self._has_metadata:
-                    # Blue tinted background for images with metadata
-                    label.setStyleSheet("""
-                        QLabel {
-                            background-color: #1e3a5f;
-                            border: 2px solid #4a6d8c;
-                            border-radius: 8px;
-                        }
-                    """)
-                else:
-                    # Grey background for images without metadata
-                    label.setStyleSheet("""
-                        QLabel {
-                            background-color: #2d3139;
-                            border: 2px solid #4a4a4a;
-                            border-radius: 8px;
-                        }
-                    """)
-            else:
-                # Background cards with varying opacity effect
-                alpha = max(180, 255 - i * 30)
-                if self._is_top_item_model or not self._has_metadata:
-                    # Grey shades for 3D models and non-metadata items
-                    shade = max(35, 50 - i * 10)
-                    label.setStyleSheet(f"""
-                        QLabel {{
-                            background-color: rgb({shade}, {shade + 3}, {shade + 8});
-                            border: 1px solid rgba(80, 85, 95, {alpha});
-                            border-radius: 8px;
-                        }}
-                    """)
-                else:
-                    # Blue tinted shades for images with metadata
-                    shade_r = max(20, 30 - i * 5)
-                    shade_g = max(45, 58 - i * 8)
-                    shade_b = max(70, 95 - i * 12)
-                    label.setStyleSheet(f"""
-                        QLabel {{
-                            background-color: rgb({shade_r}, {shade_g}, {shade_b});
-                            border: 1px solid rgba(74, 109, 140, {alpha});
-                            border-radius: 8px;
-                        }}
-                    """)
             self._stack_labels.append(label)
 
         # The top label shows the actual thumbnail
         self.thumbnail_label = self._stack_labels[-1] if self._stack_labels else None
+
+        # Apply initial colors (will use group_color if provided, else defaults)
+        self._apply_stack_colors(self._group_color)
 
         # Add drop shadow to top card for depth
         if self.thumbnail_label:
@@ -603,14 +763,24 @@ class StackedThumbnailWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw rounded rectangle background
-        # Blue for items with metadata, grey for items without
-        bg_color = "#1e3a5f" if self._has_metadata else "#2a3040"
+        # Use dominant color if available, otherwise grey for models
+        dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else None
+        if dominant and dominant != "#4a9eff":  # Not default blue
+            # Derive dark background from dominant color
+            hex_color = dominant.lstrip('#')
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            bg_color = f"#{int(r*0.3):02x}{int(g*0.3):02x}{int(b*0.3):02x}"
+            icon_color = dominant
+        else:
+            bg_color = "#2a3040"  # Grey for models
+            icon_color = "#4a9eff"
+
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
         painter.fillPath(path, QBrush(QColor(bg_color)))
 
         # Draw a simple 3D cube icon
-        painter.setPen(QPen(QColor("#4a9eff"), 2))
+        painter.setPen(QPen(QColor(icon_color), 2))
         center_x, center_y = 75, 65
         size = 28
         offset = 10
@@ -688,7 +858,11 @@ class StackedThumbnailWidget(QWidget):
                 from PySide6.QtGui import QColor
                 if self._is_hovered:
                     effect.setBlurRadius(16)
-                    effect.setColor(QColor(74, 158, 255, 60))
+                    # Use dominant color for shadow if available
+                    dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
+                    hex_color = dominant.lstrip('#')
+                    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+                    effect.setColor(QColor(r, g, b, 60))
                 else:
                     effect.setBlurRadius(12)
                     effect.setColor(QColor(0, 0, 0, 80))
@@ -1083,6 +1257,10 @@ class StackedThumbnailWidget(QWidget):
                 has_metadata=has_metadata
             )
 
+            # Set favorites manager so thumbnail knows about likes/groups
+            if self._favorites_manager:
+                thumb.set_favorites_manager(self._favorites_manager)
+
             # Connect common signals
             thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
             thumb.deleted.connect(self._on_item_deleted_in_stack)
@@ -1118,7 +1296,7 @@ class StackedThumbnailWidget(QWidget):
                 thumb.load_thumbnail_if_needed()
 
     def _create_expanded_background(self):
-        """Create a pale blue background behind all expanded thumbnails."""
+        """Create a background behind all expanded thumbnails using the stack's color."""
         from shiboken6 import isValid
         from PySide6.QtWidgets import QFrame
         from PySide6.QtCore import QRect
@@ -1142,46 +1320,80 @@ class StackedThumbnailWidget(QWidget):
 
         container = self._gallery_tab.ui.galleryThumbnailContainer
 
-        # Calculate bounding box of all expanded widgets
-        min_x = float('inf')
-        min_y = float('inf')
-        max_x = 0
-        max_y = 0
+        # Create individual backgrounds for each expanded widget
+        # This avoids the issue of a single bounding box covering neighboring stacks
+        self._expanded_backgrounds = []
+
+        # Get the dominant color for this stack
+        dominant_color = self._get_dominant_color()
+        bg_rgba, border_rgba = self._get_background_colors(dominant_color)
 
         for widget in self._expanded_widgets:
-            if isValid(widget) and widget.isVisible():
-                geom = widget.geometry()
-                min_x = min(min_x, geom.x())
-                min_y = min(min_y, geom.y())
-                max_x = max(max_x, geom.right())
-                max_y = max(max_y, geom.bottom())
+            if not isValid(widget) or not widget.isVisible():
+                continue
 
-        if min_x == float('inf'):
-            return
+            geom = widget.geometry()
 
-        # Add padding around the group
-        padding = 6
-        bg_rect = QRect(
-            int(min_x - padding),
-            int(min_y - padding),
-            int(max_x - min_x + 2 * padding),
-            int(max_y - min_y + 2 * padding)
-        )
+            # Add small padding around each widget
+            padding = 4
+            bg_rect = QRect(
+                int(geom.x() - padding),
+                int(geom.y() - padding),
+                int(geom.width() + 2 * padding),
+                int(geom.height() + 2 * padding)
+            )
 
-        # Create background frame
-        self._expanded_background = QFrame(container)
-        self._expanded_background.setGeometry(bg_rect)
-        self._expanded_background.setStyleSheet("""
-            QFrame {
-                background-color: rgba(74, 158, 255, 0.12);
-                border: 1px solid rgba(74, 158, 255, 0.3);
-                border-radius: 6px;
-            }
-        """)
+            # Create background frame for this widget
+            bg_frame = QFrame(container)
+            bg_frame.setGeometry(bg_rect)
+            bg_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {bg_rgba};
+                    border: 1px solid {border_rgba};
+                    border-radius: 6px;
+                }}
+            """)
 
-        # Lower z-order so it's behind thumbnails
-        self._expanded_background.lower()
-        self._expanded_background.show()
+            # Lower z-order so it's behind the thumbnail
+            bg_frame.lower()
+            bg_frame.show()
+            self._expanded_backgrounds.append(bg_frame)
+
+        # Keep reference to first one for compatibility (collapse cleanup)
+        self._expanded_background = self._expanded_backgrounds[0] if self._expanded_backgrounds else None
+
+    def _get_dominant_color(self):
+        """Get the dominant color for this stack (group > liked > default blue)."""
+        # Check common group color first
+        if getattr(self, '_common_group_color', None):
+            return self._common_group_color
+
+        # Check explicit group color from stacking mode
+        if self._group_color:
+            return self._group_color
+
+        # Check if all items are liked
+        if getattr(self, '_is_all_liked', False):
+            from core.settings_manager import get_setting
+            liked_color = get_setting("gallery_liked_color")
+            return liked_color or "#10b981"  # Default green
+
+        # Default blue
+        return "#4a9eff"
+
+    def _get_background_colors(self, hex_color):
+        """Convert a hex color to rgba background and border colors for the expanded background."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+
+        # Background: very transparent version of the color
+        bg_rgba = f"rgba({r}, {g}, {b}, 0.12)"
+        # Border: slightly more visible
+        border_rgba = f"rgba({r}, {g}, {b}, 0.3)"
+
+        return bg_rgba, border_rgba
 
     def collapse(self):
         """Collapse the stack by removing the expanded thumbnails from the layout."""
@@ -1191,11 +1403,13 @@ class StackedThumbnailWidget(QWidget):
         self._is_expanded = False
         self.expanded.emit(self.stack_id, False)
 
-        # Remove the background frame
-        if self._expanded_background:
-            self._expanded_background.setParent(None)
-            self._expanded_background.deleteLater()
-            self._expanded_background = None
+        # Remove all background frames
+        for bg_frame in getattr(self, '_expanded_backgrounds', []):
+            if bg_frame:
+                bg_frame.setParent(None)
+                bg_frame.deleteLater()
+        self._expanded_backgrounds = []
+        self._expanded_background = None
 
         # Remove and delete expanded widgets
         for widget in getattr(self, '_expanded_widgets', []):

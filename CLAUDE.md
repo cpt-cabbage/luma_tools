@@ -115,6 +115,14 @@ QThreadPool.globalInstance().start(self._worker)
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 
+**IMPORTANT:** `get_setting()` raises `KeyError` for unknown settings. Always wrap in try/except when reading settings that may not exist:
+```python
+try:
+    value = get_setting("my_new_setting")
+except KeyError:
+    value = False  # default
+```
+
 ### 3D Model Loaders (Strategy Pattern)
 `models/loaders/factory.py`: `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL). Each loader in `models/loaders/` implements `BaseModelLoader` ABC.
 
@@ -128,6 +136,8 @@ Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 **Likes & Groups:** Users can like items and organize them into color-coded groups. Data stored in `_gallery_favorites.json` per output directory.
 
 **Gallery Keyboard Shortcuts:** `L` (toggle like), `G` (quick add to group), `Ctrl+G` (group management dialog), `1-9` (quick assign to group by number).
+
+**Thumbnail Styling:** `resources/ui/thumbnail_styles.py` centralizes thumbnail appearance via `ThumbnailStyler`. Border/background color priority: group color > liked color > stack color > metadata-based default. New items use a pulsing "NEW" badge (blue) rather than border color changes.
 
 ### Mixin Pattern
 `PollingMixin` (`tabs/comfyui_polling.py`): Add via inheritance, call `_init_polling_state()` in `initialize()`, then `_start_iterate_polling()` or `_start_batch_polling(job_ids)`.

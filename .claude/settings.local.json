@@ -51,7 +51,11 @@
       "Bash(pythonvenvScriptspython.exe -m py_compile pythoncomfyuideadline_poller.py)",
       "Bash(pythonvenvScriptspython.exe -m py_compile pythontabscomfyui_polling.py)",
       "Bash(pythonvenvScriptspython.exe -m py_compile pythontabsmp4_maker_tab.py pythontabsrepublish_tab.py pythontabspass_builder_tab.py)",
-      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabsgalleryselection_manager.py pythontabsgalleryrefresh_controller.py pythontabsgalleryui_manager.py pythontabsgalleryfavorites_manager.py pythoncoreconfig.py)"
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythontabsgalleryselection_manager.py pythontabsgalleryrefresh_controller.py pythontabsgalleryui_manager.py pythontabsgalleryfavorites_manager.py pythoncoreconfig.py)",
+      "Bash(pythonvenvScriptspython.exe -c \"import pytest; pytest.main\\([''-v'', ''tests/'']\\)\")",
+      "Bash(powershell.exe -Command \"& {cd ''l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools''; $env:PYTHONPATH=''python;resources\\\\ui''; .\\\\python\\\\venv\\\\Scripts\\\\python.exe -c \"\"import pytest; pytest.main\\([''-v'', ''tests/'']\\)\"\"}\")",
+      "Bash(powershell.exe -NoProfile -Command \"cd ''l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools''; ./python/venv/Scripts/python.exe run_tests.py 2>&1\")",
+      "Bash(powershell.exe:*)"
     ],
     "deny": [],
     "ask": []

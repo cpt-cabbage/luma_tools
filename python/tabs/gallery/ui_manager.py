@@ -4,7 +4,7 @@ Gallery UI Manager.
 Handles UI controls for the gallery:
 - Sort button and mode selection
 - Filter button (show/hide inputs)
-- View mode toggle (stacked/grid/sections)
+- View mode toggle (grid/stacked by job)
 - User selector for multi-user gallery viewing
 """
 
@@ -146,12 +146,10 @@ class UIManager(BaseGalleryManager):
     # VIEW MODE CONTROLS
     # =========================================================================
 
-    # Stacking mode options
+    # Stacking mode options (groups shown via sidebar filter, not stacking)
     STACKING_MODES = [
         ("Grid", "grid"),
-        ("Stack by Job", "job"),
-        ("Stack by Groups", "groups"),
-        ("Stack by Groups + Job", "both"),
+        ("Stacked", "job"),
     ]
 
     def _create_view_mode_button(self):

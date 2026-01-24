@@ -307,13 +307,11 @@ class GalleryManager:
         from core.settings_manager import get_setting
         stacking_mode = get_setting("gallery_stacking_mode")
 
-        # Group items based on stacking mode
-        if stacking_mode == "groups":
-            groups = self.group_items_by_groups(items, fallback_to_job=False)
-        elif stacking_mode == "both":
-            groups = self.group_items_by_groups(items, fallback_to_job=True)
-        else:  # Default to "job" stacking
-            groups = self.group_items_by_prefix(items)
+        # Group items by job prefix (user groups are shown via sidebar filter, not stacking)
+        groups = self.group_items_by_prefix(items)
+
+        # Get favorites manager once for all stacks
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
 
         # Create stack widgets for groups with multiple items
         # Single items are shown as regular thumbnails
@@ -330,6 +328,10 @@ class GalleryManager:
                     gallery_tab=self.tab,
                     group_color=group_color
                 )
+                # Set favorites manager for likes/groups functionality
+                if favorites_manager:
+                    stack.set_favorites_manager(favorites_manager)
+
                 # Connect signals for tracking expanded state
                 stack.expanded.connect(self._on_stack_expanded)
                 stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
@@ -417,6 +419,9 @@ class GalleryManager:
             # Add new stacks/thumbnails at the beginning (most recent first)
             insert_index = 0
 
+            # Get favorites manager for new stacks
+            favorites_manager = getattr(self.tab, '_favorites_manager', None)
+
             for prefix in added_prefixes:
                 group_items = new_groups[prefix]
 
@@ -428,6 +433,10 @@ class GalleryManager:
                         parent=container,
                         gallery_tab=self.tab
                     )
+                    # Set favorites manager for likes/groups functionality
+                    if favorites_manager:
+                        stack.set_favorites_manager(favorites_manager)
+
                     stack.expanded.connect(self._on_stack_expanded)
                     stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
                     self._stack_widgets[prefix] = stack

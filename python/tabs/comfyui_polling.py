@@ -975,8 +975,6 @@ class PollingMixin:
 
     def _on_deadline_jobs_found(self, running_jobs, persisted_state):
         """Handle results from async Deadline job query."""
-        from comfyui.service import poll_deadline_job_status
-
         # End the recovery activity
         if hasattr(self.main_window, 'animator'):
             self.main_window.animator.end_activity("job_recovery")
@@ -997,14 +995,10 @@ class PollingMixin:
                 if persisted_state:
                     self.log("[Recovery] Persisted state exists but no running jobs - clearing state")
                     self._clear_running_job_state()
-                    # Check if persisted job completed
+                    # Job completed while app was closed - show notification
                     mode = persisted_state.get("mode")
                     if mode == "iterate":
-                        job_id = persisted_state.get("job_id")
-                        if job_id:
-                            result = poll_deadline_job_status(job_id, persisted_state.get("network_output_dir"))
-                            if result.get("status") == "Completed":
-                                self.show_status("Previous ComfyUI job completed while app was closed", "success")
+                        self.show_status("Previous ComfyUI job completed while app was closed", "success")
                     elif mode == "batch":
                         self.show_status("Previous ComfyUI batch completed while app was closed", "success")
                 return
@@ -1160,9 +1154,12 @@ class PollingMixin:
     def _recover_from_persisted_state(self, job_state):
         """Recover using persisted state only (fallback when Deadline check fails).
 
+        Uses async worker to check job status without blocking UI.
+
         Args:
             job_state: The persisted job state dictionary
         """
+        from ui_components import Worker
         from comfyui.service import poll_deadline_job_status
 
         mode = job_state.get("mode")
@@ -1170,73 +1167,35 @@ class PollingMixin:
             return
 
         if mode == "iterate":
-            try:
-                job_id = job_state.get("job_id")
-                network_output_dir = job_state.get("network_output_dir")
-                total_tasks = job_state.get("total_tasks", 1)
+            job_id = job_state.get("job_id")
+            network_output_dir = job_state.get("network_output_dir")
 
-                if not job_id:
-                    self.log("[Recovery] No job ID found, clearing state")
-                    self._clear_running_job_state()
-                    return
-
-                # Check if job is still active in Deadline
-                self.log(f"[Recovery] Checking status of iterate job {job_id}")
-                status_result = poll_deadline_job_status(job_id, network_output_dir)
-                status = status_result.get("status", "Unknown")
-
-                if status in ("Active", "Rendering", "Queued", "Pending"):
-                    self.log(f"[Recovery] Job {job_id} is still {status}, resuming polling")
-                    from ui_components import StatusColors
-
-                    # Restore iterate mode state and resume polling
-                    self._iterate_network_output_dir = network_output_dir
-                    self._iterate_total_tasks = total_tasks
-                    self._iterate_start_time = job_state.get("start_time", time.time())
-                    self._iterate_completed_tasks = 0
-                    self._iterate_poll_count = 0
-                    self.app_state.comfyui_current_job_id = job_id
-
-                    # Start polling without re-submitting
-                    if self._iterate_poll_timer is None:
-                        self._iterate_poll_timer = QTimer(self.main_window)
-                        self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
-
-                    self._iterate_poll_timer.start(5000)
-                    self._update_cancel_button_visibility()
-                    self.main_window.start_status_spinner()
-
-                    # Update both tab status and main status bar immediately
-                    self.ui.ComfyUIIterateStatus.setText(f"Recovered: {status}")
-                    self.ui.ComfyUIIterateProgress.setValue(0)
-                    self.main_window.animator.update_status_animated(
-                        f"ComfyUI: Recovering job ({status}) - {total_tasks} task(s)",
-                        StatusColors.INFO
-                    )
-
-                    # Start immediate poll to get current status
-                    self._poll_iterate_job()
-
-                    self.log("[Recovery] Iterate mode polling resumed successfully")
-                    self.show_status(f"Recovered running ComfyUI job (status: {status})", "success")
-                else:
-                    self.log(f"[Recovery] Job {job_id} is {status}, clearing state")
-                    self._clear_running_job_state()
-                    if status == "Completed":
-                        self.show_status("Previous ComfyUI job completed while app was closed", "success")
-                        # Show system tray notification (if enabled)
-                        from core.settings_manager import get_setting
-                        if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
-                            self.main_window.show_system_notification(
-                                "ComfyUI Complete",
-                                "Previous job completed while app was closed",
-                                "success"
-                            )
-            except Exception as e:
-                self.log(f"[Recovery] Error recovering iterate job: {e}")
-                import traceback
-                traceback.print_exc()
+            if not job_id:
+                self.log("[Recovery] No job ID found, clearing state")
                 self._clear_running_job_state()
+                return
+
+            # Check job status asynchronously
+            self.log(f"[Recovery] Checking status of iterate job {job_id} (async)")
+
+            def on_status_result(status_result):
+                try:
+                    self._handle_iterate_recovery_status(job_state, status_result)
+                except Exception as e:
+                    self.log(f"[Recovery] Error handling iterate recovery: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self._clear_running_job_state()
+
+            def on_status_error(msg, tb):
+                self.log(f"[Recovery] Error checking iterate job status: {msg}")
+                self._clear_running_job_state()
+
+            # Store worker to prevent garbage collection
+            self._recovery_status_worker = Worker(poll_deadline_job_status, job_id, network_output_dir)
+            self._recovery_status_worker.signals.result.connect(on_status_result)
+            self._recovery_status_worker.signals.error.connect(on_status_error)
+            QThreadPool.globalInstance().start(self._recovery_status_worker)
 
         elif mode == "batch":
             try:
@@ -1296,3 +1255,64 @@ class PollingMixin:
                 import traceback
                 traceback.print_exc()
                 self._clear_running_job_state()
+
+    def _handle_iterate_recovery_status(self, job_state, status_result):
+        """Handle async status result for iterate mode recovery.
+
+        Args:
+            job_state: The persisted job state dictionary
+            status_result: Result from poll_deadline_job_status
+        """
+        from ui_components import StatusColors
+
+        job_id = job_state.get("job_id")
+        network_output_dir = job_state.get("network_output_dir")
+        total_tasks = job_state.get("total_tasks", 1)
+        status = status_result.get("status", "Unknown")
+
+        if status in ("Active", "Rendering", "Queued", "Pending"):
+            self.log(f"[Recovery] Job {job_id} is still {status}, resuming polling")
+
+            # Restore iterate mode state and resume polling
+            self._iterate_network_output_dir = network_output_dir
+            self._iterate_total_tasks = total_tasks
+            self._iterate_start_time = job_state.get("start_time", time.time())
+            self._iterate_completed_tasks = 0
+            self._iterate_poll_count = 0
+            self.app_state.comfyui_current_job_id = job_id
+
+            # Start polling without re-submitting
+            if self._iterate_poll_timer is None:
+                self._iterate_poll_timer = QTimer(self.main_window)
+                self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
+
+            self._iterate_poll_timer.start(5000)
+            self._update_cancel_button_visibility()
+            self.main_window.start_status_spinner()
+
+            # Update both tab status and main status bar immediately
+            self.ui.ComfyUIIterateStatus.setText(f"Recovered: {status}")
+            self.ui.ComfyUIIterateProgress.setValue(0)
+            self.main_window.animator.update_status_animated(
+                f"ComfyUI: Recovering job ({status}) - {total_tasks} task(s)",
+                StatusColors.INFO
+            )
+
+            # Start immediate poll to get current status
+            self._poll_iterate_job()
+
+            self.log("[Recovery] Iterate mode polling resumed successfully")
+            self.show_status(f"Recovered running ComfyUI job (status: {status})", "success")
+        else:
+            self.log(f"[Recovery] Job {job_id} is {status}, clearing state")
+            self._clear_running_job_state()
+            if status == "Completed":
+                self.show_status("Previous ComfyUI job completed while app was closed", "success")
+                # Show system tray notification (if enabled)
+                from core.settings_manager import get_setting
+                if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                    self.main_window.show_system_notification(
+                        "ComfyUI Complete",
+                        "Previous job completed while app was closed",
+                        "success"
+                    )

@@ -45,8 +45,8 @@ class ThumbnailColors:
     BORDER_SELECTED_STACK = "#5ba3ff" # Slightly different blue for stacks
     BORDER_SELECTED_HOVER = "#7bc4ff" # Bright blue for selected + hover
 
-    # Special states
-    BORDER_NEW = "#10b981"            # Green for new items
+    # Special states (unused - new items use pulsing indicator instead)
+    # BORDER_NEW = "#10b981"          # Green for new items (deprecated)
 
 
 class ThumbnailStyler:
@@ -71,46 +71,76 @@ class ThumbnailStyler:
 
     def get_background_color(self, hover=False, selected=False):
         """Get the appropriate background color."""
+        # Get base background color first
+        if self.group_color:
+            base_bg = self._derive_background_from_color(self.group_color)
+        elif self.is_model:
+            base_bg = ThumbnailColors.BG_MODEL
+        elif self.has_metadata:
+            base_bg = ThumbnailColors.BG_WITH_METADATA
+        else:
+            base_bg = ThumbnailColors.BG_WITHOUT_METADATA
+
+        # Apply hover/selected modifications
         if selected and hover:
-            return ThumbnailColors.BG_HOVER_SELECTED
+            return self._lighten_color(base_bg, 0.25)
         if hover:
-            return ThumbnailColors.BG_HOVER
-        if self.is_model:
-            return ThumbnailColors.BG_MODEL
-        if self.has_metadata:
-            return ThumbnailColors.BG_WITH_METADATA
-        return ThumbnailColors.BG_WITHOUT_METADATA
+            return self._lighten_color(base_bg, 0.15)
+
+        return base_bg
+
+    def _derive_background_from_color(self, hex_color):
+        """Derive a dark tinted background color from a hex color."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        # Darken significantly for a tinted background look
+        bg_r = int(r * 0.3)
+        bg_g = int(g * 0.3)
+        bg_b = int(b * 0.3)
+        return f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
 
     def get_border_color(self, selected=False, hover=False, is_new=False):
-        """Get the appropriate border color."""
+        """Get the appropriate border color.
+
+        Note: is_new parameter is kept for backwards compatibility but no longer
+        affects border color. New items now use a pulsing indicator instead.
+        """
         if selected:
             if hover:
                 return ThumbnailColors.BORDER_SELECTED_HOVER
             return ThumbnailColors.BORDER_SELECTED_STACK if self.is_stacked else ThumbnailColors.BORDER_SELECTED
 
-        if is_new:
-            return ThumbnailColors.BORDER_NEW
+        # is_new no longer affects border - uses pulsing indicator instead
 
-        # Group color takes precedence over default colors (but not selected/new)
+        # Get base border color
         if self.group_color:
-            if hover:
-                # Lighten group color slightly on hover
-                return self._lighten_color(self.group_color, 0.2)
-            return self.group_color
+            base_border = self._derive_border_from_color(self.group_color)
+        elif self.is_model:
+            base_border = ThumbnailColors.BORDER_MODEL
+        elif self.has_metadata:
+            base_border = ThumbnailColors.BORDER_WITH_METADATA
+        else:
+            base_border = ThumbnailColors.BORDER_WITHOUT_METADATA
 
+        # Apply hover modification - brighten the current color
         if hover:
-            if self.is_model:
-                return ThumbnailColors.BORDER_HOVER_MODEL
-            if self.has_metadata:
-                return ThumbnailColors.BORDER_HOVER_METADATA
-            return ThumbnailColors.BORDER_HOVER_NO_METADATA
+            return self._lighten_color(base_border, 0.3)
 
-        # Normal state
-        if self.is_model:
-            return ThumbnailColors.BORDER_MODEL
-        if self.has_metadata:
-            return ThumbnailColors.BORDER_WITH_METADATA
-        return ThumbnailColors.BORDER_WITHOUT_METADATA
+        return base_border
+
+    def _derive_border_from_color(self, hex_color):
+        """Derive a border color from a hex color (slightly darkened)."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        # Slightly darken for border
+        border_r = int(min(255, r * 0.7))
+        border_g = int(min(255, g * 0.7))
+        border_b = int(min(255, b * 0.7))
+        return f"#{border_r:02x}{border_g:02x}{border_b:02x}"
 
     def _lighten_color(self, hex_color, factor=0.2):
         """Lighten a hex color by a factor (0-1)."""
