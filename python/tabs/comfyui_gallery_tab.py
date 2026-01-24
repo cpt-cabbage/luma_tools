@@ -426,6 +426,10 @@ class ComfyUIGalleryTab(BaseTab):
         incremental = self._initial_scan_done
         self._manager.display_items(sorted_items, self._view_mode, incremental=incremental)
 
+        # Update tracking state for smart redisplay
+        self._last_displayed_paths = set(item['path'] for item in sorted_items)
+        self._last_view_mode = self._view_mode
+
         # Update ordered list for shift-select
         self._visible_items_ordered = [item['path'] for item in sorted_items]
 

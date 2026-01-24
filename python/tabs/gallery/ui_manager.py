@@ -219,11 +219,17 @@ class UIManager(BaseGalleryManager):
             from core.user_preferences import save_gallery_settings
             save_gallery_settings(view_mode=new_view_mode)
 
-        # Redisplay with new stacking mode
-        self._redisplay_items()
+        # Redisplay with new stacking mode (force rebuild since view mode changed)
+        self._redisplay_items(force_rebuild=True)
 
-    def _redisplay_items(self):
-        """Redisplay items with current sort/filter/view settings."""
+    def _redisplay_items(self, force_rebuild=False):
+        """Redisplay items with current sort/filter/view settings.
+
+        Uses smart detection to avoid full rebuilds when only sort order changed.
+
+        Args:
+            force_rebuild: If True, always do a full widget rebuild
+        """
         if not self.tab._cached_items:
             return
 
@@ -231,8 +237,33 @@ class UIManager(BaseGalleryManager):
         filtered_items = self.tab._filter_items(self.tab._cached_items)
         sorted_items = self.tab._manager.sort_items(filtered_items, self.tab._sort_mode)
 
-        # Clear and rebuild display
-        self.tab._manager.display_items(sorted_items, self.tab._view_mode)
+        # Get current state for comparison
+        current_paths = set(item['path'] for item in sorted_items)
+        cached_paths = getattr(self.tab, '_last_displayed_paths', set())
+        last_view_mode = getattr(self.tab, '_last_view_mode', None)
+
+        # Determine if we can use fast reordering (grid mode only, same visible items, same view mode)
+        # Note: widget_cache may contain hidden widgets from previous filters, so we check
+        # against cached_paths (visible paths) not cache size
+        can_reorder = (
+            not force_rebuild
+            and self.tab._view_mode == "grid"
+            and last_view_mode == "grid"
+            and current_paths == cached_paths
+            and hasattr(self.tab, '_widget_cache')
+            and current_paths <= set(self.tab._widget_cache.keys())
+        )
+
+        if can_reorder:
+            # Fast path: just reorder existing widgets without recreation
+            self.tab._manager.reorder_widgets(sorted_items)
+        else:
+            # display_items handles widget recycling for filter changes automatically
+            self.tab._manager.display_items(sorted_items, self.tab._view_mode)
+
+        # Update tracking state
+        self.tab._last_displayed_paths = current_paths
+        self.tab._last_view_mode = self.tab._view_mode
 
         # Update ordered list for shift-select
         self.tab._visible_items_ordered = [item['path'] for item in sorted_items]

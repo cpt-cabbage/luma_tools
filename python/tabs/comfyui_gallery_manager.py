@@ -52,59 +52,56 @@ class GalleryManager:
             return items
 
     def group_items_by_prefix(self, items, separate_inputs=True):
-        """Group items by their job prefix.
+        """Group items by their job prefix, preserving the input sort order.
 
         Args:
-            items: List of item dicts with 'job_prefix' field
+            items: List of item dicts with 'job_prefix' field (already sorted by user's preference)
             separate_inputs: If True, group all input images into a separate "Inputs" group
 
         Returns:
-            dict: {prefix: [items]} ordered by most recent item in each group
+            dict: {prefix: [items]} ordered by first item's position in the input list
         """
         from collections import OrderedDict
 
-        groups = {}  # prefix -> (most_recent_mtime, [items])
+        groups = {}  # prefix -> (first_seen_index, [items])
         input_group = []  # Separate list for input images
-        input_max_mtime = 0
+        input_first_index = None
 
-        for item in items:
+        for idx, item in enumerate(items):
             # Separate input images into their own group
             if separate_inputs and item.get('is_input', False):
                 input_group.append(item)
-                if item['mtime'] > input_max_mtime:
-                    input_max_mtime = item['mtime']
+                if input_first_index is None:
+                    input_first_index = idx
                 continue
 
             prefix = item.get('job_prefix') or 'Other'
             if prefix not in groups:
-                groups[prefix] = (item['mtime'], [item])
+                # Store the index of first item in this group (for ordering groups)
+                groups[prefix] = (idx, [item])
             else:
-                current_max_mtime, group_items = groups[prefix]
+                first_idx, group_items = groups[prefix]
                 group_items.append(item)
-                # Track the most recent mtime for sorting groups
-                if item['mtime'] > current_max_mtime:
-                    groups[prefix] = (item['mtime'], group_items)
 
-        # Sort groups by most recent item, then sort items within each group
-        sorted_groups = sorted(groups.items(), key=lambda x: x[1][0], reverse=True)
+        # Sort groups by first-seen index (preserves input sort order for groups)
+        sorted_groups = sorted(groups.items(), key=lambda x: x[1][0])
 
-        # Build ordered dict with items sorted within groups
+        # Build ordered dict - items within groups already in correct order from input
         result = OrderedDict()
         for prefix, (_, group_items) in sorted_groups:
-            # Sort items within group by date descending
-            result[prefix] = sorted(group_items, key=lambda x: x['mtime'], reverse=True)
+            result[prefix] = group_items  # Already sorted from input
 
         # Add inputs group at the end if there are any
         if input_group:
-            result['📥 Inputs'] = sorted(input_group, key=lambda x: x['mtime'], reverse=True)
+            result['📥 Inputs'] = input_group  # Already sorted from input
 
         return result
 
     def group_items_by_groups(self, items, fallback_to_job=True, separate_inputs=True):
-        """Group items by their user-defined groups.
+        """Group items by their user-defined groups, preserving input sort order.
 
         Args:
-            items: List of item dicts
+            items: List of item dicts (already sorted by user's preference)
             fallback_to_job: If True, ungrouped items are stacked by job_prefix
             separate_inputs: If True, group all input images into a separate "Inputs" group
 
@@ -119,17 +116,14 @@ class GalleryManager:
             # Fall back to job prefix grouping if no favorites manager
             return self.group_items_by_prefix(items, separate_inputs)
 
-        groups = {}  # group_id -> (group_def, most_recent_mtime, [items])
+        groups = {}  # group_id -> (group_def, first_seen_index, [items])
         ungrouped = []  # Items not in any group
         input_group = []  # Separate list for input images
-        input_max_mtime = 0
 
-        for item in items:
+        for idx, item in enumerate(items):
             # Separate input images
             if separate_inputs and item.get('is_input', False):
                 input_group.append(item)
-                if item['mtime'] > input_max_mtime:
-                    input_max_mtime = item['mtime']
                 continue
 
             # Check if item is in any group
@@ -140,45 +134,43 @@ class GalleryManager:
                 group_def = favorites_manager.get_group(primary_group_id)
                 if group_def:
                     if primary_group_id not in groups:
-                        groups[primary_group_id] = (group_def, item['mtime'], [item])
+                        groups[primary_group_id] = (group_def, idx, [item])
                     else:
-                        _, current_max_mtime, group_items = groups[primary_group_id]
+                        group_def_stored, first_idx, group_items = groups[primary_group_id]
                         group_items.append(item)
-                        if item['mtime'] > current_max_mtime:
-                            groups[primary_group_id] = (group_def, item['mtime'], group_items)
                 else:
                     ungrouped.append(item)
             else:
                 ungrouped.append(item)
 
-        # Sort groups by order, then by most recent item
+        # Sort groups by user-defined order, then by first-seen index
         sorted_groups = sorted(
             groups.items(),
-            key=lambda x: (x[1][0].order, -x[1][1])  # (group_def.order, -mtime)
+            key=lambda x: (x[1][0].order, x[1][1])  # (group_def.order, first_seen_index)
         )
 
-        # Build ordered dict with items sorted within groups
+        # Build ordered dict - items already in correct order from input
         result = OrderedDict()
         group_colors = {}  # Store colors for stacked widget styling
 
         for group_id, (group_def, _, group_items) in sorted_groups:
             group_name = f"🏷 {group_def.name}"
-            result[group_name] = sorted(group_items, key=lambda x: x['mtime'], reverse=True)
+            result[group_name] = group_items  # Already sorted from input
             group_colors[group_name] = group_def.color
 
         # Handle ungrouped items
         if ungrouped:
             if fallback_to_job:
-                # Stack ungrouped items by job prefix
+                # Stack ungrouped items by job prefix (preserves sort order)
                 job_groups = self.group_items_by_prefix(ungrouped, separate_inputs=False)
                 for prefix, job_items in job_groups.items():
                     result[prefix] = job_items
             else:
-                result['Ungrouped'] = sorted(ungrouped, key=lambda x: x['mtime'], reverse=True)
+                result['Ungrouped'] = ungrouped  # Already sorted from input
 
         # Add inputs group at the end
         if input_group:
-            result['📥 Inputs'] = sorted(input_group, key=lambda x: x['mtime'], reverse=True)
+            result['📥 Inputs'] = input_group  # Already sorted from input
 
         # Store group colors on the manager for use by display methods
         self._group_colors = group_colors
@@ -210,16 +202,26 @@ class GalleryManager:
             self.tab._visible_items_ordered = [item['path'] for item in items]
             return
 
-        if incremental and hasattr(self.tab, '_widget_cache') and self.tab._widget_cache:
-            # Incremental update - only add new items at correct positions
+        # Grid mode - check for widget recycling opportunity
+        if hasattr(self.tab, '_widget_cache') and self.tab._widget_cache:
+            target_paths = set(item['path'] for item in items)
             existing_paths = set(self.tab._widget_cache.keys())
-            new_items = [item for item in items if item['path'] not in existing_paths]
 
-            if new_items:
-                # Use fast incremental insert that doesn't rebuild the entire layout
-                self._insert_new_items_incrementally(items, new_items)
-                print(f"[Gallery] Incremental update: added {len(new_items)} new items")
-            return
+            # Check if this is a filter change (subset/superset of existing)
+            # or incremental addition
+            if incremental:
+                new_items = [item for item in items if item['path'] not in existing_paths]
+                if new_items:
+                    self._insert_new_items_incrementally(items, new_items)
+                    print(f"[Gallery] Incremental update: added {len(new_items)} new items")
+                return
+
+            # Check if we can recycle widgets (filter change scenario)
+            # All target items exist in cache, just need to show/hide and reorder
+            if target_paths <= existing_paths:
+                recycled = self._recycle_widgets_for_filter(items, target_paths, existing_paths)
+                if recycled:
+                    return
 
         # Full refresh - clear and rebuild everything
         container.setUpdatesEnabled(False)
@@ -263,6 +265,67 @@ class GalleryManager:
             scroll_area.verticalScrollBar().valueChanged.connect(self.tab._on_scroll)
             scroll_area.horizontalScrollBar().valueChanged.connect(self.tab._on_scroll)
             self.tab._scroll_connected = True
+
+    def _recycle_widgets_for_filter(self, items, target_paths, existing_paths):
+        """Recycle existing widgets for a filter change instead of rebuilding.
+
+        When filtering, we often just need to hide some widgets and reorder the visible ones.
+        This is much faster than deleting and recreating widgets.
+
+        Args:
+            items: List of item dicts (sorted, filtered)
+            target_paths: Set of paths that should be visible
+            existing_paths: Set of paths that have cached widgets
+
+        Returns:
+            True if recycling was successful, False if full rebuild needed
+        """
+        from shiboken6 import isValid
+
+        container = self.tab.ui.galleryThumbnailContainer
+
+        # Verify all target widgets exist and are valid
+        for path in target_paths:
+            widget = self.tab._widget_cache.get(path)
+            if not widget or not isValid(widget):
+                return False
+
+        container.setUpdatesEnabled(False)
+
+        try:
+            # Remove all widgets from layout (but keep in cache)
+            while self.tab._flow_layout.count():
+                self.tab._flow_layout.takeAt(0)
+
+            # Add only the target widgets in sorted order
+            for item in items:
+                path = item['path']
+                widget = self.tab._widget_cache[path]
+                if isValid(widget):
+                    widget.setVisible(True)
+                    self.tab._flow_layout.addWidget(widget)
+
+            # Hide widgets that are filtered out (keep in cache for quick restoration)
+            hidden_paths = existing_paths - target_paths
+            for path in hidden_paths:
+                widget = self.tab._widget_cache.get(path)
+                if widget and isValid(widget):
+                    widget.setVisible(False)
+
+        finally:
+            container.setUpdatesEnabled(True)
+
+        # Force layout recalculation
+        self.tab._flow_layout.invalidate()
+        container.updateGeometry()
+
+        # Update status and ordered list
+        self.update_status_count(items)
+        self.tab._visible_items_ordered = [item['path'] for item in items]
+
+        # Note: We don't reload thumbnails - recycled widgets already have them loaded
+        print(f"[Gallery] Widget recycling: {len(target_paths)} shown, {len(hidden_paths)} hidden")
+        return True
 
     def _clear_stack_widgets(self):
         """Remove all stack widgets."""
@@ -683,37 +746,59 @@ class GalleryManager:
         """Reorder existing widgets without recreating them.
 
         This is much faster than display_items when just changing sort order.
+        Only works for grid (flat) view mode - stacked mode needs full rebuild.
 
         Args:
             items: List of item dicts (already sorted)
         """
+        from shiboken6 import isValid
+
         container = self.tab.ui.galleryThumbnailContainer
         container.setUpdatesEnabled(False)
 
         try:
-            # Remove all widgets from layout (but don't delete them)
-            while self.tab._flow_layout.count():
-                self.tab._flow_layout.takeAt(0)
-
-            # Add widgets back in sorted order using cache
+            # Build the new order from cache
+            ordered_widgets = []
             for item_dict in items:
                 path = item_dict['path']
                 if path in self.tab._widget_cache:
                     widget = self.tab._widget_cache[path]
-                    self.tab._flow_layout.addWidget(widget)
+                    if isValid(widget):
+                        ordered_widgets.append(widget)
+
+            # Only proceed if we have all widgets
+            if len(ordered_widgets) != len(items):
+                # Mismatch - fall back to full rebuild
+                container.setUpdatesEnabled(True)
+                print(f"[Gallery] Reorder mismatch: {len(ordered_widgets)} widgets vs {len(items)} items, doing full rebuild")
+                self.display_items(items, self.tab._view_mode)
+                return
+
+            # Remove all widgets from layout (but don't delete them)
+            while self.tab._flow_layout.count():
+                self.tab._flow_layout.takeAt(0)
+
+            # Add widgets back in sorted order
+            for widget in ordered_widgets:
+                self.tab._flow_layout.addWidget(widget)
 
         finally:
             container.setUpdatesEnabled(True)
 
-        # Force layout update
+        # Force layout recalculation - need multiple calls to ensure Qt processes the change
         self.tab._flow_layout.invalidate()
+        self.tab._flow_layout.activate()
         container.updateGeometry()
+        container.update()
 
-        # Trigger lazy loading for visible items after reorder
-        QTimer.singleShot(50, self.tab._load_visible_thumbnails)
+        # Update status count (items haven't changed, just order)
+        self.update_status_count(items)
 
         # Update ordered list for shift-select range selection
         self.tab._visible_items_ordered = [item['path'] for item in items]
+
+        # Note: We don't reload thumbnails here - they're already loaded in the widgets
+        print(f"[Gallery] Fast reorder: {len(items)} items repositioned")
 
     def create_all_widgets(self):
         """Create thumbnail widgets in batches to avoid blocking the UI."""
@@ -729,7 +814,7 @@ class GalleryManager:
         # Updates already disabled by display_items, don't toggle
         # Start batched creation
         self.tab._widget_create_index = 0
-        self.tab._widget_batch_size = 12  # Create 12 widgets per batch for smoother UI
+        self.tab._widget_batch_size = 20  # Create 20 widgets per batch for faster loading
         self.tab._is_editable_cache = self.tab._is_own_gallery()
         self.create_widget_batch()
 
@@ -800,8 +885,8 @@ class GalleryManager:
 
         self.tab._widget_create_index = end_index
 
-        # Schedule next batch with small delay to keep UI responsive
-        QTimer.singleShot(10, self.create_widget_batch)
+        # Schedule next batch with minimal delay
+        QTimer.singleShot(1, self.create_widget_batch)
 
     def load_visible_thumbnails(self):
         """Load thumbnails for widgets that are currently visible in the viewport.
@@ -855,24 +940,32 @@ class GalleryManager:
         self.load_thumbnail_batch()
 
     def load_thumbnail_batch(self):
-        """Load thumbnails one at a time with delays to prevent UI lag."""
+        """Load thumbnails in small batches for better performance."""
         from shiboken6 import isValid
 
         if not hasattr(self.tab, '_pending_thumbnail_loads'):
             return
-        if self.tab._thumbnail_load_index >= len(self.tab._pending_thumbnail_loads):
+
+        pending = self.tab._pending_thumbnail_loads
+        start_idx = self.tab._thumbnail_load_index
+
+        if start_idx >= len(pending):
             return
 
-        # Load one widget at a time to stagger worker completions
-        # Check if widget is still valid before accessing it
-        widget = self.tab._pending_thumbnail_loads[self.tab._thumbnail_load_index]
-        if isValid(widget):
-            widget.load_thumbnail_if_needed()
-        self.tab._thumbnail_load_index += 1
+        # Load 4 thumbnails per batch for faster loading while keeping UI responsive
+        batch_size = 4
+        end_idx = min(start_idx + batch_size, len(pending))
 
-        # Schedule next with delay so workers don't all finish at once
-        if self.tab._thumbnail_load_index < len(self.tab._pending_thumbnail_loads):
-            QTimer.singleShot(20, self.load_thumbnail_batch)
+        for i in range(start_idx, end_idx):
+            widget = pending[i]
+            if isValid(widget):
+                widget.load_thumbnail_if_needed()
+
+        self.tab._thumbnail_load_index = end_idx
+
+        # Schedule next batch with minimal delay
+        if end_idx < len(pending):
+            QTimer.singleShot(5, self.load_thumbnail_batch)
 
     def update_status_count(self, items):
         """Update the status bar with item counts.

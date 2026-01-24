@@ -644,20 +644,55 @@ class StackedThumbnailWidget(QWidget):
     def _load_image_thumbnail(self, path):
         """Load an image thumbnail."""
         from PySide6.QtCore import QThreadPool
+        from PySide6.QtGui import QPixmap
         from workers import Worker
 
+        # Check in-memory cache first (fast path)
+        try:
+            from ui_components import get_cached_image_thumbnail
+            cached_data = get_cached_image_thumbnail(path)
+            if cached_data:
+                pixmap = QPixmap()
+                pixmap.loadFromData(cached_data)
+                if not pixmap.isNull():
+                    scaled = pixmap.scaled(
+                        *self.THUMBNAIL_SIZE,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self._on_thumbnail_loaded(scaled)
+                    return
+        except ImportError:
+            pass  # Cache not available, load from disk
+
         def load_scaled_image(image_path):
-            from PySide6.QtGui import QPixmap
-            from PySide6.QtCore import Qt
+            from PySide6.QtCore import QBuffer, QIODevice
 
             pixmap = QPixmap(image_path)
             if pixmap.isNull():
                 return None
-            return pixmap.scaled(
+            scaled = pixmap.scaled(
                 *self.THUMBNAIL_SIZE,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
+            # Also cache as bytes for ThumbnailWidget reuse
+            try:
+                from ui_components import cache_image_thumbnail, ThumbnailWidget
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                # Cache at ThumbnailWidget size for consistency
+                cache_scaled = pixmap.scaled(
+                    ThumbnailWidget.THUMBNAIL_SIZE[0],
+                    ThumbnailWidget.THUMBNAIL_SIZE[1],
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                cache_scaled.save(buffer, "PNG")
+                cache_image_thumbnail(image_path, buffer.data().data())
+            except (ImportError, Exception):
+                pass  # Caching failed, continue anyway
+            return scaled
 
         # Load on worker thread - store reference to prevent GC
         self._load_worker = Worker(load_scaled_image, path)

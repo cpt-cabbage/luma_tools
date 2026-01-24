@@ -115,6 +115,32 @@ class MetadataCopyMixin:
 
 
 # ============================================================================
+# IMAGE THUMBNAIL CACHE
+# ============================================================================
+
+# Global cache for image thumbnails to avoid reloading from disk
+# Key: image path, Value: PNG bytes data
+_image_thumbnail_cache = {}
+_IMAGE_THUMBNAIL_CACHE_MAX_SIZE = 500  # Limit cache size
+
+
+def get_cached_image_thumbnail(path):
+    """Get cached image thumbnail bytes if available."""
+    return _image_thumbnail_cache.get(path)
+
+
+def cache_image_thumbnail(path, data):
+    """Cache image thumbnail bytes."""
+    # Simple LRU-like behavior: if cache is full, clear oldest half
+    if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
+        # Remove first half of entries (oldest)
+        keys = list(_image_thumbnail_cache.keys())
+        for key in keys[:len(keys) // 2]:
+            del _image_thumbnail_cache[key]
+    _image_thumbnail_cache[path] = data
+
+
+# ============================================================================
 # UNIFIED THUMBNAIL WIDGET (for images and 3D models)
 # ============================================================================
 
@@ -672,6 +698,17 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if ext == '.exr':
             self.thumbnail_label.setPixmap(self._create_placeholder("EXR"))
             return
+
+        # Check in-memory cache first (fast path for recycled widgets)
+        cached_data = get_cached_image_thumbnail(self.path)
+        if cached_data:
+            pixmap = QPixmap()
+            pixmap.loadFromData(cached_data)
+            if not pixmap.isNull():
+                self.thumbnail_label.setPixmap(pixmap)
+                return
+
+        # Load from disk in background
         self._load_worker = Worker(self._load_image_data, self.path)
         self._load_worker.signals.result.connect(self._on_image_thumbnail_loaded)
         self._load_worker.signals.error.connect(lambda msg, tb: self._on_thumbnail_error())
@@ -701,6 +738,10 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if image_data is None:
             self.thumbnail_label.setPixmap(self._create_placeholder("?"))
             return
+
+        # Cache the thumbnail data for reuse
+        cache_image_thumbnail(self.path, image_data)
+
         pixmap = QPixmap()
         pixmap.loadFromData(image_data)
         if not pixmap.isNull():

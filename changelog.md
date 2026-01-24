@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.5.3.2
+- UI fix
+
 ## Version 0.5.3.1
 - Bug fixes
 - UI updates
