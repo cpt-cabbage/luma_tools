@@ -41,6 +41,9 @@ class RefreshController(BaseGalleryManager):
         # Scan state
         self._scan_in_progress = False
 
+        # Flag to skip first auto-refresh after prewarm (avoid duplicate scan)
+        self._skip_next_auto_refresh = False
+
     def on_refresh(self, force=False, show_status=True):
         """
         Handle refresh request.
@@ -49,6 +52,13 @@ class RefreshController(BaseGalleryManager):
             force: If True, bypass scan-in-progress check
             show_status: If True, show status bar feedback (False for auto-refreshes)
         """
+        # Skip first automatic refresh after prewarm to avoid duplicate scan
+        # Only skip non-forced, silent (automatic) refreshes
+        if self._skip_next_auto_refresh and not force and not show_status:
+            self._skip_next_auto_refresh = False
+            self.tab.log("[Gallery] Skipping auto-refresh (prewarm cache active)")
+            return
+
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
             self.show_status("Refresh already in progress", "info")
@@ -147,6 +157,14 @@ class RefreshController(BaseGalleryManager):
             prewarm_items = prewarm_cache['items']
             self.tab.log(f"[Gallery] Using pre-warmed cache: {len(prewarm_items)} items")
 
+            # Mark initial scan as done IMMEDIATELY to prevent race condition
+            # with on_tab_activated() triggering a duplicate refresh
+            self.tab._initial_scan_done = True
+
+            # Skip the next automatic refresh (network polling) since we have prewarm data
+            # This prevents the full scan from running and causing items to "pop up"
+            self._skip_next_auto_refresh = True
+
             # Enrich items with additional data if needed
             items = self._enrich_prewarm_items(prewarm_items)
 
@@ -174,8 +192,7 @@ class RefreshController(BaseGalleryManager):
         # Now it's safe to create widgets and display without blocking splash
         self._process_scan_results_sync(items)
 
-        # Mark initial scan as done
-        self.tab._initial_scan_done = True
+        # _initial_scan_done already set in use_prewarm_cache_sync() to prevent race condition
         self.tab.log(f"[Gallery] Displayed {len(items)} pre-warmed items")
 
     def _enrich_prewarm_items(self, items):
@@ -247,10 +264,14 @@ class RefreshController(BaseGalleryManager):
                 # Fall back to filename pattern detection
                 if is_output is None or job_prefix is None:
                     try:
-                        job_prefix, is_output = extract_job_prefix(filename)
+                        # Pass file_type so models/video/audio default to output correctly
+                        file_type = item.get('type', 'image')
+                        job_prefix, is_output = extract_job_prefix(filename, file_type)
                     except Exception:
                         job_prefix = None
-                        is_output = False
+                        # Models/video/audio default to output, images to input
+                        file_type = item.get('type', 'image')
+                        is_output = file_type in ('model', 'video', 'audio')
 
                 # Add enriched fields
                 item['workflow'] = ''
@@ -259,12 +280,98 @@ class RefreshController(BaseGalleryManager):
                 item['source_images'] = source_images
                 item['has_metadata'] = has_metadata
 
+        # Bundle _view/_export pairs to match full scan behavior
+        items = self._bundle_view_export_pairs(items)
+
         return items
+
+    def _bundle_view_export_pairs(self, items):
+        """Bundle _view and _export file pairs to match full scan behavior.
+
+        This ensures prewarm items have the same structure as items from
+        GalleryLoader.scan_directory(), preventing "new item" detection on refresh.
+        """
+        if not items:
+            return items
+
+        # Group items by directory
+        items_by_dir = {}
+        for item in items:
+            dir_path = os.path.dirname(item['path'])
+            if dir_path not in items_by_dir:
+                items_by_dir[dir_path] = {}
+            filename = os.path.basename(item['path'])
+            items_by_dir[dir_path][filename] = item
+
+        result = []
+        for dir_path, items_dict in items_by_dir.items():
+            bundled_files = set()
+
+            for filename in list(items_dict.keys()):
+                if filename in bundled_files:
+                    continue
+
+                base_name = None
+                view_file = None
+                export_file = None
+
+                # Check if this is a _view or _export file
+                if '_view' in filename:
+                    parts = filename.rsplit('_view', 1)
+                    if len(parts) == 2:
+                        base_name = parts[0]
+                        ext_part = parts[1]
+                        view_file = filename
+                        export_candidate = f"{base_name}_export{ext_part}"
+                        if export_candidate in items_dict:
+                            export_file = export_candidate
+                elif '_export' in filename:
+                    parts = filename.rsplit('_export', 1)
+                    if len(parts) == 2:
+                        base_name = parts[0]
+                        ext_part = parts[1]
+                        export_file = filename
+                        view_candidate = f"{base_name}_view{ext_part}"
+                        if view_candidate in items_dict:
+                            view_file = view_candidate
+
+                # If we found a pair, create a bundled item
+                if base_name and view_file and export_file:
+                    bundled_files.add(view_file)
+                    bundled_files.add(export_file)
+
+                    view_item = items_dict[view_file]
+                    export_item = items_dict[export_file]
+
+                    result.append({
+                        'path': view_item['path'],
+                        'export_path': export_item['path'],
+                        'mtime': max(view_item['mtime'], export_item['mtime']),
+                        'type': view_item['type'],
+                        'name': view_item['name'],
+                        'workflow': view_item.get('workflow', ''),
+                        'job_prefix': view_item.get('job_prefix'),
+                        'is_input': view_item.get('is_input', False),
+                        'source_images': view_item.get('source_images', []),
+                        'has_metadata': view_item.get('has_metadata', False),
+                        'is_bundled': True
+                    })
+                else:
+                    if filename not in bundled_files:
+                        result.append(items_dict[filename])
+
+        return result
 
     def _process_scan_results_sync(self, items):
         """Process scan results synchronously (for prewarm cache)."""
         # Store in cache
         self.tab._cached_items = items
+
+        # Update known items for ALL items (not just filtered ones)
+        # This prevents filtered-out items from being detected as "new" on every refresh
+        # Normalize paths for consistent comparison across different scan sources
+        for item in items:
+            self.tab._known_items.add(os.path.normpath(item['path']))
 
         # Apply current filter and sort
         filtered_items = self.tab._filter_items(items)
@@ -272,10 +379,6 @@ class RefreshController(BaseGalleryManager):
 
         # Use display_items to properly create and display all widgets
         self.tab._manager.display_items(sorted_items, self.tab._view_mode)
-
-        # Update known items for incremental refresh
-        for item in sorted_items:
-            self.tab._known_items.add(item['path'])
 
     # =========================================================================
     # FILE SYSTEM WATCHER

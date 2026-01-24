@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.5.4
+- Add caching for all thumbnails
+- Fix stacked view not repecting sort mode
+- Implement thumbnail in-memory caching for faster load times
+- Improve reordering logic
+- Improve general gallery performance
+
 ## Version 0.5.3.2
 - UI fix
 

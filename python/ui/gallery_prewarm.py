@@ -55,7 +55,7 @@ def get_gallery_output_path() -> Optional[str]:
 
 def scan_gallery_items(output_dir: str) -> List[Dict]:
     """
-    Scan directory for gallery items (images and 3D models).
+    Scan directory for gallery items (images, 3D models, video, and audio).
 
     Args:
         output_dir: Directory to scan
@@ -64,9 +64,12 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
         List of item dicts with keys: path, mtime, type, name
     """
     items = []
-    image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr'}
+    # Match extensions from comfyui_gallery_loader.py to avoid items appearing later
+    image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.exr', '.tiff', '.tif', '.bmp', '.gif'}
     model_extensions = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
-    supported_extensions = image_extensions | model_extensions
+    video_extensions = {'.mp4', '.mov', '.avi', '.webm'}
+    audio_extensions = {'.wav', '.mp3', '.flac', '.ogg'}
+    supported_extensions = image_extensions | model_extensions | video_extensions | audio_extensions
 
     try:
         for root, dirs, files in os.walk(output_dir):
@@ -78,7 +81,16 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
                         mtime = os.path.getmtime(full_path)
                     except OSError:
                         mtime = 0
-                    file_type = 'model' if ext in model_extensions else 'image'
+
+                    # Determine file type
+                    if ext in model_extensions:
+                        file_type = 'model'
+                    elif ext in video_extensions:
+                        file_type = 'video'
+                    elif ext in audio_extensions:
+                        file_type = 'audio'
+                    else:
+                        file_type = 'image'
 
                     items.append({
                         'path': full_path,

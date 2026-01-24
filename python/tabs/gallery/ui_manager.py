@@ -3,16 +3,17 @@ Gallery UI Manager.
 
 Handles UI controls for the gallery:
 - Sort button and mode selection
-- Filter button (show/hide inputs)
+- Filters button and floating filters dialog
 - View mode toggle (grid/stacked by job)
 - User selector for multi-user gallery viewing
 """
 
 import os
-from PySide6.QtWidgets import QPushButton, QMenu, QCheckBox
+from PySide6.QtWidgets import QPushButton, QMenu
 from PySide6.QtCore import QThreadPool
 
 from .base_manager import BaseGalleryManager
+from .filters_dialog import FiltersDialog
 
 
 class UIManager(BaseGalleryManager):
@@ -94,20 +95,29 @@ class UIManager(BaseGalleryManager):
     # =========================================================================
 
     def _create_filter_button(self):
-        """Create the show inputs checkbox toggle."""
+        """Create the Filters button that opens the floating filters dialog."""
         from PySide6.QtCore import Qt
-        self._filter_checkbox = QCheckBox("Show Inputs")
-        self._filter_checkbox.setObjectName("filterToggleCheckbox")
-        self._filter_checkbox.setCursor(Qt.ArrowCursor)
-        self._filter_checkbox.setChecked(self.tab._show_inputs)
-        self._filter_checkbox.setToolTip("Show/hide input source images")
-        self._filter_checkbox.toggled.connect(self._on_filter_toggle)
+
+        self._filters_btn = QPushButton("Filters")
+        self._filters_btn.setObjectName("filtersButton")
+        self._filters_btn.setCursor(Qt.ArrowCursor)
+        self._filters_btn.setToolTip("Open filter settings")
+        self._filters_btn.clicked.connect(self._on_filters_button_clicked)
+
+        # Create the filters dialog (hidden initially)
+        self._filters_dialog = FiltersDialog(self.tab)
+        self._filters_dialog.filters_changed.connect(self._on_filters_changed)
+        self._filters_dialog.closed.connect(self._on_filters_dialog_closed)
+
+        # Load saved filter settings
+        self._load_filter_settings()
+        self._update_filters_button_text()
 
         # Insert after sort button in the header layout
         header_layout = self._find_header_layout()
         if header_layout:
             sort_index = header_layout.indexOf(self.tab.ui.GallerySortButton)
-            header_layout.insertWidget(sort_index + 1, self._filter_checkbox)
+            header_layout.insertWidget(sort_index + 1, self._filters_btn)
 
     def _find_header_layout(self):
         """Find the header layout that contains the sort button."""
@@ -126,21 +136,66 @@ class UIManager(BaseGalleryManager):
                         return nested_layout
         return None
 
-    def _on_filter_toggle(self, checked):
-        """Toggle input file visibility."""
-        self.tab._show_inputs = checked
+    def _load_filter_settings(self):
+        """Load filter settings from user preferences."""
+        from core.user_preferences import get_gallery_settings
+        settings = get_gallery_settings()
+
+        # Load show_inputs
+        show_inputs = settings.get("show_inputs", False)
+        self._filters_dialog.set_show_inputs(show_inputs)
+
+        # Load type filters
+        type_filters = settings.get("type_filters", {
+            "image": True,
+            "video": True,
+            "audio": True,
+            "model": True
+        })
+        self._filters_dialog.set_type_filters(type_filters)
+
+        # Sync to tab state
+        self.tab._show_inputs = show_inputs
+        self.tab._type_filters = type_filters
+
+    def _on_filters_button_clicked(self):
+        """Toggle the filters dialog visibility."""
+        if self._filters_dialog.isVisible():
+            self._filters_dialog.close()
+        else:
+            self._filters_dialog.show_below(self._filters_btn)
+
+    def _on_filters_dialog_closed(self):
+        """Handle filters dialog close."""
+        self._update_filters_button_text()
+
+    def _on_filters_changed(self):
+        """Handle filter settings change from dialog."""
+        # Get current settings from dialog
+        show_inputs = self._filters_dialog.get_show_inputs()
+        type_filters = self._filters_dialog.get_type_filters()
+
+        # Update tab state
+        self.tab._show_inputs = show_inputs
+        self.tab._type_filters = type_filters
 
         # Save to settings
         from core.user_preferences import save_gallery_settings
-        save_gallery_settings(show_inputs=checked)
+        save_gallery_settings(show_inputs=show_inputs, type_filters=type_filters)
 
-        # Show status feedback
-        if hasattr(self.tab, 'show_status_message'):
-            status = "shown" if checked else "hidden"
-            self.tab.show_status_message(f"Input images {status}")
+        # Update button text
+        self._update_filters_button_text()
 
         # Re-filter and redisplay from cached items (no rescan needed)
         self._redisplay_items()
+
+    def _update_filters_button_text(self):
+        """Update the Filters button text based on active filters."""
+        count = self._filters_dialog.get_active_filter_count()
+        if count > 0:
+            self._filters_btn.setText(f"Filters ({count})")
+        else:
+            self._filters_btn.setText("Filters")
 
     # =========================================================================
     # VIEW MODE CONTROLS
@@ -167,10 +222,10 @@ class UIManager(BaseGalleryManager):
         self._stacking_btn.clicked.connect(self._on_stacking_button_clicked)
         self._update_stacking_button_text(current_mode)
 
-        # Insert after filter checkbox in the header layout
+        # Insert after filters button in the header layout
         header_layout = self._find_header_layout()
         if header_layout:
-            filter_index = header_layout.indexOf(self._filter_checkbox)
+            filter_index = header_layout.indexOf(self._filters_btn)
             header_layout.insertWidget(filter_index + 1, self._stacking_btn)
 
     def _update_stacking_button_text(self, mode):

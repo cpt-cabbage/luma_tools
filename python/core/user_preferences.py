@@ -271,7 +271,8 @@ def save_gallery_settings(
     show_inputs: Optional[bool] = None,
     view_mode: Optional[str] = None,
     collapsed_sections: Optional[List[str]] = None,
-    sort_mode: Optional[str] = None
+    sort_mode: Optional[str] = None,
+    type_filters: Optional[dict] = None
 ):
     """Save gallery settings.
 
@@ -282,6 +283,7 @@ def save_gallery_settings(
         view_mode: View mode - "stacked" or "grid"
         collapsed_sections: List of section IDs that are collapsed
         sort_mode: Sort mode - "date_desc", "date_asc", "name_asc", "name_desc", "workflow"
+        type_filters: Dict of file type -> bool for filtering by type
     """
     settings = load_user_settings()
     if "gallery_settings" not in settings:
@@ -295,5 +297,7 @@ def save_gallery_settings(
         settings["gallery_settings"]["collapsed_sections"] = collapsed_sections
     if sort_mode is not None:
         settings["gallery_settings"]["sort_mode"] = sort_mode
+    if type_filters is not None:
+        settings["gallery_settings"]["type_filters"] = type_filters
 
     save_user_settings(settings)

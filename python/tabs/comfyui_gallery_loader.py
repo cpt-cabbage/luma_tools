@@ -19,7 +19,7 @@ MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | MODEL_EXTENSIONS
 
 
-def extract_job_prefix(filename: str) -> tuple:
+def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
     """Extract the job prefix from a ComfyUI output filename.
 
     Filenames follow patterns like:
@@ -30,6 +30,7 @@ def extract_job_prefix(filename: str) -> tuple:
 
     Args:
         filename: The filename to extract prefix from
+        file_type: 'image', 'model', 'video', or 'audio' - models default to output
 
     Returns:
         tuple: (prefix, is_output) where:
@@ -102,20 +103,26 @@ def extract_job_prefix(filename: str) -> tuple:
         except Exception as e:
             print(f"[Detection] Error in 3 digit sequence search for {filename}: {e}")
 
-        # No clear output pattern - likely an input image
-        # Try to extract a meaningful prefix by removing trailing numbers
+        # No clear output pattern
+        # 3D models are typically generated outputs, so default them to output
+        # Images without patterns are likely input images
         try:
             cleaned = re.sub(r'_?\d+$', '', base)
-            result = (cleaned if cleaned else None, False)
-            print(f"[Detection] {filename} -> INPUT (no pattern match, prefix={result[0]})")
+            # 3D models (and video/audio) default to output, images default to input
+            is_output = file_type in ('model', 'video', 'audio')
+            result = (cleaned if cleaned else None, is_output)
+            status = 'OUTPUT' if is_output else 'INPUT'
+            print(f"[Detection] {filename} -> {status} (no pattern match, type={file_type}, prefix={result[0]})")
             return result
         except Exception as e:
             print(f"[Detection] Error in cleanup for {filename}: {e}")
-            return (base, False)  # Return base as fallback
+            is_output = file_type in ('model', 'video', 'audio')
+            return (base, is_output)  # Return base as fallback
 
     except Exception as e:
         print(f"[Detection] Unexpected error processing {filename}: {e}")
-        return (None, False)
+        is_output = file_type in ('model', 'video', 'audio')
+        return (None, is_output)
 
 
 class GalleryLoader:
@@ -247,11 +254,12 @@ class GalleryLoader:
                     # Fall back to filename pattern detection if metadata missing or invalid
                     if is_output is None or job_prefix is None:
                         try:
-                            job_prefix, is_output = extract_job_prefix(filename)
+                            job_prefix, is_output = extract_job_prefix(filename, file_type)
                         except Exception as e:
                             print(f"[Loader] Error extracting prefix from {filename}: {e}")
                             job_prefix = None
-                            is_output = False  # Default to input if all detection fails
+                            # 3D models/video/audio default to output, images to input
+                            is_output = file_type in ('model', 'video', 'audio')
 
                     items_dict[filename] = {
                         'path': full_path,
@@ -351,14 +359,17 @@ class GalleryLoader:
                 if 'job_prefix' not in item:
                     try:
                         filename = os.path.basename(item.get('path', ''))
-                        job_prefix, is_output = extract_job_prefix(filename)
+                        file_type = item.get('type', 'image')
+                        job_prefix, is_output = extract_job_prefix(filename, file_type)
                         item['job_prefix'] = job_prefix
                         item['is_input'] = not is_output
                         item['source_images'] = []
                     except Exception as e:
                         print(f"[Prewarm] Error extracting prefix: {e}")
                         item['job_prefix'] = None
-                        item['is_input'] = True
+                        # 3D models/video/audio default to output, images to input
+                        file_type = item.get('type', 'image')
+                        item['is_input'] = file_type not in ('model', 'video', 'audio')
                         item['source_images'] = []
             return items
 
@@ -434,11 +445,13 @@ class GalleryLoader:
                             except Exception as e:
                                 print(f"[Prewarm] Error reading metadata fields for {filename}: {e}")
                                 # Fall back to filename pattern
-                                job_prefix, is_output = extract_job_prefix(filename)
+                                file_type = item.get('type', 'image')
+                                job_prefix, is_output = extract_job_prefix(filename, file_type)
                                 item['source_images'] = []
                         else:
                             # Fall back to filename pattern
-                            job_prefix, is_output = extract_job_prefix(filename)
+                            file_type = item.get('type', 'image')
+                            job_prefix, is_output = extract_job_prefix(filename, file_type)
                             item['source_images'] = []
 
                         item['job_prefix'] = job_prefix

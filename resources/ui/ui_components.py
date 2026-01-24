@@ -315,77 +315,15 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self.type_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self._apply_type_indicator()
 
-        # NEW indicator (top-right, pulsing blue badge for new items)
-        self.new_indicator = QLabel(self.thumbnail_label)
-        self.new_indicator.setText("NEW")
-        self.new_indicator.setAlignment(Qt.AlignCenter)
-        self.new_indicator.setFixedSize(32, 16)
-        self.new_indicator.move(self.THUMBNAIL_SIZE[0] - 36, 4)
-        self.new_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.new_indicator.setContextMenuPolicy(Qt.NoContextMenu)
-        self.new_indicator.hide()
-
-        # Pulsing animation state for NEW indicator
-        self._new_pulse_intensity = 0.0
-        self._new_pulse_direction = 1
-        self._new_pulse_timer = None
+        # NEW indicator (top-right, pulsing red notification dot for new items)
+        # Uses same visual style as TabGlowEffect and ButtonNotificationBadge
+        from effects import ThumbnailNotificationDot
+        self._new_indicator = ThumbnailNotificationDot(self.thumbnail_label)
+        self._new_indicator.move(self.THUMBNAIL_SIZE[0] - 18, 4)
 
         # Start pulsing if new
         if self._is_new:
-            self._start_new_pulse()
-
-    def _start_new_pulse(self):
-        """Start the pulsing animation for new items."""
-        self.new_indicator.show()
-        self._new_pulse_intensity = 0.0
-        self._new_pulse_direction = 1
-        self._update_new_indicator_style()
-
-        if self._new_pulse_timer is None:
-            self._new_pulse_timer = QTimer(self)
-            self._new_pulse_timer.timeout.connect(self._animate_new_pulse)
-        self._new_pulse_timer.start(50)  # 20 FPS
-
-    def _stop_new_pulse(self):
-        """Stop the pulsing animation."""
-        if self._new_pulse_timer:
-            self._new_pulse_timer.stop()
-        self.new_indicator.hide()
-
-    def _animate_new_pulse(self):
-        """Update the pulse intensity for animation."""
-        # Update intensity
-        self._new_pulse_intensity += 0.08 * self._new_pulse_direction
-
-        # Clamp and reverse direction at bounds
-        if self._new_pulse_intensity >= 1.0:
-            self._new_pulse_intensity = 1.0
-            self._new_pulse_direction = -1
-        elif self._new_pulse_intensity <= 0.0:
-            self._new_pulse_intensity = 0.0
-            self._new_pulse_direction = 1
-
-        self._update_new_indicator_style()
-
-    def _update_new_indicator_style(self):
-        """Update the NEW indicator style based on pulse intensity."""
-        # Blue color: rgb(59, 130, 246) - same as selection
-        intensity = self._new_pulse_intensity
-        # Vary alpha and border thickness based on intensity
-        bg_alpha = int(0.3 + 0.4 * intensity)  # 0.3 to 0.7
-        border_alpha = int(0.5 + 0.5 * intensity)  # 0.5 to 1.0
-        text_alpha = int(0.7 + 0.3 * intensity)  # 0.7 to 1.0
-
-        self.new_indicator.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgba(59, 130, 246, {bg_alpha});
-                color: rgba(255, 255, 255, {text_alpha});
-                border: 1px solid rgba(59, 130, 246, {border_alpha});
-                border-radius: 4px;
-                font-size: 8px;
-                font-weight: bold;
-            }}
-        """)
+            self._new_indicator.show_dot()
 
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state."""
@@ -637,7 +575,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     def mark_as_viewed(self):
         if self._is_new:
             self._is_new = False
-            self._stop_new_pulse()  # Stop pulsing animation
+            self._new_indicator.hide_dot()  # Stop pulsing animation
             self._apply_thumbnail_style()
             self.viewed.emit(self.path)
 

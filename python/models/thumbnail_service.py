@@ -59,7 +59,6 @@ class ModelThumbnailService:
     def __init__(self):
         self._cache: Dict[str, QPixmap] = {}  # In-memory cache
         self._pending: Dict[str, bool] = {}   # Tracks pending generations
-        self._thumbnail_viewer = None         # Reusable hidden viewer
 
     def get_cache_path(self, model_path: str) -> str:
         """
@@ -130,26 +129,39 @@ class ModelThumbnailService:
         ext = os.path.splitext(model_path)[1].lower()
         return ext in SUPPORTED_EXTENSIONS
 
-    def _get_or_create_viewer(self):
-        """Get or create a hidden Three.js viewer for thumbnail generation."""
-        if self._thumbnail_viewer is not None:
-            return self._thumbnail_viewer
+    def _create_fresh_viewer(self):
+        """Create a fresh Three.js viewer for thumbnail generation.
 
+        Creates a new viewer each time to avoid state issues when
+        generating thumbnails for multiple models sequentially.
+        """
         try:
             from models.threejs_viewer import ThreeJSViewerWidget, WEBENGINE_AVAILABLE
             if not WEBENGINE_AVAILABLE:
                 print("[ThumbnailService] WebEngine not available")
                 return None
 
-            # Create hidden viewer
-            self._thumbnail_viewer = ThreeJSViewerWidget(prewarm=True)
-            self._thumbnail_viewer.setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
-            self._thumbnail_viewer.hide()
+            # Create viewer without prewarm flag so WebGL initializes properly
+            # Position off-screen to avoid visual flash
+            viewer = ThreeJSViewerWidget(prewarm=False)
+            viewer.setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+            viewer.move(-1000, -1000)
+            # Show it off-screen so WebGL context initializes
+            viewer.show()
 
-            return self._thumbnail_viewer
+            return viewer
         except Exception as e:
             print(f"[ThumbnailService] Error creating viewer: {e}")
             return None
+
+    def _cleanup_viewer(self, viewer):
+        """Clean up a viewer after use."""
+        if viewer:
+            try:
+                viewer.hide()
+                viewer.deleteLater()
+            except Exception as e:
+                print(f"[ThumbnailService] Error cleaning up viewer: {e}")
 
     def generate_thumbnail_sync(self, model_path: str) -> Optional[QPixmap]:
         """
@@ -173,8 +185,9 @@ class ModelThumbnailService:
 
         cache_path = self.get_cache_path(model_path)
 
+        viewer = None
         try:
-            viewer = self._get_or_create_viewer()
+            viewer = self._create_fresh_viewer()
             if viewer is None:
                 print("[ThumbnailService] Could not create viewer")
                 return None
@@ -198,9 +211,11 @@ class ModelThumbnailService:
                 loop.quit()
 
             def capture_screenshot():
+                # Viewer is already visible off-screen, just capture
                 viewer.capture_screenshot(THUMBNAIL_SIZE, on_screenshot_captured)
 
             def on_screenshot_captured(data_url):
+
                 if data_url and data_url.startswith('data:image/png;base64,'):
                     # Extract base64 data and convert to pixmap
                     base64_data = data_url.split(',', 1)[1]
@@ -260,12 +275,17 @@ class ModelThumbnailService:
             except RuntimeError:
                 pass  # Signals already disconnected
 
+            # Clean up viewer
+            self._cleanup_viewer(viewer)
+
             return result['pixmap']
 
         except Exception as e:
             print(f"[ThumbnailService] Thumbnail generation error: {e}")
             import traceback
             traceback.print_exc()
+            # Clean up viewer on error
+            self._cleanup_viewer(viewer)
             return None
 
     def clear_cache(self, model_path: str = None):

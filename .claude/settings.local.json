@@ -55,7 +55,8 @@
       "Bash(pythonvenvScriptspython.exe -c \"import pytest; pytest.main\\([''-v'', ''tests/'']\\)\")",
       "Bash(powershell.exe -Command \"& {cd ''l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools''; $env:PYTHONPATH=''python;resources\\\\ui''; .\\\\python\\\\venv\\\\Scripts\\\\python.exe -c \"\"import pytest; pytest.main\\([''-v'', ''tests/'']\\)\"\"}\")",
       "Bash(powershell.exe -NoProfile -Command \"cd ''l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools''; ./python/venv/Scripts/python.exe run_tests.py 2>&1\")",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe:*)",
+      "Bash(cmd /c \"dir /b /o-d C:\\\\Users\\\\christophe.leyder\\\\.luma_tools\\\\logs\\\\*.log 2>nul\")"
     ],
     "deny": [],
     "ask": []

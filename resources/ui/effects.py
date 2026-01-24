@@ -156,11 +156,11 @@ class TabGlowEffect(QObject):
         dot_x = icon_size - dot_size
         dot_y = 0
 
-        notification_color = QColor(255, 80, 80)  # Bright red
+        notification_color = QColor(59, 130, 246)  # Bright blue
         alpha = int(200 + 55 * intensity)
 
         # Draw outer glow
-        glow_color = QColor(255, 100, 100, int(100 * intensity))
+        glow_color = QColor(80, 140, 255, int(100 * intensity))
         painter.setBrush(QBrush(glow_color))
         painter.setPen(Qt.NoPen)
         glow_rect = QRectF(dot_x - 2, dot_y - 1, dot_size + 3, dot_size + 3)
@@ -262,7 +262,7 @@ class TabGlowManager(QObject):
 class ButtonNotificationBadge(QWidget):
     """
     A notification badge that can be overlaid on a button.
-    Shows a small red dot in the top-right corner, similar to tab notification badges.
+    Shows a small pulsing blue dot in the top-right corner, similar to tab notification badges.
 
     Usage:
         badge = ButtonNotificationBadge(button)
@@ -271,14 +271,14 @@ class ButtonNotificationBadge(QWidget):
         badge.hide_badge()
     """
 
-    def __init__(self, parent_button, size=10, color=QColor(255, 80, 80), offset=(4, 4)):
+    def __init__(self, parent_button, size=10, color=QColor(59, 130, 246), offset=(4, 4)):
         """
         Initialize the notification badge.
 
         Args:
             parent_button: The QPushButton to attach the badge to
             size: Diameter of the badge in pixels (default: 10)
-            color: QColor for the badge (default: bright red)
+            color: QColor for the badge (default: bright blue)
             offset: Tuple (x, y) offset from top-right corner (default: (4, 4))
         """
         super().__init__(parent_button)
@@ -412,6 +412,151 @@ class ButtonNotificationBadge(QWidget):
 
     def is_badge_visible(self):
         """Check if badge is currently visible."""
+        return self._visible
+
+
+class ThumbnailNotificationDot(QWidget):
+    """
+    A pulsing notification dot for thumbnail widgets to indicate new items.
+    Uses the same visual style as TabGlowEffect and ButtonNotificationBadge.
+
+    Usage:
+        dot = ThumbnailNotificationDot(thumbnail_label)
+        dot.move(x, y)  # Position in top-right
+        dot.show_dot()
+        # Later:
+        dot.hide_dot()
+    """
+
+    def __init__(self, parent, size=10, color=QColor(59, 130, 246)):
+        """
+        Initialize the notification dot.
+
+        Args:
+            parent: The parent widget (typically thumbnail_label)
+            size: Diameter of the dot in pixels (default: 10)
+            color: QColor for the dot (default: bright blue)
+        """
+        super().__init__(parent)
+        self._size = size
+        self._color = color
+        self._visible = False
+
+        # Animation state
+        self._intensity = 0.0
+        self._direction = 1  # 1 = brightening, -1 = dimming
+        self._is_animating = False
+
+        # Timer for pulsing animation
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._animation_interval = 50  # 20 FPS
+        self._intensity_step = 0.08  # How much to change per frame
+
+        # Set fixed size for the dot (extra space for animated glow)
+        self.setFixedSize(size + 6, size + 6)
+
+        # Make transparent background
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # Initially hidden
+        self.hide()
+
+    def _animate(self):
+        """Update the pulse intensity for animation."""
+        if not self._is_animating:
+            return
+
+        # Update intensity
+        self._intensity += self._intensity_step * self._direction
+
+        # Clamp and reverse direction at bounds
+        if self._intensity >= 1.0:
+            self._intensity = 1.0
+            self._direction = -1
+        elif self._intensity <= 0.0:
+            self._intensity = 0.0
+            self._direction = 1
+
+        self.update()
+
+    def paintEvent(self, event):
+        """Paint the notification glow with pulsing animation."""
+        if not self._visible:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Calculate animated values based on intensity
+        size_boost = int(3 * self._intensity)  # Size varies more for glow effect
+        center_x = (self._size + 6) / 2
+        center_y = (self._size + 6) / 2
+
+        # Draw multiple layered glows for a soft, diffuse effect
+        # Outer glow (very soft, large)
+        outer_alpha = int(20 + 30 * self._intensity)  # 20-50 alpha
+        outer_color = QColor(self._color)
+        outer_color.setAlpha(outer_alpha)
+        painter.setBrush(QBrush(outer_color))
+        painter.setPen(Qt.NoPen)
+        outer_size = self._size + 6 + size_boost
+        painter.drawEllipse(
+            int(center_x - outer_size / 2),
+            int(center_y - outer_size / 2),
+            int(outer_size),
+            int(outer_size)
+        )
+
+        # Middle glow
+        mid_alpha = int(40 + 50 * self._intensity)  # 40-90 alpha
+        mid_color = QColor(self._color)
+        mid_color.setAlpha(mid_alpha)
+        painter.setBrush(QBrush(mid_color))
+        mid_size = self._size + 2 + size_boost * 0.6
+        painter.drawEllipse(
+            int(center_x - mid_size / 2),
+            int(center_y - mid_size / 2),
+            int(mid_size),
+            int(mid_size)
+        )
+
+        # Inner core (brighter but still semi-transparent)
+        core_alpha = int(80 + 80 * self._intensity)  # 80-160 alpha
+        core_color = QColor(self._color)
+        core_color.setAlpha(core_alpha)
+        painter.setBrush(QBrush(core_color))
+        core_size = self._size * 0.6 + size_boost * 0.3
+        painter.drawEllipse(
+            int(center_x - core_size / 2),
+            int(center_y - core_size / 2),
+            int(core_size),
+            int(core_size)
+        )
+
+        painter.end()
+
+    def show_dot(self):
+        """Show the notification dot with pulsing animation."""
+        self._visible = True
+        self._is_animating = True
+        self._intensity = 0.0
+        self._direction = 1
+        self.show()
+        self.raise_()
+        self._timer.start(self._animation_interval)
+        self.update()
+
+    def hide_dot(self):
+        """Hide the notification dot and stop animation."""
+        self._visible = False
+        self._is_animating = False
+        self._timer.stop()
+        self.hide()
+
+    def is_visible(self):
+        """Check if dot is currently visible."""
         return self._visible
 
 

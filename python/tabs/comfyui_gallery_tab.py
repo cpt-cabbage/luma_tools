@@ -75,6 +75,12 @@ class ComfyUIGalleryTab(BaseTab):
         self._show_inputs = gallery_settings.get("show_inputs", False)
         self._view_mode = gallery_settings.get("view_mode", "stacked")
         self._collapsed_sections = set(gallery_settings.get("collapsed_sections", []))
+        self._type_filters = gallery_settings.get("type_filters", {
+            "image": True,
+            "video": True,
+            "audio": True,
+            "model": True
+        })
         self._section_items = {}
         self._expanded_stack_id = None
         self._pre_expansion_stacked = False
@@ -409,13 +415,19 @@ class ComfyUIGalleryTab(BaseTab):
         # Store in cache
         self._cached_items = items
 
-        # Detect new items
-        current_paths = set(item['path'] for item in items)
+        # Detect new items (normalize paths for consistent comparison)
+        current_paths = set(os.path.normpath(item['path']) for item in items)
+        self.log(f"[Gallery] Scan found {len(items)} items, {len(current_paths)} unique paths, known: {len(self._known_items)}")
         if self._initial_scan_done:
+            # _known_items is already normalized, no need to normalize again
             new_paths = current_paths - self._known_items
             self._new_items.update(new_paths)
             if new_paths:
                 self.log(f"[Gallery] {len(new_paths)} new item(s) detected")
+                # Debug: log a few examples
+                examples = list(new_paths)[:3]
+                for ex in examples:
+                    self.log(f"[Gallery] New item example: {ex}")
         self._known_items = current_paths
 
         # Apply filter and sort
@@ -658,9 +670,16 @@ class ComfyUIGalleryTab(BaseTab):
     def _filter_items(self, items):
         """Filter items based on current filter settings.
 
-        Applies both show_inputs filter and likes/groups/stacks filter.
+        Applies type filter, show_inputs filter, and likes/groups/stacks filter.
         """
         filter_type, filter_id = self._current_filter
+
+        # Apply type filter first (unless viewing inputs specifically)
+        if filter_type != "inputs" and hasattr(self, '_type_filters'):
+            items = [
+                item for item in items
+                if self._type_filters.get(item.get('type', 'image'), True)
+            ]
 
         # Special case: "inputs" filter shows only input images (bypass show_inputs setting)
         if filter_type == "inputs":
