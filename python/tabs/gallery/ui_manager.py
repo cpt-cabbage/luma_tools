@@ -313,8 +313,8 @@ class UIManager(BaseGalleryManager):
             # Fast path: just reorder existing widgets without recreation
             self.tab._manager.reorder_widgets(sorted_items)
         else:
-            # display_items handles widget recycling for filter changes automatically
-            self.tab._manager.display_items(sorted_items, self.tab._view_mode)
+            # Full rebuild - add transition animation
+            self._animate_gallery_transition(sorted_items)
 
         # Update tracking state
         self.tab._last_displayed_paths = current_paths
@@ -322,6 +322,50 @@ class UIManager(BaseGalleryManager):
 
         # Update ordered list for shift-select
         self.tab._visible_items_ordered = [item['path'] for item in sorted_items]
+
+    def _animate_gallery_transition(self, sorted_items):
+        """Rebuild gallery display with a smooth opacity transition.
+
+        Args:
+            sorted_items: Sorted list of items to display
+        """
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+        container = self.tab.ui.galleryThumbnailContainer
+
+        # Cancel any running transition
+        if hasattr(self, '_transition_anim') and self._transition_anim:
+            self._transition_anim.stop()
+
+        # Quick dip: set opacity down, rebuild, then fade back up
+        effect = container.graphicsEffect()
+        if not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(container)
+            container.setGraphicsEffect(effect)
+
+        effect.setOpacity(0.6)
+
+        # Rebuild the display
+        self.tab._manager.display_items(sorted_items, self.tab._view_mode)
+
+        # Fade back to full opacity
+        self._transition_anim = QPropertyAnimation(effect, b"opacity")
+        self._transition_anim.setDuration(200)
+        self._transition_anim.setStartValue(0.6)
+        self._transition_anim.setEndValue(1.0)
+        self._transition_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._transition_anim.start()
+
+        # Remove effect after animation to avoid rendering overhead
+        QTimer.singleShot(250, self._cleanup_transition)
+
+    def _cleanup_transition(self):
+        """Remove transition opacity effect from gallery container."""
+        self._transition_anim = None
+        container = self.tab.ui.galleryThumbnailContainer
+        if container.graphicsEffect():
+            container.setGraphicsEffect(None)
 
     # =========================================================================
     # USER SELECTION

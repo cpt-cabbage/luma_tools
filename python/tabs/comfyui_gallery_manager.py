@@ -237,6 +237,10 @@ class GalleryManager:
                     return
 
         # Full refresh - clear and rebuild everything
+        # Ensure layout guard is released in case an animation was in progress
+        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout._animation_active:
+            self.tab._flow_layout.end_animation()
+
         container.setUpdatesEnabled(False)
 
         # Clear existing stacks
@@ -344,9 +348,9 @@ class GalleryManager:
         """Remove all stack widgets."""
         if hasattr(self, '_stack_widgets'):
             for stack in self._stack_widgets.values():
-                # Collapse first to clean up expanded background and widgets
+                # Collapse without animation to avoid blocking the layout guard
                 if stack.is_expanded():
-                    stack.collapse()
+                    stack.collapse(animated=False)
                 stack.setParent(None)
                 stack.deleteLater()
         self._stack_widgets = {}
@@ -363,6 +367,11 @@ class GalleryManager:
         from ui_components import StackedThumbnailWidget
 
         container = self.tab.ui.galleryThumbnailContainer
+
+        # Ensure layout guard is released in case an animation was in progress
+        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout._animation_active:
+            self.tab._flow_layout.end_animation()
+
         container.setUpdatesEnabled(False)
 
         # Clear existing widgets
@@ -491,7 +500,7 @@ class GalleryManager:
                     stack = self._stack_widgets.pop(prefix)
                     if isValid(stack):
                         if stack.is_expanded():
-                            stack.collapse()
+                            stack.collapse(animated=False)
                         self.tab._flow_layout.removeWidget(stack)
                         stack.deleteLater()
                 else:
@@ -515,6 +524,7 @@ class GalleryManager:
 
             # Add new stacks/thumbnails
             favorites_manager = getattr(self.tab, '_favorites_manager', None)
+            new_widgets = []
 
             for prefix in added_prefixes:
                 group_items = new_groups[prefix]
@@ -534,6 +544,7 @@ class GalleryManager:
                     stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
                     self._stack_widgets[prefix] = stack
                     self.tab._flow_layout.addWidget(stack)
+                    new_widgets.append(stack)
 
                     self.tab._section_items[prefix] = [item['path'] for item in group_items]
                 else:
@@ -543,6 +554,7 @@ class GalleryManager:
                     if thumbnail:
                         self.tab._widget_cache[item['path']] = thumbnail
                         self.tab._flow_layout.addWidget(thumbnail)
+                        new_widgets.append(thumbnail)
                         self.tab._section_items[prefix] = [item['path']]
 
             changes = []
@@ -561,6 +573,10 @@ class GalleryManager:
 
         finally:
             container.setUpdatesEnabled(True)
+
+        # Animate newly added widgets
+        if new_widgets:
+            self._animate_new_items(new_widgets)
 
         # Load thumbnails for new items
         QTimer.singleShot(150, self._load_visible_stack_thumbnails)
@@ -635,6 +651,58 @@ class GalleryManager:
 
         # Also load regular thumbnails
         self.load_visible_thumbnails()
+
+    def _animate_new_items(self, widgets):
+        """Fade in newly inserted gallery items with staggered animation.
+
+        Args:
+            widgets: List of newly created widgets to animate
+        """
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+        if not widgets:
+            return
+
+        # Store references to prevent GC
+        if not hasattr(self, '_new_item_animations'):
+            self._new_item_animations = []
+
+        duration = 250
+        stagger = 30
+        max_animated = 20
+
+        for idx, widget in enumerate(widgets[:max_animated]):
+            opacity_effect = QGraphicsOpacityEffect(widget)
+            opacity_effect.setOpacity(0.0)
+            widget.setGraphicsEffect(opacity_effect)
+
+            anim = QPropertyAnimation(opacity_effect, b"opacity")
+            anim.setDuration(duration)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._new_item_animations.append(anim)
+
+            delay = idx * stagger
+            QTimer.singleShot(delay, anim.start)
+
+        # Cleanup after animations complete
+        total_time = min(len(widgets), max_animated) * stagger + duration + 50
+        QTimer.singleShot(total_time, self._cleanup_new_item_animations)
+
+    def _cleanup_new_item_animations(self):
+        """Clean up new item animation references and remove opacity effects."""
+        from shiboken6 import isValid
+
+        for anim in getattr(self, '_new_item_animations', []):
+            target = anim.targetObject()
+            if target:
+                # Find the widget that has this opacity effect
+                parent = target.parent()
+                if parent and isValid(parent):
+                    parent.setGraphicsEffect(None)
+        self._new_item_animations = []
 
     def _on_stack_expanded(self, stack_id, is_expanded):
         """Handle stack expansion/collapse state change.
@@ -846,6 +914,12 @@ class GalleryManager:
 
         finally:
             container.setUpdatesEnabled(True)
+
+        # Animate newly added items with staggered fade-in
+        new_widgets = [self.tab._widget_cache[item['path']] for item in new_items
+                       if item['path'] in self.tab._widget_cache]
+        if new_widgets:
+            self._animate_new_items(new_widgets)
 
         # Trigger lazy loading for the new visible items
         QTimer.singleShot(150, self.tab._load_visible_thumbnails)

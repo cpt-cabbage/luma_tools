@@ -181,7 +181,7 @@ class OperationsManager(BaseGalleryManager):
                 if isValid(stack_widget):
                     # Collapse if expanded
                     if hasattr(stack_widget, 'is_expanded') and stack_widget.is_expanded():
-                        stack_widget.collapse()
+                        stack_widget.collapse(animated=False)
                     self.tab._flow_layout.removeWidget(stack_widget)
                     stack_widget.deleteLater()
                 del self.tab._manager._stack_widgets[stack_id]

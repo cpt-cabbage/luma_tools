@@ -1242,6 +1242,7 @@ class StackedThumbnailWidget(QWidget):
         if self._is_expanded:
             return
 
+        self._cancel_animations()
         self._is_expanded = True
         self.expanded.emit(self.stack_id, True)
 
@@ -1264,6 +1265,14 @@ class StackedThumbnailWidget(QWidget):
 
         if my_index < 0:
             return
+
+        # Record pre-insertion positions of all existing widgets
+        self._pre_expand_positions = {}
+        for i in range(flow_layout.count()):
+            layout_item = flow_layout.itemAt(i)
+            if layout_item and layout_item.widget():
+                w = layout_item.widget()
+                self._pre_expand_positions[w] = w.pos()
 
         # Create thumbnail widgets and insert them right after the stack
         from ui_components import ThumbnailWidget
@@ -1317,20 +1326,154 @@ class StackedThumbnailWidget(QWidget):
             flow_layout.insertWidget(my_index + 1 + idx, thumb)
             self._expanded_widgets.append(thumb)
 
-        # Trigger layout update
+        # Make expanded widgets invisible immediately so they don't flash at final positions
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        for widget in self._expanded_widgets:
+            effect = QGraphicsOpacityEffect(widget)
+            effect.setOpacity(0.0)
+            widget.setGraphicsEffect(effect)
+
+        # Trigger layout update so positions are calculated
         flow_layout.invalidate()
         container.updateGeometry()
 
-        # Create and position background after layout settles
+        # Start slide animation after layout settles, load thumbnails immediately
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, self._load_expanded_thumbnails)
-        QTimer.singleShot(150, self._create_expanded_background)
+        QTimer.singleShot(0, self._start_expand_animation)
+        QTimer.singleShot(0, self._load_expanded_thumbnails)
 
     def _load_expanded_thumbnails(self):
         """Load thumbnails for expanded widgets."""
         for thumb in getattr(self, '_expanded_widgets', []):
             if hasattr(thumb, 'load_thumbnail_if_needed'):
                 thumb.load_thumbnail_if_needed()
+
+    def _cancel_animations(self):
+        """Cancel any running expand/collapse animations and reset layout guard."""
+        for anim in getattr(self, '_expand_animations', []):
+            anim.stop()
+        self._expand_animations = []
+
+        for anim in getattr(self, '_collapse_animations', []):
+            anim.stop()
+        self._collapse_animations = []
+
+        for anim in getattr(self, '_bg_fade_animations', []):
+            anim.stop()
+        self._bg_fade_animations = []
+
+        # Reset layout guard and replay any missed layout
+        if self._gallery_tab and hasattr(self._gallery_tab, '_flow_layout'):
+            self._gallery_tab._flow_layout.end_animation()
+
+        # Remove leftover opacity effects from expanded widgets
+        for widget in getattr(self, '_expanded_widgets', []):
+            try:
+                if widget.graphicsEffect():
+                    widget.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+
+    def _start_expand_animation(self):
+        """Slide expanded widgets from the stack position to their layout positions."""
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, QPoint
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        from shiboken6 import isValid
+
+        if not isValid(self) or not self._is_expanded or not self._expanded_widgets:
+            return
+
+        flow_layout = self._gallery_tab._flow_layout
+
+        # Record post-layout positions of all widgets
+        post_positions = {}
+        for i in range(flow_layout.count()):
+            layout_item = flow_layout.itemAt(i)
+            if layout_item and layout_item.widget():
+                w = layout_item.widget()
+                post_positions[w] = w.pos()
+
+        # Block layout from overriding positions during animation
+        flow_layout.begin_animation()
+
+        stack_pos = self.pos()
+        duration = 300
+        stagger = 40
+        max_animated = 20
+        self._expand_animations = []
+
+        # Animate expanded widgets: slide from stack position to final position + fade in
+        for idx, widget in enumerate(self._expanded_widgets[:max_animated]):
+            final_pos = post_positions.get(widget, widget.pos())
+
+            # Set initial state: at stack position, invisible
+            opacity_effect = QGraphicsOpacityEffect(widget)
+            opacity_effect.setOpacity(0.0)
+            widget.setGraphicsEffect(opacity_effect)
+            widget.move(stack_pos)
+
+            # Position animation
+            pos_anim = QPropertyAnimation(widget, b"pos")
+            pos_anim.setDuration(duration)
+            pos_anim.setStartValue(stack_pos)
+            pos_anim.setEndValue(final_pos)
+            pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+            # Opacity animation
+            fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+            fade_anim.setDuration(duration)
+            fade_anim.setStartValue(0.0)
+            fade_anim.setEndValue(1.0)
+            fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+            self._expand_animations.extend([pos_anim, fade_anim])
+
+            delay = idx * stagger
+            QTimer.singleShot(delay, pos_anim.start)
+            QTimer.singleShot(delay, fade_anim.start)
+
+        # Animate existing widgets that shifted position
+        pre_positions = getattr(self, '_pre_expand_positions', {})
+        for widget, old_pos in pre_positions.items():
+            if widget in self._expanded_widgets or widget is self:
+                continue
+            new_pos = post_positions.get(widget)
+            if new_pos and old_pos != new_pos:
+                widget.move(old_pos)
+                pos_anim = QPropertyAnimation(widget, b"pos")
+                pos_anim.setDuration(duration)
+                pos_anim.setStartValue(old_pos)
+                pos_anim.setEndValue(new_pos)
+                pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+                pos_anim.start()
+                self._expand_animations.append(pos_anim)
+
+        # Schedule cleanup after all animations complete
+        total_time = min(len(self._expanded_widgets), max_animated) * stagger + duration + 50
+        QTimer.singleShot(total_time, self._cleanup_expand_animations)
+
+    def _cleanup_expand_animations(self):
+        """Clean up expand animation references and remove opacity effects."""
+        from shiboken6 import isValid
+
+        self._expand_animations = []
+        self._pre_expand_positions = {}
+
+        # Remove opacity effects so they don't interfere with rendering
+        for widget in getattr(self, '_expanded_widgets', []):
+            try:
+                if isValid(widget) and widget.graphicsEffect():
+                    widget.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+
+        # Release layout guard and replay any missed layout
+        if self._gallery_tab and hasattr(self._gallery_tab, '_flow_layout'):
+            self._gallery_tab._flow_layout.end_animation()
+
+        # Create backgrounds now that widgets are at their final positions
+        if isValid(self) and self._is_expanded:
+            self._create_expanded_background()
 
     def _create_expanded_background(self):
         """Create a background behind all expanded thumbnails using the stack's color."""
@@ -1365,7 +1508,12 @@ class StackedThumbnailWidget(QWidget):
         dominant_color = self._get_dominant_color()
         bg_rgba, border_rgba = self._get_background_colors(dominant_color)
 
-        for widget in self._expanded_widgets:
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+
+        self._bg_fade_animations = []
+
+        for idx, widget in enumerate(self._expanded_widgets):
             if not isValid(widget) or not widget.isVisible():
                 continue
 
@@ -1394,10 +1542,41 @@ class StackedThumbnailWidget(QWidget):
             # Lower z-order so it's behind the thumbnail
             bg_frame.lower()
             bg_frame.show()
+
+            # Fade in from transparent
+            opacity_effect = QGraphicsOpacityEffect(bg_frame)
+            opacity_effect.setOpacity(0.0)
+            bg_frame.setGraphicsEffect(opacity_effect)
+
+            fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+            fade_anim.setDuration(200)
+            fade_anim.setStartValue(0.0)
+            fade_anim.setEndValue(1.0)
+            fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._bg_fade_animations.append(fade_anim)
+
+            delay = idx * 30
+            QTimer.singleShot(delay, fade_anim.start)
+
             self._expanded_backgrounds.append(bg_frame)
 
         # Keep reference to first one for compatibility (collapse cleanup)
         self._expanded_background = self._expanded_backgrounds[0] if self._expanded_backgrounds else None
+
+        # Clean up opacity effects after fade completes
+        total_fade = min(len(self._expanded_backgrounds), 20) * 30 + 200 + 50
+        QTimer.singleShot(total_fade, self._cleanup_bg_fade)
+
+    def _cleanup_bg_fade(self):
+        """Remove opacity effects from background frames after fade-in completes."""
+        from shiboken6 import isValid
+        self._bg_fade_animations = []
+        for bg_frame in getattr(self, '_expanded_backgrounds', []):
+            try:
+                if isValid(bg_frame) and bg_frame.graphicsEffect():
+                    bg_frame.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
 
     def _get_dominant_color(self):
         """Get the dominant color for this stack (group > liked > default blue)."""
@@ -1432,15 +1611,21 @@ class StackedThumbnailWidget(QWidget):
 
         return bg_rgba, border_rgba
 
-    def collapse(self):
-        """Collapse the stack by removing the expanded thumbnails from the layout."""
+    def collapse(self, animated=True):
+        """Collapse the stack.
+
+        Args:
+            animated: If True, use slide-back animation. If False, collapse instantly
+                      (used during programmatic cleanup to avoid blocking the layout).
+        """
         if not self._is_expanded:
             return
 
+        self._cancel_animations()
         self._is_expanded = False
         self.expanded.emit(self.stack_id, False)
 
-        # Remove all background frames
+        # Remove backgrounds immediately
         for bg_frame in getattr(self, '_expanded_backgrounds', []):
             if bg_frame:
                 bg_frame.setParent(None)
@@ -1448,7 +1633,113 @@ class StackedThumbnailWidget(QWidget):
         self._expanded_backgrounds = []
         self._expanded_background = None
 
-        # Remove and delete expanded widgets
+        if not animated or not self._gallery_tab or not hasattr(self._gallery_tab, '_flow_layout'):
+            self._finish_collapse()
+            return
+
+        self._animate_collapse_slide()
+
+    def _animate_collapse_slide(self):
+        """Animate expanded widgets sliding back to the stack and other widgets reflowing."""
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, QPoint
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        from shiboken6 import isValid
+
+        flow_layout = self._gallery_tab._flow_layout
+        container = self._gallery_tab.ui.galleryThumbnailContainer
+
+        # Record current positions of ALL widgets
+        pre_positions = {}
+        expanded_indices = []
+        for i in range(flow_layout.count()):
+            layout_item = flow_layout.itemAt(i)
+            if layout_item and layout_item.widget():
+                w = layout_item.widget()
+                pre_positions[w] = w.pos()
+                if w in self._expanded_widgets:
+                    expanded_indices.append(i)
+
+        # Remove expanded widgets from the layout (but keep them visible)
+        for i in sorted(expanded_indices, reverse=True):
+            flow_layout.takeAt(i)
+
+        # Let layout recalculate positions for remaining widgets
+        flow_layout.invalidate()
+        container.updateGeometry()
+        flow_layout.activate()
+
+        # Record new positions of remaining widgets
+        post_positions = {}
+        for i in range(flow_layout.count()):
+            layout_item = flow_layout.itemAt(i)
+            if layout_item and layout_item.widget():
+                w = layout_item.widget()
+                post_positions[w] = w.pos()
+
+        # Block layout during animation
+        flow_layout.begin_animation()
+
+        # Move remaining widgets back to their pre-collapse positions
+        for w in post_positions:
+            if w in pre_positions:
+                w.move(pre_positions[w])
+
+        stack_pos = self.pos()
+        duration = 250
+        self._collapse_animations = []
+
+        # Animate expanded widgets: slide to stack position + fade out
+        for widget in self._expanded_widgets:
+            if not isValid(widget):
+                continue
+
+            current_pos = pre_positions.get(widget, widget.pos())
+            widget.move(current_pos)
+            widget.raise_()
+
+            # Position animation
+            pos_anim = QPropertyAnimation(widget, b"pos")
+            pos_anim.setDuration(duration)
+            pos_anim.setStartValue(current_pos)
+            pos_anim.setEndValue(stack_pos)
+            pos_anim.setEasingCurve(QEasingCurve.InCubic)
+
+            # Opacity animation
+            existing_effect = widget.graphicsEffect()
+            if not isinstance(existing_effect, QGraphicsOpacityEffect):
+                existing_effect = QGraphicsOpacityEffect(widget)
+                widget.setGraphicsEffect(existing_effect)
+            fade_anim = QPropertyAnimation(existing_effect, b"opacity")
+            fade_anim.setDuration(duration)
+            fade_anim.setStartValue(existing_effect.opacity())
+            fade_anim.setEndValue(0.0)
+            fade_anim.setEasingCurve(QEasingCurve.InCubic)
+
+            pos_anim.start()
+            fade_anim.start()
+            self._collapse_animations.extend([pos_anim, fade_anim])
+
+        # Animate remaining widgets: slide from old to new positions
+        for w in post_positions:
+            old_pos = pre_positions.get(w)
+            new_pos = post_positions[w]
+            if old_pos and old_pos != new_pos:
+                pos_anim = QPropertyAnimation(w, b"pos")
+                pos_anim.setDuration(duration)
+                pos_anim.setStartValue(old_pos)
+                pos_anim.setEndValue(new_pos)
+                pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+                pos_anim.start()
+                self._collapse_animations.append(pos_anim)
+
+        # Clean up after animation completes
+        QTimer.singleShot(duration + 30, self._finish_collapse)
+
+    def _finish_collapse(self):
+        """Complete collapse by deleting expanded widgets and restoring layout."""
+        self._collapse_animations = []
+
+        # Delete expanded widgets
         for widget in getattr(self, '_expanded_widgets', []):
             widget.setParent(None)
             widget.deleteLater()
@@ -1457,10 +1748,11 @@ class StackedThumbnailWidget(QWidget):
         # Show the count badge again
         self.count_badge.show()
 
-        # Trigger layout update
+        # Release layout guard (replays any missed layout) and force fresh pass
         if self._gallery_tab and hasattr(self._gallery_tab, '_flow_layout'):
             flow_layout = self._gallery_tab._flow_layout
             container = self._gallery_tab.ui.galleryThumbnailContainer
+            flow_layout.end_animation()
             flow_layout.invalidate()
             container.updateGeometry()
 

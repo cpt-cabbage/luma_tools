@@ -792,22 +792,71 @@ class GroupsFilterPanel(QWidget):
                 self.status_message.emit(f"Created group '{name}'")
 
     def _toggle_collapse(self):
-        """Toggle collapsed state."""
+        """Toggle collapsed state with smooth width animation."""
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+
         self._is_collapsed = not self._is_collapsed
+        duration = 200
+
+        # Cancel any running animation
+        for anim in getattr(self, '_collapse_anims', []):
+            anim.stop()
+        self._collapse_anims = []
+
         if self._is_collapsed:
-            self._expanded_width = self.width()  # Remember width before collapsing
-            self.setMinimumWidth(40)
-            self.setMaximumWidth(40)
-            self.collapse_btn.setText("▶")
+            self._expanded_width = self.width()
+
+            # Hide content immediately (text clips during animation otherwise)
             self.content.hide()
             self.add_group_btn.hide()
+            self.collapse_btn.setText("▶")
+
+            # Animate maxWidth and minWidth to 40
+            max_anim = QPropertyAnimation(self, b"maximumWidth")
+            max_anim.setDuration(duration)
+            max_anim.setStartValue(self.maximumWidth())
+            max_anim.setEndValue(40)
+            max_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+            min_anim = QPropertyAnimation(self, b"minimumWidth")
+            min_anim.setDuration(duration)
+            min_anim.setStartValue(self.minimumWidth())
+            min_anim.setEndValue(40)
+            min_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+            max_anim.start()
+            min_anim.start()
+            self._collapse_anims = [max_anim, min_anim]
         else:
-            self.setMinimumWidth(120)
-            self.setMaximumWidth(400)
             self.collapse_btn.setText("◀")
+
+            # Animate maxWidth and minWidth to expanded size
+            max_anim = QPropertyAnimation(self, b"maximumWidth")
+            max_anim.setDuration(duration)
+            max_anim.setStartValue(40)
+            max_anim.setEndValue(400)
+            max_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+            min_anim = QPropertyAnimation(self, b"minimumWidth")
+            min_anim.setDuration(duration)
+            min_anim.setStartValue(40)
+            min_anim.setEndValue(120)
+            min_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+            max_anim.start()
+            min_anim.start()
+            self._collapse_anims = [max_anim, min_anim]
+
+            # Show content midway through animation
+            QTimer.singleShot(duration // 2, self._show_content_if_expanded)
+
+        self.collapsed_changed.emit(self._is_collapsed)
+
+    def _show_content_if_expanded(self):
+        """Show content widgets if panel is currently expanded."""
+        if not self._is_collapsed:
             self.content.show()
             self.add_group_btn.show()
-        self.collapsed_changed.emit(self._is_collapsed)
 
     def is_collapsed(self):
         """Return whether the panel is currently collapsed."""

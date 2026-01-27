@@ -20,6 +20,8 @@ class FlowLayout(QLayout):
         self._item_list = []
         self._h_spacing = spacing
         self._v_spacing = spacing
+        self._animation_active = False
+        self._pending_rect = None
 
     def __del__(self):
         # Check if _item_list exists (may not if initialization failed or GC order issues)
@@ -91,7 +93,23 @@ class FlowLayout(QLayout):
 
     def setGeometry(self, rect):
         super().setGeometry(rect)
+        if self._animation_active:
+            self._pending_rect = rect
+            return
         self._do_layout(rect, False)
+
+    def begin_animation(self):
+        """Block layout repositioning during widget animations."""
+        self._animation_active = True
+        self._pending_rect = None
+
+    def end_animation(self):
+        """Resume layout and replay any missed layout pass."""
+        self._animation_active = False
+        if self._pending_rect is not None:
+            rect = self._pending_rect
+            self._pending_rect = None
+            self._do_layout(rect, False)
 
     def sizeHint(self):
         return self.minimumSize()
