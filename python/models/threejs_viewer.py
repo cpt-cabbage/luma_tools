@@ -12,8 +12,11 @@ Supports:
 
 import os
 import json
+import logging
 from typing import Optional, Dict
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, Signal, Slot, QObject, QUrl, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout
@@ -100,7 +103,7 @@ class ThreeJSBridge(QObject):
     @Slot()
     def onViewerReady(self):
         """Called from JavaScript when Three.js viewer is fully initialized."""
-        print("Three.js viewer JavaScript ready")
+        logger.info("Three.js viewer JavaScript ready")
         self._viewer_ready = True
         self.viewerReady.emit()
 
@@ -293,7 +296,7 @@ class ThreeJSViewerWidget(QWidget):
             url = QUrl.fromLocalFile(viewer_path)
             self._web_view.setUrl(url)
         else:
-            print(f"Warning: Three.js viewer not found at {viewer_path}")
+            logger.warning(f"Three.js viewer not found at {viewer_path}")
             self._viewer_ready = True  # Mark as ready to prevent hanging
             # Show error message in widget
             self._web_view.setHtml(f"""
@@ -311,14 +314,14 @@ class ThreeJSViewerWidget(QWidget):
     def _on_page_loaded(self, ok: bool):
         """Called when the HTML page finishes loading."""
         if ok:
-            print("Three.js viewer HTML loaded, waiting for JS initialization...")
+            logger.info("Three.js viewer HTML loaded, waiting for JS initialization...")
         else:
-            print("Three.js viewer page failed to load")
+            logger.error("Three.js viewer page failed to load")
             self.loadError.emit("Failed to load viewer page")
 
     def _on_viewer_ready(self):
         """Called when JavaScript viewer is fully initialized (via QWebChannel callback)."""
-        print("Three.js viewer fully ready")
+        logger.info("Three.js viewer fully ready")
         self._viewer_ready = True
 
         # Show the web view now that it's ready (if not a prewarm widget)
@@ -327,7 +330,7 @@ class ThreeJSViewerWidget(QWidget):
 
         # Load any pending model now that viewer is ready
         if self._pending_model_path:
-            print(f"Loading pending model: {self._pending_model_path}")
+            logger.info(f"Loading pending model: {self._pending_model_path}")
             self._do_load_model(self._pending_model_path)
             self._pending_model_path = None
 
@@ -375,7 +378,7 @@ class ThreeJSViewerWidget(QWidget):
             self._do_load_model(file_path)
         else:
             # Queue for loading after viewer is ready
-            print(f"Queuing model load (viewer not ready): {file_path}")
+            logger.info(f"Queuing model load (viewer not ready): {file_path}")
             self._pending_model_path = file_path
 
     def set_view_mode(self, mode: ViewMode):
@@ -686,7 +689,7 @@ class ThreeJSViewerDialog(QWidget):
                         action.setCheckable(True)
                         action.setChecked(True)
         except Exception as e:
-            print(f"Error loading HDRI list: {e}")
+            logger.error(f"Error loading HDRI list: {e}")
 
         action = menu.exec_(self._lighting_btn.mapToGlobal(
             self._lighting_btn.rect().bottomLeft()))
@@ -708,7 +711,7 @@ class ThreeJSViewerDialog(QWidget):
             mode_enum = ShadingMode(mode)
             self._viewer.set_shading_mode(mode_enum)
         except Exception as e:
-            print(f"Error setting shading mode: {e}")
+            logger.error(f"Error setting shading mode: {e}")
 
         # Persist preference
         try:
@@ -727,7 +730,7 @@ class ThreeJSViewerDialog(QWidget):
             mode_enum = LightingMode(mode)
             self._viewer.set_lighting_mode(mode_enum)
         except Exception as e:
-            print(f"Error setting lighting mode: {e}")
+            logger.error(f"Error setting lighting mode: {e}")
 
         # Persist preference
         try:
@@ -743,7 +746,7 @@ class ThreeJSViewerDialog(QWidget):
         try:
             self._viewer.load_hdri(hdri_path)
         except Exception as e:
-            print(f"Error loading HDRI: {e}")
+            logger.error(f"Error loading HDRI: {e}")
 
         # Persist preference
         try:
@@ -761,7 +764,7 @@ class ThreeJSViewerDialog(QWidget):
         try:
             self._viewer.set_light_strength(strength)
         except Exception as e:
-            print(f"Error setting light strength: {e}")
+            logger.error(f"Error setting light strength: {e}")
 
         # Persist preference
         try:

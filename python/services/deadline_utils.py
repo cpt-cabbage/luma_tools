@@ -3,9 +3,12 @@ Deadline utility functions.
 
 Provides common functionality for Deadline job submission and management.
 """
+import logging
 import os
 import subprocess
 from typing import Optional, Tuple, List
+
+logger = logging.getLogger(__name__)
 
 
 def extract_job_id(result_output: str) -> Optional[str]:
@@ -45,17 +48,17 @@ def run_deadline_command(deadline_command: List[str], log_prefix: str = "") -> T
         result_output = result.stdout.strip()
 
         prefix = f"{log_prefix} " if log_prefix else ""
-        print(f"{prefix}Deadline submission result: {result_output}")
+        logger.info(f"{prefix}Deadline submission result: {result_output}")
 
         if result.returncode != 0:
             error_msg = result.stderr.strip()
-            print(f"{prefix}Deadline submission error: {error_msg}")
+            logger.error(f"{prefix}Deadline submission error: {error_msg}")
             return False, result_output, error_msg
 
         return True, result_output, ""
     except Exception as e:
         error_msg = str(e)
-        print(f"Error submitting to Deadline: {error_msg}")
+        logger.error(f"Error submitting to Deadline: {error_msg}")
         return False, "", error_msg
 
 

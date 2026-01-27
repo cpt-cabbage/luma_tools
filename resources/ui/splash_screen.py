@@ -1,9 +1,12 @@
+import logging
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPropertyAnimation, QEasingCurve, QThreadPool
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QProgressBar
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QPixmap
 import math
 import os
 from ui_components import LoadingStyles, Worker, SpinnerWidget
+
+logger = logging.getLogger(__name__)
 
 
 class SplashScreen(QWidget):
@@ -175,8 +178,8 @@ class SplashScreen(QWidget):
 
         def on_error(error_msg, traceback_str):
             """Called when initialization fails."""
-            print(f"Error during initialization: {error_msg}")
-            print(traceback_str)
+            logger.error(f"Error during initialization: {error_msg}")
+            logger.error(traceback_str)
             self.close()
 
         # Create worker for initialization

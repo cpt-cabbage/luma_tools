@@ -6,7 +6,10 @@ All state access is protected by a reentrant lock to prevent race conditions
 when accessed from worker threads and the GUI thread.
 """
 
+import logging
 import threading
+
+logger = logging.getLogger(__name__)
 
 
 class ThreadSafeProperty:
@@ -179,22 +182,22 @@ class ApplicationState:
             self.output_subdirectory = args[6]
             self.standalone_mode = False
 
-            print("Full command: " + str(args))
-            print(f"jobname = {self.jobname}")
-            print(f"shot = {self.shot}")
-            print(f"task = {self.task}")
-            print(f"shotpath = {self.shotpath}")
-            print(f"user = {self.user}")
-            print(f"output_subdirectory = {self.output_subdirectory}")
+            logger.info("Full command: " + str(args))
+            logger.info(f"jobname = {self.jobname}")
+            logger.info(f"shot = {self.shot}")
+            logger.info(f"task = {self.task}")
+            logger.info(f"shotpath = {self.shotpath}")
+            logger.info(f"user = {self.user}")
+            logger.info(f"output_subdirectory = {self.output_subdirectory}")
         else:
             # Standalone mode - no shot context
             self.standalone_mode = True
             import os
             self.user = os.environ.get("USERNAME", os.environ.get("USER", "unknown"))
-            print("=" * 50)
-            print("STANDALONE MODE - No shot context provided")
-            print(f"user = {self.user}")
-            print("=" * 50)
+            logger.info("=" * 50)
+            logger.info("STANDALONE MODE - No shot context provided")
+            logger.info(f"user = {self.user}")
+            logger.info("=" * 50)
 
 
 # Global application state instance

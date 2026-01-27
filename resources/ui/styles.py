@@ -4,8 +4,11 @@ Style constants and stylesheet utilities for the UI.
 Provides unified styling for loading screens, status indicators, and themes.
 """
 import os
+import logging
 from PySide6.QtCore import QFile, QTextStream
 from PySide6.QtGui import QColor, QFont
+
+logger = logging.getLogger(__name__)
 
 
 class LoadingStyles:
@@ -157,7 +160,7 @@ def load_stylesheet(path):
         str: The stylesheet content, or empty string if file not found
     """
     if not os.path.exists(path):
-        print(f"Stylesheet not found: {path}")
+        logger.warning(f"Stylesheet not found: {path}")
         return ""
 
     file = QFile(path)

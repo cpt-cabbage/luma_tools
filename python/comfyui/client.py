@@ -26,7 +26,10 @@ import sys
 import os
 import json
 import copy
+import logging
 import argparse
+
+logger = logging.getLogger(__name__)
 
 # Import shared utilities
 from comfyui.utils import (
@@ -89,11 +92,11 @@ Examples:
 
     # Verify workflow exists
     if not os.path.exists(args.workflow):
-        print(f"ERROR: Workflow not found: {args.workflow}")
+        logger.error(f"Workflow not found: {args.workflow}")
         sys.exit(1)
 
     # Load workflow
-    print(f"Loading workflow: {args.workflow}")
+    logger.info(f"Loading workflow: {args.workflow}")
     with open(args.workflow, 'r', encoding='utf-8') as f:
         base_workflow = json.load(f)
 
@@ -103,7 +106,7 @@ Examples:
     seeds_data = None
     if args.seeds_file:
         if not os.path.exists(args.seeds_file):
-            print(f"ERROR: Seeds file not found: {args.seeds_file}")
+            logger.error(f"Seeds file not found: {args.seeds_file}")
             sys.exit(1)
 
         with open(args.seeds_file, 'r', encoding='utf-8') as f:
@@ -112,19 +115,19 @@ Examples:
     # Determine frames to process
     if args.batch and seeds_data:
         frames = list(range(1, len(seeds_data.get('seeds', [])) + 1))
-        print(f"Batch mode: {len(frames)} frames to process")
+        logger.info(f"Batch mode: {len(frames)} frames to process")
     else:
         frames = [args.frame]
 
     # Wait for server to be ready
     if not wait_for_server(server_url=args.server_url, timeout=args.wait_for_server):
-        print("ERROR: Server not available")
+        logger.error("Server not available")
         sys.exit(1)
 
     # Collect and copy input images
     input_images = collect_input_images(base_workflow, workflow_dir)
     if input_images and args.server_input_dir:
-        print(f"Copying {len(input_images)} input image(s) to server...")
+        logger.info(f"Copying {len(input_images)} input image(s) to server...")
         copy_inputs_to_server(input_images, args.server_input_dir)
 
     # Process frames
@@ -138,13 +141,13 @@ Examples:
         if seeds_data:
             frame_idx = frame_num - 1
             if frame_idx < 0 or frame_idx >= len(seeds_data.get('seeds', [])):
-                print(f"ERROR: Frame {frame_num} out of range")
+                logger.error(f"Frame {frame_num} out of range")
                 failed += 1
                 continue
 
             seed = seeds_data['seeds'][frame_idx]
             output_prefix = f"{args.output_prefix}_gen{frame_num:02d}"
-            print(f"\nFrame {frame_num}: seed={seed}, prefix={output_prefix}")
+            logger.info(f"Frame {frame_num}: seed={seed}, prefix={output_prefix}")
             workflow = modify_workflow_seed(workflow, seed, output_prefix)
         else:
             output_prefix = args.output_prefix
@@ -153,7 +156,7 @@ Examples:
         # Submit and wait
         prompt_id = submit_workflow(workflow, server_url=args.server_url)
         if not prompt_id:
-            print(f"Failed to submit frame {frame_num}")
+            logger.error(f"Failed to submit frame {frame_num}")
             failed += 1
             continue
 
@@ -165,9 +168,9 @@ Examples:
 
     # Summary
     total = len(frames)
-    print(f"\n{'='*40}")
-    print(f"Complete: {successful}/{total} successful, {failed} failed")
-    print(f"{'='*40}")
+    logger.info(f"{'='*40}")
+    logger.info(f"Complete: {successful}/{total} successful, {failed} failed")
+    logger.info(f"{'='*40}")
 
     sys.exit(0 if failed == 0 else 1)
 

@@ -6,6 +6,7 @@ Includes Phase 2 AYON integration with validators.
 """
 
 import os
+import logging
 from typing import Optional, List, Tuple
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -13,6 +14,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QThreadPool
 from dialog_helpers import show_warning, show_error, show_info
+
+logger = logging.getLogger(__name__)
 
 
 def _run_publish_validators(
@@ -64,7 +67,7 @@ def _run_publish_validators(
 
     except ImportError as e:
         # Validators not available - log but continue (graceful degradation)
-        print(f"[AYON Publish] Validators not available: {e}")
+        logger.info(f"[AYON Publish] Validators not available: {e}")
         return True, ""
 
 
@@ -130,7 +133,7 @@ def publish_comfyui_asset_to_ayon(
         comment = dialog.get_comment()
 
         # Run validators before proceeding (Phase 2 AYON integration)
-        print("[AYON Publish] Running validators...")
+        logger.info("[AYON Publish] Running validators...")
         validators_passed, validator_error = _run_publish_validators(
             file_path, product_type, product_name, variant, parent_widget
         )
@@ -149,17 +152,17 @@ def publish_comfyui_asset_to_ayon(
         else:
             full_product_name = product_name
 
-        print(f"[AYON Publish] Product Type: {product_type}, Product Name: {full_product_name}, Task: {task}")
+        logger.info(f"[AYON Publish] Product Type: {product_type}, Product Name: {full_product_name}, Task: {task}")
 
         # Get folder path
-        print("[AYON Publish] Building AYON paths...")
+        logger.info("[AYON Publish] Building AYON paths...")
         folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
 
         # Get render directory for metadata output
         render_dir = os.path.dirname(file_path)
 
         # Use the single-file metadata function (handles FBX, GLB, images, etc.)
-        print("[AYON Publish] Creating metadata...")
+        logger.info("[AYON Publish] Creating metadata...")
         metadata = create_ayon_metadata_single_file(
             project_name=app_state.jobname,
             file_path=file_path,
@@ -173,11 +176,11 @@ def publish_comfyui_asset_to_ayon(
         )
 
         # Write metadata file next to the source file
-        print("[AYON Publish] Writing metadata file...")
+        logger.info("[AYON Publish] Writing metadata file...")
         metadata_filename = f"ayon_comfyui_{full_product_name}.json"
         metadata_path = os.path.join(render_dir, metadata_filename)
 
-        print(f"[AYON Publish] Writing metadata to: {metadata_path}")
+        logger.info(f"[AYON Publish] Writing metadata to: {metadata_path}")
         metadata_path = write_metadata_file(metadata, metadata_path)
 
         if not metadata_path:
@@ -188,7 +191,7 @@ def publish_comfyui_asset_to_ayon(
         success = False
         if use_farm:
             # Submit to Deadline
-            print("[AYON Publish] Submitting to Deadline farm...")
+            logger.info("[AYON Publish] Submitting to Deadline farm...")
             from ayon.service import submit_ayon_publish_to_deadline
 
             filename = os.path.basename(file_path)
@@ -204,7 +207,7 @@ def publish_comfyui_asset_to_ayon(
             )
 
             if job_id:
-                print(f"[AYON Publish] Successfully submitted to Deadline: {job_id}")
+                logger.info(f"[AYON Publish] Successfully submitted to Deadline: {job_id}")
                 show_info(
                     "Published to Farm",
                     f"Successfully submitted to Deadline.\n\n"
@@ -216,11 +219,11 @@ def publish_comfyui_asset_to_ayon(
                 )
                 success = True
             else:
-                print("[AYON Publish] Failed to submit to Deadline")
+                logger.error("[AYON Publish] Failed to submit to Deadline")
                 show_error("Publish Failed", "Failed to submit job to Deadline.", parent_widget)
         else:
             # Publish locally using Worker thread to avoid freezing UI
-            print("[AYON Publish] Publishing to AYON locally...")
+            logger.info("[AYON Publish] Publishing to AYON locally...")
 
             # Create a progress dialog to show while publishing
             from PySide6.QtWidgets import QProgressDialog
@@ -262,7 +265,7 @@ def publish_comfyui_asset_to_ayon(
                 progress_dialog.close()
 
                 if result:
-                    print("[AYON Publish] Successfully published to AYON")
+                    logger.info("[AYON Publish] Successfully published to AYON")
                     show_info(
                         "Published Successfully",
                         f"Successfully published to AYON.\n\n"
@@ -272,7 +275,7 @@ def publish_comfyui_asset_to_ayon(
                         parent_widget
                     )
                 else:
-                    print("[AYON Publish] Failed to publish to AYON")
+                    logger.error("[AYON Publish] Failed to publish to AYON")
                     show_error(
                         "Publish Failed",
                         "AYON publish command failed. Check logs for details.",
@@ -283,7 +286,7 @@ def publish_comfyui_asset_to_ayon(
                 """Handle publish error."""
                 progress_dialog.close()
                 error_msg = str(error_tuple[1]) if len(error_tuple) > 1 else "Unknown error"
-                print(f"[AYON Publish] Error: {error_msg}")
+                logger.error(f"[AYON Publish] Error: {error_msg}")
                 show_error("Publish Error", f"Failed to publish to AYON:\n\n{error_msg}", parent_widget)
 
             # Create and start worker
@@ -301,8 +304,7 @@ def publish_comfyui_asset_to_ayon(
         return success
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[AYON Publish] Failed to publish to AYON: {e}", exc_info=True)
         show_error("Publish Error", f"Failed to publish to AYON:\n\n{str(e)}", parent_widget)
         return False
 

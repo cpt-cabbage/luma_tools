@@ -295,7 +295,7 @@ def scan_exr_sequences(path):
         search_pattern = os.path.join(path, "*.exr")
         return list(fileseq.findSequencesOnDisk(search_pattern))
     except Exception as e:
-        print(f"Error scanning EXR sequences in {path}: {e}")
+        logger.error(f"Error scanning EXR sequences in {path}: {e}")
         return []
 
 

@@ -7,6 +7,7 @@ Each user has their own requests file stored in the ComfyUI network output folde
 
 import os
 import json
+import logging
 from typing import Dict, Any, List
 from datetime import datetime
 from .settings_manager import (
@@ -16,6 +17,8 @@ from .settings_manager import (
 )
 from .error_handling import log_error, handle_errors
 from .utils import ensure_directory
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -102,7 +105,7 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(requests, f, indent=2, ensure_ascii=False)
 
-        print(f"Feature request created: {category} by {username}")
+        logger.info(f"Feature request created: {category} by {username}")
         return True
 
     except Exception as e:
@@ -142,13 +145,13 @@ def get_feature_requests() -> List[Dict[str, str]]:
                                 # Generate ID from timestamp
                                 req['id'] = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d_%H%M%S_%f")
                                 modified = True
-                                print(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
+                                logger.info(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
 
                         # Save back if modified
                         if modified:
                             with open(file_path, 'w', encoding='utf-8') as f_out:
                                 json.dump(user_requests, f_out, indent=2, ensure_ascii=False)
-                            print(f"Updated {filename} with missing IDs")
+                            logger.info(f"Updated {filename} with missing IDs")
 
                         all_requests.extend(user_requests)
             except Exception as e:
@@ -206,14 +209,14 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
                     # Write back to file
                     with open(file_path, 'w', encoding='utf-8') as f:
                         json.dump(requests, f, indent=2, ensure_ascii=False)
-                    print(f"Marked request {request_id} as completed by {admin_username}")
+                    logger.info(f"Marked request {request_id} as completed by {admin_username}")
                     return True
 
             except Exception as e:
                 log_error("processing file", e, filename)
                 continue
 
-        print(f"Request {request_id} not found")
+        logger.warning(f"Request {request_id} not found")
         return False
 
     except Exception as e:
@@ -257,7 +260,7 @@ def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_use
         with open(notification_file, 'w', encoding='utf-8') as f:
             json.dump(notifications, f, indent=2, ensure_ascii=False)
 
-        print(f"Notification created for {username}")
+        logger.info(f"Notification created for {username}")
 
     except Exception as e:
         log_error("creating notification for", e, username)
@@ -319,7 +322,7 @@ def mark_notifications_read(username: str):
         with open(notification_file, 'w', encoding='utf-8') as f:
             json.dump(notifications, f, indent=2, ensure_ascii=False)
 
-        print(f"Marked all notifications as read for {username}")
+        logger.info(f"Marked all notifications as read for {username}")
 
     except Exception as e:
         log_error("marking notifications as read", e)
@@ -391,7 +394,7 @@ def mark_feature_requests_as_read(username: str):
         # Save current timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         set_setting("feature_requests_last_read", timestamp, verbose=False)
-        print(f"Marked feature requests as read for {username} at {timestamp}")
+        logger.info(f"Marked feature requests as read for {username} at {timestamp}")
 
     except Exception as e:
         log_error("marking feature requests as read", e)

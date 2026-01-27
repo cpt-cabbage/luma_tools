@@ -13,6 +13,9 @@ Features:
 - Heartbeat endpoint for health checks
 - Queue status monitoring
 
+Logs are written to the network path from global settings (_logs/ subdirectory)
+for accessibility from all machines, falling back to ~/.luma_tools/logs/.
+
 Usage:
     python comfyui_server.py --comfyui-path "C:/ComfyUI" --port 8188
 """
@@ -32,13 +35,79 @@ import signal
 import argparse
 import threading
 import subprocess
+import logging
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 # Import shared utilities
 from comfyui.utils import check_server_health, wait_for_server, resolve_comfyui_paths
+
+
+def setup_logging(global_settings: dict = None, log_dir_override: str = None) -> str:
+    """Set up file logging for the persistent server.
+
+    Writes logs to the network path from global settings
+    (comfyui_network_output_path/_logs/) for accessibility from all machines.
+
+    Args:
+        global_settings: Loaded global settings dict
+        log_dir_override: Optional CLI override for log directory
+
+    Returns:
+        Path to the log file
+    """
+    import socket
+    hostname = socket.gethostname()
+
+    # Determine log directory
+    log_dir = None
+
+    # CLI override
+    if log_dir_override and os.path.isdir(log_dir_override):
+        log_dir = log_dir_override
+
+    # From global settings network path
+    if not log_dir and global_settings:
+        network_path = global_settings.get('comfyui_network_output_path', '')
+        if network_path and os.path.isdir(network_path):
+            log_dir = os.path.join(network_path, '_logs', 'server')
+            os.makedirs(log_dir, exist_ok=True)
+
+    # Last resort: local user directory
+    if not log_dir:
+        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"comfyui_server_{hostname}_{timestamp}.log"
+    log_path = os.path.join(log_dir, log_filename)
+
+    # Configure root logger with both file and console handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+
+    # Remove existing handlers from basicConfig
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # File handler - network-accessible log
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    root_logger.addHandler(file_handler)
+
+    # Console handler - for terminal/Deadline output
+    console_handler = logging.StreamHandler(sys.__stdout__)
+    console_handler.setLevel(logging.DEBUG)
+    console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    root_logger.addHandler(console_handler)
+
+    logger.info(f"Log file: {log_path}")
+    return log_path
 
 
 # Server state
@@ -84,9 +153,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_error(404, 'Not Found')
 
     def _handle_restart(self):
-        print("\n" + "=" * 60)
-        print("RESTART REQUESTED via API")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("RESTART REQUESTED via API")
+        logger.info("=" * 60)
         server_state['restart_requested'] = True
 
         self.send_response(200)
@@ -162,7 +231,7 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
     start_time = time.time()
     last_status = ""
 
-    print(f"Waiting for ComfyUI to start on port {port}...")
+    logger.info(f"Waiting for ComfyUI to start on port {port}...")
 
     while time.time() - start_time < timeout:
         if server_state['shutdown_requested']:
@@ -172,20 +241,20 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
             req = urllib.request.urlopen(url, timeout=5)
             if req.status == 200:
                 elapsed = int(time.time() - start_time)
-                print(f"ComfyUI ready after {elapsed}s")
+                logger.info(f"ComfyUI ready after {elapsed}s")
                 return True
         except urllib.error.URLError:
             elapsed = int(time.time() - start_time)
             status = f"Waiting... ({elapsed}s)"
             if status != last_status:
-                print(status)
+                logger.info(status)
                 last_status = status
         except Exception as e:
-            print(f"Error checking ComfyUI: {e}")
+            logger.error(f"Error checking ComfyUI: {e}")
 
         time.sleep(2)
 
-    print(f"Timeout waiting for ComfyUI after {timeout}s")
+    logger.error(f"Timeout waiting for ComfyUI after {timeout}s")
     return False
 
 
@@ -205,17 +274,17 @@ def health_monitor_thread(port: int):
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
-                print(f"WARNING: ComfyUI health check failed ({consecutive_failures}/{max_consecutive_failures})")
+                logger.warning(f"ComfyUI health check failed ({consecutive_failures}/{max_consecutive_failures})")
 
                 if server_state['comfyui_process']:
                     ret = server_state['comfyui_process'].poll()
                     if ret is not None:
-                        print(f"ERROR: ComfyUI process died with exit code {ret}")
+                        logger.error(f"ComfyUI process died with exit code {ret}")
                         server_state['is_ready'] = False
                         # Main loop will handle crash recovery
                     elif consecutive_failures >= max_consecutive_failures:
                         # Process is running but not responding - request restart
-                        print("ComfyUI unresponsive after multiple health checks, requesting restart...")
+                        logger.warning("ComfyUI unresponsive after multiple health checks, requesting restart...")
                         server_state['restart_requested'] = True
                         consecutive_failures = 0
 
@@ -263,7 +332,7 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
         raise FileNotFoundError(f"ComfyUI main.py not found: {main_py}")
 
     if mode == "standalone" and not skip_dep_check:
-        print("Checking ComfyUI dependencies...")
+        logger.info("Checking ComfyUI dependencies...")
         success, missing, error_msg = check_comfyui_dependencies(python_exe, comfyui_path)
         if not success:
             raise RuntimeError(error_msg)
@@ -280,8 +349,8 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
 
     working_dir = os.path.dirname(main_py)
 
-    print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
-    print(f"Working directory: {working_dir}")
+    logger.info(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
+    logger.info(f"Working directory: {working_dir}")
 
     # Set up environment with UTF-8 encoding for proper Unicode handling
     env = os.environ.copy()
@@ -324,7 +393,7 @@ def stream_comfyui_output(process: subprocess.Popen):
             line = line.rstrip()
             if line:
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                print(f"[{timestamp}] [ComfyUI] {line}", flush=True)
+                logger.info(f"[{timestamp}] [ComfyUI] {line}")
 
                 if "Prompt executed in" in line:
                     server_state['jobs_completed'] += 1
@@ -334,10 +403,10 @@ def stream_comfyui_output(process: subprocess.Popen):
                 # Check for fatal CUDA/GPU errors that require restart
                 for pattern in FATAL_ERROR_PATTERNS:
                     if pattern in line:
-                        print(f"\n{'!' * 60}")
-                        print(f"FATAL GPU ERROR DETECTED: {pattern}")
-                        print(f"Requesting immediate server restart...")
-                        print(f"{'!' * 60}\n")
+                        logger.error(f"\n{'!' * 60}")
+                        logger.error(f"FATAL GPU ERROR DETECTED: {pattern}")
+                        logger.error(f"Requesting immediate server restart...")
+                        logger.error(f"{'!' * 60}\n")
                         server_state['jobs_failed'] += 1
                         server_state['restart_requested'] = True
                         server_state['is_ready'] = False  # Mark as not ready immediately
@@ -345,11 +414,11 @@ def stream_comfyui_output(process: subprocess.Popen):
                         break
 
     except Exception as e:
-        print(f"Output stream error: {e}")
+        logger.error(f"Output stream error: {e}")
     finally:
         ret = process.poll()
         if ret is not None:
-            print(f"ComfyUI process exited with code {ret}")
+            logger.info(f"ComfyUI process exited with code {ret}")
             server_state['is_ready'] = False
 
 
@@ -361,24 +430,24 @@ def restart_comfyui(reason: str = "manual"):
     """
     config = server_state.get('startup_config')
     if not config:
-        print("ERROR: No startup config available for restart")
+        logger.error("No startup config available for restart")
         return False
 
-    print("\n" + "=" * 60)
-    print(f"RESTARTING COMFYUI (reason: {reason})")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info(f"RESTARTING COMFYUI (reason: {reason})")
+    logger.info("=" * 60)
 
     server_state['is_ready'] = False
     server_state['restart_requested'] = False
 
     if server_state['comfyui_process']:
-        print("Terminating existing ComfyUI process...")
+        logger.info("Terminating existing ComfyUI process...")
         server_state['comfyui_process'].terminate()
         try:
             server_state['comfyui_process'].wait(timeout=30)
-            print("ComfyUI terminated gracefully")
+            logger.info("ComfyUI terminated gracefully")
         except subprocess.TimeoutExpired:
-            print("Force killing ComfyUI...")
+            logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
             server_state['comfyui_process'].wait()
 
@@ -401,17 +470,17 @@ def restart_comfyui(reason: str = "manual"):
 
         if wait_for_comfyui(config['port'], timeout=300):
             server_state['is_ready'] = True
-            print("\n" + "=" * 60)
-            print("COMFYUI RESTART COMPLETE")
-            print(f"ComfyUI API: http://127.0.0.1:{config['port']}")
-            print("=" * 60 + "\n")
+            logger.info("\n" + "=" * 60)
+            logger.info("COMFYUI RESTART COMPLETE")
+            logger.info(f"ComfyUI API: http://127.0.0.1:{config['port']}")
+            logger.info("=" * 60 + "\n")
             return True
         else:
-            print("ERROR: ComfyUI failed to restart")
+            logger.error("ComfyUI failed to restart")
             return False
 
     except Exception as e:
-        print(f"ERROR: Failed to restart ComfyUI: {e}")
+        logger.error(f"Failed to restart ComfyUI: {e}")
         return False
 
 
@@ -427,25 +496,25 @@ def handle_crash_recovery(exit_code: int) -> bool:
     server_state['crash_count'] += 1
     server_state['last_crash_time'] = datetime.now().isoformat()
 
-    print("\n" + "!" * 60)
-    print(f"COMFYUI CRASHED (exit code: {exit_code})")
-    print(f"Crash count: {server_state['crash_count']}/{server_state['max_crash_restarts']}")
-    print("!" * 60)
+    logger.error("\n" + "!" * 60)
+    logger.error(f"COMFYUI CRASHED (exit code: {exit_code})")
+    logger.error(f"Crash count: {server_state['crash_count']}/{server_state['max_crash_restarts']}")
+    logger.error("!" * 60)
 
     # Check if crash recovery is disabled
     if server_state['max_crash_restarts'] <= 0:
-        print("Crash recovery is disabled. Server will exit.")
+        logger.info("Crash recovery is disabled. Server will exit.")
         return False
 
     # Check if we've exceeded max restarts
     if server_state['crash_count'] > server_state['max_crash_restarts']:
-        print(f"ERROR: Exceeded maximum crash restarts ({server_state['max_crash_restarts']})")
-        print("Server will exit. Manual intervention required.")
+        logger.error(f"Exceeded maximum crash restarts ({server_state['max_crash_restarts']})")
+        logger.error("Server will exit. Manual intervention required.")
         return False
 
     # Apply cooldown between restarts to avoid rapid restart loops
     cooldown = server_state['crash_cooldown_seconds']
-    print(f"Waiting {cooldown}s before restart attempt...")
+    logger.info(f"Waiting {cooldown}s before restart attempt...")
 
     # Wait for cooldown, but check for shutdown during wait
     cooldown_start = time.time()
@@ -455,13 +524,13 @@ def handle_crash_recovery(exit_code: int) -> bool:
         time.sleep(1)
 
     # Attempt restart
-    print(f"Attempting automatic restart ({server_state['crash_count']}/{server_state['max_crash_restarts']})...")
+    logger.info(f"Attempting automatic restart ({server_state['crash_count']}/{server_state['max_crash_restarts']})...")
 
     if restart_comfyui(reason="crash"):
-        print("Crash recovery successful!")
+        logger.info("Crash recovery successful!")
         return True
     else:
-        print("ERROR: Crash recovery failed")
+        logger.error("Crash recovery failed")
         # Don't increment crash count again since restart_comfyui handles its own failures
         return False
 
@@ -473,26 +542,26 @@ def reset_crash_counter():
     allowing the server to handle future crashes.
     """
     if server_state['crash_count'] > 0:
-        print(f"Resetting crash counter (was {server_state['crash_count']})")
+        logger.info(f"Resetting crash counter (was {server_state['crash_count']})")
         server_state['crash_count'] = 0
 
 
 def shutdown(signum=None, frame=None):
     """Graceful shutdown handler."""
-    print("\nShutdown requested...")
+    logger.info("\nShutdown requested...")
     server_state['shutdown_requested'] = True
 
     if server_state['comfyui_process']:
-        print("Terminating ComfyUI...")
+        logger.info("Terminating ComfyUI...")
         server_state['comfyui_process'].terminate()
         try:
             server_state['comfyui_process'].wait(timeout=30)
-            print("ComfyUI terminated gracefully")
+            logger.info("ComfyUI terminated gracefully")
         except subprocess.TimeoutExpired:
-            print("Force killing ComfyUI...")
+            logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
 
-    print("Server shutdown complete")
+    logger.info("Server shutdown complete")
     sys.exit(0)
 
 
@@ -524,10 +593,10 @@ def load_global_settings() -> dict:
                 with open(path, 'r') as f:
                     return json.load(f)
 
-        print("Warning: Could not find global_settings.json, using defaults")
+        logger.warning("Could not find global_settings.json, using defaults")
         return {}
     except Exception as e:
-        print(f"Warning: Error loading global settings: {e}")
+        logger.warning(f"Error loading global settings: {e}")
         return {}
 
 
@@ -572,12 +641,17 @@ def main():
                         help='Max automatic restart attempts after crash (default: 5, 0 to disable)')
     parser.add_argument('--crash-cooldown', type=int, default=60,
                         help='Seconds to wait between crash restarts (default: 60)')
+    parser.add_argument('--log-dir', default=None,
+                        help='Override log directory (default: network path from global settings)')
 
     args = parser.parse_args()
 
+    # Set up file logging to network path
+    setup_logging(global_settings, args.log_dir)
+
     # Validate required arguments
     if not args.comfyui_path:
-        print("ERROR: --comfyui-path is required (not found in command line or global settings)")
+        logger.error("--comfyui-path is required (not found in command line or global settings)")
         sys.exit(1)
 
     signal.signal(signal.SIGTERM, shutdown)
@@ -604,7 +678,7 @@ def main():
         extra_args.append('--fast')
 
     if args.mode == "standalone" and not args.python_path:
-        print("ERROR: --python-path is required for standalone mode")
+        logger.error("--python-path is required for standalone mode")
         sys.exit(1)
 
     server_state['comfyui_port'] = args.port
@@ -612,14 +686,14 @@ def main():
     server_state['max_crash_restarts'] = args.max_crash_restarts
     server_state['crash_cooldown_seconds'] = args.crash_cooldown
 
-    print("=" * 60)
-    print("ComfyUI Persistent Server")
-    print("=" * 60)
-    print(f"ComfyUI Path: {args.comfyui_path}")
-    print(f"ComfyUI Port: {args.port}")
-    print(f"Mode: {args.mode}")
+    logger.info("=" * 60)
+    logger.info("ComfyUI Persistent Server")
+    logger.info("=" * 60)
+    logger.info(f"ComfyUI Path: {args.comfyui_path}")
+    logger.info(f"ComfyUI Port: {args.port}")
+    logger.info(f"Mode: {args.mode}")
     if args.mode == "standalone":
-        print(f"Python Path: {args.python_path}")
+        logger.info(f"Python Path: {args.python_path}")
 
     # Show performance flags
     flags_enabled = []
@@ -636,14 +710,14 @@ def main():
     if args.gpu_only:
         flags_enabled.append("--gpu-only")
     if flags_enabled:
-        print(f"Performance Flags: {', '.join(flags_enabled)}")
+        logger.info(f"Performance Flags: {', '.join(flags_enabled)}")
 
     if args.max_crash_restarts > 0:
-        print(f"Crash Recovery: enabled (max {args.max_crash_restarts} restarts, {args.crash_cooldown}s cooldown)")
+        logger.info(f"Crash Recovery: enabled (max {args.max_crash_restarts} restarts, {args.crash_cooldown}s cooldown)")
     else:
-        print(f"Crash Recovery: disabled")
-    print(f"Started: {datetime.now().isoformat()}")
-    print("=" * 60)
+        logger.info(f"Crash Recovery: disabled")
+    logger.info(f"Started: {datetime.now().isoformat()}")
+    logger.info("=" * 60)
 
     server_state['startup_config'] = {
         'comfyui_path': args.comfyui_path,
@@ -661,22 +735,22 @@ def main():
         )
         server_state['comfyui_process'] = process
     except Exception as e:
-        print(f"ERROR: Failed to start ComfyUI: {e}")
+        logger.error(f"Failed to start ComfyUI: {e}")
         sys.exit(1)
 
     output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
     output_thread.start()
 
     if not wait_for_comfyui(args.port, timeout=3000):
-        print("ERROR: ComfyUI failed to start")
+        logger.error("ComfyUI failed to start")
         shutdown()
         sys.exit(1)
 
     server_state['is_ready'] = True
-    print("\n" + "=" * 60)
-    print("SERVER READY")
-    print(f"ComfyUI API: http://127.0.0.1:{args.port}")
-    print("=" * 60 + "\n")
+    logger.info("\n" + "=" * 60)
+    logger.info("SERVER READY")
+    logger.info(f"ComfyUI API: http://127.0.0.1:{args.port}")
+    logger.info("=" * 60 + "\n")
 
     health_thread = threading.Thread(target=health_monitor_thread, args=(args.port,), daemon=True)
     health_thread.start()
@@ -686,9 +760,9 @@ def main():
         health_server = HTTPServer(('0.0.0.0', health_port), HealthCheckHandler)
         health_server_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
         health_server_thread.start()
-        print(f"Health check endpoint: http://0.0.0.0:{health_port}/health")
+        logger.info(f"Health check endpoint: http://0.0.0.0:{health_port}/health")
     except Exception as e:
-        print(f"Warning: Could not start health check server on port {health_port}: {e}")
+        logger.warning(f"Could not start health check server on port {health_port}: {e}")
 
     # Track uptime for crash counter reset
     stable_uptime_threshold = 300  # Reset crash counter after 5 min stable uptime
@@ -703,7 +777,7 @@ def main():
                     process = server_state['comfyui_process']
                     last_stable_check = time.time()
                 else:
-                    print("ERROR: Restart failed, server will exit")
+                    logger.error("Restart failed, server will exit")
                     break
 
             ret = process.poll()
@@ -717,7 +791,7 @@ def main():
                     last_stable_check = time.time()
                 else:
                     # Recovery failed or max retries exceeded
-                    print("ERROR: Crash recovery failed, server will exit")
+                    logger.error("Crash recovery failed, server will exit")
                     break
 
             # Reset crash counter after stable uptime period
@@ -735,4 +809,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
     main()

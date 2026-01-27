@@ -56,7 +56,14 @@
       "Bash(powershell.exe -Command \"& {cd ''l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools''; $env:PYTHONPATH=''python;resources\\\\ui''; .\\\\python\\\\venv\\\\Scripts\\\\python.exe -c \"\"import pytest; pytest.main\\([''-v'', ''tests/'']\\)\"\"}\")",
       "Bash(powershell.exe -NoProfile -Command \"cd ''l:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools''; ./python/venv/Scripts/python.exe run_tests.py 2>&1\")",
       "Bash(powershell.exe:*)",
-      "Bash(cmd /c \"dir /b /o-d C:\\\\Users\\\\christophe.leyder\\\\.luma_tools\\\\logs\\\\*.log 2>nul\")"
+      "Bash(cmd /c \"dir /b /o-d C:\\\\Users\\\\christophe.leyder\\\\.luma_tools\\\\logs\\\\*.log 2>nul\")",
+      "Bash(pythonvenvScriptspython.exe -m py_compile pythoncoreluma_tools.py)",
+      "Bash(pythonvenvScriptspython.exe -m py_compile:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\check_syntax.ps1\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_run_test.ps1\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"Get-Content ''W:\\\\LumaRND\\\\tmp\\\\ComfyUI_OUT\\\\_logs\\\\users\\\\luma_tools_christophe.leyder_ls-ws-lookdev01_20260127_065306.log'' | Select-Object -First 30\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"Get-Content ''W:\\\\LumaRND\\\\tmp\\\\ComfyUI_OUT\\\\_logs\\\\users\\\\luma_tools_christophe.leyder_ls-ws-lookdev01_20260127_065306.log'' | Select-Object -Last 30\")",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

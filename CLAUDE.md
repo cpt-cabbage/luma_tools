@@ -112,6 +112,7 @@ QThreadPool.globalInstance().start(self._worker)
 
 - **User:** `~/.luma_tools/settings.json` (window state, tab order, last dirs)
 - **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs)
+- **Key global setting:** `comfyui_network_output_path` — network path for ComfyUI outputs AND centralized logs (currently `W:/LumaRND/tmp/ComfyUI_OUT`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 
@@ -207,8 +208,77 @@ powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\l
 powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -c \"import sys; sys.path.insert(0, 'python'); sys.path.insert(0, 'resources/ui'); from tabs.my_tab import MyTab; print('OK')\""
 ```
 
+**CRITICAL: PowerShell `$` variable escaping.** The bash compatibility layer mangles PowerShell `$` variables (e.g., `$LASTEXITCODE` becomes `extglob`, `$env:PYTHONPATH` becomes `:PYTHONPATH`). For any commands that use PowerShell variables or `$env:`, write a temporary `.ps1` script file and run it instead:
+```powershell
+# Write the script
+Write tool → _temp_script.ps1
+
+# Execute it
+powershell -ExecutionPolicy Bypass -File "l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\_temp_script.ps1"
+```
+
 ### Debugging
-**IMPORTANT: Always check the log files when debugging issues.** Logs are at `~/.luma_tools/logs/` (last 5 kept, UTF-8). On Windows: `C:\Users\<username>\.luma_tools\logs\`. Read the most recent log file using the Read tool - don't ask the user to copy/paste logs. Use Grep to search for errors: `Grep pattern="ERROR|Exception|Traceback" path="C:\Users\<username>\.luma_tools\logs\"`. Check worker GC if callbacks don't fire.
+
+**Logging:** All output uses Python `logging` module (not `print()`). Every module should have:
+```python
+import logging
+logger = logging.getLogger(__name__)
+```
+Use `logger.info()`, `logger.warning()`, `logger.error()`. Never use `print()` for new code.
+
+**Log Files:** All logs are centralized on the network path from `comfyui_network_output_path` global setting:
+```
+<network_path>/_logs/
+├── users/    # Main app logs: luma_tools_<user>_<hostname>_<timestamp>.log
+├── server/   # Persistent server logs: comfyui_server_<hostname>_<timestamp>.log
+├── runner/   # Farm runner logs: comfyui_runner_<jobname>_<timestamp>.log
+```
+Currently: `W:/LumaRND/tmp/ComfyUI_OUT/_logs/`. Falls back to `~/.luma_tools/logs/` if network unavailable.
+
+**Reading logs (NO SCRIPT NEEDED):**
+```bash
+# Get latest log file path (use for Read tool)
+powershell -Command "(Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName"
+
+# Read last 100 lines directly
+powershell -Command "Get-Content (Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Tail 100"
+
+# Search for errors across all logs
+Grep pattern="ERROR|Exception|Traceback" path="W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\" output_mode="content"
+
+# Read specific log with Read tool (use offset=-100 for last 100 lines)
+Read tool on log path with offset=-100
+```
+**IMPORTANT:** PowerShell one-liners work fine for file operations. Only use `.ps1` script files when you need `$env:` variables (which get mangled by bash compatibility layer).
+
+**Debug CLI Arguments:** The app supports debug flags that can be appended after the normal positional arguments:
+```
+--tab <name>       Select a tab on startup (gallery, comfyui, settings, logs, passbuilder, mp4, republish, cleaner)
+--auto-close <sec> Auto-close the app after N seconds (for automated testing)
+```
+
+**Running the app from Claude Code for debugging:**
+Because PYTHONPATH must be set (uses `$env:` which bash mangles), write a `.ps1` script:
+```powershell
+# _run_test.ps1 - write this file, then execute with: powershell -ExecutionPolicy Bypass -File _run_test.ps1
+Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'
+$env:PYTHONPATH = "$(Get-Location)\python;$(Get-Location)\resources\ui"
+python\venv\Scripts\python.exe python\core\luma_tools.py --tab gallery --auto-close 30
+
+# With shot context:
+# python\venv\Scripts\python.exe python\core\luma_tools.py LumaRND '' '' 'W:\LumaRNDwork' 'christophe.leyder' 'combined' --tab gallery --auto-close 30
+```
+
+```powershell
+# After app closes, read the latest log from network path
+powershell -Command "Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName }"
+```
+
+**Debugging workflow:**
+1. Run the app with `--tab <target> --auto-close <seconds>` in background
+2. Wait for it to close (or read logs while running)
+3. Read the log file with `Read` tool or search with `Grep`
+4. All gallery, prewarm, thumbnail, and incremental sync events are logged to the file
 
 ### UI Modifications
 Edit `.ui` files in Qt Designer, update tab logic in `python/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.

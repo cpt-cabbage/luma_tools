@@ -4,11 +4,14 @@ Cleanup service for Luma Tools.
 Handles directory cleanup operations for renders, USD files, and backups.
 """
 
+import logging
 import os
 import shutil
 from typing import List
 
 from core.error_handling import handle_errors, log_error
+
+logger = logging.getLogger(__name__)
 
 
 def cleanup_renders(lookdev_dir, render_dirs_to_delete):
@@ -28,12 +31,12 @@ def cleanup_renders(lookdev_dir, render_dirs_to_delete):
     for dir_name in render_dirs_to_delete:
         dir_path = os.path.join(renders_path, dir_name)
         if not os.path.exists(dir_path):
-            print(f"Directory not found: {dir_path}")
+            logger.warning(f"Directory not found: {dir_path}")
             continue
         with handle_errors(f"deleting render directory {dir_path}"):
             shutil.rmtree(dir_path)
             deleted.append(dir_name)
-            print(f"Removed render directory: {dir_path}")
+            logger.info(f"Removed render directory: {dir_path}")
 
     return deleted
 
@@ -55,12 +58,12 @@ def cleanup_usd(lookdev_dir, usd_dirs_to_delete):
     for dir_name in usd_dirs_to_delete:
         dir_path = os.path.join(usd_path, dir_name)
         if not os.path.exists(dir_path):
-            print(f"Directory not found: {dir_path}")
+            logger.warning(f"Directory not found: {dir_path}")
             continue
         with handle_errors(f"deleting USD directory {dir_path}"):
             shutil.rmtree(dir_path)
             deleted.append(dir_name)
-            print(f"Removed USD directory: {dir_path}")
+            logger.info(f"Removed USD directory: {dir_path}")
 
     return deleted
 
@@ -78,12 +81,12 @@ def cleanup_hip_backups(lookdev_dir):
     backup_path = os.path.join(lookdev_dir, "backup")
 
     if not os.path.exists(backup_path):
-        print(f"Backup directory not found: {backup_path}")
+        logger.warning(f"Backup directory not found: {backup_path}")
         return False
 
     with handle_errors(f"deleting backup directory {backup_path}"):
         shutil.rmtree(backup_path)
-        print(f"Removed backup directory: {backup_path}")
+        logger.info(f"Removed backup directory: {backup_path}")
         return True
 
     return False

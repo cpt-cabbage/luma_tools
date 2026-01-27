@@ -8,10 +8,13 @@ Includes publish strategy pattern for farm vs local publishing.
 import os
 import subprocess
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, List, Callable
 
 from core.utils import normalize_path, ensure_directory
+
+logger = logging.getLogger(__name__)
 from core.config import (
     AYON_COLORSPACE, AYON_CONSOLE, AYON_DEFAULT_FPS, AYON_DEFAULT_HEIGHT,
     AYON_DEFAULT_WIDTH, AYON_DISPLAY, AYON_FAMILY, AYON_PRODUCT_TYPE, AYON_VIEW,
@@ -33,7 +36,7 @@ try:
     from ayon_core.lib import Logger
     AYON_AVAILABLE = True
 except ImportError as e:
-    print(f"Warning: AYON imports failed: {e}")
+    logger.warning(f"AYON imports failed: {e}")
     AYON_AVAILABLE = False
 
 # Deadline imports
@@ -46,7 +49,7 @@ try:
     )
     DEADLINE_AVAILABLE = True
 except ImportError as e:
-    print(f"Warning: Deadline imports failed: {e}")
+    logger.warning(f"Deadline imports failed: {e}")
     DEADLINE_AVAILABLE = False
 
 # Try to import Qt for processEvents
@@ -124,7 +127,7 @@ def submit_oiio_to_deadline(
 
     buildjobid = submit_deadline_job(deadline_command)
     if buildjobid:
-        print(f"Passes Build Deadline Job ID: {buildjobid}")
+        logger.info(f"Passes Build Deadline Job ID: {buildjobid}")
     return buildjobid
 
 
@@ -171,34 +174,34 @@ def get_next_version(project_name: str, folder_path: str, product_name: str) -> 
         int: Next version number (starts from 1 if no versions exist)
     """
     if not AYON_AVAILABLE:
-        print("[get_next_version] AYON not available, defaulting to version 1")
+        logger.info("[get_next_version] AYON not available, defaulting to version 1")
         return 1
 
     try:
         # Get the folder entity
         folder = get_folder_by_path(project_name, folder_path)
         if not folder:
-            print(f"[get_next_version] Folder not found: {folder_path}, defaulting to version 1")
+            logger.info(f"[get_next_version] Folder not found: {folder_path}, defaulting to version 1")
             return 1
 
         # Get the product by name within this folder
         product = get_product_by_name(project_name, product_name, folder["id"])
         if not product:
-            print(f"[get_next_version] Product '{product_name}' not found in {folder_path}, starting at version 1")
+            logger.info(f"[get_next_version] Product '{product_name}' not found in {folder_path}, starting at version 1")
             return 1
 
         # Get the last version of this product
         last_version = get_last_version_by_product_id(project_name, product["id"])
         if not last_version:
-            print(f"[get_next_version] No versions found for '{product_name}', starting at version 1")
+            logger.info(f"[get_next_version] No versions found for '{product_name}', starting at version 1")
             return 1
 
         next_ver = last_version["version"] + 1
-        print(f"[get_next_version] Found version {last_version['version']}, next version will be {next_ver}")
+        logger.info(f"[get_next_version] Found version {last_version['version']}, next version will be {next_ver}")
         return next_ver
 
     except Exception as e:
-        print(f"[get_next_version] Error querying versions: {e}, defaulting to version 1")
+        logger.error(f"[get_next_version] Error querying versions: {e}, defaulting to version 1")
         return 1
 
 
@@ -536,7 +539,7 @@ def write_metadata_file(metadata_dict, output_path):
             else:
                 logger.info(f"All required fields present: {required_fields}")
         else:
-            print(f"Successfully wrote metadata to: {output_path}")
+            logger.info(f"Successfully wrote metadata to: {output_path}")
 
         return output_path
 
@@ -545,7 +548,7 @@ def write_metadata_file(metadata_dict, output_path):
         if logger:
             logger.error(error_msg)
         else:
-            print(error_msg)
+            logger.error(error_msg)
         return None
 
 
@@ -573,7 +576,7 @@ def publish_to_ayon_local(
     import queue
 
     if not AYON_AVAILABLE:
-        print("AYON not available, skipping publish")
+        logger.warning("AYON not available, skipping publish")
         return False
 
     # Get bundle name
@@ -603,7 +606,7 @@ def publish_to_ayon_local(
     # This prevents SiteAlreadyPresentError from blocking the publish
     env["AYON_SITESYNC_ENABLED"] = "0"
 
-    print(f"Executing AYON publish locally: {' '.join(cmd)}")
+    logger.info(f"Executing AYON publish locally: {' '.join(cmd)}")
 
     def stream_reader(pipe, output_queue, prefix):
         """Read lines from pipe and put them in queue."""
@@ -652,7 +655,7 @@ def publish_to_ayon_local(
             try:
                 prefix, line = output_queue.get(timeout=0.1)
                 if line:
-                    print(f"{prefix}: {line}")
+                    logger.info(f"{prefix}: {line}")
                     if prefix == "AYON":
                         stdout_lines.append(line)
                     else:
@@ -660,13 +663,13 @@ def publish_to_ayon_local(
 
                     # Detect key progress stages for better feedback
                     if "ExtractReview" in line and "Processing" in line:
-                        print("  -> Extracting review files...")
+                        logger.info("  -> Extracting review files...")
                     elif "IntegrateAsset" in line:
-                        print("  -> Integrating assets into AYON...")
+                        logger.info("  -> Integrating assets into AYON...")
                     elif "Successfully" in line or "success" in line.lower():
-                        print("  [OK] Operation successful")
+                        logger.info("  [OK] Operation successful")
                     elif "Failed" in line or "ERROR" in line:
-                        print(f"  [ERROR] Error detected: {line}")
+                        logger.error(f"  [ERROR] Error detected: {line}")
             except queue.Empty:
                 continue
 
@@ -679,7 +682,7 @@ def publish_to_ayon_local(
             try:
                 prefix, line = output_queue.get_nowait()
                 if line:
-                    print(f"{prefix}: {line}")
+                    logger.info(f"{prefix}: {line}")
                     if prefix == "AYON":
                         stdout_lines.append(line)
                     else:
@@ -689,32 +692,30 @@ def publish_to_ayon_local(
 
         # Check return code
         if process.returncode == 0:
-            print('AYON Publish Local Process Successful')
+            logger.info('AYON Publish Local Process Successful')
             return True
         else:
             # Check for SiteAlreadyPresentError - this error occurs AFTER successful integration
             # The IntegrateAsset plugin completes before IntegrateSiteSync fails
             all_output = "\n".join(stdout_lines + stderr_lines)
             if "SiteAlreadyPresentError" in all_output and "IntegrateAsset" in all_output:
-                print('AYON Publish completed successfully')
+                logger.info('AYON Publish completed successfully')
                 return True
 
-            print(f'AYON Publish Local Process Failed with code {process.returncode}')
-            # Print last few lines for debugging
+            logger.error(f'AYON Publish Local Process Failed with code {process.returncode}')
+            # Log last few lines for debugging
             if stdout_lines:
-                print("Last stdout lines:")
+                logger.error("Last stdout lines:")
                 for line in stdout_lines[-10:]:
-                    print(f"  {line}")
+                    logger.error(f"  {line}")
             if stderr_lines:
-                print("Last stderr lines:")
+                logger.error("Last stderr lines:")
                 for line in stderr_lines[-10:]:
-                    print(f"  {line}")
+                    logger.error(f"  {line}")
             return False
 
     except Exception as e:
-        print(f'AYON Publish Local Process Failed: {e}')
-        import traceback
-        traceback.print_exc()
+        logger.error(f'AYON Publish Local Process Failed: {e}', exc_info=True)
         return False
 
 
@@ -745,7 +746,7 @@ def submit_ayon_publish_to_deadline(
         str: Publish job ID or None if failed
     """
     if not AYON_AVAILABLE or not DEADLINE_AVAILABLE:
-        print("AYON or Deadline not available, skipping publish")
+        logger.warning("AYON or Deadline not available, skipping publish")
         return None
 
     logger = Logger.get_logger(__name__)
@@ -890,8 +891,8 @@ class PublishStrategy(ABC):
         folder_path_raw = working_dir.partition(shot)[0] + shot
         folder_path = convert_to_ayon_folder_path(folder_path_raw, project_name)
 
-        print(f"Folder Path (AYON hierarchy): {folder_path}")
-        print(f"Working Directory: {working_dir}")
+        logger.info(f"Folder Path (AYON hierarchy): {folder_path}")
+        logger.info(f"Working Directory: {working_dir}")
 
         return working_dir, folder_path
 
@@ -929,7 +930,7 @@ class FarmPublishStrategy(PublishStrategy):
         progress_callback: Optional[Callable[[int, str], None]] = None
     ) -> bool:
         """Publish to AYON via Deadline farm submission."""
-        print(f"Starting AYON farm publish setup for {render_name}")
+        logger.info(f"Starting AYON farm publish setup for {render_name}")
 
         # Build paths
         self._report_progress(progress_callback, 78, "Building AYON folder paths...")
@@ -966,7 +967,7 @@ class FarmPublishStrategy(PublishStrategy):
         )
 
         if not metadata_path:
-            print("Failed to write metadata file, skipping publish")
+            logger.error("Failed to write metadata file, skipping publish")
             return False
 
         # Submit to Deadline
@@ -983,10 +984,10 @@ class FarmPublishStrategy(PublishStrategy):
         )
 
         if publish_job_id:
-            print(f"AYON publish job submitted: {publish_job_id}")
+            logger.info(f"AYON publish job submitted: {publish_job_id}")
             return True
         else:
-            print("Failed to submit AYON publish job")
+            logger.error("Failed to submit AYON publish job")
             return False
 
 
@@ -1009,7 +1010,7 @@ class LocalPublishStrategy(PublishStrategy):
         progress_callback: Optional[Callable[[int, str], None]] = None
     ) -> bool:
         """Publish to AYON locally (no Deadline submission)."""
-        print(f"Starting AYON local publish for {render_name}")
+        logger.info(f"Starting AYON local publish for {render_name}")
 
         # Build paths
         self._report_progress(progress_callback, 92, "Building AYON folder paths...")
@@ -1046,7 +1047,7 @@ class LocalPublishStrategy(PublishStrategy):
         )
 
         if not metadata_path:
-            print("Failed to write metadata file, skipping publish")
+            logger.error("Failed to write metadata file, skipping publish")
             return False
 
         # Execute AYON publish locally
@@ -1060,8 +1061,8 @@ class LocalPublishStrategy(PublishStrategy):
         )
 
         if success:
-            print(f"AYON local publish completed successfully")
+            logger.info(f"AYON local publish completed successfully")
             return True
         else:
-            print("AYON local publish failed")
+            logger.error("AYON local publish failed")
             return False

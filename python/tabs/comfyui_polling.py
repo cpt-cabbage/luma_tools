@@ -5,10 +5,13 @@ Provides mixin classes for iterate and batch mode polling.
 """
 import os
 import time
+import logging
 from PySide6.QtCore import QTimer, QThreadPool
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
 from dialog_helpers import confirm_action
+
+logger = logging.getLogger(__name__)
 
 
 def format_elapsed_time(seconds):
@@ -144,8 +147,7 @@ class PollingMixin:
         try:
             self._on_iterate_poll_result_impl(result)
         except Exception as e:
-            print(f"ERROR in _on_iterate_poll_result: {e}")
-            traceback.print_exc()
+            logger.error(f"ERROR in _on_iterate_poll_result: {e}", exc_info=True)
             self._stop_iterate_polling()
 
     def _on_iterate_poll_result_impl(self, result):
@@ -279,8 +281,7 @@ class PollingMixin:
         try:
             self._on_iterate_job_completed_impl()
         except Exception as e:
-            print(f"ERROR in _on_iterate_job_completed: {e}")
-            traceback.print_exc()
+            logger.error(f"ERROR in _on_iterate_job_completed: {e}", exc_info=True)
             self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
 
@@ -470,8 +471,7 @@ class PollingMixin:
             # Early log with immediate flush to capture any crash point
             status = result.get('status', 'Unknown') if isinstance(result, dict) else 'InvalidResult'
             pending = self._batch_poll_pending_results - 1
-            print(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}", flush=True)
-            sys.stdout.flush()
+            logger.info(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}")
 
             self.log(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
             self._batch_poll_results[job_id] = result
@@ -480,16 +480,13 @@ class PollingMixin:
             if self._batch_poll_pending_results <= 0:
                 self._process_collected_poll_results()
         except Exception as e:
-            print(f"ERROR in _on_batch_poll_result_collected: {e}", flush=True)
-            traceback.print_exc()
-            sys.stdout.flush()
+            logger.error(f"ERROR in _on_batch_poll_result_collected: {e}", exc_info=True)
 
     def _process_collected_poll_results(self):
         """Process all collected poll results and update status bar once."""
         import sys
         try:
-            print(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...", flush=True)
-            sys.stdout.flush()
+            logger.info(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...")
 
             from ui_components import StatusColors
 
@@ -611,15 +608,13 @@ class PollingMixin:
                 main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
                 status_color = StatusColors.INFO
 
-            print(f"[Batch Poll] Updating status bar...", flush=True)
+            logger.info(f"[Batch Poll] Updating status bar...")
             self.main_window.animator.update_status_animated(main_status, status_color)
-            print(f"[Batch Poll] Status update complete", flush=True)
+            logger.info(f"[Batch Poll] Status update complete")
         except Exception as e:
             import traceback
             import sys
-            print(f"ERROR in _process_collected_poll_results: {e}", flush=True)
-            traceback.print_exc()
-            sys.stdout.flush()
+            logger.error(f"ERROR in _process_collected_poll_results: {e}", exc_info=True)
             self.log(f"[Batch] ERROR in _process_collected_poll_results: {e}")
             self.log(traceback.format_exc())
 
@@ -638,8 +633,7 @@ class PollingMixin:
         try:
             self._on_batch_jobs_completed_impl(had_failures)
         except Exception as e:
-            print(f"ERROR in _on_batch_jobs_completed: {e}")
-            traceback.print_exc()
+            logger.error(f"ERROR in _on_batch_jobs_completed: {e}", exc_info=True)
 
     def _on_batch_jobs_completed_impl(self, had_failures=False):
         """Implementation of batch jobs completion."""
@@ -905,8 +899,7 @@ class PollingMixin:
                 self.log(f"[Recovery] Found persisted {mode} mode job state from previous session")
         except Exception as e:
             self.log(f"[Recovery] Error reading persisted job state: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[Recovery] Error reading persisted job state: {e}", exc_info=True)
 
         # Always check Deadline for running jobs from the current user
         # This catches jobs that may not be in persisted state
@@ -962,7 +955,7 @@ class PollingMixin:
     def _on_deadline_query_error(self, error_msg, traceback_str, persisted_state):
         """Handle error from Deadline job query."""
         self.log(f"[Recovery] Error checking Deadline for user jobs: {error_msg}")
-        print(traceback_str)
+        logger.error(traceback_str)
 
         # Update status
         if hasattr(self.main_window, 'animator'):
@@ -1031,8 +1024,7 @@ class PollingMixin:
 
         except Exception as e:
             self.log(f"[Recovery] Error checking Deadline for user jobs: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[Recovery] Error checking Deadline for user jobs: {e}", exc_info=True)
             # Fall back to persisted state recovery
             if persisted_state:
                 self._recover_from_persisted_state(persisted_state)
@@ -1183,8 +1175,7 @@ class PollingMixin:
                     self._handle_iterate_recovery_status(job_state, status_result)
                 except Exception as e:
                     self.log(f"[Recovery] Error handling iterate recovery: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.error(f"[Recovery] Error handling iterate recovery: {e}", exc_info=True)
                     self._clear_running_job_state()
 
             def on_status_error(msg, tb):
@@ -1252,8 +1243,7 @@ class PollingMixin:
                 self.show_status(f"Recovering {len(job_ids)} ComfyUI job(s)...", "success")
             except Exception as e:
                 self.log(f"[Recovery] Error recovering batch jobs: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"[Recovery] Error recovering batch jobs: {e}", exc_info=True)
                 self._clear_running_job_state()
 
     def _handle_iterate_recovery_status(self, job_state, status_result):

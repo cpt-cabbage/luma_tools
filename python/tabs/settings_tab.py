@@ -6,6 +6,7 @@ Handles user settings (local) and global settings management.
 
 import os
 import json
+import logging
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
@@ -13,6 +14,8 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 from .base_tab import BaseTab
 from dialog_helpers import confirm_action, show_warning, show_error, show_info
 from core.utils import ensure_directory
+
+logger = logging.getLogger(__name__)
 
 
 def get_version():
@@ -215,7 +218,7 @@ class SettingsTab(BaseTab):
                 mark_notifications_read(self.app_state.user)
 
         except Exception as e:
-            print(f"Error checking user notifications: {e}")
+            logger.error(f"Error checking user notifications: {e}")
 
     def _on_show_version_history(self):
         """Show version history dialog."""
@@ -765,7 +768,7 @@ class SettingsTab(BaseTab):
                 restricted.append(tab_name)
 
         set_setting("restricted_tabs", restricted, verbose=False)
-        print(f"Updated restricted tabs: {restricted}")
+        logger.info(f"Updated restricted tabs: {restricted}")
 
     def _load_feature_request_ui(self):
         """Configure feature request buttons based on user role."""
@@ -826,7 +829,7 @@ class SettingsTab(BaseTab):
             from ui.spell_checker import add_spell_checking
             add_spell_checking(description_edit)
         except Exception as e:
-            print(f"Spell checking not available: {e}")
+            logger.warning(f"Spell checking not available: {e}")
 
         layout.addWidget(description_edit)
 

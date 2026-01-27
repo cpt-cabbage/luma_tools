@@ -9,6 +9,8 @@ Handles likes and groups functionality for the gallery:
 - Persistence via settings manager
 """
 
+import os
+import logging
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Any
@@ -16,6 +18,8 @@ from dataclasses import dataclass, field, asdict
 from PySide6.QtCore import QObject, Signal
 
 from core.config import UIColors
+
+logger = logging.getLogger(__name__)
 
 # Import GROUP_COLORS from config for backwards compatibility
 GROUP_COLORS = UIColors.GROUP_COLORS
@@ -88,9 +92,9 @@ class FavoritesManager(QObject):
         """Load likes and groups from user settings."""
         from core.settings_manager import get_setting
 
-        # Load liked items
+        # Load liked items (normalize paths for consistent lookup)
         liked_list = get_setting("gallery_liked_items")
-        self._liked_items = set(liked_list) if liked_list else set()
+        self._liked_items = set(os.path.normpath(p) for p in liked_list) if liked_list else set()
 
         # Load groups
         groups_dict = get_setting("gallery_groups")
@@ -100,14 +104,15 @@ class FavoritesManager(QObject):
                 try:
                     self._groups[group_id] = GroupDef.from_dict(group_data)
                 except Exception as e:
-                    print(f"Error loading group {group_id}: {e}")
+                    logger.error(f"Error loading group {group_id}: {e}")
 
-        # Load item-to-groups mapping
+        # Load item-to-groups mapping (normalize paths for consistent lookup)
         item_groups_dict = get_setting("gallery_item_groups")
         self._item_groups = {}
         if item_groups_dict:
             for path, group_ids in item_groups_dict.items():
-                self._item_groups[path] = set(group_ids) if group_ids else set()
+                norm_path = os.path.normpath(path)
+                self._item_groups[norm_path] = set(group_ids) if group_ids else set()
 
     def _save_liked_items(self):
         """Save liked items to settings."""
@@ -141,6 +146,7 @@ class FavoritesManager(QObject):
             True if item is now liked, False if unliked
         """
         self._ensure_loaded()
+        path = os.path.normpath(path)
         if path in self._liked_items:
             self._liked_items.discard(path)
             is_liked = False
@@ -154,7 +160,7 @@ class FavoritesManager(QObject):
     def is_liked(self, path: str) -> bool:
         """Check if an item is liked."""
         self._ensure_loaded()
-        return path in self._liked_items
+        return os.path.normpath(path) in self._liked_items
 
     def get_liked_items(self) -> List[str]:
         """Get list of all liked item paths."""
@@ -165,6 +171,7 @@ class FavoritesManager(QObject):
         """Like multiple items (batch operation)."""
         self._ensure_loaded()
         for path in paths:
+            path = os.path.normpath(path)
             if path not in self._liked_items:
                 self._liked_items.add(path)
                 self.like_changed.emit(path, True)
@@ -174,6 +181,7 @@ class FavoritesManager(QObject):
         """Unlike multiple items (batch operation)."""
         self._ensure_loaded()
         for path in paths:
+            path = os.path.normpath(path)
             if path in self._liked_items:
                 self._liked_items.discard(path)
                 self.like_changed.emit(path, False)
@@ -310,6 +318,7 @@ class FavoritesManager(QObject):
             True if item was added, False if already in group or group doesn't exist
         """
         self._ensure_loaded()
+        path = os.path.normpath(path)
         if group_id not in self._groups:
             return False
 
@@ -344,6 +353,7 @@ class FavoritesManager(QObject):
             True if item was removed, False if not in group
         """
         self._ensure_loaded()
+        path = os.path.normpath(path)
         if path not in self._item_groups:
             return False
 
@@ -369,6 +379,7 @@ class FavoritesManager(QObject):
             True if item is now in group, False if removed
         """
         self._ensure_loaded()
+        path = os.path.normpath(path)
         if path in self._item_groups and group_id in self._item_groups[path]:
             self.remove_from_group(path, group_id)
             return False
@@ -379,6 +390,7 @@ class FavoritesManager(QObject):
     def get_item_groups(self, path: str) -> List[str]:
         """Get list of group IDs an item belongs to."""
         self._ensure_loaded()
+        path = os.path.normpath(path)
         if path not in self._item_groups:
             return []
         return list(self._item_groups[path])
@@ -386,7 +398,7 @@ class FavoritesManager(QObject):
     def get_item_group_colors(self, path: str) -> List[str]:
         """Get list of colors for groups an item belongs to (for visual display)."""
         self._ensure_loaded()
-        group_ids = self.get_item_groups(path)
+        group_ids = self.get_item_groups(path)  # Already normalizes
         colors = []
         for gid in group_ids:
             group = self._groups.get(gid)
@@ -431,6 +443,7 @@ class FavoritesManager(QObject):
         multi_group_enabled = get_setting("gallery_multi_group_enabled")
 
         for path in paths:
+            path = os.path.normpath(path)
             if path not in self._item_groups:
                 self._item_groups[path] = set()
             if not multi_group_enabled:
@@ -444,6 +457,7 @@ class FavoritesManager(QObject):
         """Remove multiple items from a group (batch operation)."""
         self._ensure_loaded()
         for path in paths:
+            path = os.path.normpath(path)
             if path in self._item_groups and group_id in self._item_groups[path]:
                 self._item_groups[path].discard(group_id)
                 if not self._item_groups[path]:

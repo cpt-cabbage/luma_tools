@@ -13,8 +13,11 @@ Uses QOpenGLWidget for rendering with mouse controls for rotation, pan, and zoom
 import os
 import sys
 import math
+import logging
 from typing import Optional, Dict, List, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -97,8 +100,7 @@ class ModelLoaderWorker(QRunnable):
             self.signals.finished.emit(model_data)
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error loading model: {e}", exc_info=True)
             self.signals.error.emit(f"Error loading model: {e}")
 
 
@@ -215,7 +217,7 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
                     if tex_id:
                         self._textures[name] = tex_id
                 except Exception as e:
-                    print(f"Error loading embedded texture {name}: {e}")
+                    logger.error(f"Error loading embedded texture {name}: {e}")
 
             # Load external textures from materials
             for mat in self._model_data.materials:
@@ -225,7 +227,7 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
                         if tex_id:
                             self._textures[mat.diffuse_texture] = tex_id
                     except Exception as e:
-                        print(f"Error loading texture {mat.diffuse_texture}: {e}")
+                        logger.error(f"Error loading texture {mat.diffuse_texture}: {e}")
 
         def _create_texture_from_data(self, data: bytes) -> Optional[int]:
             """Create OpenGL texture from image data."""
@@ -239,7 +241,7 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
 
                 return self._upload_texture(img_data, img.width, img.height)
             except Exception as e:
-                print(f"Error creating texture from data: {e}")
+                logger.error(f"Error creating texture from data: {e}")
                 return None
 
         def _create_texture_from_file(self, path: str) -> Optional[int]:
@@ -256,7 +258,7 @@ if OPENGL_AVAILABLE and PYOPENGL_AVAILABLE:
 
                 return self._upload_texture(img_data, img.width, img.height)
             except Exception as e:
-                print(f"Error loading texture file {path}: {e}")
+                logger.error(f"Error loading texture file {path}: {e}")
                 return None
 
         def _upload_texture(self, data: np.ndarray, width: int, height: int) -> int:
@@ -804,7 +806,7 @@ class ModelViewerDialog(QDialog):
             is_standalone = app_state.standalone_mode
 
             # Debug logging
-            print(f"[AYON Publish Button] AYON_AVAILABLE={AYON_AVAILABLE}, standalone_mode={is_standalone}")
+            logger.info(f"[AYON Publish Button] AYON_AVAILABLE={AYON_AVAILABLE}, standalone_mode={is_standalone}")
 
             if is_standalone or not AYON_AVAILABLE:
                 self._publish_btn.setEnabled(False)
@@ -815,9 +817,7 @@ class ModelViewerDialog(QDialog):
             else:
                 self._publish_btn.setToolTip("Publish this 3D model to AYON")
         except Exception as e:
-            print(f"[AYON Publish Button] Error checking availability: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[AYON Publish Button] Error checking availability: {e}", exc_info=True)
             self._publish_btn.setEnabled(False)
             self._publish_btn.setToolTip("AYON is not available")
         control_layout.addWidget(self._publish_btn)
@@ -890,9 +890,9 @@ class ModelViewerDialog(QDialog):
         self._stacked.setCurrentIndex(1)
         self._reset_btn.setEnabled(True)
 
-        print(f"Loaded 3D model: {model_data.path}")
-        print(f"  Meshes: {len(model_data.meshes)}, Materials: {len(model_data.materials)}")
-        print(f"  Skeleton: {model_data.has_skeleton}, Animations: {len(model_data.animations)}")
+        logger.info(f"Loaded 3D model: {model_data.path}")
+        logger.info(f"  Meshes: {len(model_data.meshes)}, Materials: {len(model_data.materials)}")
+        logger.info(f"  Skeleton: {model_data.has_skeleton}, Animations: {len(model_data.animations)}")
 
     def _on_load_error(self, error_msg: str):
         self._loading_label.setText("Error loading model")
@@ -949,11 +949,10 @@ class ModelViewerDialog(QDialog):
             )
 
             if success:
-                print(f"Successfully published model to AYON: {self._model_path}")
+                logger.info(f"Successfully published model to AYON: {self._model_path}")
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to publish model to AYON: {e}", exc_info=True)
             from dialog_helpers import show_error
             show_error("Publish Error", f"Failed to publish model to AYON:\n\n{str(e)}", self)
 

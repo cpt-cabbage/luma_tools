@@ -12,6 +12,7 @@ import os
 import json
 import copy
 import random
+import logging
 from typing import Optional, Callable, List, Dict, Any, Tuple
 
 from core.config import (
@@ -24,6 +25,8 @@ from core.config import (
 )
 from core.settings_manager import get_setting
 from core.utils import ensure_directory
+
+logger = logging.getLogger(__name__)
 
 
 def submit_comfyui_to_deadline_server_mode(
@@ -94,7 +97,7 @@ def submit_comfyui_to_deadline_server_mode(
     for src, dst in [(client_script_source, client_script), (utils_script_source, utils_script)]:
         if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
             shutil.copy2(src, dst)
-            print(f"Copied {os.path.basename(src)} to: {dst}")
+            logger.info(f"Copied {os.path.basename(src)} to: {dst}")
 
     # Build arguments for the client script
     timeout = get_setting("comfyui_timeout")
@@ -126,15 +129,15 @@ def submit_comfyui_to_deadline_server_mode(
         '-name', f'LUMA TOOLS - {render_name}',
     ]
 
-    print(f"Submitting Luma Tools job (server mode): {render_name}")
-    print(f"Frames: 1-{generation_count} (each frame = different seed)")
-    print(f"Server URL: {server_url}")
+    logger.info(f"Submitting Luma Tools job (server mode): {render_name}")
+    logger.info(f"Frames: 1-{generation_count} (each frame = different seed)")
+    logger.info(f"Server URL: {server_url}")
 
     from services.deadline_utils import submit_deadline_job
 
     job_id = submit_deadline_job(deadline_command, "[Server Mode]")
     if job_id:
-        print(f"ComfyUI Deadline Job ID (server mode): {job_id}")
+        logger.info(f"ComfyUI Deadline Job ID (server mode): {job_id}")
 
     return job_id
 
@@ -205,7 +208,7 @@ def submit_comfyui_to_deadline(
     # Always copy to ensure latest version (files are small, no performance impact)
     for src, dst in [(runner_script_source, runner_script), (utils_script_source, utils_script)]:
         shutil.copy2(src, dst)
-        print(f"Copied {os.path.basename(src)} to: {dst}")
+        logger.info(f"Copied {os.path.basename(src)} to: {dst}")
 
     input_dir = output_dir
     port = 8188 if use_server_mode else random.randint(8200, 8299)
@@ -275,8 +278,8 @@ ExitCodeTreatedAsFailure=1-255
     with open(plugin_info_path, 'w') as f:
         f.write(plugin_info_content)
 
-    print(f"Submitting Luma Tools job: {render_name}")
-    print(f"Frames: 1-{generation_count} (each frame = different seed)")
+    logger.info(f"Submitting Luma Tools job: {render_name}")
+    logger.info(f"Frames: 1-{generation_count} (each frame = different seed)")
 
     deadline_command = [DEADLINE_PATH, job_info_path, plugin_info_path]
 
@@ -284,7 +287,7 @@ ExitCodeTreatedAsFailure=1-255
 
     job_id = submit_deadline_job(deadline_command)
     if job_id:
-        print(f"ComfyUI Deadline Job ID: {job_id}")
+        logger.info(f"ComfyUI Deadline Job ID: {job_id}")
 
     return job_id
 
@@ -370,11 +373,11 @@ def submit_comfyui_job(
         batch_files = [input_image]
 
     if not batch_files:
-        print("No input files found - submitting workflow as-is")
+        logger.info("No input files found - submitting workflow as-is")
         batch_files = [None]
 
     total_files = len(batch_files)
-    print(f"Batch submission: {total_files} file(s) x {generation_count} generations each")
+    logger.info(f"Batch submission: {total_files} file(s) x {generation_count} generations each")
 
     if progress_callback:
         progress_callback(10, f"Processing {total_files} file(s)...")
@@ -432,7 +435,7 @@ def submit_comfyui_job(
                 "The workflow must have a TextEncodeQwenImageEditPlus node "
                 "with a title ending in '_editable' to accept custom prompts."
             )
-            print(f"ERROR: {error_msg}")
+            logger.error(error_msg)
             return [], error_msg
 
         workflow_file = save_workflow(modified, current_working_dir)
@@ -489,7 +492,7 @@ def submit_comfyui_job(
                             file_dest = os.path.join(current_working_dir, file_base)
                             if not os.path.exists(file_dest) or os.path.getmtime(file_path) > os.path.getmtime(file_dest):
                                 shutil.copy2(file_path, file_dest)
-                                print(f"Copied {node_info.widget_type} file: {file_base}")
+                                logger.info(f"Copied {node_info.widget_type} file: {file_base}")
 
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,

@@ -161,6 +161,10 @@ class RefreshController(BaseGalleryManager):
             # with on_tab_activated() triggering a duplicate refresh
             self.tab._initial_scan_done = True
 
+            # First real scan after prewarm should replace (not add incrementally)
+            # to avoid duplicates from any prewarm/full-scan output differences
+            self.tab._first_scan_after_prewarm = True
+
             # Skip the next automatic refresh (network polling) since we have prewarm data
             # This prevents the full scan from running and causing items to "pop up"
             self._skip_next_auto_refresh = True
@@ -369,9 +373,9 @@ class RefreshController(BaseGalleryManager):
 
         # Update known items for ALL items (not just filtered ones)
         # This prevents filtered-out items from being detected as "new" on every refresh
-        # Normalize paths for consistent comparison across different scan sources
+        # Paths are already normalized at scan source (os.path.normpath)
         for item in items:
-            self.tab._known_items.add(os.path.normpath(item['path']))
+            self.tab._known_items.add(item['path'])
 
         # Apply current filter and sort
         filtered_items = self.tab._filter_items(items)
@@ -409,11 +413,11 @@ class RefreshController(BaseGalleryManager):
 
         # Collect directories to watch (including subdirectories) in background
         def collect_directories():
-            dirs_to_watch = [output_dir]
+            dirs_to_watch = [os.path.normpath(output_dir)]
             try:
                 for root, dirs, files in os.walk(output_dir):
                     for d in dirs:
-                        subdir = os.path.join(root, d)
+                        subdir = os.path.normpath(os.path.join(root, d))
                         dirs_to_watch.append(subdir)
             except Exception as e:
                 self.tab.log(f"[Gallery] Error collecting watch directories: {e}")

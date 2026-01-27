@@ -1,6 +1,9 @@
+import logging
 import os
 from PySide6.QtCore import QObject, Signal
 from core.utils import get_trailing_number, remove_after, get_folder_size
+
+logger = logging.getLogger(__name__)
 from services.file_operations import (
     fast_scandir,
     find_renders,
@@ -77,7 +80,7 @@ class DirectoryScanner:
 
         # Get lookdev directory
         self.state.lookdev_dir = get_lookdev_directory(self.state.shotpath)
-        print(f"lookdev Dir: {self.state.lookdev_dir}")
+        logger.info(f"lookdev Dir: {self.state.lookdev_dir}")
 
         # Scan render directory
         self._update_progress(10, "Scanning Render Files", "Searching for render directories...")
@@ -131,7 +134,7 @@ class DirectoryScanner:
             dirs = fast_scandir(self.state.lookdev_dir)
         except Exception as e:
             dirs = ()
-            print(f"No Renders Found: {e}")
+            logger.warning(f"No Renders Found: {e}")
 
         render_folders = []
         render_directory = ""
@@ -147,7 +150,7 @@ class DirectoryScanner:
                 self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
             except (IndexError, Exception) as e:
                 self.signals.set_widget_enabled.emit('RendersList', False)
-                print(f"No Renders Found: {e}")
+                logger.warning(f"No Renders Found: {e}")
         else:
             self.signals.set_label_text.emit('Renderlabel', 'Render Directory Not Found!')
             self.signals.set_widget_enabled.emit('CleanRender', False)
@@ -165,7 +168,7 @@ class DirectoryScanner:
         try:
             dirs = fast_scandir(self.state.lookdev_dir)
         except Exception as e:
-            print(f"Error scanning directory: {e}")
+            logger.error(f"Error scanning directory: {e}")
             dirs = ()
 
         usd_folders = []
@@ -182,7 +185,7 @@ class DirectoryScanner:
                 self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
             except (IndexError, Exception) as e:
                 usd_directory = ""
-                print(f"No USDs Found: {e}")
+                logger.warning(f"No USDs Found: {e}")
         else:
             usd_directory = ""
             self.signals.set_label_text.emit('USDlabel', 'USD Directory Not Found!')
@@ -321,7 +324,7 @@ class DirectoryScanner:
         try:
             dirs = fast_scandir(comp_dir)
         except Exception as e:
-            print(f"Error scanning comp directory: {e}")
+            logger.error(f"Error scanning comp directory: {e}")
             dirs = ()
 
         comp_folders = []
@@ -342,7 +345,7 @@ class DirectoryScanner:
                 renders_in_comp = read_comp_file(comp_directory + latestcomp, hip_file)
                 self._deselect_renders_in_comp(renders_in_comp)
             except Exception as e:
-                print(f"No Comp Dir Found: {e}")
+                logger.warning(f"No Comp Dir Found: {e}")
         else:
             self.signals.set_label_text.emit('Complabel', 'Comp Directory Not Found!')
 

@@ -89,6 +89,7 @@ class ComfyUIGalleryTab(BaseTab):
         self._known_items = set()
         self._initial_scan_done = False
         self._new_items = set()
+        self._first_scan_after_prewarm = False
 
         # Cache for scanned items
         self._cached_items = None
@@ -415,19 +416,13 @@ class ComfyUIGalleryTab(BaseTab):
         # Store in cache
         self._cached_items = items
 
-        # Detect new items (normalize paths for consistent comparison)
-        current_paths = set(os.path.normpath(item['path']) for item in items)
-        self.log(f"[Gallery] Scan found {len(items)} items, {len(current_paths)} unique paths, known: {len(self._known_items)}")
+        # Detect new items (paths are already normalized at scan source)
+        current_paths = set(item['path'] for item in items)
         if self._initial_scan_done:
-            # _known_items is already normalized, no need to normalize again
             new_paths = current_paths - self._known_items
             self._new_items.update(new_paths)
             if new_paths:
                 self.log(f"[Gallery] {len(new_paths)} new item(s) detected")
-                # Debug: log a few examples
-                examples = list(new_paths)[:3]
-                for ex in examples:
-                    self.log(f"[Gallery] New item example: {ex}")
         self._known_items = current_paths
 
         # Apply filter and sort
@@ -435,7 +430,13 @@ class ComfyUIGalleryTab(BaseTab):
         sorted_items = self._manager.sort_items(filtered_items, self._sort_mode)
 
         # Display items (use incremental update after initial scan to avoid flashing)
-        incremental = self._initial_scan_done
+        # But NOT for the first scan after prewarm - that should replace to avoid duplicates
+        if self._first_scan_after_prewarm:
+            incremental = False
+            self._first_scan_after_prewarm = False
+            self.log("[Gallery] First scan after prewarm, using full replacement display")
+        else:
+            incremental = self._initial_scan_done
         self._manager.display_items(sorted_items, self._view_mode, incremental=incremental)
 
         # Update tracking state for smart redisplay
@@ -491,6 +492,7 @@ class ComfyUIGalleryTab(BaseTab):
             self._known_items.clear()
             self._new_items.clear()
             self._initial_scan_done = False
+            self._first_scan_after_prewarm = False
             self._cached_items = None
 
         # Update watcher

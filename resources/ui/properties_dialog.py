@@ -9,6 +9,7 @@ Shows comprehensive information about images and models including:
 """
 
 import os
+import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from PySide6.QtWidgets import (
@@ -17,6 +18,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QFont
+
+logger = logging.getLogger(__name__)
 
 
 class PropertiesDialog(QDialog):
@@ -229,7 +232,7 @@ class PropertiesDialog(QDialog):
             metadata = get_image_metadata(self.output_dir, filename)
             return metadata or {}
         except Exception as e:
-            print(f"Error loading metadata: {e}")
+            logger.error(f"Error loading metadata: {e}")
             return {}
     
     def _load_thumbnail(self):
@@ -240,7 +243,7 @@ class PropertiesDialog(QDialog):
                 scaled = pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.icon_label.setPixmap(scaled)
         except Exception as e:
-            print(f"Error loading thumbnail: {e}")
+            logger.error(f"Error loading thumbnail: {e}")
             self.icon_label.setText("🖼️")
             self.icon_label.setStyleSheet(self.icon_label.styleSheet() + "font-size: 32px;")
     
@@ -449,7 +452,7 @@ class PropertiesDialog(QDialog):
                 self.content_layout.addWidget(group)
         
         except Exception as e:
-            print(f"Error loading note: {e}")
+            logger.error(f"Error loading note: {e}")
     
     def _create_group(self, title: str) -> QGroupBox:
         """Create a styled group box."""
@@ -512,13 +515,13 @@ class PropertiesDialog(QDialog):
             clipboard = QApplication.clipboard()
             clipboard.setText(self.item_path)
             # Could show a temporary "Copied!" message here
-            print(f"Copied to clipboard: {self.item_path}")
+            logger.info(f"Copied to clipboard: {self.item_path}")
         except Exception as e:
-            print(f"Error copying to clipboard: {e}")
+            logger.error(f"Error copying to clipboard: {e}")
     
     def _apply_settings(self):
         """Apply settings to ComfyUI tab."""
         if self._metadata:
             self.copy_settings_requested.emit(self._metadata)
             # Could show a temporary "Applied!" message here
-            print("Settings applied to ComfyUI")
+            logger.info("Settings applied to ComfyUI")

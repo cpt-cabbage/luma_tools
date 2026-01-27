@@ -4,9 +4,12 @@ Provides SVG icon loading with color tinting support.
 """
 
 import os
+import logging
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage
 from PySide6.QtSvg import QSvgRenderer
+
+logger = logging.getLogger(__name__)
 
 
 # Icon directory path
@@ -99,7 +102,7 @@ class IconManager:
 
         if not os.path.exists(icon_path):
             # Return empty pixmap if icon doesn't exist
-            print(f"Icon not found: {icon_path}")
+            logger.warning(f"Icon not found: {icon_path}")
             return QPixmap(size, size)
 
         # Render SVG to pixmap
@@ -143,7 +146,7 @@ class IconManager:
         renderer = QSvgRenderer(path)
 
         if not renderer.isValid():
-            print(f"Invalid SVG: {path}")
+            logger.warning(f"Invalid SVG: {path}")
             return QPixmap(size, size)
 
         # Create image with transparency

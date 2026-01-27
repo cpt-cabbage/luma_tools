@@ -10,11 +10,14 @@ Handles:
 
 import os
 import json
+import logging
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 
 from core.config import COMFYUI_OUTPUT_EXTENSIONS
 from core.utils import ensure_directory
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -134,7 +137,7 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
     try:
         metadata_path = _get_metadata_path(output_dir)
     except Exception as e:
-        print(f"[Metadata] Error getting metadata path for {output_dir}: {e}")
+        logger.error(f"[Metadata] Error getting metadata path for {output_dir}: {e}")
         return {}
 
     if not os.path.exists(metadata_path):
@@ -150,7 +153,7 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
                 if cached_mtime == current_mtime and isinstance(cached_data, dict):
                     return cached_data
             except Exception as e:
-                print(f"[Metadata] Error reading cache: {e}")
+                logger.error(f"[Metadata] Error reading cache: {e}")
 
         # Load from file
         with open(metadata_path, 'r', encoding='utf-8') as f:
@@ -158,17 +161,17 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
 
             # Validate data is a dict
             if not isinstance(data, dict):
-                print(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
+                logger.warning(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
                 return {}
 
             _gallery_metadata_cache[output_dir] = (current_mtime, data)
             return data
 
     except json.JSONDecodeError as e:
-        print(f"[Metadata] Corrupted JSON in {metadata_path}: {e}")
+        logger.error(f"[Metadata] Corrupted JSON in {metadata_path}: {e}")
         return {}
     except Exception as e:
-        print(f"[Metadata] Error loading gallery metadata from {output_dir}: {e}")
+        logger.error(f"[Metadata] Error loading gallery metadata from {output_dir}: {e}")
         return {}
 
 
@@ -183,7 +186,7 @@ def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) 
         clear_gallery_metadata_cache(output_dir)
         return True
     except Exception as e:
-        print(f"Error saving gallery metadata: {e}")
+        logger.error(f"Error saving gallery metadata: {e}")
         return False
 
 
@@ -212,7 +215,7 @@ def add_image_metadata(
     try:
         metadata = load_gallery_metadata(output_dir)
     except Exception as e:
-        print(f"[Metadata] Error loading metadata, starting fresh: {e}")
+        logger.error(f"[Metadata] Error loading metadata, starting fresh: {e}")
         metadata = {}
 
     # Extract all source images and models from editable values
@@ -259,7 +262,7 @@ def add_image_metadata(
                         if basename:
                             source_images.append(basename)
                 except Exception as e:
-                    print(f"[Metadata] Error extracting image paths: {e}")
+                    logger.error(f"[Metadata] Error extracting image paths: {e}")
                 continue
             elif widget_type == '3d_model':
                 # Collect 3D model paths
@@ -274,7 +277,7 @@ def add_image_metadata(
                         if basename:
                             source_models.append(basename)
                 except Exception as e:
-                    print(f"[Metadata] Error extracting model paths: {e}")
+                    logger.error(f"[Metadata] Error extracting model paths: {e}")
 
             # Serialize editable value
             try:
@@ -286,14 +289,14 @@ def add_image_metadata(
                     "value": value,
                 }
             except Exception as e:
-                print(f"[Metadata] Error serializing editable value for node {node_id}: {e}")
+                logger.error(f"[Metadata] Error serializing editable value for node {node_id}: {e}")
 
     # Deduplicate source lists while preserving order
     try:
         source_images = list(dict.fromkeys(source_images))  # Remove dupes, keep order
         source_models = list(dict.fromkeys(source_models))
     except Exception as e:
-        print(f"[Metadata] Error deduplicating sources: {e}")
+        logger.error(f"[Metadata] Error deduplicating sources: {e}")
 
     prefix_key = output_prefix.rstrip('_') if output_prefix else "unknown"
 
@@ -317,7 +320,7 @@ def add_image_metadata(
         metadata[f"_prefix_{prefix_key}"] = entry
         return save_gallery_metadata(output_dir, metadata)
     except Exception as e:
-        print(f"[Metadata] Error saving metadata: {e}")
+        logger.error(f"[Metadata] Error saving metadata: {e}")
         return False
 
 
@@ -368,7 +371,7 @@ def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) ->
                 if isinstance(value, dict):
                     return value
     except Exception as e:
-        print(f"[Metadata] Error during prefix lookup for {filename}: {e}")
+        logger.error(f"[Metadata] Error during prefix lookup for {filename}: {e}")
 
     return None
 

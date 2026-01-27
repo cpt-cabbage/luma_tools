@@ -4,6 +4,7 @@ Image viewer widgets for the gallery.
 Contains embedded and fullscreen viewers with support for images, 3D models, and videos.
 """
 import os
+import logging
 from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
@@ -13,6 +14,8 @@ from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
 from workers import Worker
+
+logger = logging.getLogger(__name__)
 
 
 class ZoomableImageWidget(QtWidgets.QGraphicsView):
@@ -235,7 +238,7 @@ class EmbeddedImageViewer(QWidget):
             self.image_stack.addWidget(self.video_widget)
             self._has_video_player = True
         except Exception as e:
-            print(f"Video player not available: {e}")
+            logger.warning(f"Video player not available: {e}")
             self._has_video_player = False
             self.video_widget = None
             self.media_player = None
@@ -409,7 +412,7 @@ class EmbeddedImageViewer(QWidget):
             else:
                 self.publish_to_ayon_btn.setToolTip("Publish this asset to AYON")
         except Exception as e:
-            print(f"Warning: Could not initialize AYON button: {e}")
+            logger.warning(f"Could not initialize AYON button: {e}")
             self.publish_to_ayon_btn.setEnabled(False)
             self.publish_to_ayon_btn.setToolTip("AYON is not available")
 
@@ -520,7 +523,7 @@ class EmbeddedImageViewer(QWidget):
 
                 # Create fresh viewer - GPU thread is already initialized, no flash expected
                 self.glb_viewer = ThreeJSViewerWidget()
-                print(f"✓ Created Three.js 3D viewer (GPU pre-warmed)")
+                logger.info("Created Three.js 3D viewer (GPU pre-warmed)")
                 self.glb_viewer.loadError.connect(self._on_3d_load_error)
                 self.glb_viewer.modelLoaded.connect(self._on_3d_model_loaded)
                 self.image_stack.addWidget(self.glb_viewer)
@@ -530,11 +533,9 @@ class EmbeddedImageViewer(QWidget):
                     callback(True)
                 return
             else:
-                print(f"✗ Three.js viewer not available - PySide6 WebEngine may be missing")
+                logger.warning("Three.js viewer not available - PySide6 WebEngine may be missing")
         except Exception as e:
-            print(f"✗ Three.js viewer failed: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Three.js viewer failed: {e}", exc_info=True)
 
         # No viewer available
         self._has_glb_viewer = False
@@ -710,7 +711,7 @@ class EmbeddedImageViewer(QWidget):
                     self.glb_viewer.set_light_strength(self._current_light_strength)
 
             except Exception as e:
-                print(f"Error applying viewer preferences: {e}")
+                logger.error(f"Error applying viewer preferences: {e}")
 
     def _on_3d_load_error(self, error_msg):
         """Handle 3D model loading error from Three.js viewer."""
@@ -804,7 +805,7 @@ class EmbeddedImageViewer(QWidget):
                         action.setCheckable(True)
                         action.setChecked(True)
         except Exception as e:
-            print(f"Error loading HDRI list: {e}")
+            logger.error(f"Error loading HDRI list: {e}")
 
         action = menu.exec_(self.lighting_btn.mapToGlobal(
             self.lighting_btn.rect().bottomLeft()))
@@ -828,7 +829,7 @@ class EmbeddedImageViewer(QWidget):
                 mode_enum = ShadingMode(mode)
                 self.glb_viewer.set_shading_mode(mode_enum)
             except Exception as e:
-                print(f"Error setting shading mode: {e}")
+                logger.error(f"Error setting shading mode: {e}")
 
         # Persist preference
         try:
@@ -849,7 +850,7 @@ class EmbeddedImageViewer(QWidget):
                 mode_enum = LightingMode(mode)
                 self.glb_viewer.set_lighting_mode(mode_enum)
             except Exception as e:
-                print(f"Error setting lighting mode: {e}")
+                logger.error(f"Error setting lighting mode: {e}")
 
         # Persist preference
         try:
@@ -866,7 +867,7 @@ class EmbeddedImageViewer(QWidget):
             try:
                 self.glb_viewer.load_hdri(hdri_path)
             except Exception as e:
-                print(f"Error loading HDRI: {e}")
+                logger.error(f"Error loading HDRI: {e}")
 
         # Persist preference
         try:
@@ -886,7 +887,7 @@ class EmbeddedImageViewer(QWidget):
             try:
                 self.glb_viewer.set_light_strength(strength)
             except Exception as e:
-                print(f"Error setting light strength: {e}")
+                logger.error(f"Error setting light strength: {e}")
 
         # Persist preference
         try:
@@ -916,7 +917,7 @@ class EmbeddedImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No prompt available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error copying prompt: {e}")
+            logger.error(f"Error copying prompt: {e}")
 
     def _copy_settings(self):
         """Apply all settings for current image to the ComfyUI tab."""
@@ -938,7 +939,7 @@ class EmbeddedImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No settings available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error applying settings: {e}")
+            logger.error(f"Error applying settings: {e}")
 
     def _publish_to_ayon(self):
         """Publish this image to AYON."""
@@ -957,10 +958,9 @@ class EmbeddedImageViewer(QWidget):
                 output_dir=self.output_dir
             )
             if success:
-                print(f"Successfully published image to AYON: {image_path}")
+                logger.info(f"Successfully published image to AYON: {image_path}")
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Failed to publish image to AYON: {e}", exc_info=True)
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(parent_window, "Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}")
 
@@ -1112,7 +1112,7 @@ class EmbeddedImageViewer(QWidget):
         try:
             subprocess.Popen(f'explorer /select,"{image_path}"')
         except Exception as e:
-            print(f"Error opening folder: {e}")
+            logger.error(f"Error opening folder: {e}")
 
     def _copy_path(self, image_path):
         clipboard = QApplication.clipboard()
@@ -1344,7 +1344,7 @@ class FullscreenImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No prompt available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error copying prompt: {e}")
+            logger.error(f"Error copying prompt: {e}")
 
     def _copy_settings(self):
         if not self.image_paths:
@@ -1365,7 +1365,7 @@ class FullscreenImageViewer(QWidget):
                 self.filename_label.setText(f"{filename} - No settings available")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
-            print(f"Error applying settings: {e}")
+            logger.error(f"Error applying settings: {e}")
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -1477,7 +1477,7 @@ class FullscreenImageViewer(QWidget):
         try:
             subprocess.Popen(f'explorer /select,"{image_path}"')
         except Exception as e:
-            print(f"Error opening folder: {e}")
+            logger.error(f"Error opening folder: {e}")
 
     def _copy_path(self, image_path):
         clipboard = QApplication.clipboard()

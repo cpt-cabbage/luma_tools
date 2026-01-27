@@ -6,7 +6,10 @@ Best for FBX files with skeleton/animation support.
 """
 
 import os
+import logging
 from typing import Set, List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -81,7 +84,7 @@ class AssimpModelLoader(BaseModelLoader):
             # Debug output
             num_meshes = len(scene.meshes) if scene.meshes else 0
             num_anims = len(scene.animations) if hasattr(scene, 'animations') and scene.animations else 0
-            print(f"Assimp loaded: {num_meshes} meshes, {num_anims} animations")
+            logger.info(f"Assimp loaded: {num_meshes} meshes, {num_anims} animations")
 
             # Extract all components
             model.materials = self._extract_materials(scene, base_dir)

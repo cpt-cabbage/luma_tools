@@ -15,6 +15,8 @@ The actual implementations are in:
 - image_viewers.py: Image and model viewing widgets
 """
 import os
+import logging
+logger = logging.getLogger(__name__)
 from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool, QFile, QTextStream
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
@@ -55,7 +57,7 @@ class MetadataCopyMixin:
 
     def _show_feedback(self, message, duration=1500):
         """Show UI feedback. Override in subclass for custom feedback."""
-        print(message)
+        logger.info(message)
 
     def _copy_prompt(self):
         """Copy prompt to clipboard with feedback."""
@@ -74,7 +76,7 @@ class MetadataCopyMixin:
             clipboard.setText(prompt, mode=clipboard.Mode.Clipboard)
             self._show_feedback(f"Prompt copied: {prompt[:50]}...")
         except Exception as e:
-            print(f"Error copying prompt: {e}")
+            logger.error(f"Error copying prompt: {e}")
             self._show_feedback("Error copying prompt")
 
     def _copy_settings(self):
@@ -85,7 +87,7 @@ class MetadataCopyMixin:
             return
 
         if not hasattr(self, 'copy_settings_requested'):
-            print("Error: copy_settings_requested signal not defined")
+            logger.error("copy_settings_requested signal not defined")
             return
 
         try:
@@ -93,7 +95,7 @@ class MetadataCopyMixin:
             path = getattr(self, 'image_path', getattr(self, 'model_path', 'unknown'))
             self._show_feedback(f"Settings applied from {os.path.basename(path)}")
         except Exception as e:
-            print(f"Error applying settings: {e}")
+            logger.error(f"Error applying settings: {e}")
             self._show_feedback("Error applying settings")
 
     def _copy_path(self, path=None):
@@ -110,34 +112,85 @@ class MetadataCopyMixin:
             clipboard.setText(path)
             self._show_feedback(f"Path copied: {os.path.basename(path)}")
         except Exception as e:
-            print(f"Error copying path: {e}")
+            logger.error(f"Error copying path: {e}")
             self._show_feedback("Error copying path")
 
 
 # ============================================================================
-# IMAGE THUMBNAIL CACHE
+# IMAGE THUMBNAIL CACHE (memory + disk)
 # ============================================================================
 
-# Global cache for image thumbnails to avoid reloading from disk
+import hashlib
+from core.utils import ensure_directory
+
+# Disk cache directory (shared with model thumbnails)
+_THUMBNAIL_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
+ensure_directory(_THUMBNAIL_CACHE_DIR)
+
+# In-memory cache for fast access within a session
 # Key: image path, Value: PNG bytes data
 _image_thumbnail_cache = {}
 _IMAGE_THUMBNAIL_CACHE_MAX_SIZE = 500  # Limit cache size
 
 
+def _get_thumbnail_disk_path(image_path):
+    """Get the disk cache path for an image thumbnail."""
+    path_hash = hashlib.md5(os.path.normpath(image_path).encode()).hexdigest()
+    return os.path.join(_THUMBNAIL_CACHE_DIR, f"img_{path_hash}.png")
+
+
 def get_cached_image_thumbnail(path):
-    """Get cached image thumbnail bytes if available."""
-    return _image_thumbnail_cache.get(path)
+    """Get cached image thumbnail bytes if available (memory then disk).
+
+    Returns PNG bytes if cached, None otherwise.
+    """
+    # Check in-memory cache first
+    data = _image_thumbnail_cache.get(path)
+    if data:
+        return data
+
+    # Check disk cache
+    cache_path = _get_thumbnail_disk_path(path)
+    if os.path.exists(cache_path):
+        try:
+            # Validate cache freshness against original file
+            if os.path.exists(path):
+                if os.path.getmtime(cache_path) < os.path.getmtime(path):
+                    # Cache is stale, remove it
+                    os.remove(cache_path)
+                    return None
+
+            with open(cache_path, 'rb') as f:
+                data = f.read()
+            if data:
+                # Promote to memory cache
+                _image_thumbnail_cache[path] = data
+                return data
+        except (OSError, IOError):
+            pass
+
+    return None
 
 
 def cache_image_thumbnail(path, data):
-    """Cache image thumbnail bytes."""
-    # Simple LRU-like behavior: if cache is full, clear oldest half
+    """Cache image thumbnail bytes (memory + disk)."""
+    if not data:
+        return
+
+    # Memory cache with LRU-like eviction
     if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
-        # Remove first half of entries (oldest)
         keys = list(_image_thumbnail_cache.keys())
         for key in keys[:len(keys) // 2]:
             del _image_thumbnail_cache[key]
     _image_thumbnail_cache[path] = data
+
+    # Write to disk cache
+    cache_path = _get_thumbnail_disk_path(path)
+    try:
+        with open(cache_path, 'wb') as f:
+            f.write(data)
+    except (OSError, IOError):
+        pass  # Disk write failed, memory cache still works
 
 
 # ============================================================================
@@ -699,7 +752,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 ))
                 return
         except Exception as e:
-            print(f"Error loading cached model thumbnail: {e}")
+            logger.error(f"Error loading cached model thumbnail: {e}")
         self.thumbnail_label.setPixmap(self._create_3d_placeholder("3D"))
         self._generate_model_thumbnail_async()
 
@@ -728,7 +781,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             pixmap = service.generate_thumbnail_sync(self.path)
             self._on_model_thumbnail_generated(pixmap)
         except Exception as e:
-            print(f"Error generating model thumbnail: {e}")
+            logger.error(f"Error generating model thumbnail: {e}")
             self._on_thumbnail_error()
 
     def _on_model_thumbnail_generated(self, pixmap):
@@ -983,7 +1036,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 filename = os.path.basename(self.path)
                 self._cached_metadata = get_image_metadata(self.output_dir, filename) or {}
             except Exception as e:
-                print(f"Error loading metadata for {self.path}: {e}")
+                logger.error(f"Error loading metadata for {self.path}: {e}")
                 self._cached_metadata = {}
         return self._cached_metadata
 
@@ -1094,9 +1147,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
 
             menu.exec_(self.mapToGlobal(pos))
         except Exception as e:
-            import traceback
-            print(f"[ERROR] Exception in _show_context_menu: {e}")
-            traceback.print_exc()
+            logger.error(f"Exception in _show_context_menu: {e}", exc_info=True)
 
     def _show_batch_context_menu(self, pos):
         """Show context menu for batch operations on multiple selected items."""
@@ -1208,30 +1259,30 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
             publish_comfyui_asset_to_ayon(self.path, parent_window, self.output_dir)
         except Exception as e:
-            print(f"Error publishing to AYON: {e}")
+            logger.error(f"Error publishing to AYON: {e}")
 
     def _open_item(self):
         try:
             os.startfile(self.path)
         except Exception as e:
-            print(f"Error opening item: {e}")
+            logger.error(f"Error opening item: {e}")
 
     def _open_folder(self):
         import subprocess
         try:
             subprocess.Popen(f'explorer /select,"{self.path}"')
         except Exception as e:
-            print(f"Error opening folder: {e}")
+            logger.error(f"Error opening folder: {e}")
 
     def _view_input(self, input_path):
         """Open the input image that was used to generate this output."""
         if not input_path or not os.path.exists(input_path):
-            print(f"Input image not found: {input_path}")
+            logger.warning(f"Input image not found: {input_path}")
             return
         try:
             os.startfile(input_path)
         except Exception as e:
-            print(f"Error opening input image: {e}")
+            logger.error(f"Error opening input image: {e}")
 
     def _delete_item(self):
         from PySide6.QtWidgets import QMessageBox
@@ -1249,7 +1300,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if reply == QMessageBox.Yes:
             try:
                 os.remove(self.path)
-                print(f"Deleted file: {self.path}")
+                logger.info(f"Deleted file: {self.path}")
                 self.deleted.emit(self.path)
                 container = self.parentWidget()
                 if container:
@@ -1270,7 +1321,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                     self.setParent(None)
                     self.deleteLater()
             except Exception as e:
-                print(f"Error deleting file: {e}")
+                logger.error(f"Error deleting file: {e}")
                 QMessageBox.critical(parent_window, "Delete Error", f"Could not delete file:\n{e}")
 
     def _edit_item(self):
@@ -1288,7 +1339,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 self._tooltip_loaded = False
                 self._load_tooltip_async()
         except Exception as e:
-            print(f"Error opening edit item dialog: {e}")
+            logger.error(f"Error opening edit item dialog: {e}")
 
     def _show_properties(self):
         """Show comprehensive properties dialog for this item."""
@@ -1310,7 +1361,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             )
             dialog.exec()
         except Exception as e:
-            print(f"Error showing properties: {e}")
+            logger.error(f"Error showing properties: {e}")
 
 
 # Aliases for backwards compatibility

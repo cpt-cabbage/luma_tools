@@ -6,6 +6,7 @@ Falls back gracefully if PyEnchant is not available.
 """
 
 import re
+import logging
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
     QSyntaxHighlighter,
@@ -16,6 +17,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QTextEdit, QMenu
 
+logger = logging.getLogger(__name__)
+
 # Try to import enchant, gracefully degrade if not available
 try:
     import enchant
@@ -23,7 +26,7 @@ try:
     ENCHANT_AVAILABLE = True
 except ImportError:
     ENCHANT_AVAILABLE = False
-    print("PyEnchant not available - spell checking disabled")
+    logger.info("PyEnchant not available - spell checking disabled")
 
 
 class SpellCheckHighlighter(QSyntaxHighlighter):
@@ -60,7 +63,7 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
                     available = enchant.list_languages()
                     if available:
                         self.dict = enchant.Dict(available[0])
-                        print(f"Using {available[0]} dictionary for spell check")
+                        logger.info(f"Using {available[0]} dictionary for spell check")
 
                 if self.dict:
                     # Get tokenizer with email and URL filters
@@ -74,7 +77,7 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
                         self.tokenizer = get_tokenizer()
 
             except Exception as e:
-                print(f"Error initializing spell checker: {e}")
+                logger.error(f"Error initializing spell checker: {e}")
                 self.dict = None
 
     def highlightBlock(self, text):
@@ -135,7 +138,7 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
                 self.dict.add(word)
                 self.rehighlight()
             except Exception as e:
-                print(f"Error adding word to dictionary: {e}")
+                logger.error(f"Error adding word to dictionary: {e}")
 
     def ignore_word(self, word):
         """Ignore a word for this session."""
@@ -144,7 +147,7 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
                 self.dict.add_to_session(word)
                 self.rehighlight()
             except Exception as e:
-                print(f"Error ignoring word: {e}")
+                logger.error(f"Error ignoring word: {e}")
 
 
 class SpellCheckTextEdit(QTextEdit):

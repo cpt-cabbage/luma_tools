@@ -3,7 +3,11 @@ Small reusable UI widgets and utilities.
 
 Contains simple widgets and helper functions used across the application.
 """
+import logging
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
 from PySide6.QtWidgets import (
     QWidget, QMenu, QPushButton, QHBoxLayout, QLabel, QSizePolicy
 )
@@ -780,12 +784,12 @@ class StackedThumbnailWidget(QWidget):
             )
             self._on_thumbnail_loaded(scaled)
         else:
-            print(f"[StackedThumbnail] Model thumbnail generation returned null for: {path}")
+            logger.warning("Model thumbnail generation returned null for: %s", path)
 
     def _on_model_thumbnail_error(self, path, service, error_msg=""):
         """Handle model thumbnail generation error."""
         service.set_pending(path, False)
-        print(f"[StackedThumbnail] Model thumbnail error for {path}: {error_msg}")
+        logger.error("Model thumbnail error for %s: %s", path, error_msg)
 
     def _show_model_placeholder(self):
         """Show a 3D model placeholder with modern styling."""
@@ -1213,7 +1217,7 @@ class StackedThumbnailWidget(QWidget):
                 filename = os.path.basename(item_path)
                 metadata = get_image_metadata(output_dir, filename) or {}
             except Exception as e:
-                print(f"Could not load metadata for stack top item: {e}")
+                logger.warning("Could not load metadata for stack top item: %s", e)
             
             dialog = PropertiesDialog(
                 item_path, 
@@ -1224,9 +1228,7 @@ class StackedThumbnailWidget(QWidget):
             
             dialog.exec()
         except Exception as e:
-            import traceback
-            print(f"Error opening properties dialog for stack: {e}")
-            traceback.print_exc()
+            logger.error("Error opening properties dialog for stack: %s", e, exc_info=True)
 
     def toggle_expansion(self):
         """Toggle between expanded and collapsed state."""

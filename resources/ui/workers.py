@@ -3,9 +3,12 @@ Threading utilities for background operations.
 
 Provides QThread workers for running functions without blocking the GUI.
 """
+import logging
 import traceback
 from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, Slot
 from PySide6.QtWidgets import QApplication
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerSignals(QObject):
@@ -77,8 +80,8 @@ class Worker(QRunnable):
             error_msg = str(e)
             tb = traceback.format_exc()
             self.signals.error.emit(error_msg, tb)
-            print(f"Worker error: {error_msg}")
-            print(tb)
+            logger.error(f"Worker error: {error_msg}")
+            logger.error(tb)
 
 
 class ThreadedOperation(QObject):

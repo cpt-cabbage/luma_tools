@@ -4,10 +4,13 @@ File system operations for Luma Tools.
 Handles directory scanning, file discovery, and file system queries.
 """
 
+import logging
 import os
 import fileseq
 from pathlib import Path
 from typing import List, Tuple
+
+logger = logging.getLogger(__name__)
 
 from core.config import (
     LOOKDEV_SUBPATH,
@@ -125,7 +128,7 @@ def read_comp_file(compfile, hip_file_name):
                         foundcomps = foundcomps.split(r"/")[-1]
                         renders_in_comp.append(foundcomps)
     except Exception as e:
-        print(f"Error reading comp file {compfile}: {e}")
+        logger.error(f"Error reading comp file {compfile}: {e}")
 
     return renders_in_comp
 
@@ -152,7 +155,7 @@ def find_render_directory(shot_path):
             return render_directory, render_folders
 
     except Exception as e:
-        print(f"Error finding render directory: {e}")
+        logger.error(f"Error finding render directory: {e}")
 
     return None, []
 
@@ -179,7 +182,7 @@ def find_usd_directory(shot_path):
             return usd_directory, usd_folders
 
     except Exception as e:
-        print(f"Error finding USD directory: {e}")
+        logger.error(f"Error finding USD directory: {e}")
 
     return None, []
 

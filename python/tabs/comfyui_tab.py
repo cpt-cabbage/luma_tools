@@ -13,7 +13,8 @@ from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QMenu, QInputDialog, QDialog, QVBoxLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
+    QSizePolicy
 )
 from PySide6.QtGui import QPixmap
 
@@ -120,38 +121,36 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _setup_workflow_selector(self):
         """Set up the workflow selector dropdown for multi-workflow models."""
-        # Create workflow selector row (hidden by default)
-        self._workflow_selector_widget = QWidget()
-        workflow_selector_layout = QHBoxLayout(self._workflow_selector_widget)
-        workflow_selector_layout.setContentsMargins(0, 5, 0, 5)
+        # Add workflow selector to the existing button row instead of creating a new row
+        if not hasattr(self.ui, 'comfyuiPresetButtonsLayout'):
+            return
 
-        label = QLabel("Workflow:")
-        label.setFixedWidth(100)
-        workflow_selector_layout.addWidget(label)
+        # Create spacer to separate buttons from workflow selector
+        spacer = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
+        self.ui.comfyuiPresetButtonsLayout.addItem(spacer)
+
+        # Add workflow label and combo to button row
+        self._workflow_label = QLabel("Workflow:")
+        self._workflow_label.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_label)
 
         self._workflow_selector_combo = QtWidgets.QComboBox()
-        self._workflow_selector_combo.setMinimumWidth(200)
+        self._workflow_selector_combo.setMinimumWidth(150)
+        self._workflow_selector_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._workflow_selector_combo.currentTextChanged.connect(self._on_workflow_selected)
-        workflow_selector_layout.addWidget(self._workflow_selector_combo)
-
-        workflow_selector_layout.addStretch()
-
-        self._workflow_selector_widget.setVisible(False)
-
-        # Insert into comfyuiWorkflowLayout after comfyuiPresetLayout
-        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
-            # Insert after the preset info row (index 2, after buttons and preset label)
-            self.ui.comfyuiWorkflowLayout.insertWidget(2, self._workflow_selector_widget)
+        self._workflow_selector_combo.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_selector_combo)
 
     def _setup_note_display(self):
         """Set up the note display area for showing model/workflow notes."""
         # Create note display widget (hidden by default)
         self._note_display_widget = QWidget()
         note_layout = QHBoxLayout(self._note_display_widget)
-        note_layout.setContentsMargins(0, 0, 0, 5)
+        note_layout.setContentsMargins(0, 0, 0, 2)
+        note_layout.setSpacing(6)
 
         note_icon_label = QLabel("Note:")
-        note_icon_label.setFixedWidth(100)
+        note_icon_label.setFixedWidth(70)
         note_icon_label.setStyleSheet("color: #4a9eff; font-weight: bold;")
         note_layout.addWidget(note_icon_label)
 
@@ -171,11 +170,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         from comfyui.presets_manager import is_workflow_preset_multi, get_workflow_preset_workflows
 
         if not self.state_manager.current_preset_name:
-            self._workflow_selector_widget.setVisible(False)
+            self._workflow_label.setVisible(False)
+            self._workflow_selector_combo.setVisible(False)
             return
 
         is_multi = is_workflow_preset_multi(self.state_manager.current_preset_name)
-        self._workflow_selector_widget.setVisible(is_multi)
+        self._workflow_label.setVisible(is_multi)
+        self._workflow_selector_combo.setVisible(is_multi)
 
         if is_multi:
             # Populate workflow options

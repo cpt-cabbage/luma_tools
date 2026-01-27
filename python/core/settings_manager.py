@@ -7,6 +7,7 @@ Uses a registry pattern to minimize boilerplate for simple settings.
 
 import os
 import json
+import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, Callable, List
 from .config import (
@@ -17,6 +18,8 @@ from .config import (
     DEFAULT_GLOBAL_SETTINGS_PATH,
     GLOBAL_SETTINGS_FILENAME,
 )
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # SETTINGS REGISTRY
@@ -144,7 +147,7 @@ def ensure_settings_dir():
     from .utils import ensure_directory
     if not os.path.exists(USER_SETTINGS_DIR):
         ensure_directory(USER_SETTINGS_DIR)
-        print(f"Created settings directory: {USER_SETTINGS_DIR}")
+        logger.info(f"Created settings directory: {USER_SETTINGS_DIR}")
 
 
 # ============================================================================
@@ -171,7 +174,7 @@ def load_user_settings() -> Dict[str, Any]:
             _user_settings_cache = settings
             return settings.copy()
     except Exception as e:
-        print(f"Error loading user settings: {e}")
+        logger.error(f"Error loading user settings: {e}")
         _user_settings_cache = default_settings
         return default_settings.copy()
 
@@ -189,7 +192,7 @@ def save_user_settings(settings: Dict[str, Any]):
         os.replace(temp_file, USER_SETTINGS_FILE)
         _user_settings_cache = settings.copy()
     except Exception as e:
-        print(f"Error saving user settings: {e}")
+        logger.error(f"Error saving user settings: {e}")
         # Clean up temp file if it exists
         temp_file = USER_SETTINGS_FILE + ".tmp"
         if os.path.exists(temp_file):
@@ -223,7 +226,7 @@ def set_global_settings_path(path: str):
     save_user_settings(settings)
     _global_settings_path_cache = None
     _global_settings_cache = None
-    print(f"Set global settings path to: {path}")
+    logger.info(f"Set global settings path to: {path}")
 
 
 def _get_global_settings_file() -> str:
@@ -237,7 +240,7 @@ def _ensure_global_settings_dir():
     path = get_global_settings_path()
     if not os.path.exists(path):
         ensure_directory(path)
-        print(f"Created global settings directory: {path}")
+        logger.info(f"Created global settings directory: {path}")
 
 
 def load_global_settings() -> Dict[str, Any]:
@@ -263,7 +266,7 @@ def load_global_settings() -> Dict[str, Any]:
             _global_settings_cache = settings
             return settings.copy()
     except Exception as e:
-        print(f"Error loading global settings: {e}")
+        logger.error(f"Error loading global settings: {e}")
         _global_settings_cache = default_settings
         return default_settings.copy()
 
@@ -278,7 +281,7 @@ def save_global_settings(settings: Dict[str, Any]):
             json.dump(settings, f, indent=2)
         _global_settings_cache = settings.copy()
     except Exception as e:
-        print(f"Error saving global settings: {e}")
+        logger.error(f"Error saving global settings: {e}")
 
 
 # ============================================================================
@@ -304,7 +307,7 @@ class SettingsAccessor:
         settings[key] = value
         self._save_fn(settings)
         if verbose:
-            print(f"Set {key} to: {value}")
+            logger.info(f"Set {key} to: {value}")
 
 
 _global_settings = SettingsAccessor('global')
@@ -382,7 +385,7 @@ def add_hdri_to_list(name: str, path: str):
     hdri_list.append({"name": name, "path": path})
     settings["hdri_list"] = hdri_list
     save_global_settings(settings)
-    print(f"Added HDRI to global settings: {name}")
+    logger.info(f"Added HDRI to global settings: {name}")
 
 
 def remove_hdri_from_list(name: str):
@@ -391,7 +394,7 @@ def remove_hdri_from_list(name: str):
     hdri_list = settings.get("hdri_list", [])
     settings["hdri_list"] = [h for h in hdri_list if h.get("name") != name]
     save_global_settings(settings)
-    print(f"Removed HDRI from global settings: {name}")
+    logger.info(f"Removed HDRI from global settings: {name}")
 
 
 # ============================================================================
@@ -432,7 +435,7 @@ def _add_user_to_list(username: str, settings_key: str, role_name: str):
     if username.lower() not in existing_lower:
         settings[settings_key].append(username)
         save_global_settings(settings)
-        print(f"Added {role_name} user: {username}")
+        logger.info(f"Added {role_name} user: {username}")
 
 
 def _remove_user_from_list(username: str, settings_key: str, role_name: str):
@@ -444,7 +447,7 @@ def _remove_user_from_list(username: str, settings_key: str, role_name: str):
     settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
     if len(settings[settings_key]) < len(original_list):
         save_global_settings(settings)
-        print(f"Removed {role_name} user: {username}")
+        logger.info(f"Removed {role_name} user: {username}")
 
 
 def get_admin_users() -> List[str]:

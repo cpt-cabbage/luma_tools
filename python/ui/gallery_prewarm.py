@@ -7,8 +7,11 @@ Scans directories, pre-generates GLB thumbnails, and caches results.
 
 import os
 import sys
+import logging
 import subprocess
 from typing import Optional, List, Dict, Callable
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -39,9 +42,9 @@ def get_gallery_output_path() -> Optional[str]:
             try:
                 from core.utils import ensure_directory
                 ensure_directory(user_path)
-                print(f"[PreWarm] Created gallery directory: {user_path}")
+                logger.info(f"[PreWarm] Created gallery directory: {user_path}")
             except Exception as e:
-                print(f"[PreWarm] Warning: Could not create gallery directory: {user_path} - {e}")
+                logger.warning(f"[PreWarm] Could not create gallery directory: {user_path} - {e}")
                 # Fall back to network_path if user folder creation failed
                 if os.path.isdir(network_path):
                     return network_path
@@ -49,7 +52,7 @@ def get_gallery_output_path() -> Optional[str]:
 
         return user_path
     except Exception as e:
-        print(f"[PreWarm] Error getting gallery path: {e}")
+        logger.error(f"[PreWarm] Error getting gallery path: {e}")
         return None
 
 
@@ -76,7 +79,7 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
             for filename in files:
                 ext = os.path.splitext(filename)[1].lower()
                 if ext in supported_extensions:
-                    full_path = os.path.join(root, filename)
+                    full_path = os.path.normpath(os.path.join(root, filename))
                     try:
                         mtime = os.path.getmtime(full_path)
                     except OSError:
@@ -99,7 +102,7 @@ def scan_gallery_items(output_dir: str) -> List[Dict]:
                         'name': filename.lower()
                     })
     except Exception as e:
-        print(f"[PreWarm] Error scanning directory: {e}")
+        logger.error(f"[PreWarm] Error scanning directory: {e}")
 
     return items
 
@@ -125,7 +128,7 @@ def prewarm_model_thumbnails(items: List[Dict],
         from models.thumbnail_service import get_model_thumbnail_service
         service = get_model_thumbnail_service()
     except ImportError:
-        print("[PreWarm] Model thumbnail service not available")
+        logger.warning("[PreWarm] Model thumbnail service not available")
         return 0
 
     # Filter to just models
@@ -135,7 +138,7 @@ def prewarm_model_thumbnails(items: List[Dict],
     if total_models == 0:
         return 0
 
-    print(f"[PreWarm] Found {total_models} 3D models total")
+    logger.info(f"[PreWarm] Found {total_models} 3D models total")
 
     if progress_callback:
         progress_callback(0, f"Checking {total_models} model thumbnails...")
@@ -149,7 +152,7 @@ def prewarm_model_thumbnails(items: List[Dict],
         else:
             uncached.append(m)
 
-    print(f"[PreWarm] {cached_count} already cached, {len(uncached)} need thumbnails")
+    logger.info(f"[PreWarm] {cached_count} already cached, {len(uncached)} need thumbnails")
 
     if not uncached:
         if progress_callback:
@@ -162,7 +165,7 @@ def prewarm_model_thumbnails(items: List[Dict],
     generated = 0
     skipped = len(uncached) - total
 
-    print(f"[PreWarm] Generating {total} model thumbnails (max {max_items})")
+    logger.info(f"[PreWarm] Generating {total} model thumbnails (max {max_items})")
 
     for i, item in enumerate(to_generate):
         filename = os.path.basename(item['path'])
@@ -178,7 +181,7 @@ def prewarm_model_thumbnails(items: List[Dict],
             if result:
                 generated += 1
         except Exception as e:
-            print(f"[PreWarm] Error generating thumbnail for {item['path']}: {e}")
+            logger.error(f"[PreWarm] Error generating thumbnail for {item['path']}: {e}")
 
     # Final message
     if progress_callback:
@@ -219,13 +222,13 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     output_dir = get_gallery_output_path()
     if not output_dir:
-        print("[PreWarm] No gallery path configured, skipping pre-warm")
+        logger.info("[PreWarm] No gallery path configured, skipping pre-warm")
         if progress_callback:
             progress_callback(100, "No gallery configured")
         return result
 
     result['output_dir'] = output_dir
-    print(f"[PreWarm] Gallery path: {output_dir}")
+    logger.info(f"[PreWarm] Gallery path: {output_dir}")
 
     # Step 2: Scan directory
     if progress_callback:
@@ -236,7 +239,7 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 
     image_count = sum(1 for i in items if i['type'] == 'image')
     model_count = sum(1 for i in items if i['type'] == 'model')
-    print(f"[PreWarm] Found {image_count} images, {model_count} 3D models")
+    logger.info(f"[PreWarm] Found {image_count} images, {model_count} 3D models")
 
     # 3D model thumbnails are generated lazily when visible in gallery
     if progress_callback:

@@ -6,10 +6,13 @@ and task log analysis for ComfyUI workflows.
 """
 
 import os
+import logging
 import subprocess
 from typing import Optional, List, Dict, Any, Tuple
 
 from core.config import DEADLINE_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
@@ -117,7 +120,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         progress = int((completed_tasks / max(total_tasks, 1)) * 100)
 
         # Debug: log raw status from Deadline
-        print(f"[Poll Debug] Job {job_id}: raw_status='{status}', completed={completed_tasks}/{total_tasks}, failed={failed_tasks}")
+        logger.info(f"[Poll Debug] Job {job_id}: raw_status='{status}', completed={completed_tasks}/{total_tasks}, failed={failed_tasks}")
 
         # Normalize "Complete" to "Completed" for consistency
         if status == "Complete":
@@ -132,14 +135,14 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             elif queued_tasks > 0 and completed_tasks == 0:
                 status = "Queued"
 
-        print(f"[Poll Debug] Job {job_id}: final_status='{status}'")
+        logger.info(f"[Poll Debug] Job {job_id}: final_status='{status}'")
 
         # Get queue position info for queued/pending jobs
         queue_info = {}
         if status in ("Queued", "Pending"):
             queue_info = get_queue_info(job_id)
             if queue_info.get("queue_position", 0) > 0:
-                print(f"[Poll Debug] Job {job_id}: position {queue_info['queue_position']}/{queue_info['total_queued']} in queue")
+                logger.info(f"[Poll Debug] Job {job_id}: position {queue_info['queue_position']}/{queue_info['total_queued']} in queue")
 
         # Try to get detailed progress for rendering tasks
         task_progress = None
@@ -154,27 +157,27 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
                     output_prefix = job_name[len("LUMA TOOLS - "):]
                     log_content = get_runner_log_from_network(output_dir, output_prefix)
                     if log_content:
-                        print(f"[Poll Debug] Job {job_id}: Got {len(log_content)} bytes from network log")
+                        logger.info(f"[Poll Debug] Job {job_id}: Got {len(log_content)} bytes from network log")
 
             # Fall back to Deadline task log if network log not available
             if not log_content:
                 active_task_id = completed_tasks
                 log_content = get_task_log(job_id, active_task_id)
                 if log_content:
-                    print(f"[Poll Debug] Job {job_id} task {active_task_id}: Got {len(log_content)} bytes from Deadline log")
+                    logger.info(f"[Poll Debug] Job {job_id} task {active_task_id}: Got {len(log_content)} bytes from Deadline log")
 
             if log_content:
                 task_progress = extract_task_progress(log_content)
                 if task_progress:
                     is_loading_model = task_progress.get('is_loading_model', False)
                     if is_loading_model:
-                        print(f"[Poll Debug] Job {job_id}: Loading model...")
+                        logger.info(f"[Poll Debug] Job {job_id}: Loading model...")
                     else:
-                        print(f"[Poll Debug] Job {job_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
+                        logger.info(f"[Poll Debug] Job {job_id}: {task_progress['progress_pct']}% ({task_progress['current_node']}/{task_progress['total_nodes']} nodes)")
                 else:
-                    print(f"[Poll Debug] Job {job_id}: No progress extracted from log")
+                    logger.info(f"[Poll Debug] Job {job_id}: No progress extracted from log")
             else:
-                print(f"[Poll Debug] Job {job_id}: No log content available yet")
+                logger.info(f"[Poll Debug] Job {job_id}: No log content available yet")
 
         return {
             "status": status,
@@ -244,7 +247,7 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
     import glob
     try:
         if not output_dir or not os.path.isdir(output_dir):
-            print(f"[Debug] Output dir not valid: {output_dir}")
+            logger.info(f"[Debug] Output dir not valid: {output_dir}")
             return None
 
         # Find the most recent log file matching the job name
@@ -253,27 +256,25 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
 
         # Search recursively in subdirectories (logs written to user/uuid/ subdirs)
         pattern = os.path.join(output_dir, "**", f"comfyui_runner_{safe_name}_*.log")
-        print(f"[Debug] Looking for log with pattern: {pattern}")
+        logger.info(f"[Debug] Looking for log with pattern: {pattern}")
         log_files = glob.glob(pattern, recursive=True)
-        print(f"[Debug] Found {len(log_files)} log files: {log_files[:3] if len(log_files) > 3 else log_files}")
+        logger.info(f"[Debug] Found {len(log_files)} log files: {log_files[:3] if len(log_files) > 3 else log_files}")
 
         if not log_files:
             return None
 
         # Get the most recent log file
         latest_log = max(log_files, key=os.path.getmtime)
-        print(f"[Debug] Reading log file: {latest_log}")
+        logger.info(f"[Debug] Reading log file: {latest_log}")
 
         # Read the log file
         with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
-            print(f"[Debug] Read {len(content)} bytes from log file")
+            logger.info(f"[Debug] Read {len(content)} bytes from log file")
             return content
 
     except Exception as e:
-        print(f"[Debug] Error reading runner log: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[Debug] Error reading runner log: {e}", exc_info=True)
         return None
 
 
@@ -535,15 +536,15 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     """
     running_jobs = []
 
-    print(f"[find_user_running_jobs] Looking for jobs from user: '{username}'")
-    print(f"[find_user_running_jobs] DEADLINE_PATH: {DEADLINE_PATH}")
+    logger.info(f"[find_user_running_jobs] Looking for jobs from user: '{username}'")
+    logger.info(f"[find_user_running_jobs] DEADLINE_PATH: {DEADLINE_PATH}")
 
     if not DEADLINE_PATH:
-        print("[find_user_running_jobs] No DEADLINE_PATH configured")
+        logger.info("[find_user_running_jobs] No DEADLINE_PATH configured")
         return running_jobs
 
     if not username:
-        print("[find_user_running_jobs] No username provided")
+        logger.info("[find_user_running_jobs] No username provided")
         return running_jobs
 
     username_lower = username.lower()
@@ -551,7 +552,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     try:
         # Get all active/pending jobs from Deadline
         for status_filter in ["Active", "Pending"]:
-            print(f"[find_user_running_jobs] Querying Deadline for {status_filter} jobs...")
+            logger.info(f"[find_user_running_jobs] Querying Deadline for {status_filter} jobs...")
             result = subprocess.run(
                 [DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"],
                 capture_output=True,
@@ -560,11 +561,11 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
             )
 
             if result.returncode != 0:
-                print(f"[find_user_running_jobs] GetJobIdsFilter failed: {result.stderr}")
+                logger.error(f"[find_user_running_jobs] GetJobIdsFilter failed: {result.stderr}")
                 continue
 
             job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-            print(f"[find_user_running_jobs] Found {len(job_ids)} {status_filter} jobs on Deadline")
+            logger.info(f"[find_user_running_jobs] Found {len(job_ids)} {status_filter} jobs on Deadline")
 
             for job_id in job_ids:
                 job_result = subprocess.run(
@@ -609,7 +610,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
 
                 # Debug: show luma_tools jobs we're checking
                 if is_luma_job:
-                    print(f"[find_user_running_jobs] Job {job_id}: name='{job_name}', user='{job_user}', user_match={job_user.lower() == username_lower}")
+                    logger.info(f"[find_user_running_jobs] Job {job_id}: name='{job_name}', user='{job_user}', user_match={job_user.lower() == username_lower}")
 
                 if is_luma_job and job_user.lower() == username_lower:
                     running_jobs.append({
@@ -622,12 +623,10 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
 
         # Sort by submit date (oldest first) so we process in order
         running_jobs.sort(key=lambda x: x["submit_date"])
-        print(f"[find_user_running_jobs] Total matching jobs found: {len(running_jobs)}")
+        logger.info(f"[find_user_running_jobs] Total matching jobs found: {len(running_jobs)}")
 
     except Exception as e:
-        print(f"[find_user_running_jobs] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[find_user_running_jobs] Error: {e}", exc_info=True)
 
     return running_jobs
 

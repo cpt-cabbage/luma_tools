@@ -6,7 +6,10 @@ Best for GLB/GLTF with embedded textures - properly extracts texture data.
 """
 
 import os
+import logging
 from typing import Set
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -157,5 +160,5 @@ class TrimeshModelLoader(BaseModelLoader):
             material.diffuse_texture = texture_name
             return texture_counter + 1
         except Exception as e:
-            print(f"Error saving texture: {e}")
+            logger.error(f"Error saving texture: {e}")
             return texture_counter

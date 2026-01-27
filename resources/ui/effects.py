@@ -3,12 +3,16 @@ UI animation and visual effect utilities.
 
 Provides animations, tab glow effects, and visual feedback.
 """
+import logging
+
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect,
     QSequentialAnimationGroup, QObject, QRectF, Signal
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush, QPen
+
+logger = logging.getLogger(__name__)
 
 
 class TabGlowEffect(QObject):
@@ -1037,7 +1041,7 @@ class UIAnimations:
             message: Success message
             show_in_status: If True, also show in status bar
         """
-        print(f"SUCCESS: {message}")
+        logger.info(f"SUCCESS: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
             self._status_queue.post(f"✓ {message}", StatusColors.SUCCESS,
@@ -1051,7 +1055,7 @@ class UIAnimations:
             message: Error message
             show_in_status: If True, also show in status bar
         """
-        print(f"ERROR: {message}")
+        logger.error(f"ERROR: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
             self._status_queue.post(f"✗ {message}", StatusColors.ERROR,
@@ -1065,7 +1069,7 @@ class UIAnimations:
             message: Warning message
             show_in_status: If True, also show in status bar
         """
-        print(f"WARNING: {message}")
+        logger.warning(f"WARNING: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
             self._status_queue.post(f"⚠ {message}", StatusColors.WARNING,
@@ -1079,7 +1083,7 @@ class UIAnimations:
             message: Info message
             show_in_status: If True, also show in status bar
         """
-        print(f"INFO: {message}")
+        logger.info(f"INFO: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
             self._status_queue.post(message, StatusColors.INFO,

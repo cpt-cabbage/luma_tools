@@ -6,9 +6,12 @@ Extracted from comfyui_tab.py to improve maintainability.
 """
 
 import os
+import logging
 from typing import Dict, Any, Optional, List, Tuple
 
 from PySide6 import QtWidgets
+
+logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy
 )
@@ -94,8 +97,8 @@ class ComfyUIWidgetManager:
         total_image_nodes = sum(1 for node in editable_nodes
                                if node.widget_type == 'image'
                                and node_overrides.get(str(node.node_id), node_overrides.get(node.title, {})).get("enabled", True))
-        print(f"[ComfyUI] Node overrides: {node_overrides}")
-        print(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
+        logger.info(f"[ComfyUI] Node overrides: {node_overrides}")
+        logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
 
         # Collect widgets separately for horizontal layout
         non_image_widgets = []  # List of (widget, node) tuples for text, toggles, etc.
@@ -109,7 +112,7 @@ class ComfyUIWidgetManager:
             override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
             if not override.get("enabled", True):
                 # Node is disabled, skip it
-                print(f"[ComfyUI] Skipping disabled node: {node.title} (ID: {node.node_id}, type: {node.widget_type})")
+                logger.info(f"[ComfyUI] Skipping disabled node: {node.title} (ID: {node.node_id}, type: {node.widget_type})")
                 continue
 
             # Apply default value override if present (for text and string nodes)
@@ -132,11 +135,11 @@ class ComfyUIWidgetManager:
 
         # Layout strategy: if we have both non-image and image widgets, arrange horizontally
         # (non-image on left, images on right). Otherwise, arrange vertically.
-        print(f"[ComfyUI] Non-image widgets: {len(non_image_widgets)}, Image widgets: {len(image_widgets)}")
+        logger.info(f"[ComfyUI] Non-image widgets: {len(non_image_widgets)}, Image widgets: {len(image_widgets)}")
 
         if non_image_widgets and image_widgets:
             # Mixed layout: Create horizontal container with left (non-image) and right (image) sections
-            print(f"[ComfyUI] Creating horizontal layout: {len(non_image_widgets)} non-image on left, {len(image_widgets)} image on right")
+            logger.info(f"[ComfyUI] Creating horizontal layout: {len(non_image_widgets)} non-image on left, {len(image_widgets)} image on right")
             horizontal_container = QWidget()
             horizontal_layout = QHBoxLayout(horizontal_container)
             horizontal_layout.setContentsMargins(0, 0, 0, 0)
@@ -171,7 +174,7 @@ class ComfyUIWidgetManager:
         elif image_widgets and not non_image_widgets:
             # Only image widgets: arrange horizontally if multiple, vertically if single
             if len(image_widgets) > 1:
-                print(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
+                logger.info(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
                 image_row_container = QWidget()
                 image_row_layout = QHBoxLayout(image_row_container)
                 image_row_layout.setContentsMargins(0, 5, 0, 5)
@@ -184,14 +187,14 @@ class ComfyUIWidgetManager:
                 image_row_container.is_image_row = True
             else:
                 # Single image widget
-                print(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
+                logger.info(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
                 widget = image_widgets[0][0]
                 widget.setVisible(True)
                 self.layout.addWidget(widget, 1)  # Add stretch factor
 
         elif non_image_widgets and not image_widgets:
             # Only non-image widgets: arrange vertically
-            print(f"[ComfyUI] Adding {len(non_image_widgets)} non-image widgets vertically")
+            logger.info(f"[ComfyUI] Adding {len(non_image_widgets)} non-image widgets vertically")
             for widget, node in non_image_widgets:
                 self.layout.addWidget(widget, 1)  # Add stretch factor for each widget
 
@@ -280,7 +283,8 @@ class ComfyUIWidgetManager:
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 5, 0, 5)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(4)
 
         if node.widget_type == 'toggle':
             # Toggle/switch widget - displayed as checkbox
@@ -334,7 +338,7 @@ class ComfyUIWidgetManager:
 
             # Text input with spell checking - expands to fill available space
             input_widget = SpellCheckTextEdit()
-            input_widget.setMinimumHeight(60)
+            input_widget.setMinimumHeight(100)
             input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             if node.current_value:
                 input_widget.setPlainText(str(node.current_value))

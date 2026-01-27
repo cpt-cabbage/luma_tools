@@ -135,10 +135,10 @@ QGroupBox {
     background-color: #282c34;
     border: 1px solid #3c414b;
     border-radius: 10px;
-    margin-top: 12px;
-    margin-bottom: 4px;
-    padding: 16px;
-    padding-top: 36px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+    padding: 8px;
+    padding-top: 24px;
     font-weight: 600;
     font-size: 11pt;
 }
@@ -233,10 +233,10 @@ QPushButton {
     color: #c5cad3;
     border: 1px solid #3c414b;
     border-radius: 7px;
-    padding: 8px 22px;
+    padding: 6px 16px;
     font-weight: 600;
     font-size: 10pt;
-    min-height: 28px;
+    min-height: 24px;
 }
 
 QPushButton:hover {

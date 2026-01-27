@@ -5,9 +5,12 @@ Builds composite passes from rendered layers and publishes to AYON.
 Uses strategy pattern to handle farm vs local publishing without code duplication.
 """
 
+import logging
 import os
 import sys
 from typing import Optional, Callable
+
+logger = logging.getLogger(__name__)
 
 # Import our modular services
 from core.config import OIIO_PATH, FRAME_PADDING
@@ -85,14 +88,14 @@ class PassBuilder:
         # Normalize paths
         renders_path = normalize_path(renders_path)
 
-        # Debug prints
-        print(f"Processing render pass building for {passes_file}")
-        print(f"Renders path: {renders_path}")
-        print(f"Frames: {start_frame}-{end_frame}")
-        print(f"Farm: {use_farm}")
-        print(f"Project: {project_name}")
-        print(f"Shot: {shot}")
-        print(f"Task: {task}")
+        # Debug logging
+        logger.info(f"Processing render pass building for {passes_file}")
+        logger.info(f"Renders path: {renders_path}")
+        logger.info(f"Frames: {start_frame}-{end_frame}")
+        logger.info(f"Farm: {use_farm}")
+        logger.info(f"Project: {project_name}")
+        logger.info(f"Shot: {shot}")
+        logger.info(f"Task: {task}")
 
         # Validate passes file
         if not os.path.isfile(passes_file):
@@ -219,8 +222,8 @@ pass_builder = PassBuilder()
 
 
 if __name__ == "__main__":
-    print("Pass Builder module loaded successfully")
+    logger.info("Pass Builder module loaded successfully")
     if not AYON_AVAILABLE:
-        print("WARNING: AYON modules not available")
+        logger.warning("WARNING: AYON modules not available")
     if not DEADLINE_AVAILABLE:
-        print("WARNING: Deadline modules not available")
+        logger.warning("WARNING: Deadline modules not available")

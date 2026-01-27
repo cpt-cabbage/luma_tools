@@ -5,11 +5,14 @@ Handles republishing renders to AYON.
 """
 
 import os
+import logging
 
 from PySide6 import QtWidgets, QtCore
 
 from .base_tab import BaseTab
 from ui_components import StatusColors
+
+logger = logging.getLogger(__name__)
 
 
 class RePublishTab(BaseTab):
@@ -53,7 +56,7 @@ class RePublishTab(BaseTab):
         if self.app_state.standalone_mode:
             source_options = [("Custom", "custom")]
             self.ui.RePublishBrowseCustomPath.setVisible(True)
-            print("Republish tab: Standalone mode - only custom directory selection allowed")
+            logger.info("Republish tab: Standalone mode - only custom directory selection allowed")
 
         # Source button manager with dynamic label function
         self._source_manager = OptionButtonManager(
@@ -335,9 +338,9 @@ class RePublishTab(BaseTab):
             output_subdirectory = ""
 
         # Debug logging
-        print(f"Source directory: {source_dir}")
-        print(f"Base render path: {base_render_path}")
-        print(f"Output subdirectory: {output_subdirectory}")
+        logger.info(f"Source directory: {source_dir}")
+        logger.info(f"Base render path: {base_render_path}")
+        logger.info(f"Output subdirectory: {output_subdirectory}")
 
         progress_callback(50, "Preparing metadata for AYON publish...")
 
@@ -353,7 +356,7 @@ class RePublishTab(BaseTab):
             # Use current AYON task context directly (user explicitly requested this)
             project_name = self.app_state.jobname
             shot_path_for_conversion = self.app_state.shotpath
-            print(f"[Use Current Task] Using current AYON context instead of parsing path")
+            logger.info(f"[Use Current Task] Using current AYON context instead of parsing path")
         else:
             # Extract project name and folder path from the actual source directory
             # This handles both standard workflow and custom directory selection
@@ -386,8 +389,8 @@ class RePublishTab(BaseTab):
 
         folder_path = convert_to_ayon_folder_path(shot_path_for_conversion, project_name)
 
-        print(f"Detected project: {project_name}")
-        print(f"Detected folder path: {folder_path}")
+        logger.info(f"Detected project: {project_name}")
+        logger.info(f"Detected folder path: {folder_path}")
 
         # Determine working_dir from the shot path
         if "work" in shot_path_for_conversion:
@@ -415,7 +418,7 @@ class RePublishTab(BaseTab):
         # create_ayon_metadata() sets "farm": True by default, but for local publish we need False
         if not use_farm and "instances" in metadata and len(metadata["instances"]) > 0:
             metadata["instances"][0]["farm"] = False
-            print(f"Set farm flag to False for local publish")
+            logger.info(f"Set farm flag to False for local publish")
 
         # Write metadata file to source directory
         metadata_filename = f"ayon_{product_name}.json"
@@ -498,4 +501,4 @@ class RePublishTab(BaseTab):
 
         self.log(f"Publish error: {error_msg}")
         if traceback_str:
-            print(traceback_str)
+            logger.error(traceback_str)

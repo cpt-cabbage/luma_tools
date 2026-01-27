@@ -7,10 +7,13 @@ and API format used by ComfyUI's API.
 
 import os
 import json
+import logging
 from typing import Dict, Any, List, Optional
 
 from comfyui.node_configs import WIDGET_MAPPINGS, SKIP_NODE_TYPES
 from core.utils import ensure_directory
+
+logger = logging.getLogger(__name__)
 
 
 def load_workflow(workflow_path: str) -> Dict[str, Any]:
@@ -62,7 +65,7 @@ def save_workflow(
     with open(workflow_path, 'w', encoding='utf-8') as f:
         json.dump(workflow, f, indent=2)
 
-    print(f"Saved modified workflow to: {workflow_path}")
+    logger.info(f"Saved modified workflow to: {workflow_path}")
     return workflow_path
 
 
@@ -273,7 +276,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
     if not subgraph_nodes:
         return workflow  # No subgraph instances to expand
 
-    print(f"Expanding {len(subgraph_nodes)} subgraph node(s)...")
+    logger.info(f"Expanding {len(subgraph_nodes)} subgraph node(s)...")
 
     # Deep copy to avoid modifying original
     expanded = copy.deepcopy(workflow)
@@ -304,10 +307,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
         sg_def = subgraph_defs.get(sg_type)
 
         if not sg_def:
-            print(f"  Warning: Subgraph definition not found for {sg_type}")
+            logger.warning(f"  Subgraph definition not found for {sg_type}")
             continue
 
-        print(f"  Expanding subgraph node {sg_node_id} (type: {sg_type[:8]}...)")
+        logger.info(f"  Expanding subgraph node {sg_node_id} (type: {sg_type[:8]}...)")
         nodes_to_remove.add(sg_node_id)
 
         # Get subgraph internal structure
@@ -325,13 +328,13 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
         link_id_map = {}  # old_internal_link_id -> new_link_id
 
         # Assign new IDs to internal nodes
-        print(f"    Remapping {len(sg_internal_nodes)} internal nodes (starting from ID {max_node_id + 1}):")
+        logger.info(f"    Remapping {len(sg_internal_nodes)} internal nodes (starting from ID {max_node_id + 1}):")
         for internal_node in sg_internal_nodes:
             old_id = internal_node.get('id')
             node_type = internal_node.get('type', 'unknown')
             max_node_id += 1
             node_id_map[old_id] = max_node_id
-            print(f"      {node_type}: {old_id} -> {max_node_id}")
+            logger.info(f"      {node_type}: {old_id} -> {max_node_id}")
 
         # Assign new IDs to internal links
         for internal_link in sg_internal_links:
@@ -371,7 +374,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
         # Create remapped internal links
         # Skip links that reference boundary nodes (negative IDs or unmapped IDs)
-        print(f"    Processing {len(sg_internal_links)} internal links:")
+        logger.info(f"    Processing {len(sg_internal_links)} internal links:")
         for internal_link in sg_internal_links:
             # link format: [link_id, from_node, from_slot, to_node, to_slot, type]
             from_node_id = internal_link[1]
@@ -379,7 +382,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
             # Skip boundary links (negative IDs are subgraph input/output references)
             if from_node_id not in node_id_map or to_node_id not in node_id_map:
-                print(f"      Link {internal_link[0]}: {from_node_id} -> {to_node_id} (SKIPPED - boundary)")
+                logger.info(f"      Link {internal_link[0]}: {from_node_id} -> {to_node_id} (SKIPPED - boundary)")
                 continue
 
             new_link = list(internal_link)
@@ -387,14 +390,14 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             new_link[1] = node_id_map[from_node_id]
             new_link[3] = node_id_map[to_node_id]
             new_links.append(new_link)
-            print(f"      Link {internal_link[0]}->{new_link[0]}: {from_node_id}->{new_link[1]} slot {internal_link[2]} -> {to_node_id}->{new_link[3]} slot {internal_link[4]}")
+            logger.info(f"      Link {internal_link[0]}->{new_link[0]}: {from_node_id}->{new_link[1]} slot {internal_link[2]} -> {to_node_id}->{new_link[3]} slot {internal_link[4]}")
 
         # Handle external connections TO the subgraph (inputs)
         # The subgraph node's inputs connect to internal nodes
         # Find boundary links: links where from_node is negative (boundary input marker)
         # These indicate connections from external inputs to internal nodes
         sg_node_inputs = sg_node.get('inputs', [])
-        print(f"    Processing {len(sg_inputs)} subgraph inputs, {len(sg_node_inputs)} connected inputs")
+        logger.info(f"    Processing {len(sg_inputs)} subgraph inputs, {len(sg_node_inputs)} connected inputs")
 
         # Build map of boundary input slot -> LIST of (internal_node, internal_slot, link)
         # Boundary inputs use negative from_node IDs (e.g., -1, -2, etc.)
@@ -411,7 +414,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 if from_slot not in boundary_input_map:
                     boundary_input_map[from_slot] = []
                 boundary_input_map[from_slot].append((to_node, to_slot, il))
-                print(f"    Found boundary input: slot {from_slot} -> internal node {to_node} slot {to_slot}")
+                logger.info(f"    Found boundary input: slot {from_slot} -> internal node {to_node} slot {to_slot}")
 
         for i, sg_input_def in enumerate(sg_inputs):
             input_name = sg_input_def.get('name', f'input_{i}')
@@ -421,7 +424,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 ext_link_id = sg_node_inputs[i].get('link')
 
             if ext_link_id is None:
-                print(f"    Input {i} ({input_name}): no external link connected")
+                logger.info(f"    Input {i} ({input_name}): no external link connected")
                 continue
 
             # Get all internal targets for this input
@@ -437,16 +440,16 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             # Second try: use boundary input map by slot index (may have multiple targets)
             if not internal_targets and i in boundary_input_map:
                 internal_targets = boundary_input_map[i]
-                print(f"    Input {i} ({input_name}): using boundary map -> {len(internal_targets)} target(s)")
+                logger.info(f"    Input {i} ({input_name}): using boundary map -> {len(internal_targets)} target(s)")
 
             if not internal_targets:
-                print(f"    Input {i} ({input_name}): no internal targets found")
+                logger.info(f"    Input {i} ({input_name}): no internal targets found")
                 continue
 
             # Get the external link info for creating additional links
             ext_link_info = link_lookup.get(ext_link_id)
             if not ext_link_info:
-                print(f"    Input {i} ({input_name}): external link {ext_link_id} not found in link_lookup")
+                logger.warning(f"    Input {i} ({input_name}): external link {ext_link_id} not found in link_lookup")
                 continue
 
             # Find the external link to get source info
@@ -462,7 +465,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 target_slot = internal_to_slot
 
                 if target_node_id is None:
-                    print(f"    Input {i} ({input_name}): target node {internal_to_node} not in node_id_map")
+                    logger.warning(f"    Input {i} ({input_name}): target node {internal_to_node} not in node_id_map")
                     continue
 
                 if target_idx == 0:
@@ -471,7 +474,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         old_target = ext_link_data[3]
                         ext_link_data[3] = target_node_id
                         ext_link_data[4] = target_slot
-                        print(f"    Rewired external link {ext_link_id}: target {old_target} -> {target_node_id}")
+                        logger.info(f"    Rewired external link {ext_link_id}: target {old_target} -> {target_node_id}")
                     current_link_id = ext_link_id
                 else:
                     # Additional targets: create new links from the same source
@@ -486,7 +489,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     ]
                     new_links.append(new_link)
                     current_link_id = max_link_id
-                    print(f"    Created new link {max_link_id} for additional target: -> node {target_node_id} slot {target_slot}")
+                    logger.info(f"    Created new link {max_link_id} for additional target: -> node {target_node_id} slot {target_slot}")
 
                 # Update the target internal node's input
                 found_input = False
@@ -499,11 +502,11 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                             if slot_match or index_match:
                                 inp['link'] = current_link_id
                                 found_input = True
-                                print(f"    Updated internal node {target_node_id} input slot {target_slot}: link={current_link_id}")
+                                logger.info(f"    Updated internal node {target_node_id} input slot {target_slot}: link={current_link_id}")
                                 break
                         break
                 if not found_input:
-                    print(f"    WARNING: Could not find input slot {target_slot} on node {target_node_id}")
+                    logger.warning(f"    Could not find input slot {target_slot} on node {target_node_id}")
 
         # Handle external connections FROM the subgraph (outputs)
         # Other nodes that were connected to the subgraph's outputs need rewiring
@@ -519,10 +522,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 from_slot = il[2]    # The output slot on the internal node
                 to_slot = il[4]      # The subgraph output slot
                 boundary_output_map[to_slot] = (from_node, from_slot, il)
-                print(f"    Found boundary output: internal node {from_node} slot {from_slot} -> output slot {to_slot}")
+                logger.info(f"    Found boundary output: internal node {from_node} slot {from_slot} -> output slot {to_slot}")
 
         sg_node_outputs = sg_node.get('outputs', [])
-        print(f"    Processing {len(sg_outputs)} subgraph outputs, {len(sg_node_outputs)} connected outputs")
+        logger.info(f"    Processing {len(sg_outputs)} subgraph outputs, {len(sg_node_outputs)} connected outputs")
 
         for i, sg_output_def in enumerate(sg_outputs):
             output_name = sg_output_def.get('name', f'output_{i}')
@@ -538,28 +541,28 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     if il[0] == internal_link_id:
                         source_internal_node = il[1]
                         source_slot = il[2]
-                        print(f"    Output {i} ({output_name}): found via link {internal_link_id}")
+                        logger.info(f"    Output {i} ({output_name}): found via link {internal_link_id}")
                         break
 
             # Second try: use boundary output map by slot index
             if source_internal_node is None and i in boundary_output_map:
                 source_internal_node, source_slot, _ = boundary_output_map[i]
-                print(f"    Output {i} ({output_name}): using boundary map -> node {source_internal_node} slot {source_slot}")
+                logger.info(f"    Output {i} ({output_name}): using boundary map -> node {source_internal_node} slot {source_slot}")
 
             if source_internal_node is None:
-                print(f"    Output {i} ({output_name}): no internal source found")
+                logger.info(f"    Output {i} ({output_name}): no internal source found")
                 continue
 
             # Map to remapped node ID
             source_node_id = node_id_map.get(source_internal_node)
             if source_node_id is None:
-                print(f"    Output {i} ({output_name}): internal node {source_internal_node} not in node_id_map")
+                logger.warning(f"    Output {i} ({output_name}): internal node {source_internal_node} not in node_id_map")
                 continue
 
             # Find all external links that were connected to this subgraph output
             if i < len(sg_node_outputs):
                 output_links = sg_node_outputs[i].get('links', [])
-                print(f"    Output {i} ({output_name}): {len(output_links) if output_links else 0} external links to rewire")
+                logger.info(f"    Output {i} ({output_name}): {len(output_links) if output_links else 0} external links to rewire")
 
                 if output_links:
                     for ext_link_id in output_links:
@@ -570,7 +573,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                     old_from = link[1]
                                     link[1] = source_node_id
                                     link[2] = source_slot
-                                    print(f"    Rewired external output link {ext_link_id}: source {old_from} -> {source_node_id}")
+                                    logger.info(f"    Rewired external output link {ext_link_id}: source {old_from} -> {source_node_id}")
                                     break
 
                             # Update the source internal node's output
@@ -625,10 +628,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
     # Recursively expand in case of nested subgraphs
     if any(_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
            for n in expanded['nodes']):
-        print("  Checking for nested subgraphs...")
+        logger.info("  Checking for nested subgraphs...")
         return expand_subgraphs(expanded)
 
-    print(f"  Expansion complete: {len(expanded['nodes'])} nodes, {len(expanded['links'])} links")
+    logger.info(f"  Expansion complete: {len(expanded['nodes'])} nodes, {len(expanded['links'])} links")
     return expanded
 
 
@@ -668,12 +671,12 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         # Skip muted or bypassed nodes (mode 2 = bypass, mode 4 = mute)
         if node_mode in (2, 4):
             skipped_node_ids.add(node_id)
-            print(f"Will skip node {node_id} ({node_type}) - mode {node_mode} (muted/bypassed)")
+            logger.info(f"Will skip node {node_id} ({node_type}) - mode {node_mode} (muted/bypassed)")
         # Skip certain node types (defined in comfyui_node_configs.py)
         elif node_type in SKIP_NODE_TYPES or node_type is None:
             skipped_node_ids.add(node_id)
 
-    print(f"Skipped node IDs: {skipped_node_ids}")
+    logger.info(f"Skipped node IDs: {skipped_node_ids}")
 
     # Build set of valid node IDs for validation
     valid_node_ids = set(node.get('id') for node in nodes if node.get('id') is not None)
@@ -690,10 +693,10 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             to_node = link[3]
             # Skip links that reference non-existent nodes
             if from_node not in valid_node_ids:
-                print(f"Skipping link {link_id}: from_node {from_node} not in valid nodes")
+                logger.info(f"Skipping link {link_id}: from_node {from_node} not in valid nodes")
                 continue
             if to_node not in valid_node_ids:
-                print(f"Skipping link {link_id}: to_node {to_node} not in valid nodes")
+                logger.info(f"Skipping link {link_id}: to_node {to_node} not in valid nodes")
                 continue
             link_map[link_id] = (from_node, from_slot)
 
@@ -721,7 +724,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 from_node, from_slot = link_map[link_id]
                 # Skip links that reference skipped/muted nodes
                 if from_node in skipped_node_ids:
-                    print(f"Removing input '{input_name}' from node {node_id} ({node_type}) - references skipped node {from_node}")
+                    logger.info(f"Removing input '{input_name}' from node {node_id} ({node_type}) - references skipped node {from_node}")
                     continue
                 # Reference format: [node_id, slot_index]
                 inputs[input_name] = [str(from_node), from_slot]
@@ -749,7 +752,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             if widget_names is None:
                 widget_names = WIDGET_MAPPINGS.get(node_type, None)
                 if widget_names is not None:
-                    print(f"Using manual mapping for '{node_type}' (no widget info in workflow)")
+                    logger.info(f"Using manual mapping for '{node_type}' (no widget info in workflow)")
 
             # Apply widget values using discovered names
             if widget_names is not None:
@@ -761,7 +764,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         inputs[widget_name] = widgets_values[i]
             else:
                 # Tier 3: No widget info available - warn but continue
-                print(f"Warning: Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
+                logger.warning(f"Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
 
         api_workflow[node_id] = {
             'class_type': node_type,
@@ -782,7 +785,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(input_value, list) and len(input_value) == 2:
                 ref_node_id = str(input_value[0])
                 if ref_node_id not in valid_api_ids:
-                    print(f"Removing invalid input '{input_name}' from node {node_id}: references non-existent node {ref_node_id}")
+                    logger.warning(f"Removing invalid input '{input_name}' from node {node_id}: references non-existent node {ref_node_id}")
                     invalid_inputs.append(input_name)
         for input_name in invalid_inputs:
             del inputs[input_name]

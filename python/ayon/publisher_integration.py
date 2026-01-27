@@ -5,13 +5,17 @@ Provides proper AYON publisher integration following the same patterns as
 Houdini, Blender, and other DCCs. Uses AYON's standardized publishing API.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Check if AYON is available
 try:
     from ayon_core.tools.publisher import show as show_publisher
     AYON_PUBLISHER_AVAILABLE = True
 except ImportError:
     AYON_PUBLISHER_AVAILABLE = False
-    print("Warning: AYON publisher tools not available")
+    logger.warning("AYON publisher tools not available")
 
 
 def open_ayon_publisher():
@@ -38,7 +42,5 @@ def open_ayon_publisher():
         show_publisher()
         return True
     except Exception as e:
-        print(f"Failed to open AYON Publisher: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Failed to open AYON Publisher: {e}", exc_info=True)
         return False

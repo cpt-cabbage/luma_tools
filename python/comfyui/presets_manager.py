@@ -5,11 +5,14 @@ Handles text presets, prompt presets by node type, and workflow presets.
 Text presets are stored in user settings, while workflow presets are in global settings.
 """
 
+import logging
 from typing import Dict, Any, Optional
 from core.settings_manager import (
     load_user_settings, save_user_settings,
     load_global_settings, save_global_settings
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -31,7 +34,7 @@ def save_comfyui_text_preset(name: str, text: str):
         settings["comfyui_text_presets"] = {}
     settings["comfyui_text_presets"][name] = text
     save_user_settings(settings)
-    print(f"Saved ComfyUI text preset: {name}")
+    logger.info(f"Saved ComfyUI text preset: {name}")
 
 
 def delete_comfyui_text_preset(name: str):
@@ -46,7 +49,7 @@ def delete_comfyui_text_preset(name: str):
         deleted = True
     if deleted:
         save_user_settings(settings)
-        print(f"Deleted ComfyUI text preset: {name}")
+        logger.info(f"Deleted ComfyUI text preset: {name}")
 
 
 # ============================================================================
@@ -68,7 +71,7 @@ def save_comfyui_prompt_preset_for_node_type(node_type: str, preset_name: str, t
         settings["comfyui_prompt_presets_by_node_type"][node_type] = {}
     settings["comfyui_prompt_presets_by_node_type"][node_type][preset_name] = text
     save_user_settings(settings)
-    print(f"Saved prompt preset '{preset_name}' for node type '{node_type}'")
+    logger.info(f"Saved prompt preset '{preset_name}' for node type '{node_type}'")
 
 
 def delete_comfyui_prompt_preset_for_node_type(node_type: str, preset_name: str):
@@ -81,7 +84,7 @@ def delete_comfyui_prompt_preset_for_node_type(node_type: str, preset_name: str)
             del all_presets[node_type]
         settings["comfyui_prompt_presets_by_node_type"] = all_presets
         save_user_settings(settings)
-        print(f"Deleted prompt preset '{preset_name}' from node type '{node_type}'")
+        logger.info(f"Deleted prompt preset '{preset_name}' from node type '{node_type}'")
 
 
 def get_all_comfyui_prompt_presets_by_node_type() -> Dict[str, Dict[str, str]]:
@@ -129,9 +132,9 @@ def save_comfyui_workflow_preset(
     settings["comfyui_workflow_presets"][name] = preset_data
     save_global_settings(settings)
     if is_multi:
-        print(f"Saved ComfyUI multi-workflow preset: {name} with {len(workflows or {})} workflow(s)")
+        logger.info(f"Saved ComfyUI multi-workflow preset: {name} with {len(workflows or {})} workflow(s)")
     else:
-        print(f"Saved ComfyUI workflow preset: {name} -> {workflow_path}")
+        logger.info(f"Saved ComfyUI workflow preset: {name} -> {workflow_path}")
 
 
 def update_comfyui_workflow_preset(name: str, **kwargs) -> bool:
@@ -157,7 +160,7 @@ def update_comfyui_workflow_preset(name: str, **kwargs) -> bool:
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets
     save_global_settings(settings)
-    print(f"Updated ComfyUI workflow preset: {name}")
+    logger.info(f"Updated ComfyUI workflow preset: {name}")
     return True
 
 
@@ -167,7 +170,7 @@ def delete_comfyui_workflow_preset(name: str):
     if "comfyui_workflow_presets" in settings and name in settings["comfyui_workflow_presets"]:
         del settings["comfyui_workflow_presets"][name]
         save_global_settings(settings)
-        print(f"Deleted ComfyUI workflow preset: {name}")
+        logger.info(f"Deleted ComfyUI workflow preset: {name}")
 
 
 def get_comfyui_workflow_preset_path(name: str, selected_workflow: Optional[str] = None) -> Optional[str]:

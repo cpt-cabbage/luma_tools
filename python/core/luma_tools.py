@@ -23,16 +23,47 @@ from core.utils import ensure_directory
 def setup_file_logging():
     """Setup file-based logging to capture crashes and errors.
 
-    Creates log files in ~/.luma_tools/logs/ with rotation (keeps last 5).
+    Writes to the network path from global settings (comfyui_network_output_path/_logs/)
+    for centralized debugging across all users/machines.
+    Falls back to ~/.luma_tools/logs/ if network path is unavailable.
     Returns the log file path for reference.
     """
-    # Create logs directory
-    log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-    ensure_directory(log_dir)
+    import json
+    import socket
+    import getpass
 
-    # Create timestamped log file
+    username = getpass.getuser()
+    hostname = socket.gethostname()
+
+    # Try network path from global settings for centralized logging
+    log_dir = None
+    try:
+        settings_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'global_settings', 'global_settings.json'),
+            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
+        ]
+        for settings_path in settings_paths:
+            norm_path = os.path.normpath(settings_path)
+            if os.path.exists(norm_path):
+                with open(norm_path, 'r') as f:
+                    settings = json.load(f)
+                network_path = settings.get('comfyui_network_output_path', '')
+                if network_path and os.path.isdir(network_path):
+                    log_dir = os.path.join(network_path, '_logs', 'users')
+                    os.makedirs(log_dir, exist_ok=True)
+                break
+    except Exception:
+        pass
+
+    # Fallback to local user directory
+    if not log_dir:
+        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        ensure_directory(log_dir)
+
+    # Create timestamped log file with username and hostname for identification
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"luma_tools_{timestamp}.log")
+    log_prefix = f"luma_tools_{username}_{hostname}"
+    log_file = os.path.join(log_dir, f"{log_prefix}_{timestamp}.log")
 
     # Setup logging
     logging.basicConfig(
@@ -73,10 +104,10 @@ def setup_file_logging():
     sys.stdout = TeeStream(sys.__stdout__, logging.info)
     sys.stderr = TeeStream(sys.__stderr__, logging.error)
 
-    # Cleanup old log files (keep last 5)
+    # Cleanup old log files (keep last 5 per user+hostname combination)
     try:
         log_files = sorted(
-            [f for f in os.listdir(log_dir) if f.startswith("luma_tools_") and f.endswith(".log")],
+            [f for f in os.listdir(log_dir) if f.startswith(f"{log_prefix}_") and f.endswith(".log")],
             reverse=True
         )
         for old_file in log_files[5:]:
@@ -195,6 +226,60 @@ from core.state_manager import app_state
 # Import tab configuration
 from tabs import TAB_CONFIG
 
+
+# ============================================================================
+# DEBUG CLI ARGUMENTS
+# ============================================================================
+# Parse --tab, --auto-close from sys.argv before other processing.
+# These are stripped so positional args for app_state aren't affected.
+
+_DEBUG_ARGS = {}
+_TAB_ALIASES = {
+    'gallery': 'comfyui_gallery',
+    'comfyui_gallery': 'comfyui_gallery',
+    'comfyui': 'comfyui',
+    'settings': 'settings',
+    'logs': 'logs',
+    'pass': 'passbuilder',
+    'passbuilder': 'passbuilder',
+    'mp4': 'mp4maker',
+    'mp4maker': 'mp4maker',
+    'republish': 'republish',
+    'shotcleaner': 'shotcleaner',
+    'cleaner': 'shotcleaner',
+}
+
+
+def _parse_debug_args():
+    """Extract debug arguments from sys.argv (--tab, --auto-close).
+
+    Removes consumed args from sys.argv so positional parsing is unaffected.
+    """
+    cleaned = [sys.argv[0]]
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == '--tab' and i + 1 < len(sys.argv):
+            tab_name = sys.argv[i + 1].lower()
+            _DEBUG_ARGS['tab'] = _TAB_ALIASES.get(tab_name, tab_name)
+            logging.info(f"[Debug] --tab {sys.argv[i + 1]} -> {_DEBUG_ARGS['tab']}")
+            i += 2
+            continue
+        elif arg == '--auto-close' and i + 1 < len(sys.argv):
+            try:
+                _DEBUG_ARGS['auto_close'] = int(sys.argv[i + 1])
+                logging.info(f"[Debug] --auto-close {_DEBUG_ARGS['auto_close']}s")
+            except ValueError:
+                logging.warning(f"[Debug] Invalid --auto-close value: {sys.argv[i + 1]}")
+            i += 2
+            continue
+        cleaned.append(arg)
+        i += 1
+    sys.argv = cleaned
+
+
+_parse_debug_args()
+
 # Initialize application state from command line arguments
 app_state.initialize_from_args(sys.argv)
 
@@ -220,17 +305,17 @@ try:
     fmt.setSamples(4)  # 4x MSAA
     fmt.setSwapBehavior(QSurfaceFormat.DoubleBuffer)
     QSurfaceFormat.setDefaultFormat(fmt)
-    print("OpenGL surface format configured")
+    logging.info("OpenGL surface format configured")
 except Exception as e:
-    print(f"Warning: Could not configure OpenGL surface format: {e}")
+    logging.warning(f"Could not configure OpenGL surface format: {e}")
 
 # Apply stylesheet
 apply_stylesheet(app)
 
-print("DEADLINE " + DEADLINE_PATH)
-print("OIIO " + OIIO_PATH)
-print("OIIO INFO " + OIIO_INFO_ROOT)
-print("FFMPEG " + FFMPEG_PATH)
+logging.info("DEADLINE " + DEADLINE_PATH)
+logging.info("OIIO " + OIIO_PATH)
+logging.info("OIIO INFO " + OIIO_INFO_ROOT)
+logging.info("FFMPEG " + FFMPEG_PATH)
 
 
 class LogStream(QtCore.QObject):
@@ -341,7 +426,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.animator = enhance_ui(self)
         self.animator.redirect_to_splash = False
         self.animator.splash_screen = None
-        print("UI animations enabled")
+        logging.info("UI animations enabled")
 
         # Setup tab glow manager for attention notifications
         self.tab_glow_manager = TabGlowManager(self.tab_widget, self)
@@ -432,12 +517,12 @@ class LumaShotTools(QtWidgets.QWidget):
             # Skip ComfyUI and Gallery tabs for users without elevated access
             # Admins and Supervisors can access these tabs
             if not app_state.has_elevated_access and restrict_key in ['comfyui', 'comfyui_gallery']:
-                print(f"Skipping initialization of '{restrict_key}' tab for regular user")
+                logging.info(f"Skipping initialization of '{restrict_key}' tab for regular user")
                 continue
 
             # Skip settings tab for regular users (admins and supervisors can access)
             if not app_state.has_elevated_access and restrict_key == 'settings':
-                print(f"Skipping initialization of '{restrict_key}' tab for regular user")
+                logging.info(f"Skipping initialization of '{restrict_key}' tab for regular user")
                 continue
 
             # Create tab instance
@@ -518,27 +603,27 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _on_tab_request_attention(self, tab_instance):
         """Handle tab requesting attention with pulsing glow."""
-        print(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
+        logging.info(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
 
         if not hasattr(self, 'tab_glow_manager'):
-            print(f"[TabAttention] ERROR: No tab_glow_manager!")
+            logging.error(f"[TabAttention] No tab_glow_manager!")
             return
 
         # Find the tab index for this tab instance
         tab_index = self.tab_widget.indexOf(tab_instance.ui)
-        print(f"[TabAttention] Tab index: {tab_index}, current index: {self.tab_widget.currentIndex()}")
+        logging.info(f"[TabAttention] Tab index: {tab_index}, current index: {self.tab_widget.currentIndex()}")
         if tab_index == -1:
-            print(f"[TabAttention] ERROR: Tab not found in tab_widget!")
+            logging.error(f"[TabAttention] Tab not found in tab_widget!")
             return
 
         # Use tab-specific color for glow
         tab_id = tab_instance.tab_id
         color = TAB_COLORS.get(tab_id, DEFAULT_ICON_COLOR)
-        print(f"[TabAttention] Starting glow for tab_id={tab_id}, color={color}")
+        logging.info(f"[TabAttention] Starting glow for tab_id={tab_id}, color={color}")
 
         # Start the glow effect
         self.tab_glow_manager.start_glow(tab_index, color)
-        print(f"Tab '{tab_instance.tab_name}' is requesting attention")
+        logging.info(f"Tab '{tab_instance.tab_name}' is requesting attention")
 
     def _on_tab_changed(self, index):
         """Handle tab change - notify tabs."""
@@ -560,6 +645,26 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_names.append(widget.objectName())
 
         save_tab_order(tab_names)
+
+    def select_tab_by_name(self, restrict_key):
+        """Select a tab by its restrict_key name (e.g. 'comfyui_gallery').
+
+        Args:
+            restrict_key: Tab identifier from TAB_CONFIG (e.g. 'comfyui_gallery',
+                         'comfyui', 'settings', 'logs', 'passbuilder', etc.)
+
+        Returns:
+            True if tab was found and selected, False otherwise.
+        """
+        if restrict_key in self.tabs:
+            tab_instance = self.tabs[restrict_key]
+            tab_index = self.tab_widget.indexOf(tab_instance.ui)
+            if tab_index >= 0:
+                self.tab_widget.setCurrentIndex(tab_index)
+                logging.info(f"[Debug] Selected tab: {restrict_key} (index {tab_index})")
+                return True
+        logging.warning(f"[Debug] Tab not found: {restrict_key}")
+        return False
 
     def _restore_tab_order(self):
         """Restore saved tab order on startup."""
@@ -595,11 +700,11 @@ class LumaShotTools(QtWidgets.QWidget):
         app_state.refresh_admin_status()
 
         if app_state.is_admin:
-            print(f"User '{app_state.user}' is an admin (full access)")
+            logging.info(f"User '{app_state.user}' is an admin (full access)")
         elif app_state.is_sup:
-            print(f"User '{app_state.user}' is a supervisor (ComfyUI/Gallery access)")
+            logging.info(f"User '{app_state.user}' is a supervisor (ComfyUI/Gallery access)")
         else:
-            print(f"User '{app_state.user}' is a regular user")
+            logging.info(f"User '{app_state.user}' is a regular user")
 
     def _check_version_update(self):
         """Check if this is a new version and store flag for notification."""
@@ -609,11 +714,11 @@ class LumaShotTools(QtWidgets.QWidget):
         self._is_new_version = is_new_version(APP_VERSION)
 
         if self._is_new_version:
-            print(f"New version detected: v{APP_VERSION}")
+            logging.info(f"New version detected: v{APP_VERSION}")
             # Clear thumbnail cache to regenerate with new version
             self._clear_thumbnail_cache_for_new_version()
         else:
-            print(f"Current version: v{APP_VERSION}")
+            logging.info(f"Current version: v{APP_VERSION}")
 
         # Update the last opened version to current (will be saved on close)
         # We don't save immediately to avoid file I/O on every startup
@@ -629,10 +734,10 @@ class LumaShotTools(QtWidgets.QWidget):
             from models.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             service.clear_cache()  # Clear all model thumbnails
-            print("Cleared thumbnail cache for new version")
+            logging.info("Cleared thumbnail cache for new version")
         except Exception as e:
             # Non-critical - don't block startup
-            print(f"Could not clear thumbnail cache: {e}")
+            logging.warning(f"Could not clear thumbnail cache: {e}")
 
     def _check_deployed_version(self):
         """Periodically check if a new version has been deployed."""
@@ -652,12 +757,12 @@ class LumaShotTools(QtWidgets.QWidget):
 
             # Compare with the version we started with
             if deployed_version != APP_VERSION and deployed_version != "unknown":
-                print(f"New deployed version detected: v{deployed_version} (current: v{APP_VERSION})")
+                logging.info(f"New deployed version detected: v{deployed_version} (current: v{APP_VERSION})")
                 self._deployed_version_available = True
                 self._show_new_version_notification(deployed_version)
         except Exception as e:
             # Silently fail - don't spam the user with errors
-            print(f"Version check failed: {e}")
+            logging.error(f"Version check failed: {e}")
 
     def _show_new_version_notification(self, new_version: str):
         """Show notification that a new version is available via the Settings tab."""
@@ -741,7 +846,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
             if tab_name in restricted:
                 self.tab_widget.removeTab(i)
-                print(f"Hidden restricted tab: {tab_name}")
+                logging.info(f"Hidden restricted tab: {tab_name}")
 
     def _hide_standalone_incompatible_tabs(self):
         """Hide tabs that require shot context in standalone mode."""
@@ -755,7 +860,7 @@ class LumaShotTools(QtWidgets.QWidget):
             widget = self.tab_widget.widget(i)
             if widget.objectName() in standalone_incompatible:
                 self.tab_widget.removeTab(i)
-                print(f"Hidden standalone-incompatible tab: {widget.objectName()}")
+                logging.info(f"Hidden standalone-incompatible tab: {widget.objectName()}")
 
     def _setup_tab_icons(self):
         """Setup monochromatic icons for each tab."""
@@ -797,7 +902,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Check if system tray is available
         if not QSystemTrayIcon.isSystemTrayAvailable():
-            print("[Tray] System tray not available on this system")
+            logging.info("[Tray] System tray not available on this system")
             self._tray_icon = None
             return
 
@@ -823,7 +928,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Show tray icon
         self._tray_icon.show()
-        print("[Tray] System tray icon initialized")
+        logging.info("[Tray] System tray icon initialized")
 
     def _on_tray_activated(self, reason):
         """Handle tray icon activation."""
@@ -912,7 +1017,7 @@ class LumaShotTools(QtWidgets.QWidget):
             sys.stdout = self.log_stream
             sys.stderr = self.log_stream
             self._log_redirect_pending = False
-            print("Log redirection enabled")
+            logging.info("Log redirection enabled")
 
     def closeEvent(self, event):
         """Handle window close event - save window state and version."""
@@ -951,7 +1056,7 @@ def main():
             load_user_settings()  # Populate user settings cache
             load_global_settings()  # Populate global settings cache (may hit network)
         except Exception as e:
-            print(f"Warning: Could not pre-load settings: {e}")
+            logging.warning(f"Could not pre-load settings: {e}")
 
         # Check for running jobs to recover (show feedback in splash)
         pending_job_recovery = None
@@ -970,9 +1075,9 @@ def main():
                     splash.update_progress(22, "Loading", f"Found {count} job(s) to recover...")
                     pending_job_recovery = {"mode": "batch", "count": count}
                 app.processEvents()
-                print(f"[Startup] Found {mode} mode jobs to recover")
+                logging.info(f"[Startup] Found {mode} mode jobs to recover")
         except Exception as e:
-            print(f"Warning: Could not check for job recovery: {e}")
+            logging.warning(f"Could not check for job recovery: {e}")
 
         # Pre-scan gallery directory on worker thread while splash shows
         splash.update_progress(30, "Loading", "Scanning gallery...")
@@ -1002,7 +1107,7 @@ def main():
                 gallery_data['thumbnails_generated'] = result.get('thumbnails_generated', 0)
             except Exception as e:
                 gallery_data['error'] = str(e)
-                print(f"Warning: Gallery pre-scan failed: {e}")
+                logging.warning(f"Gallery pre-scan failed: {e}")
             finally:
                 gallery_data['done'] = True
 
@@ -1044,7 +1149,7 @@ def main():
             from ui.gallery_prewarm import set_prewarm_cache
             set_prewarm_cache({'items': gallery_data['items']})
         except Exception as e:
-            print(f"Warning: Could not set prewarm cache: {e}")
+            logging.warning(f"Could not set prewarm cache: {e}")
 
 
 
@@ -1095,7 +1200,7 @@ def main():
             try:
                 from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
                 if is_threejs_viewer_available():
-                    print("Starting async 3D viewer initialization...")
+                    logging.info("Starting async 3D viewer initialization...")
                     _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
 
                     # Add to window's layout hierarchy (hidden) to prevent window flash
@@ -1104,12 +1209,27 @@ def main():
 
                     # Store globally - will be retrieved and reparented by gallery later
                     set_prewarm_viewer(_threejs_prewarm_viewer)
-                    print("3D viewer initialization started (running in background)")
+                    logging.info("3D viewer initialization started (running in background)")
             except Exception as e:
-                print(f"Warning: Could not initialize 3D viewer: {e}")
+                logging.warning(f"Could not initialize 3D viewer: {e}")
 
         # Schedule viewer initialization to run after event loop starts
         QtCore.QTimer.singleShot(100, init_threejs_viewer)
+
+        # Apply debug CLI arguments
+        if _DEBUG_ARGS.get('tab'):
+            # Delay tab selection slightly to ensure all tabs are fully initialized
+            def _select_debug_tab():
+                window.select_tab_by_name(_DEBUG_ARGS['tab'])
+            QtCore.QTimer.singleShot(200, _select_debug_tab)
+
+        if _DEBUG_ARGS.get('auto_close'):
+            seconds = _DEBUG_ARGS['auto_close']
+            logging.info(f"[Debug] Auto-close scheduled in {seconds}s")
+            QtCore.QTimer.singleShot(seconds * 1000, lambda: (
+                logging.info("[Debug] Auto-close triggered, shutting down"),
+                app.quit()
+            ))
 
         # Run the application
         logging.info("Application window shown, entering event loop")

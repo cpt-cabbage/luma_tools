@@ -4,12 +4,15 @@ Render management service for Luma Tools.
 Handles pass detection, channel parsing, and render configuration.
 """
 
+import logging
 import subprocess
 import json
 import os
 import re
 import sys
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
 from core.utils import substring_after, remove_after, ensure_directory
@@ -77,14 +80,14 @@ def load_pass_config(pass_file):
     Returns:
         dict: Pass configuration or empty dict if not found
     """
-    print(f"Reading passes from file: {pass_file}")
+    logger.info(f"Reading passes from file: {pass_file}")
     if os.path.isfile(pass_file):
-        print("Passes file found")
+        logger.info("Passes file found")
         with open(pass_file) as json_file:
             passes = json.load(json_file)
         return passes
     else:
-        print("Passes file not found")
+        logger.info("Passes file not found")
         return {}
 
 
@@ -102,7 +105,7 @@ def save_pass_config(pass_file, passes_dict):
     with open(pass_file, 'w') as fp:
         json.dump(passes_dict, fp, indent=2)
 
-    print(f"Pass configuration saved to: {pass_file}")
+    logger.info(f"Pass configuration saved to: {pass_file}")
 
 
 def get_pass_file_path(working_dir, render_name):
@@ -215,7 +218,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     # If no frame range specified, execute once
     if start_frame is None or end_frame is None:
         local_command = f'"{oiio_path}" {oiio_args}'
-        print(f"Local Command: {local_command}")
+        logger.info(f"Local Command: {local_command}")
 
         try:
             result = subprocess.run(
@@ -225,27 +228,27 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
                 text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-            print(f"STDOUT: {result.stdout}")
+            logger.info(f"STDOUT: {result.stdout}")
             if result.stderr:
-                print(f"STDERR: {result.stderr}")
+                logger.info(f"STDERR: {result.stderr}")
 
             if result.returncode == 0:
-                print('OIIO Local Process Successful')
+                logger.info('OIIO Local Process Successful')
                 return True
             else:
-                print(f'OIIO Local Process Failed with code {result.returncode}')
+                logger.error(f'OIIO Local Process Failed with code {result.returncode}')
                 return False
 
         except Exception as e:
-            print(f'OIIO Local Process Failed: {e}')
+            logger.error(f'OIIO Local Process Failed: {e}')
             return False
 
     # Execute frame by frame (like farm does)
     total_frames = end_frame - start_frame + 1
     failed_frames = []
 
-    print(f"Executing OIIO locally for frames {start_frame}-{end_frame} ({total_frames} frames)")
-    print(f"OIIO args template: {oiio_args}")
+    logger.info(f"Executing OIIO locally for frames {start_frame}-{end_frame} ({total_frames} frames)")
+    logger.info(f"OIIO args template: {oiio_args}")
 
     # Import Qt for event processing
     from PySide6.QtWidgets import QApplication
@@ -266,7 +269,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
 
         # Print first command for debugging
         if frame_num == start_frame:
-            print(f"First frame command: {local_command}")
+            logger.info(f"First frame command: {local_command}")
 
         # Update progress and process Qt events to keep UI responsive
         report_progress(progress_callback, progress, f"Processing frame {frame_num}/{end_frame}...")
@@ -282,23 +285,23 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
 
             if result.returncode != 0:
                 error_msg = f"Frame {frame_num} failed with code {result.returncode}"
-                print(error_msg)
+                logger.error(error_msg)
                 if result.stderr:
-                    print(f"STDERR: {result.stderr}")
+                    logger.error(f"STDERR: {result.stderr}")
                 failed_frames.append(frame_num)
             else:
-                print(f"Frame {frame_num} completed successfully")
+                logger.info(f"Frame {frame_num} completed successfully")
 
         except Exception as e:
-            print(f'Frame {frame_num} failed: {e}')
+            logger.error(f'Frame {frame_num} failed: {e}')
             failed_frames.append(frame_num)
 
     # Report results
     if failed_frames:
-        print(f'OIIO Local Process completed with {len(failed_frames)} failed frames: {failed_frames}')
+        logger.error(f'OIIO Local Process completed with {len(failed_frames)} failed frames: {failed_frames}')
         return False
     else:
-        print(f'OIIO Local Process Successful - all {total_frames} frames completed')
+        logger.info(f'OIIO Local Process Successful - all {total_frames} frames completed')
         return True
 
 

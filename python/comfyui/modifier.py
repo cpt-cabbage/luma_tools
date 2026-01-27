@@ -7,11 +7,14 @@ and output prefixes based on user inputs and editable node values.
 
 import os
 import copy
+import logging
 import random
 from typing import Optional, Dict, Any, Tuple
 
 from comfyui.workflow import is_api_format, convert_to_api_format
 from comfyui.node_configs import WIDGET_MAPPINGS, EXPORT_NODE_TYPES
+
+logger = logging.getLogger(__name__)
 
 
 def modify_workflow_api_format(
@@ -57,7 +60,7 @@ def modify_workflow_api_format(
             preview_nodes_converted.append(node_id)
 
     if preview_nodes_converted:
-        print(f"Converted {len(preview_nodes_converted)} PreviewImage node(s) to SaveImage: {preview_nodes_converted}")
+        logger.info(f"Converted {len(preview_nodes_converted)} PreviewImage node(s) to SaveImage: {preview_nodes_converted}")
 
     # Build a lookup of node_id -> value from editable_values
     editable_by_node_id = {}
@@ -78,20 +81,20 @@ def modify_workflow_api_format(
             if ct not in node_types:
                 node_types[ct] = []
             node_types[ct].append(f"{node_id}:{title}" if title else node_id)
-    print(f"Workflow contains {len(modified)} nodes:")
+    logger.info(f"Workflow contains {len(modified)} nodes:")
     for ct, nodes in sorted(node_types.items()):
-        print(f"  {ct}: {nodes}")
+        logger.info(f"  {ct}: {nodes}")
 
     # Apply editable_values first (from dynamic UI)
     if editable_values:
-        print(f"\n=== Applying {len(editable_values)} editable values ===")
+        logger.info(f"=== Applying {len(editable_values)} editable values ===")
         for node_id, data in editable_values.items():
             node_id_str = str(node_id)
             node_info = data.get('node')
             value = data.get('value')
 
             if node_id_str not in modified:
-                print(f"  Warning: Node {node_id} not found in workflow")
+                logger.warning(f"  Node {node_id} not found in workflow")
                 continue
 
             node_data = modified[node_id_str]
@@ -103,7 +106,7 @@ def modify_workflow_api_format(
             if widget_type == 'text':
                 inputs['prompt'] = value
                 inputs['text'] = value  # Some nodes use 'text' instead of 'prompt'
-                print(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
+                logger.info(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
             elif widget_type == 'image':
                 if value:
                     # Handle both string paths and lists (from batch selector)
@@ -115,26 +118,26 @@ def modify_workflow_api_format(
 
                     if image_path:
                         inputs['image'] = os.path.basename(image_path)
-                        print(f"  Set image node {node_id} ({node_type}): {os.path.basename(image_path)}")
+                        logger.info(f"  Set image node {node_id} ({node_type}): {os.path.basename(image_path)}")
                 else:
                     # No image provided - bypass this loader node
                     node_data['mode'] = 4  # 4 = bypassed
-                    print(f"  Bypassed image loader node {node_id} ({node_type}) - no image provided")
+                    logger.info(f"  Bypassed image loader node {node_id} ({node_type}) - no image provided")
             elif widget_type == 'int':
                 inputs['seed'] = value
                 inputs['noise_seed'] = value
-                print(f"  Set int node {node_id} ({node_type}): {value}")
+                logger.info(f"  Set int node {node_id} ({node_type}): {value}")
             elif widget_type == 'float':
                 inputs['cfg'] = value
-                print(f"  Set float node {node_id} ({node_type}): {value}")
+                logger.info(f"  Set float node {node_id} ({node_type}): {value}")
             elif widget_type == 'string':
                 inputs['filename_prefix'] = value
-                print(f"  Set string node {node_id} ({node_type}): {value}")
+                logger.info(f"  Set string node {node_id} ({node_type}): {value}")
             elif widget_type == 'toggle':
                 # Toggle/switch value (0 or 1)
                 int_value = 1 if value else 0
                 inputs['index'] = int_value
-                print(f"  Set toggle node {node_id} ({node_type}): {int_value}")
+                logger.info(f"  Set toggle node {node_id} ({node_type}): {int_value}")
             elif widget_type == '3d_model':
                 # 3D model file path
                 if value:
@@ -146,11 +149,11 @@ def modify_workflow_api_format(
 
                     if model_path:
                         inputs['model_file'] = os.path.basename(model_path)
-                        print(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
+                        logger.info(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
                 else:
                     # No 3D model provided - bypass this loader node
                     node_data['mode'] = 4  # 4 = bypassed
-                    print(f"  Bypassed 3D model loader node {node_id} ({node_type}) - no model provided")
+                    logger.info(f"  Bypassed 3D model loader node {node_id} ({node_type}) - no model provided")
 
     # Build a map of toggle node names to their values (True/False)
     # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name
@@ -163,7 +166,7 @@ def modify_workflow_api_format(
             base_name = title.replace('_editable', '').strip()
             value = bool(data.get('value'))
             toggle_values[base_name.lower()] = value
-            print(f"[Toggle] Found toggle '{base_name}' = {value}")
+            logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
 
     # Process nodes with @if_ conditional in their title
     # Format: "Node Name_editable&if_ToggleName" or "Node Name&if_ToggleName"
@@ -194,9 +197,9 @@ def modify_workflow_api_format(
                     # Toggle is OFF - bypass this node
                     node_data['mode'] = 4  # 4 = bypassed
                     class_type = node_data.get('class_type', 'unknown')
-                    print(f"[Bypass] Bypassed node {node_id} ({class_type}) - '{if_match}' is OFF")
+                    logger.info(f"[Bypass] Bypassed node {node_id} ({class_type}) - '{if_match}' is OFF")
             else:
-                print(f"[Bypass] Warning: Node {node_id} references toggle '{if_match}' but toggle not found")
+                logger.warning(f"[Bypass] Node {node_id} references toggle '{if_match}' but toggle not found")
 
     # Find and modify nodes by class_type
     # Apply special handling for certain node types (seeds, output prefixes, directories)
@@ -216,7 +219,7 @@ def modify_workflow_api_format(
         # LoadImage nodes - set input image filename (only if we have a legacy image and not already handled)
         if class_type == 'LoadImage' and image_basename and not node_already_handled:
             inputs['image'] = image_basename
-            print(f"Set LoadImage node {node_id} to: {image_basename}")
+            logger.info(f"Set LoadImage node {node_id} to: {image_basename}")
 
         # TextEncodeQwenImageEditPlus nodes - only modify if title ends with "_editable" and not already handled
         elif class_type == 'TextEncodeQwenImageEditPlus' and not node_already_handled:
@@ -224,14 +227,14 @@ def modify_workflow_api_format(
                 found_editable_prompt = True
                 if prompt:
                     inputs['prompt'] = prompt
-                    print(f"Set editable prompt node {node_id} ({node_title}) to: {prompt[:50]}...")
+                    logger.info(f"Set editable prompt node {node_id} ({node_title}) to: {prompt[:50]}...")
                 else:
                     existing = inputs.get('prompt', '')
                     if existing:
-                        print(f"Keeping existing prompt in editable node {node_id} ({node_title}): {str(existing)[:50]}...")
+                        logger.info(f"Keeping existing prompt in editable node {node_id} ({node_title}): {str(existing)[:50]}...")
             else:
                 # Non-editable prompt node - log but don't modify
-                print(f"Skipping non-editable prompt node {node_id} (title: '{node_title}' - missing '_editable' suffix)")
+                logger.info(f"Skipping non-editable prompt node {node_id} (title: '{node_title}' - missing '_editable' suffix)")
 
         # Generic handling based on node capabilities (WIDGET_MAPPINGS)
         # This handles output_dir, filename_prefix, and seed for ANY node that supports them
@@ -242,29 +245,29 @@ def modify_workflow_api_format(
         # Set output_dir for any node that supports it
         if 'output_dir' in widget_list and output_dir:
             inputs['output_dir'] = output_dir
-            print(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
+            logger.info(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
 
         # Set filename_prefix for export nodes
         if class_type in EXPORT_NODE_TYPES:
             inputs['filename_prefix'] = output_prefix
-            print(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
+            logger.info(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
 
         # Set seed for sampler/generator nodes
         if 'seed' in widget_list:
             inputs['seed'] = seed
-            print(f"Set {class_type} node {node_id} seed to: {seed}")
+            logger.info(f"Set {class_type} node {node_id} seed to: {seed}")
         elif 'noise_seed' in widget_list:
             inputs['noise_seed'] = seed
-            print(f"Set {class_type} node {node_id} noise_seed to: {seed}")
+            logger.info(f"Set {class_type} node {node_id} noise_seed to: {seed}")
 
     # Summary
-    print(f"\n=== Workflow Modification Summary ===")
-    print(f"Input image: {image_basename or '(from editable values)'}")
-    print(f"Prompt provided: {'Yes' if prompt else 'No (using workflow default or editable values)'}")
-    print(f"Editable values provided: {len(editable_values) if editable_values else 0}")
-    print(f"Found editable prompt node: {found_editable_prompt}")
-    print(f"Output prefix: {output_prefix}")
-    print(f"=====================================\n")
+    logger.info(f"=== Workflow Modification Summary ===")
+    logger.info(f"Input image: {image_basename or '(from editable values)'}")
+    logger.info(f"Prompt provided: {'Yes' if prompt else 'No (using workflow default or editable values)'}")
+    logger.info(f"Editable values provided: {len(editable_values) if editable_values else 0}")
+    logger.info(f"Found editable prompt node: {found_editable_prompt}")
+    logger.info(f"Output prefix: {output_prefix}")
+    logger.info(f"=====================================")
 
     return modified, found_editable_prompt
 
@@ -303,12 +306,12 @@ def modify_workflow(
 
     # Convert to API format if needed
     if is_api_format(workflow):
-        print("Detected API format workflow")
+        logger.info("Detected API format workflow")
         api_workflow = workflow
     else:
-        print("Detected UI/nodes format workflow - converting to API format...")
+        logger.info("Detected UI/nodes format workflow - converting to API format...")
         api_workflow = convert_to_api_format(workflow)
-        print(f"Converted workflow with {len(api_workflow)} nodes")
+        logger.info(f"Converted workflow with {len(api_workflow)} nodes")
 
     # Modify the API format workflow
     return modify_workflow_api_format(api_workflow, input_image, prompt, output_prefix, seed, editable_values, output_dir)

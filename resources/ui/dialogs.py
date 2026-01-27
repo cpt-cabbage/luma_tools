@@ -5,12 +5,15 @@ Provides dialogs for editing notes on images and 3D models,
 and group management dialogs.
 """
 import os
+import logging
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit,
     QLineEdit, QGridLayout, QButtonGroup, QColorDialog
 )
 from PySide6.QtGui import QColor
+
+logger = logging.getLogger(__name__)
 
 
 # Common dark theme stylesheet for edit dialogs
@@ -125,7 +128,7 @@ class BaseEditDialog(QDialog):
             note = get_model_note(self.output_dir, filename)
             self.note_edit.setPlainText(note)
         except Exception as e:
-            print(f"Error loading {self.item_type_label.lower()} note: {e}")
+            logger.error(f"Error loading {self.item_type_label.lower()} note: {e}")
 
     def _save_note(self):
         """Save the note and close the dialog."""
@@ -134,13 +137,13 @@ class BaseEditDialog(QDialog):
             filename = os.path.basename(self.item_path)
             note = self.note_edit.toPlainText()
             if set_model_note(self.output_dir, filename, note):
-                print(f"Saved note for {filename}")
+                logger.info(f"Saved note for {filename}")
                 self.accept()
             else:
-                print(f"Failed to save note for {filename}")
+                logger.error(f"Failed to save note for {filename}")
                 self.reject()
         except Exception as e:
-            print(f"Error saving {self.item_type_label.lower()} note: {e}")
+            logger.error(f"Error saving {self.item_type_label.lower()} note: {e}")
             self.reject()
 
     def get_note(self) -> str:

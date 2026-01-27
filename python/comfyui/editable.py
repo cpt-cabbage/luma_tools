@@ -6,11 +6,14 @@ suffix in their title) and extracting their configuration for dynamic UI generat
 """
 
 import os
+import logging
 from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass, field
 
 from comfyui.workflow import load_workflow
 from comfyui.node_configs import EDITABLE_NODE_CONFIGS
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,7 +95,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     try:
         workflow = load_workflow(workflow_path)
     except Exception as e:
-        print(f"Error loading workflow for editable nodes: {e}")
+        logger.error(f"Error loading workflow for editable nodes: {e}")
         return []
 
     nodes = workflow.get('nodes', [])
@@ -154,7 +157,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                 ))
         else:
             # Unknown node type - try to create a generic text widget
-            print(f"Unknown editable node type: {node_type} (title: {title})")
+            logger.warning(f"Unknown editable node type: {node_type} (title: {title})")
             if widgets_values:
                 editable_nodes.append(EditableNode(
                     node_id=node_id,
@@ -166,9 +169,9 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     condition_node=condition_node_name,
                 ))
 
-    print(f"Found {len(editable_nodes)} editable nodes in workflow")
+    logger.info(f"Found {len(editable_nodes)} editable nodes in workflow")
     for node in editable_nodes:
         condition_info = f" (visible when {node.condition_node})" if node.condition_node else ""
-        print(f"  - {node.display_name} ({node.node_type}): {node.widget_type}{condition_info}")
+        logger.info(f"  - {node.display_name} ({node.node_type}): {node.widget_type}{condition_info}")
 
     return editable_nodes

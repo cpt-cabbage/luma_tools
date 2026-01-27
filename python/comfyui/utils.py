@@ -14,9 +14,12 @@ import uuid
 import shutil
 import glob
 import threading
+import logging
 import urllib.request
 import urllib.error
 from typing import Optional, List, Dict, Any, Union
+
+logger = logging.getLogger(__name__)
 
 # Try to import websocket for real-time progress
 WEBSOCKET_AVAILABLE = False
@@ -25,7 +28,7 @@ try:
     WEBSOCKET_AVAILABLE = True
 except ImportError:
     # Try to install websocket-client automatically
-    print("websocket-client not found, attempting to install...", flush=True)
+    logger.info("websocket-client not found, attempting to install...")
     try:
         import subprocess as _sp
         _result = _sp.run(
@@ -37,11 +40,11 @@ except ImportError:
         if _result.returncode == 0:
             import websocket
             WEBSOCKET_AVAILABLE = True
-            print("Successfully installed websocket-client", flush=True)
+            logger.info("Successfully installed websocket-client")
         else:
-            print(f"Failed to install websocket-client: {_result.stderr}", flush=True)
+            logger.error(f"Failed to install websocket-client: {_result.stderr}")
     except Exception as _e:
-        print(f"Could not auto-install websocket-client: {_e}", flush=True)
+        logger.error(f"Could not auto-install websocket-client: {_e}")
 
 
 # =============================================================================
@@ -113,7 +116,7 @@ def check_server_health(server_url: str = None, port: int = None, timeout: int =
         req = urllib.request.urlopen(url, timeout=timeout)
         return req.status == 200
     except Exception as e:
-        print(f"Server health check failed: {e}")
+        logger.warning(f"Server health check failed: {e}")
         return False
 
 
@@ -121,15 +124,15 @@ def wait_for_server(server_url: str = None, port: int = None, timeout: int = 60)
     """Wait for server to become available."""
     base_url = _normalize_server_url(server_url, port)
     start_time = time.time()
-    print(f"Checking server at {base_url}...")
+    logger.info(f"Checking server at {base_url}...")
 
     while time.time() - start_time < timeout:
         if check_server_health(server_url=base_url):
-            print("Server is ready")
+            logger.info("Server is ready")
             return True
         time.sleep(2)
 
-    print(f"Server not available after {timeout}s")
+    logger.warning(f"Server not available after {timeout}s")
     return False
 
 
@@ -144,7 +147,7 @@ def submit_workflow(workflow: dict, server_url: str = None, port: int = None) ->
     url = f"{base_url}/prompt"
     data = json.dumps(prompt_data).encode('utf-8')
 
-    print(f"Submitting workflow with {len(workflow)} nodes...")
+    logger.info(f"Submitting workflow with {len(workflow)} nodes...")
 
     req = urllib.request.Request(
         url,
@@ -156,15 +159,15 @@ def submit_workflow(workflow: dict, server_url: str = None, port: int = None) ->
         response = urllib.request.urlopen(req, timeout=30)
         result = json.loads(response.read().decode('utf-8'))
         prompt_id = result.get('prompt_id')
-        print(f"Workflow submitted, prompt_id: {prompt_id}")
+        logger.info(f"Workflow submitted, prompt_id: {prompt_id}")
         return prompt_id
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
-        print(f"HTTP Error {e.code}: {e.reason}")
-        print(f"Error details: {error_body}")
+        logger.error(f"HTTP Error {e.code}: {e.reason}")
+        logger.error(f"Error details: {error_body}")
         return None
     except Exception as e:
-        print(f"Error submitting workflow: {e}")
+        logger.error(f"Error submitting workflow: {e}")
         return None
 
 
@@ -229,12 +232,12 @@ def wait_for_completion_websocket(
                 queue_remaining = exec_info.get('queue_remaining', 0)
                 if queue_remaining > 0:
                     elapsed = int(time.time() - start_time)
-                    print(f"Queue: {queue_remaining} remaining ({elapsed}s)", flush=True)
+                    logger.info(f"Queue: {queue_remaining} remaining ({elapsed}s)")
 
             elif msg_type == 'execution_start':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
-                    print(f"Execution started", flush=True)
+                    logger.info(f"Execution started")
 
             elif msg_type == 'executing':
                 exec_data = data.get('data', {})
@@ -242,12 +245,12 @@ def wait_for_completion_websocket(
                     node_id = exec_data.get('node')
                     if node_id is None:
                         elapsed = int(time.time() - start_time)
-                        print(f"Execution completed in {elapsed}s", flush=True)
+                        logger.info(f"Execution completed in {elapsed}s")
                         result['success'] = True
                         ws.close()
                     else:
                         elapsed = int(time.time() - start_time)
-                        print(f"Executing node {node_id}... ({elapsed}s)", flush=True)
+                        logger.info(f"Executing node {node_id}... ({elapsed}s)")
                         last_progress = {'value': 0, 'max': 0}
 
             elif msg_type == 'progress':
@@ -259,7 +262,7 @@ def wait_for_completion_websocket(
                     last_pct = int(100 * last_progress['value'] / max(last_progress['max'], 1))
                     if pct >= last_pct + 10 or value == max_val:
                         elapsed = int(time.time() - start_time)
-                        print(f"  Progress: {pct}% ({value}/{max_val}) ({elapsed}s)", flush=True)
+                        logger.info(f"  Progress: {pct}% ({value}/{max_val}) ({elapsed}s)")
                         last_progress = {'value': value, 'max': max_val}
 
             elif msg_type == 'executed':
@@ -270,17 +273,17 @@ def wait_for_completion_websocket(
                     result['outputs'][node_id] = output
                     if 'images' in output:
                         for img in output['images']:
-                            print(f"  Output: {img.get('filename', 'unknown')}", flush=True)
+                            logger.info(f"  Output: {img.get('filename', 'unknown')}")
                     if 'gltf' in output or 'glb' in output:
                         for item in output.get('gltf', []) + output.get('glb', []):
-                            print(f"  Output 3D: {item.get('filename', 'unknown')}", flush=True)
+                            logger.info(f"  Output 3D: {item.get('filename', 'unknown')}")
 
             elif msg_type == 'execution_cached':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
                     nodes = exec_data.get('nodes', [])
                     if nodes:
-                        print(f"Cached: {len(nodes)} node(s)", flush=True)
+                        logger.info(f"Cached: {len(nodes)} node(s)")
 
             elif msg_type == 'execution_error':
                 exec_data = data.get('data', {})
@@ -288,7 +291,7 @@ def wait_for_completion_websocket(
                     error = exec_data.get('exception_message', 'Unknown error')
                     node_id = exec_data.get('node_id')
                     node_type = exec_data.get('node_type')
-                    print(f"ERROR in node {node_id} ({node_type}): {error}", flush=True)
+                    logger.error(f"ERROR in node {node_id} ({node_type}): {error}")
                     result['error'] = error
                     result['success'] = False
                     ws.close()
@@ -296,16 +299,16 @@ def wait_for_completion_websocket(
         except json.JSONDecodeError:
             pass
         except Exception as e:
-            print(f"WebSocket message error: {e}", flush=True)
+            logger.error(f"WebSocket message error: {e}")
 
     def on_error(ws, error):
-        print(f"WebSocket error: {error}", flush=True)
+        logger.error(f"WebSocket error: {error}")
 
     def on_close(ws, close_status_code, close_msg):
         pass
 
     def on_open(ws):
-        print(f"Connected to ComfyUI WebSocket", flush=True)
+        logger.info(f"Connected to ComfyUI WebSocket")
 
     ws = websocket.WebSocketApp(
         ws_url,
@@ -326,7 +329,7 @@ def wait_for_completion_websocket(
     while result['success'] is None and result['error'] is None:
         elapsed = time.time() - start_time
         if elapsed > timeout:
-            print(f"Timeout after {int(elapsed)}s", flush=True)
+            logger.warning(f"Timeout after {int(elapsed)}s")
             ws.close()
             return False
 
@@ -336,20 +339,20 @@ def wait_for_completion_websocket(
 
             if history_result['status'] == 'success':
                 elapsed_int = int(elapsed)
-                print(f"Workflow completed successfully ({elapsed_int}s)", flush=True)
+                logger.info(f"Workflow completed successfully ({elapsed_int}s)")
                 outputs = history_result.get('outputs', {})
                 for node_id, output in outputs.items():
                     if 'images' in output:
                         for img in output['images']:
-                            print(f"  Output: {img.get('filename', 'unknown')}", flush=True)
+                            logger.info(f"  Output: {img.get('filename', 'unknown')}")
                             if output_dir and on_image_output:
                                 on_image_output(img, base_url, output_dir)
                 ws.close()
                 return True
             elif history_result['status'] == 'error':
-                print(f"Workflow failed", flush=True)
+                logger.error(f"Workflow failed")
                 for msg in history_result.get('messages', []):
-                    print(f"  Error: {msg}", flush=True)
+                    logger.error(f"  Error: {msg}")
                 ws.close()
                 return False
 
@@ -391,13 +394,13 @@ def wait_for_completion_http(
             if our_prompt_running:
                 consecutive_errors = 0
                 if elapsed - last_print_time >= 10:
-                    print(f"Executing... ({elapsed}s)", flush=True)
+                    logger.info(f"Executing... ({elapsed}s)")
                     last_print_time = elapsed
             elif our_prompt_pending:
                 consecutive_errors = 0
                 status = f"Queued... ({elapsed}s)"
                 if status != last_status:
-                    print(status, flush=True)
+                    logger.info(status)
                     last_status = status
             else:
                 response = urllib.request.urlopen(history_url, timeout=10)
@@ -410,28 +413,28 @@ def wait_for_completion_http(
                     outputs = prompt_data.get('outputs', {})
 
                     if status_data.get('status_str') == 'success' or outputs:
-                        print(f"Completed successfully in {elapsed}s", flush=True)
+                        logger.info(f"Completed successfully in {elapsed}s")
                         for node_id, output in outputs.items():
                             if 'images' in output:
                                 for img in output['images']:
-                                    print(f"Output: {img.get('filename', 'unknown')}", flush=True)
+                                    logger.info(f"Output: {img.get('filename', 'unknown')}")
                                     if output_dir and on_image_output:
                                         on_image_output(img, base_url, output_dir)
                             for key in ['gltf', 'glb', 'obj', 'fbx']:
                                 if key in output:
                                     for item in output[key]:
-                                        print(f"Output 3D ({key}): {item.get('filename', 'unknown')}", flush=True)
+                                        logger.info(f"Output 3D ({key}): {item.get('filename', 'unknown')}")
                         return True
 
                     if status_data.get('status_str') == 'error':
-                        print("Workflow failed with error", flush=True)
+                        logger.error("Workflow failed with error")
                         for msg in status_data.get('messages', []):
-                            print(f"Error: {msg}", flush=True)
+                            logger.error(f"Error: {msg}")
                         return False
                 else:
                     consecutive_errors += 1
                     if consecutive_errors > 5 and elapsed - last_print_time >= 10:
-                        print(f"Waiting for result... ({elapsed}s)", flush=True)
+                        logger.info(f"Waiting for result... ({elapsed}s)")
                         last_print_time = elapsed
 
             consecutive_errors = 0
@@ -439,17 +442,17 @@ def wait_for_completion_http(
         except (urllib.error.URLError, urllib.error.HTTPError) as e:
             consecutive_errors += 1
             if consecutive_errors >= 10:
-                print(f"ERROR: Lost connection after {consecutive_errors} consecutive failures: {e}")
+                logger.error(f"ERROR: Lost connection after {consecutive_errors} consecutive failures: {e}")
                 return False
             if elapsed - last_print_time >= 30:
-                print(f"Connection issue ({elapsed}s): {e}", flush=True)
+                logger.warning(f"Connection issue ({elapsed}s): {e}")
                 last_print_time = elapsed
         except Exception as e:
-            print(f"Unexpected error ({elapsed}s): {type(e).__name__}: {e}", flush=True)
+            logger.error(f"Unexpected error ({elapsed}s): {type(e).__name__}: {e}")
 
         time.sleep(0.5)
 
-    print(f"Timeout after {timeout}s", flush=True)
+    logger.warning(f"Timeout after {timeout}s")
     return False
 
 
@@ -463,24 +466,24 @@ def wait_for_completion(
 ) -> bool:
     """Wait for workflow execution to complete using WebSocket or HTTP polling."""
     if WEBSOCKET_AVAILABLE:
-        print("Using WebSocket for real-time progress monitoring", flush=True)
+        logger.info("Using WebSocket for real-time progress monitoring")
         try:
             return wait_for_completion_websocket(
                 prompt_id, server_url=server_url, port=port,
                 timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
             )
         except Exception as e:
-            print(f"WebSocket failed, falling back to HTTP polling: {e}", flush=True)
+            logger.warning(f"WebSocket failed, falling back to HTTP polling: {e}")
             return wait_for_completion_http(
                 prompt_id, server_url=server_url, port=port,
                 timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
             )
     else:
-        print("=" * 60, flush=True)
-        print("NOTE: Using HTTP polling (limited progress info)", flush=True)
-        print("For node-level progress, install websocket-client:", flush=True)
-        print(f"  {sys.executable} -m pip install websocket-client", flush=True)
-        print("=" * 60, flush=True)
+        logger.info("=" * 60)
+        logger.info("NOTE: Using HTTP polling (limited progress info)")
+        logger.info("For node-level progress, install websocket-client:")
+        logger.info(f"  {sys.executable} -m pip install websocket-client")
+        logger.info("=" * 60)
         return wait_for_completion_http(
             prompt_id, server_url=server_url, port=port,
             timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
@@ -518,7 +521,7 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             node_data['class_type'] = 'SaveImage'
             if 'inputs' not in node_data:
                 node_data['inputs'] = {}
-            print(f"Converted PreviewImage node {node_id} to SaveImage")
+            logger.info(f"Converted PreviewImage node {node_id} to SaveImage")
 
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict) or 'class_type' not in node_data:
@@ -530,53 +533,53 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
         # === Seed nodes ===
         if class_type == 'KSampler':
             inputs['seed'] = seed
-            print(f"Set KSampler node {node_id} seed to: {seed}")
+            logger.info(f"Set KSampler node {node_id} seed to: {seed}")
 
         elif class_type == 'RandomNoise':
             inputs['noise_seed'] = seed
-            print(f"Set RandomNoise node {node_id} seed to: {seed}")
+            logger.info(f"Set RandomNoise node {node_id} seed to: {seed}")
 
         elif class_type == 'HYMotionGenerate':
             inputs['seed'] = seed
-            print(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
+            logger.info(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
 
         elif class_type == 'Trellis2MeshWithVoxelAdvancedGenerator':
             inputs['seed'] = seed
-            print(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
+            logger.info(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
 
         elif class_type == 'Trellis2ImageToShape':
             inputs['seed'] = seed
-            print(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
+            logger.info(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
 
         elif class_type == 'Trellis2ShapeToTexturedMesh':
             inputs['seed'] = seed
-            print(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
+            logger.info(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
 
         elif class_type == 'UltraShapeRefine':
             inputs['seed'] = seed
-            print(f"Set UltraShapeRefine node {node_id} seed to: {seed}")
+            logger.info(f"Set UltraShapeRefine node {node_id} seed to: {seed}")
 
         # === Export/output prefix nodes ===
         elif class_type == 'SaveImage':
             inputs['filename_prefix'] = output_prefix
-            print(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
+            logger.info(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
 
         elif class_type == 'HYMotionExportFBX':
             inputs['output_dir'] = ''
             inputs['filename_prefix'] = output_prefix
-            print(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
+            logger.info(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
 
         elif class_type == 'Trellis2ExportMesh':
             inputs['filename_prefix'] = output_prefix
-            print(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
+            logger.info(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
 
         elif class_type == 'Trellis2ExportGLB':
             inputs['filename_prefix'] = output_prefix
-            print(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
+            logger.info(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
 
         elif class_type == 'UltraShapeSaveGLB':
             inputs['filename_prefix'] = output_prefix
-            print(f"Set UltraShapeSaveGLB node {node_id} prefix to: {output_prefix}")
+            logger.info(f"Set UltraShapeSaveGLB node {node_id} prefix to: {output_prefix}")
 
     return modified
 
@@ -592,7 +595,7 @@ def upload_image_to_server(image_path: str, server_url: str = None, port: int = 
         Filename as stored on server, or None on failure
     """
     if not os.path.exists(image_path):
-        print(f"Image file not found: {image_path}")
+        logger.warning(f"Image file not found: {image_path}")
         return None
 
     import mimetypes
@@ -628,14 +631,14 @@ def upload_image_to_server(image_path: str, server_url: str = None, port: int = 
         response = urllib.request.urlopen(req, timeout=30)
         result = json.loads(response.read().decode('utf-8'))
         server_filename = result.get('name', filename)
-        print(f"Uploaded image to server: {filename} -> {server_filename}")
+        logger.info(f"Uploaded image to server: {filename} -> {server_filename}")
         return server_filename
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
-        print(f"Failed to upload image: HTTP {e.code} - {error_body}")
+        logger.error(f"Failed to upload image: HTTP {e.code} - {error_body}")
         return None
     except Exception as e:
-        print(f"Failed to upload image: {e}")
+        logger.error(f"Failed to upload image: {e}")
         return None
 
 
@@ -671,15 +674,15 @@ def download_image_from_server(
             local_path = os.path.join(output_dir, filename)
             with open(local_path, 'wb') as f:
                 f.write(image_data)
-            print(f"Downloaded: {filename} -> {local_path}")
+            logger.info(f"Downloaded: {filename} -> {local_path}")
             return local_path
         return None
 
     except urllib.error.HTTPError as e:
-        print(f"Failed to download {filename}: HTTP {e.code}")
+        logger.error(f"Failed to download {filename}: HTTP {e.code}")
         return None
     except Exception as e:
-        print(f"Failed to download {filename}: {e}")
+        logger.error(f"Failed to download {filename}: {e}")
         return None
 
 
@@ -724,19 +727,19 @@ def move_output_files(
     moved_files = []
 
     if not comfyui_output_dir or not os.path.isdir(comfyui_output_dir):
-        print(f"[move_output_files] Output dir doesn't exist: {comfyui_output_dir}")
+        logger.warning(f"[move_output_files] Output dir doesn't exist: {comfyui_output_dir}")
         return moved_files
 
     if not target_dir:
-        print(f"[move_output_files] No target dir specified")
+        logger.warning(f"[move_output_files] No target dir specified")
         return moved_files
 
     os.makedirs(target_dir, exist_ok=True)
     cutoff_time = time.time() - (recent_minutes * 60)
 
-    print(f"[move_output_files] Searching for {extensions} in {comfyui_output_dir}")
-    print(f"[move_output_files] Target prefix: {filename_prefix}")
-    print(f"[move_output_files] Looking for files modified in last {recent_minutes} minutes")
+    logger.info(f"[move_output_files] Searching for {extensions} in {comfyui_output_dir}")
+    logger.info(f"[move_output_files] Target prefix: {filename_prefix}")
+    logger.info(f"[move_output_files] Looking for files modified in last {recent_minutes} minutes")
 
     all_matches = []
     for ext in extensions:
@@ -756,14 +759,14 @@ def move_output_files(
             if mtime > cutoff_time:
                 recent_files.append((file_path, mtime))
         except Exception as e:
-            print(f"[move_output_files] Error checking {file_path}: {e}")
+            logger.error(f"[move_output_files] Error checking {file_path}: {e}")
 
     recent_files.sort(key=lambda x: x[1], reverse=True)
 
-    print(f"[move_output_files] Found {len(recent_files)} recent files out of {len(all_matches)} total")
+    logger.info(f"[move_output_files] Found {len(recent_files)} recent files out of {len(all_matches)} total")
     for file_path, mtime in recent_files:
         age = int((time.time() - mtime) / 60)
-        print(f"  - {os.path.basename(file_path)} ({age} min ago)")
+        logger.info(f"  - {os.path.basename(file_path)} ({age} min ago)")
 
     for src_path, mtime in recent_files:
         original_filename = os.path.basename(src_path)
@@ -788,14 +791,14 @@ def move_output_files(
             final_size = os.path.getsize(src_path)
 
             if initial_size != final_size:
-                print(f"[move_output_files] File still being written, waiting: {original_filename}")
+                logger.info(f"[move_output_files] File still being written, waiting: {original_filename}")
                 time.sleep(2)
 
             shutil.move(src_path, dest_path)
-            print(f"[move_output_files] Moved: {original_filename} -> {new_filename}")
+            logger.info(f"[move_output_files] Moved: {original_filename} -> {new_filename}")
             moved_files.append(dest_path)
         except Exception as e:
-            print(f"[move_output_files] Failed to move {original_filename}: {e}")
+            logger.error(f"[move_output_files] Failed to move {original_filename}: {e}")
 
     return moved_files
 
@@ -896,7 +899,7 @@ def copy_inputs_to_server(input_files: list, server_input_dir: str):
 
     for src_file in input_files:
         if not os.path.exists(src_file):
-            print(f"Warning: Input file not found: {src_file}")
+            logger.warning(f"Warning: Input file not found: {src_file}")
             continue
 
         filename = os.path.basename(src_file)
@@ -904,4 +907,4 @@ def copy_inputs_to_server(input_files: list, server_input_dir: str):
 
         if not os.path.exists(dst_file) or os.path.getmtime(src_file) > os.path.getmtime(dst_file):
             shutil.copy2(src_file, dst_file)
-            print(f"Copied: {filename}")
+            logger.info(f"Copied: {filename}")

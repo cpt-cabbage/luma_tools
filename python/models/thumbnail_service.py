@@ -9,7 +9,10 @@ Designed for async loading with caching for performance.
 import os
 import hashlib
 import base64
+import logging
 from typing import Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtCore import QEventLoop, QTimer
@@ -138,7 +141,7 @@ class ModelThumbnailService:
         try:
             from models.threejs_viewer import ThreeJSViewerWidget, WEBENGINE_AVAILABLE
             if not WEBENGINE_AVAILABLE:
-                print("[ThumbnailService] WebEngine not available")
+                logger.warning("[ThumbnailService] WebEngine not available")
                 return None
 
             # Create viewer without prewarm flag so WebGL initializes properly
@@ -151,7 +154,7 @@ class ModelThumbnailService:
 
             return viewer
         except Exception as e:
-            print(f"[ThumbnailService] Error creating viewer: {e}")
+            logger.error(f"[ThumbnailService] Error creating viewer: {e}")
             return None
 
     def _cleanup_viewer(self, viewer):
@@ -161,7 +164,7 @@ class ModelThumbnailService:
                 viewer.hide()
                 viewer.deleteLater()
             except Exception as e:
-                print(f"[ThumbnailService] Error cleaning up viewer: {e}")
+                logger.error(f"[ThumbnailService] Error cleaning up viewer: {e}")
 
     def generate_thumbnail_sync(self, model_path: str) -> Optional[QPixmap]:
         """
@@ -176,11 +179,11 @@ class ModelThumbnailService:
             QPixmap of the thumbnail, or None if generation failed
         """
         if not os.path.exists(model_path):
-            print(f"[ThumbnailService] Model file not found: {model_path}")
+            logger.warning(f"[ThumbnailService] Model file not found: {model_path}")
             return None
 
         if not self.is_supported(model_path):
-            print(f"[ThumbnailService] Unsupported format: {model_path}")
+            logger.warning(f"[ThumbnailService] Unsupported format: {model_path}")
             return None
 
         cache_path = self.get_cache_path(model_path)
@@ -189,7 +192,7 @@ class ModelThumbnailService:
         try:
             viewer = self._create_fresh_viewer()
             if viewer is None:
-                print("[ThumbnailService] Could not create viewer")
+                logger.warning("[ThumbnailService] Could not create viewer")
                 return None
 
             # Track state
@@ -207,7 +210,7 @@ class ModelThumbnailService:
                 QTimer.singleShot(500, capture_screenshot)
 
             def on_load_error(error):
-                print(f"[ThumbnailService] Load error: {error}")
+                logger.error(f"[ThumbnailService] Load error: {error}")
                 loop.quit()
 
             def capture_screenshot():
@@ -233,7 +236,7 @@ class ModelThumbnailService:
                             self._cache[model_path] = pixmap
                             result['captured'] = True
                     except Exception as e:
-                        print(f"[ThumbnailService] Error saving thumbnail: {e}")
+                        logger.error(f"[ThumbnailService] Error saving thumbnail: {e}")
 
                 loop.quit()
 
@@ -257,7 +260,7 @@ class ModelThumbnailService:
                 viewer._bridge.viewerReady.disconnect(on_viewer_ready)
 
             if not viewer._viewer_ready:
-                print("[ThumbnailService] Viewer failed to initialize")
+                logger.warning("[ThumbnailService] Viewer failed to initialize")
                 return None
 
             # Load the model
@@ -281,9 +284,7 @@ class ModelThumbnailService:
             return result['pixmap']
 
         except Exception as e:
-            print(f"[ThumbnailService] Thumbnail generation error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[ThumbnailService] Thumbnail generation error: {e}", exc_info=True)
             # Clean up viewer on error
             self._cleanup_viewer(viewer)
             return None

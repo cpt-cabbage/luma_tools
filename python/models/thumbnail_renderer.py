@@ -12,6 +12,9 @@ Usage:
 
 import sys
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_output_dir(path):
@@ -41,7 +44,7 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         mesh = o3d.io.read_triangle_mesh(model_path, enable_post_processing=True)
 
         if mesh.is_empty():
-            print(f"Failed to load mesh or mesh is empty: {model_path}", file=sys.stderr)
+            logger.error(f"Failed to load mesh or mesh is empty: {model_path}")
             return False
 
         # Compute vertex normals if not present (required for proper lighting)
@@ -136,9 +139,7 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         return True
 
     except Exception as e:
-        print(f"Rendering failed: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        logger.error(f"Rendering failed: {e}", exc_info=True)
         return False
 
 
@@ -163,7 +164,7 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         model_data = load_model(model_path)
 
         if not model_data.has_skeleton:
-            print("No skeleton data found", file=sys.stderr)
+            logger.error("No skeleton data found")
             return False
 
         skeleton = model_data.skeleton
@@ -284,9 +285,7 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         return True
 
     except Exception as e:
-        print(f"Skeleton rendering failed: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        logger.error(f"Skeleton rendering failed: {e}", exc_info=True)
         return False
 
 
@@ -360,13 +359,13 @@ def render_placeholder_thumbnail(output_path: str, size: int = 150, label: str =
         return True
 
     except Exception as e:
-        print(f"Placeholder rendering failed: {e}", file=sys.stderr)
+        logger.error(f"Placeholder rendering failed: {e}")
         return False
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python thumbnail_renderer.py <input_model> <output_png> [size]", file=sys.stderr)
+        logger.error("Usage: python thumbnail_renderer.py <input_model> <output_png> [size]")
         sys.exit(1)
 
     input_path = sys.argv[1]
@@ -374,7 +373,7 @@ if __name__ == '__main__':
     size = int(sys.argv[3]) if len(sys.argv) > 3 else 150
 
     if not os.path.exists(input_path):
-        print(f"Input file not found: {input_path}", file=sys.stderr)
+        logger.error(f"Input file not found: {input_path}")
         sys.exit(1)
 
     # Try regular mesh rendering first
@@ -382,13 +381,13 @@ if __name__ == '__main__':
 
     # If mesh rendering failed, try skeleton rendering (for mocap FBX files)
     if not success:
-        print("Mesh rendering failed, trying skeleton rendering...", file=sys.stderr)
+        logger.info("Mesh rendering failed, trying skeleton rendering...")
         success = render_skeleton_thumbnail(input_path, output_path, size)
 
     # If all rendering failed, generate a placeholder thumbnail
     if not success:
         ext = os.path.splitext(input_path)[1].upper().replace('.', '')
-        print(f"Skeleton rendering failed, generating placeholder for {ext}...", file=sys.stderr)
+        logger.info(f"Skeleton rendering failed, generating placeholder for {ext}...")
         success = render_placeholder_thumbnail(output_path, size, label=ext or "3D")
 
     sys.exit(0 if success else 1)

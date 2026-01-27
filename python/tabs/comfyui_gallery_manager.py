@@ -9,6 +9,7 @@ Handles gallery UI management operations:
 """
 
 import os
+import logging
 from PySide6.QtCore import QTimer, Qt
 
 
@@ -211,9 +212,21 @@ class GalleryManager:
             # or incremental addition
             if incremental:
                 new_items = [item for item in items if item['path'] not in existing_paths]
+                stale_paths = existing_paths - target_paths
+
+                # Remove stale widgets (items no longer in scan results)
+                if stale_paths:
+                    self._remove_stale_widgets(stale_paths)
+                    logging.info(f"[Gallery] Incremental sync: removed {len(stale_paths)} stale items")
+
+                # Add new items
                 if new_items:
                     self._insert_new_items_incrementally(items, new_items)
-                    print(f"[Gallery] Incremental update: added {len(new_items)} new items")
+                    logging.info(f"[Gallery] Incremental sync: added {len(new_items)} new items")
+
+                if stale_paths or new_items:
+                    self.update_status_count(items)
+                    self.tab._visible_items_ordered = [item['path'] for item in items]
                 return
 
             # Check if we can recycle widgets (filter change scenario)
@@ -324,7 +337,7 @@ class GalleryManager:
         self.tab._visible_items_ordered = [item['path'] for item in items]
 
         # Note: We don't reload thumbnails - recycled widgets already have them loaded
-        print(f"[Gallery] Widget recycling: {len(target_paths)} shown, {len(hidden_paths)} hidden")
+        logging.info(f"[Gallery] Widget recycling: {len(target_paths)} shown, {len(hidden_paths)} hidden")
         return True
 
     def _clear_stack_widgets(self):
@@ -410,17 +423,19 @@ class GalleryManager:
                 if thumbnail:
                     self.tab._widget_cache[item['path']] = thumbnail
                     self.tab._flow_layout.addWidget(thumbnail)
+                    # Track in section_items so incremental sync can find this prefix
+                    self.tab._section_items[prefix] = [item['path']]
 
         container.setUpdatesEnabled(True)
 
         # Trigger thumbnail loading after layout settles
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(50, self._load_visible_stack_thumbnails)
+        QTimer.singleShot(150, self._load_visible_stack_thumbnails)
 
     def _update_stacked_items_incrementally(self, items):
         """Update stacked view incrementally without full rebuild.
 
-        Only adds new stacks/items, avoids clearing existing widgets.
+        Handles additions, removals, and updates of stacks/items.
         This prevents the visual "flash" when new images are added.
 
         Args:
@@ -447,19 +462,19 @@ class GalleryManager:
         existing_prefixes = existing_stack_prefixes | existing_single_prefixes
         new_prefixes = set(new_groups.keys())
 
-        # Find what's new
+        # Find additions and removals
         added_prefixes = new_prefixes - existing_prefixes
+        removed_prefixes = existing_prefixes - new_prefixes
 
-        # Check for stacks that need updating (existing stacks with new items)
+        # Check for stacks that need updating (existing stacks with changed items)
         stacks_to_update = []
-        for prefix in existing_stack_prefixes:
-            if prefix in new_groups:
-                old_paths = set(self.tab._section_items.get(prefix, []))
-                new_paths = set(item['path'] for item in new_groups[prefix])
-                if new_paths != old_paths:
-                    stacks_to_update.append(prefix)
+        for prefix in existing_prefixes & new_prefixes:
+            old_paths = set(self.tab._section_items.get(prefix, []))
+            new_paths = set(item['path'] for item in new_groups[prefix])
+            if new_paths != old_paths:
+                stacks_to_update.append(prefix)
 
-        if not added_prefixes and not stacks_to_update:
+        if not added_prefixes and not removed_prefixes and not stacks_to_update:
             # No changes - just update internal tracking
             self.tab._section_items = {}
             for prefix, group_items in new_groups.items():
@@ -470,19 +485,35 @@ class GalleryManager:
         container.setUpdatesEnabled(False)
 
         try:
-            # Update existing stacks that have new items
+            # Remove stale stacks/items
+            for prefix in removed_prefixes:
+                if prefix in self._stack_widgets:
+                    stack = self._stack_widgets.pop(prefix)
+                    if isValid(stack):
+                        if stack.is_expanded():
+                            stack.collapse()
+                        self.tab._flow_layout.removeWidget(stack)
+                        stack.deleteLater()
+                else:
+                    # Single item - remove from widget cache
+                    paths = self.tab._section_items.get(prefix, [])
+                    for path in paths:
+                        widget = self.tab._widget_cache.pop(path, None)
+                        if widget and isValid(widget):
+                            self.tab._flow_layout.removeWidget(widget)
+                            widget.deleteLater()
+                # Clean up section tracking
+                self.tab._section_items.pop(prefix, None)
+
+            # Update existing stacks that have changed items
             for prefix in stacks_to_update:
                 if prefix in self._stack_widgets:
                     stack = self._stack_widgets[prefix]
                     if isValid(stack):
-                        # Update the stack's items
                         stack.update_items(new_groups[prefix])
                         self.tab._section_items[prefix] = [item['path'] for item in new_groups[prefix]]
 
-            # Add new stacks/thumbnails at the beginning (most recent first)
-            insert_index = 0
-
-            # Get favorites manager for new stacks
+            # Add new stacks/thumbnails
             favorites_manager = getattr(self.tab, '_favorites_manager', None)
 
             for prefix in added_prefixes:
@@ -496,17 +527,14 @@ class GalleryManager:
                         parent=container,
                         gallery_tab=self.tab
                     )
-                    # Set favorites manager for likes/groups functionality
                     if favorites_manager:
                         stack.set_favorites_manager(favorites_manager)
 
                     stack.expanded.connect(self._on_stack_expanded)
                     stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
                     self._stack_widgets[prefix] = stack
-                    self.tab._flow_layout.insertWidget(insert_index, stack)
-                    insert_index += 1
+                    self.tab._flow_layout.addWidget(stack)
 
-                    # Track items for this stack
                     self.tab._section_items[prefix] = [item['path'] for item in group_items]
                 else:
                     # Single item - show as regular thumbnail
@@ -514,19 +542,63 @@ class GalleryManager:
                     thumbnail = self._create_thumbnail_widget(item, container)
                     if thumbnail:
                         self.tab._widget_cache[item['path']] = thumbnail
-                        self.tab._flow_layout.insertWidget(insert_index, thumbnail)
-                        insert_index += 1
-                        # Track as section for consistency
+                        self.tab._flow_layout.addWidget(thumbnail)
                         self.tab._section_items[prefix] = [item['path']]
 
-            if added_prefixes or stacks_to_update:
-                print(f"[Gallery] Incremental stacked update: {len(added_prefixes)} new, {len(stacks_to_update)} updated")
+            changes = []
+            if added_prefixes:
+                changes.append(f"{len(added_prefixes)} added")
+            if removed_prefixes:
+                changes.append(f"{len(removed_prefixes)} removed")
+            if stacks_to_update:
+                changes.append(f"{len(stacks_to_update)} updated")
+            if changes:
+                logging.info(f"[Gallery] Incremental stacked sync: {', '.join(changes)}")
+
+            # Reorder all widgets to match the sorted item order
+            if added_prefixes or removed_prefixes:
+                self._reorder_stacks(items)
 
         finally:
             container.setUpdatesEnabled(True)
 
         # Load thumbnails for new items
-        QTimer.singleShot(50, self._load_visible_stack_thumbnails)
+        QTimer.singleShot(150, self._load_visible_stack_thumbnails)
+
+    def _reorder_stacks(self, items):
+        """Reorder all stack/single widgets to match the sorted item order.
+
+        After incremental additions/removals, widgets may be out of order.
+        This repositions them to match the expected sort order.
+
+        Args:
+            items: List of item dicts in sorted order
+        """
+        from shiboken6 import isValid
+
+        # Use the same grouping logic as display to get correct prefix order
+        groups = self.group_items_by_prefix(items)
+        seen_prefixes = list(groups.keys())
+
+        # Reposition widgets in the layout according to sorted prefix order
+        target_index = 0
+        for prefix in seen_prefixes:
+            if prefix in self._stack_widgets:
+                stack = self._stack_widgets[prefix]
+                if isValid(stack):
+                    # Remove and re-insert at correct position
+                    self.tab._flow_layout.removeWidget(stack)
+                    self.tab._flow_layout.insertWidget(target_index, stack)
+                    target_index += 1
+            else:
+                # Single item - find its widget in cache
+                paths = self.tab._section_items.get(prefix, [])
+                for path in paths:
+                    widget = self.tab._widget_cache.get(path)
+                    if widget and isValid(widget):
+                        self.tab._flow_layout.removeWidget(widget)
+                        self.tab._flow_layout.insertWidget(target_index, widget)
+                        target_index += 1
 
     def _load_visible_stack_thumbnails(self):
         """Load thumbnails for visible stack widgets."""
@@ -536,9 +608,14 @@ class GalleryManager:
         viewport = scroll_area.viewport()
         viewport_rect = viewport.rect()
 
+        # Retry if viewport hasn't been laid out yet
+        if viewport_rect.height() <= 0:
+            QTimer.singleShot(150, self._load_visible_stack_thumbnails)
+            return
+
         visible_top = scroll_area.verticalScrollBar().value()
         visible_bottom = visible_top + viewport_rect.height()
-        buffer = 200
+        buffer = 300
 
         visible_top = max(0, visible_top - buffer)
         visible_bottom += buffer
@@ -548,6 +625,10 @@ class GalleryManager:
             if not isValid(stack):
                 continue
             widget_rect = stack.geometry()
+            # Stacks not yet laid out (zero geometry) are assumed visible
+            if widget_rect.width() == 0 and widget_rect.height() == 0:
+                stack.load_thumbnail_if_needed()
+                continue
             if (widget_rect.bottom() >= visible_top and
                 widget_rect.top() <= visible_bottom):
                 stack.load_thumbnail_if_needed()
@@ -563,11 +644,11 @@ class GalleryManager:
             is_expanded: True if expanded, False if collapsed
         """
         if is_expanded:
-            print(f"[Gallery] Stack expanded: {stack_id}")
+            logging.info(f"[Gallery] Stack expanded: {stack_id}")
             # Track expanded stack
             self.tab._expanded_stack_id = stack_id
         else:
-            print(f"[Gallery] Stack collapsed: {stack_id}")
+            logging.info(f"[Gallery] Stack collapsed: {stack_id}")
             # Clear expanded state if this was the expanded stack
             if getattr(self.tab, '_expanded_stack_id', None) == stack_id:
                 self.tab._expanded_stack_id = None
@@ -641,7 +722,7 @@ class GalleryManager:
 
             return thumbnail
         except Exception as e:
-            print(f"[Gallery] Error creating thumbnail for {path}: {e}")
+            logging.error(f"[Gallery] Error creating thumbnail for {path}: {e}")
             return None
 
     def _on_thumbnail_like_toggled(self, path, is_liked):
@@ -657,6 +738,33 @@ class GalleryManager:
                 self.tab.show_status_message("♥ Added to Likes")
             else:
                 self.tab.show_status_message("Removed from Likes")
+
+    def _remove_stale_widgets(self, stale_paths):
+        """Remove widgets for items that are no longer in the current scan.
+
+        Handles both grid widgets and stacked view items.
+
+        Args:
+            stale_paths: Set of paths to remove
+        """
+        from shiboken6 import isValid
+
+        for path in stale_paths:
+            widget = self.tab._widget_cache.pop(path, None)
+            if widget and isValid(widget):
+                self.tab._flow_layout.removeWidget(widget)
+                widget.deleteLater()
+
+        # Also clean up section_items references
+        if hasattr(self.tab, '_section_items'):
+            for section_id in list(self.tab._section_items.keys()):
+                paths = self.tab._section_items[section_id]
+                self.tab._section_items[section_id] = [
+                    p for p in paths if p not in stale_paths
+                ]
+                # Remove empty sections
+                if not self.tab._section_items[section_id]:
+                    del self.tab._section_items[section_id]
 
     def _insert_new_items_incrementally(self, sorted_items, new_items):
         """Insert new items at their correct positions without rebuilding the layout.
@@ -740,7 +848,7 @@ class GalleryManager:
             container.setUpdatesEnabled(True)
 
         # Trigger lazy loading for the new visible items
-        QTimer.singleShot(50, self.tab._load_visible_thumbnails)
+        QTimer.singleShot(150, self.tab._load_visible_thumbnails)
 
     def reorder_widgets(self, items):
         """Reorder existing widgets without recreating them.
@@ -770,7 +878,7 @@ class GalleryManager:
             if len(ordered_widgets) != len(items):
                 # Mismatch - fall back to full rebuild
                 container.setUpdatesEnabled(True)
-                print(f"[Gallery] Reorder mismatch: {len(ordered_widgets)} widgets vs {len(items)} items, doing full rebuild")
+                logging.info(f"[Gallery] Reorder mismatch: {len(ordered_widgets)} widgets vs {len(items)} items, doing full rebuild")
                 self.display_items(items, self.tab._view_mode)
                 return
 
@@ -798,7 +906,7 @@ class GalleryManager:
         self.tab._visible_items_ordered = [item['path'] for item in items]
 
         # Note: We don't reload thumbnails here - they're already loaded in the widgets
-        print(f"[Gallery] Fast reorder: {len(items)} items repositioned")
+        logging.info(f"[Gallery] Fast reorder: {len(items)} items repositioned")
 
     def create_all_widgets(self):
         """Create thumbnail widgets in batches to avoid blocking the UI."""
@@ -829,7 +937,7 @@ class GalleryManager:
             container.setUpdatesEnabled(True)
 
             # Trigger initial lazy load after layout settles
-            QTimer.singleShot(50, self.tab._load_visible_thumbnails)
+            QTimer.singleShot(150, self.tab._load_visible_thumbnails)
             return
 
         end_index = min(self.tab._widget_create_index + self.tab._widget_batch_size, len(self.tab._pending_items))
@@ -892,8 +1000,15 @@ class GalleryManager:
         """Load thumbnails for widgets that are currently visible in the viewport.
 
         Loads in batches to avoid overwhelming the thread pool.
+        Uses a guard flag to prevent parallel loading loops from rapid
+        scroll/resize events.
         """
         from shiboken6 import isValid
+
+        # Prevent parallel loading batches - if already loading, defer
+        if getattr(self.tab, '_thumbnail_loading_in_progress', False):
+            self.tab._thumbnail_load_pending = True
+            return
 
         if not hasattr(self.tab, '_widget_cache') or not self.tab._widget_cache:
             return
@@ -902,6 +1017,11 @@ class GalleryManager:
         viewport = scroll_area.viewport()
         viewport_rect = viewport.rect()
 
+        # Retry if viewport hasn't been laid out yet (height 0)
+        if viewport_rect.height() <= 0:
+            QTimer.singleShot(150, self.load_visible_thumbnails)
+            return
+
         # Convert viewport rect to container coordinates
         visible_top = scroll_area.verticalScrollBar().value()
         visible_bottom = visible_top + viewport_rect.height()
@@ -909,7 +1029,7 @@ class GalleryManager:
         visible_right = visible_left + viewport_rect.width()
 
         # Add buffer zone for smoother scrolling
-        buffer = 200
+        buffer = 300
         visible_top = max(0, visible_top - buffer)
         visible_bottom += buffer
         visible_left = max(0, visible_left - buffer)
@@ -925,6 +1045,13 @@ class GalleryManager:
                 continue
 
             widget_rect = widget.geometry()
+
+            # Widgets that haven't been laid out yet (zero geometry) are
+            # assumed visible so they load immediately rather than staying blank
+            if widget_rect.width() == 0 and widget_rect.height() == 0:
+                widgets_to_load.append(widget)
+                continue
+
             if (widget_rect.bottom() >= visible_top and
                 widget_rect.top() <= visible_bottom and
                 widget_rect.right() >= visible_left and
@@ -934,7 +1061,8 @@ class GalleryManager:
         if not widgets_to_load:
             return
 
-        # Store and start batched loading
+        # Set guard flag and store batch state
+        self.tab._thumbnail_loading_in_progress = True
         self.tab._pending_thumbnail_loads = widgets_to_load
         self.tab._thumbnail_load_index = 0
         self.load_thumbnail_batch()
@@ -944,12 +1072,14 @@ class GalleryManager:
         from shiboken6 import isValid
 
         if not hasattr(self.tab, '_pending_thumbnail_loads'):
+            self._finish_thumbnail_loading()
             return
 
         pending = self.tab._pending_thumbnail_loads
         start_idx = self.tab._thumbnail_load_index
 
         if start_idx >= len(pending):
+            self._finish_thumbnail_loading()
             return
 
         # Load 4 thumbnails per batch for faster loading while keeping UI responsive
@@ -966,6 +1096,15 @@ class GalleryManager:
         # Schedule next batch with minimal delay
         if end_idx < len(pending):
             QTimer.singleShot(5, self.load_thumbnail_batch)
+        else:
+            self._finish_thumbnail_loading()
+
+    def _finish_thumbnail_loading(self):
+        """Clear loading guard and retry if a load was deferred during loading."""
+        self.tab._thumbnail_loading_in_progress = False
+        if getattr(self.tab, '_thumbnail_load_pending', False):
+            self.tab._thumbnail_load_pending = False
+            QTimer.singleShot(50, self.load_visible_thumbnails)
 
     def update_status_count(self, items):
         """Update the status bar with item counts.

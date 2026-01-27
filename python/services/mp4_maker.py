@@ -6,11 +6,14 @@ Handles MP4 video generation from image sequences.
 - For other formats (PNG, JPG, etc.): Uses FFmpeg directly
 """
 
+import logging
 import os
 import subprocess
 import tempfile
 import shutil
 from typing import Optional, Callable
+
+logger = logging.getLogger(__name__)
 
 import sys
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
@@ -162,11 +165,11 @@ def convert_exr_to_png_with_oiio(
                 oiio_cmd.extend([
                     "--colorconvert", "ACES - ACEScg", "sRGB",
                 ])
-                print(f"Using OCIO config: {ocio_config}")
+                logger.info(f"Using OCIO config: {ocio_config}")
             else:
                 # Fallback: Use simple gamma curve if OCIO not available
                 # This converts linear to sRGB approximation
-                print("OCIO config not found, using gamma 2.2 fallback")
+                logger.warning("OCIO config not found, using gamma 2.2 fallback")
                 oiio_cmd.extend([
                     "--powc", "0.4545",  # Gamma 1/2.2 = 0.4545 (linear to sRGB)
                 ])
@@ -177,12 +180,12 @@ def convert_exr_to_png_with_oiio(
             # Add output file
             oiio_cmd.extend(["-o", output_file])
 
-            # Print command for debugging (first frame only)
+            # Log command for debugging (first frame only)
             if i == 0:
-                print("=" * 60)
-                print("OIIO Conversion Command:")
-                print(" ".join(oiio_cmd))
-                print("=" * 60)
+                logger.info("=" * 60)
+                logger.info("OIIO Conversion Command:")
+                logger.info(" ".join(oiio_cmd))
+                logger.info("=" * 60)
 
             # Execute OIIO
             result = subprocess.run(
@@ -192,9 +195,9 @@ def convert_exr_to_png_with_oiio(
             )
 
             if result.returncode != 0:
-                print(f"OIIO conversion failed for frame {frame}")
-                print(f"Error: {result.stderr}")
-                print(f"Command: {' '.join(oiio_cmd)}")
+                logger.error(f"OIIO conversion failed for frame {frame}")
+                logger.error(f"Error: {result.stderr}")
+                logger.error(f"Command: {' '.join(oiio_cmd)}")
                 return False
 
             # Update progress (10-50% range for conversion)
@@ -209,7 +212,7 @@ def convert_exr_to_png_with_oiio(
         return True
 
     except Exception as e:
-        print(f"Error in OIIO conversion: {e}")
+        logger.error(f"Error in OIIO conversion: {e}")
         return False
 
 
@@ -265,11 +268,11 @@ def generate_mp4(
         # Determine input pattern for FFmpeg
         if is_exr:
             # EXR files need OIIO conversion for proper color management
-            print(f"Detected EXR format - will convert to PNG using OIIO")
+            logger.info(f"Detected EXR format - will convert to PNG using OIIO")
 
             # Create temporary directory for PNG files
             temp_dir = tempfile.mkdtemp(prefix="mp4_maker_")
-            print(f"Created temporary directory: {temp_dir}")
+            logger.info(f"Created temporary directory: {temp_dir}")
 
             report_progress(progress_callback, 8, "Converting EXR to PNG with OIIO...")
 
@@ -289,7 +292,7 @@ def generate_mp4(
             ffmpeg_input_pattern = os.path.join(temp_dir, f"frame_%04d.png")
         else:
             # Non-EXR files can be used directly by FFmpeg
-            print(f"Detected {file_ext} format - will use directly with FFmpeg")
+            logger.info(f"Detected {file_ext} format - will use directly with FFmpeg")
             ffmpeg_input_pattern = input_sequence_path
 
         # Step 2: Encode sequence to MP4 using FFmpeg
@@ -333,11 +336,11 @@ def generate_mp4(
             output_mp4_path
         ])
 
-        # Print command for debugging
-        print("=" * 60)
-        print("FFmpeg Command:")
-        print(" ".join(cmd))
-        print("=" * 60)
+        # Log command for debugging
+        logger.info("=" * 60)
+        logger.info("FFmpeg Command:")
+        logger.info(" ".join(cmd))
+        logger.info("=" * 60)
 
         # Execute FFmpeg
         process = subprocess.Popen(
@@ -350,7 +353,7 @@ def generate_mp4(
 
         # Monitor progress
         for line in process.stderr:
-            print(line.strip())
+            logger.info(line.strip())
 
             # Parse frame progress from FFmpeg output
             if "frame=" in line:
@@ -375,15 +378,15 @@ def generate_mp4(
 
         if return_code != 0:
             stderr_output = process.stderr.read() if process.stderr else ""
-            print(f"FFmpeg failed with return code {return_code}")
-            print(f"Error output: {stderr_output}")
+            logger.error(f"FFmpeg failed with return code {return_code}")
+            logger.error(f"Error output: {stderr_output}")
             if progress_callback:
                 progress_callback(0, f"FFmpeg failed with error code {return_code}")
             return False
 
         # Verify output file exists
         if not os.path.exists(output_mp4_path):
-            print(f"Output file not created: {output_mp4_path}")
+            logger.error(f"Output file not created: {output_mp4_path}")
             if progress_callback:
                 progress_callback(0, "Output file not created")
             return False
@@ -391,11 +394,11 @@ def generate_mp4(
         # Success
         report_progress(progress_callback, 98, "MP4 generation complete!")
 
-        print(f"MP4 successfully generated: {output_mp4_path}")
+        logger.info(f"MP4 successfully generated: {output_mp4_path}")
         return True
 
     except Exception as e:
-        print(f"Error generating MP4: {e}")
+        logger.error(f"Error generating MP4: {e}")
         if progress_callback:
             progress_callback(0, f"Error: {str(e)}")
         return False
@@ -405,9 +408,9 @@ def generate_mp4(
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
-                print(f"Cleaned up temporary directory: {temp_dir}")
+                logger.info(f"Cleaned up temporary directory: {temp_dir}")
             except Exception as e:
-                print(f"Warning: Could not delete temp directory {temp_dir}: {e}")
+                logger.warning(f"Warning: Could not delete temp directory {temp_dir}: {e}")
 
 
 def get_output_filename(render_name: str, shot: str) -> str:
@@ -424,11 +427,11 @@ def get_output_filename(render_name: str, shot: str) -> str:
     return f"{shot}_{render_name}.mp4"
 
 
-print("=" * 60)
-print("LOADING: mp4_maker.py")
-print("=" * 60)
+logger.info("=" * 60)
+logger.info("LOADING: mp4_maker.py")
+logger.info("=" * 60)
 
 if __name__ == "__main__":
-    print("MP4 Maker module loaded successfully")
-    print(f"FFmpeg path: {FFMPEG_PATH}")
-    print(f"OCIO config: {get_ocio_config() or 'Not set'}")
+    logger.info("MP4 Maker module loaded successfully")
+    logger.info(f"FFmpeg path: {FFMPEG_PATH}")
+    logger.info(f"OCIO config: {get_ocio_config() or 'Not set'}")

@@ -11,7 +11,8 @@ Two modes of operation:
    - Models stay loaded in GPU memory between job submissions
    - Much faster since no model loading overhead per job
 
-Logs are written to ~/.luma_tools/logs/comfyui_runner_<timestamp>.log
+Logs are written to the network path from global settings (_logs/ subdirectory)
+for accessibility from all machines, falling back to ~/.luma_tools/logs/.
 """
 
 import sys
@@ -30,7 +31,10 @@ import argparse
 import signal
 import threading
 import shutil
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Import shared utilities
 # Try package import first (for development), fall back to local file (for farm execution)
@@ -92,24 +96,54 @@ class TeeWriter:
         self.log_file.flush()
 
 
+def _get_network_log_dir() -> str:
+    """Get network log directory from global settings (comfyui_network_output_path/_logs/)."""
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        settings_paths = [
+            os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
+            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
+        ]
+        for settings_path in settings_paths:
+            norm_path = os.path.normpath(settings_path)
+            if os.path.exists(norm_path):
+                with open(norm_path, 'r') as f:
+                    settings = json.load(f)
+                network_path = settings.get('comfyui_network_output_path', '')
+                if network_path and os.path.isdir(network_path):
+                    log_dir = os.path.join(network_path, '_logs', 'runner')
+                    os.makedirs(log_dir, exist_ok=True)
+                    return log_dir
+                break
+    except Exception:
+        pass
+    return None
+
+
 def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
     """Set up file logging by redirecting stdout/stderr to also write to a log file.
 
+    Logs are written to the network path from global settings
+    (comfyui_network_output_path/_logs/) for accessibility from all machines.
+    Falls back to the job output directory, then ~/.luma_tools/logs/.
+
     Args:
         job_name: Optional job name for log filename
-        network_output_dir: Optional network directory to write log (makes it accessible from all machines)
+        network_output_dir: Optional network directory to write log (fallback)
 
     Returns:
         Path to the log file
     """
-    # Write log to network output dir if provided (accessible from all machines)
-    # Otherwise fall back to local user directory
-    if network_output_dir and os.path.isdir(network_output_dir):
+    # Primary: network log directory from global settings
+    log_dir = _get_network_log_dir()
+
+    # Fallback: job output directory (also network-accessible)
+    if not log_dir and network_output_dir and os.path.isdir(network_output_dir):
         log_dir = network_output_dir
-    else:
+
+    # Last resort: local user directory
+    if not log_dir:
         log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-        # Use os.makedirs directly here since we're in standalone farm execution context
-        # where core.utils may not be importable
         os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -131,7 +165,15 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
     sys.stdout = TeeWriter(sys.__stdout__, log_file)
     sys.stderr = TeeWriter(sys.__stderr__, log_file)
 
-    print(f"Log file: {log_path}")
+    # Update the logging module's StreamHandler to use the tee'd stderr
+    # so logger.info() etc. also write to the log file via TeeWriter.
+    # (basicConfig creates a StreamHandler pointing to the original stderr
+    # before TeeWriter replaces it, so we need to update the reference.)
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            handler.stream = sys.stderr  # Now points to TeeWriter
+
+    logger.info(f"Log file: {log_path}")
     return log_path
 
 
@@ -148,22 +190,22 @@ def signal_server_restart(port: int, health_port: int = None) -> bool:
         health_port = port + 1000
 
     url = f"http://127.0.0.1:{health_port}/restart"
-    print(f"\n{'='*60}")
-    print("SIGNALING SERVER RESTART")
-    print(f"Sending restart request to {url}")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info("SIGNALING SERVER RESTART")
+    logger.info(f"Sending restart request to {url}")
+    logger.info(f"{'='*60}")
 
     try:
         req = urllib.request.Request(url, method='POST')
         response = urllib.request.urlopen(req, timeout=10)
         result = json.loads(response.read().decode('utf-8'))
-        print(f"Restart response: {result.get('message', 'OK')}")
+        logger.info(f"Restart response: {result.get('message', 'OK')}")
         return True
     except urllib.error.HTTPError as e:
-        print(f"HTTP Error {e.code}: {e.reason}")
+        logger.error(f"HTTP Error {e.code}: {e.reason}")
         return False
     except Exception as e:
-        print(f"Error signaling restart: {e}")
+        logger.error(f"Error signaling restart: {e}")
         return False
 
 
@@ -174,7 +216,7 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
     url = f"http://127.0.0.1:{port}/system_stats"
     start_time = time.time()
 
-    print("Waiting for server to restart...")
+    logger.info("Waiting for server to restart...")
     down_detected = False
     while time.time() - start_time < 30:
         try:
@@ -185,21 +227,21 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
             break
 
     if not down_detected:
-        print("Warning: Server may not have restarted (still responding)")
+        logger.warning("Server may not have restarted (still responding)")
 
-    print("Waiting for server to become ready...")
+    logger.info("Waiting for server to become ready...")
     while time.time() - start_time < timeout:
         try:
             req = urllib.request.urlopen(url, timeout=5)
             if req.status == 200:
                 elapsed = int(time.time() - start_time)
-                print(f"Server restart complete after {elapsed}s")
+                logger.info(f"Server restart complete after {elapsed}s")
                 return True
         except (urllib.error.URLError, OSError):
             pass  # Server not ready yet
         time.sleep(2)
 
-    print(f"Timeout waiting for server restart after {timeout}s")
+    logger.error(f"Timeout waiting for server restart after {timeout}s")
     return False
 
 
@@ -213,7 +255,7 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
     try:
         python_exe, main_py = resolve_comfyui_paths(comfyui_path, mode, python_path)
     except ValueError as e:
-        print(f"ERROR: {e}")
+        logger.error(f"{e}")
         return None
 
     cmd = [
@@ -230,8 +272,8 @@ def start_comfyui_server(comfyui_path: str, input_dir: str, output_dir: str, por
 
     working_dir = os.path.dirname(main_py)
 
-    print(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
-    print(f"Working directory: {working_dir}")
+    logger.info(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
+    logger.info(f"Working directory: {working_dir}")
 
     process = subprocess.Popen(
         cmd,
@@ -252,15 +294,15 @@ def stream_output(process: subprocess.Popen, process_died: threading.Event):
         for line in process.stdout:
             line = line.rstrip()
             if line:
-                print(f"[ComfyUI] {line}", flush=True)
+                logger.info(f"[ComfyUI] {line}")
                 if "Error" in line or "Exception" in line or "CUDA out of memory" in line:
-                    print(f"WARNING: ComfyUI error detected: {line}", flush=True)
+                    logger.warning(f"ComfyUI error detected: {line}")
     except Exception as e:
-        print(f"Output stream error: {e}", flush=True)
+        logger.error(f"Output stream error: {e}")
     finally:
         ret = process.poll()
         if ret is not None:
-            print(f"ComfyUI process exited with code {ret}", flush=True)
+            logger.info(f"ComfyUI process exited with code {ret}")
             if ret != 0:
                 process_died.set()
 
@@ -301,22 +343,22 @@ def main():
     try:
         python_exe, main_py = resolve_comfyui_paths(args.comfyui_path, args.mode, args.python_path)
     except ValueError as e:
-        print(f"ERROR: {e}")
+        logger.error(f"{e}")
         sys.exit(1)
 
     # Verify paths
     if not os.path.exists(python_exe):
-        print(f"ERROR: Python executable not found: {python_exe}")
+        logger.error(f"Python executable not found: {python_exe}")
         sys.exit(1)
     if not os.path.exists(main_py):
-        print(f"ERROR: ComfyUI main.py not found: {main_py}")
+        logger.error(f"ComfyUI main.py not found: {main_py}")
         sys.exit(1)
     if not os.path.exists(args.workflow):
-        print(f"ERROR: Workflow file not found: {args.workflow}")
+        logger.error(f"Workflow file not found: {args.workflow}")
         sys.exit(1)
 
     # Load workflow
-    print(f"Loading workflow from: {args.workflow}")
+    logger.info(f"Loading workflow from: {args.workflow}")
     with open(args.workflow, 'r', encoding='utf-8') as f:
         base_workflow = json.load(f)
 
@@ -324,7 +366,7 @@ def main():
     seeds_data = None
     if args.seeds_file:
         if not os.path.exists(args.seeds_file):
-            print(f"ERROR: Seeds file not found: {args.seeds_file}")
+            logger.error(f"Seeds file not found: {args.seeds_file}")
             sys.exit(1)
         with open(args.seeds_file, 'r', encoding='utf-8') as f:
             seeds_data = json.load(f)
@@ -332,7 +374,7 @@ def main():
     # Determine frames to process
     if args.batch and seeds_data:
         frames_to_process = list(range(1, len(seeds_data.get('seeds', [])) + 1))
-        print(f"Batch mode: Processing {len(frames_to_process)} generations")
+        logger.info(f"Batch mode: Processing {len(frames_to_process)} generations")
     else:
         frames_to_process = [args.frame]
 
@@ -343,11 +385,11 @@ def main():
         if seeds_data:
             frame_index = frame_num - 1
             if frame_index < 0 or frame_index >= len(seeds_data.get('seeds', [])):
-                print(f"ERROR: Frame {frame_num} out of range")
+                logger.error(f"Frame {frame_num} out of range")
                 sys.exit(1)
             seed = seeds_data['seeds'][frame_index]
             output_prefix = f"{args.output_prefix}_gen{frame_num:02d}"
-            print(f"Frame {frame_num}: Using seed {seed}, output prefix: {output_prefix}")
+            logger.info(f"Frame {frame_num}: Using seed {seed}, output prefix: {output_prefix}")
             workflow = modify_workflow_seed(workflow, seed, output_prefix)
         workflows_to_run.append((frame_num, workflow))
 
@@ -357,76 +399,76 @@ def main():
     server_started_by_us = False
 
     if args.persistent:
-        print(f"Persistent mode: connecting to server on port {args.port}...")
+        logger.info(f"Persistent mode: connecting to server on port {args.port}...")
 
         # Copy input images to ComfyUI's default input directory FIRST
         # This must happen before restart to ensure files are present
         # Some ComfyUI nodes ignore the server's configured input directory
         # and always look in the hardcoded default location
         images_to_upload = get_workflow_images(base_workflow)
-        print(f"DEBUG: Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
-        print(f"DEBUG: args.comfyui_path = {args.comfyui_path}")
-        print(f"DEBUG: args.input_directory = {args.input_directory}")
+        logger.info(f"DEBUG: Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
+        logger.info(f"DEBUG: args.comfyui_path = {args.comfyui_path}")
+        logger.info(f"DEBUG: args.input_directory = {args.input_directory}")
         if images_to_upload:
             comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
             if os.path.isdir(comfyui_input_dir):
-                print(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
+                logger.info(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
                 for image_name in images_to_upload:
                     src_path = os.path.join(args.input_directory, image_name)
                     dst_path = os.path.join(comfyui_input_dir, image_name)
                     if os.path.exists(src_path):
                         try:
                             shutil.copy2(src_path, dst_path)
-                            print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                            logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
                         except Exception as e:
-                            print(f"  WARNING: Failed to copy {image_name}: {e}")
+                            logger.warning(f"Failed to copy {image_name}: {e}")
                     else:
-                        print(f"  WARNING: Image not found: {src_path}")
+                        logger.warning(f"Image not found: {src_path}")
             else:
-                print(f"WARNING: ComfyUI input directory not found: {comfyui_input_dir}")
+                logger.warning(f"ComfyUI input directory not found: {comfyui_input_dir}")
 
         if args.full_restart:
-            print("\nFull restart requested")
+            logger.info("\nFull restart requested")
             if signal_server_restart(args.port):
                 if not wait_for_server_restart(args.port, timeout=300):
-                    print("ERROR: Server restart failed")
+                    logger.error("Server restart failed")
                     sys.exit(1)
                 # Re-copy images after restart in case they were cleared
                 if images_to_upload and os.path.isdir(comfyui_input_dir):
-                    print(f"\nRe-copying {len(images_to_upload)} input image(s) after restart...")
+                    logger.info(f"\nRe-copying {len(images_to_upload)} input image(s) after restart...")
                     for image_name in images_to_upload:
                         src_path = os.path.join(args.input_directory, image_name)
                         dst_path = os.path.join(comfyui_input_dir, image_name)
                         if os.path.exists(src_path):
                             try:
                                 shutil.copy2(src_path, dst_path)
-                                print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                                logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
                             except Exception as e:
-                                print(f"  WARNING: Failed to copy {image_name}: {e}")
+                                logger.warning(f"Failed to copy {image_name}: {e}")
             else:
-                print("WARNING: Could not signal server restart, continuing...")
+                logger.warning("Could not signal server restart, continuing...")
 
         if not check_server_health(port=args.port):
             if args.server_not_found == 'wait':
-                print(f"Server not found - waiting up to {args.server_wait_timeout}s...")
+                logger.info(f"Server not found - waiting up to {args.server_wait_timeout}s...")
                 if not wait_for_server(port=args.port, timeout=args.server_wait_timeout):
-                    print(f"ERROR: Server did not start within timeout")
+                    logger.error(f"Server did not start within timeout")
                     sys.exit(1)
             else:
-                print(f"ERROR: No ComfyUI server found on port {args.port}")
+                logger.error(f"No ComfyUI server found on port {args.port}")
                 sys.exit(1)
 
-        print(f"Connected to existing server on port {args.port}")
+        logger.info(f"Connected to existing server on port {args.port}")
 
         # Also upload via HTTP API as backup method
-        print("\nUploading input images to server via HTTP...")
+        logger.info("\nUploading input images to server via HTTP...")
         for image_name in images_to_upload:
             image_path = os.path.join(args.input_directory, image_name)
             if os.path.exists(image_path):
                 if not upload_image_to_server(image_path, port=args.port):
-                    print(f"WARNING: HTTP upload failed for {image_name} (but direct copy may have succeeded)")
+                    logger.warning(f"HTTP upload failed for {image_name} (but direct copy may have succeeded)")
             else:
-                print(f"WARNING: Image not found locally: {image_path}")
+                logger.warning(f"Image not found locally: {image_path}")
     else:
         # Copy input images to ComfyUI's default input directory
         # Some ComfyUI nodes ignore --input-directory and use hardcoded paths
@@ -434,20 +476,20 @@ def main():
         if images_to_copy:
             comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
             if os.path.isdir(comfyui_input_dir):
-                print(f"\nCopying {len(images_to_copy)} input image(s) to ComfyUI input directory...")
+                logger.info(f"\nCopying {len(images_to_copy)} input image(s) to ComfyUI input directory...")
                 for image_name in images_to_copy:
                     src_path = os.path.join(args.input_directory, image_name)
                     dst_path = os.path.join(comfyui_input_dir, image_name)
                     if os.path.exists(src_path):
                         try:
                             shutil.copy2(src_path, dst_path)
-                            print(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                            logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
                         except Exception as e:
-                            print(f"  WARNING: Failed to copy {image_name}: {e}")
+                            logger.warning(f"Failed to copy {image_name}: {e}")
                     else:
-                        print(f"  WARNING: Image not found: {src_path}")
+                        logger.warning(f"Image not found: {src_path}")
             else:
-                print(f"WARNING: ComfyUI input directory not found: {comfyui_input_dir}")
+                logger.warning(f"ComfyUI input directory not found: {comfyui_input_dir}")
 
         process = start_comfyui_server(
             args.comfyui_path,
@@ -459,7 +501,7 @@ def main():
             lowvram=args.lowvram
         )
         if process is None:
-            print("ERROR: Failed to start ComfyUI server")
+            logger.error("Failed to start ComfyUI server")
             sys.exit(1)
         server_started_by_us = True
 
@@ -467,21 +509,21 @@ def main():
         output_thread.start()
 
         if not wait_for_server(port=args.port, timeout=120):
-            print("Failed to start ComfyUI server")
+            logger.error("Failed to start ComfyUI server")
             process.terminate()
             sys.exit(1)
 
     # Cleanup handler
     def cleanup(signum=None, frame=None, exit_code=None):
         if server_started_by_us and process:
-            print("Cleaning up - shutting down server...")
+            logger.info("Cleaning up - shutting down server...")
             process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
         elif args.persistent:
-            print("Persistent mode - server stays running")
+            logger.info("Persistent mode - server stays running")
 
         if signum is not None:
             sys.exit(1)
@@ -499,22 +541,22 @@ def main():
 
         for i, (frame_num, workflow) in enumerate(workflows_to_run, 1):
             if process and process.poll() is not None:
-                print(f"ERROR: ComfyUI process died (exit code: {process.returncode})")
+                logger.error(f"ComfyUI process died (exit code: {process.returncode})")
                 failed += (total_frames - i + 1)
                 break
 
             if process_died.is_set():
-                print("ERROR: ComfyUI process crashed")
+                logger.error("ComfyUI process crashed")
                 failed += (total_frames - i + 1)
                 break
 
-            print(f"\n{'='*60}")
-            print(f"Processing generation {i}/{total_frames} (frame {frame_num})")
-            print(f"{'='*60}")
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Processing generation {i}/{total_frames} (frame {frame_num})")
+            logger.info(f"{'='*60}")
 
             prompt_id = submit_workflow(workflow, port=args.port)
             if not prompt_id:
-                print(f"Failed to submit workflow for frame {frame_num}")
+                logger.error(f"Failed to submit workflow for frame {frame_num}")
                 if process and process.poll() is not None:
                     failed += (total_frames - i + 1)
                     break
@@ -538,16 +580,16 @@ def main():
             )
 
             if process and process.poll() is not None:
-                print(f"ERROR: ComfyUI crashed during generation")
+                logger.error(f"ComfyUI crashed during generation")
                 failed += (total_frames - i + 1)
                 break
 
             if success:
-                print(f"Frame {frame_num} completed successfully")
+                logger.info(f"Frame {frame_num} completed successfully")
                 successful += 1
 
                 if args.comfyui_output_dir:
-                    print(f"[Runner] Checking for output files to move")
+                    logger.info(f"[Runner] Checking for output files to move")
                     moved = move_output_files(
                         args.comfyui_output_dir,
                         args.output_directory,
@@ -555,22 +597,23 @@ def main():
                         recent_minutes=30
                     )
                     if moved:
-                        print(f"Moved {len(moved)} output file(s)")
+                        logger.info(f"Moved {len(moved)} output file(s)")
             else:
-                print(f"Frame {frame_num} failed or timed out")
+                logger.error(f"Frame {frame_num} failed or timed out")
                 failed += 1
 
-        print(f"\n{'='*60}")
-        print(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed")
+        logger.info(f"{'='*60}")
 
         exit_code = 0 if failed == 0 else 1
         cleanup(exit_code=exit_code)
 
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         cleanup(exit_code=1)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
     main()

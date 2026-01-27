@@ -5,8 +5,11 @@ Provides a validation framework similar to AYON's Pyblish plugins
 but simplified for Luma Tools' use case.
 """
 
+import logging
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 class ValidationError(Exception):
@@ -129,8 +132,8 @@ def run_validators(
         if not result.passed:
             if not validator.optional:
                 all_passed = False
-            print(f"[Validator] {validator.name}: FAILED - {result.message}")
+            logger.warning(f"[Validator] {validator.name}: FAILED - {result.message}")
         else:
-            print(f"[Validator] {validator.name}: PASSED")
+            logger.info(f"[Validator] {validator.name}: PASSED")
 
     return all_passed, results
