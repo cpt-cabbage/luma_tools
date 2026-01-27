@@ -297,8 +297,6 @@ class SettingsTab(BaseTab):
             if pass_name in default_passes or pass_name in REQUIRED_PASSES:
                 item.setSelected(True)
 
-        self.log(f"Loaded default passes UI with {len(all_available_passes)} passes")
-
     def _load_global_settings_ui(self):
         """Load global settings into the settings UI."""
         from core.settings_manager import get_global_settings_path, get_setting

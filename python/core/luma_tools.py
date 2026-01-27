@@ -215,6 +215,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPainter, QColor, QPen
 from PySide6.QtWidgets import QApplication, QTabBar
 
+# Suppress known Qt warnings that are harmless in our environment
+def _qt_message_filter(mode, context, message):
+    if "QtWebEngineProcess" in message and "sandbox" in message:
+        return
+    sys.stderr.write(message + "\n")
+QtCore.qInstallMessageHandler(_qt_message_filter)
+
 # Import UI components
 from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager, InlineSpinner
 from splash_screen import SplashScreen
@@ -1194,8 +1201,8 @@ def main():
             from PySide6.QtGui import QCursor
             # Create and post a synthetic mouse move event to force cursor update
             pos = QCursor.pos()
-            global_pos = window.mapFromGlobal(pos)
-            event = QMouseEvent(QtCore.QEvent.Type.MouseMove, global_pos, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+            local_pos = window.mapFromGlobal(pos)
+            event = QMouseEvent(QtCore.QEvent.Type.MouseMove, local_pos, pos, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
             QtCore.QCoreApplication.postEvent(window, event)
         
         QtCore.QTimer.singleShot(100, force_cursor_update)
