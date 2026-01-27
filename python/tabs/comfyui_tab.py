@@ -158,9 +158,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         self._note_display_widget.setVisible(False)
 
-        # Insert into comfyuiWorkflowLayout after workflow selector (index 3)
+        # Insert into comfyuiWorkflowLayout after buttons and path label
         if hasattr(self.ui, 'comfyuiWorkflowLayout'):
-            self.ui.comfyuiWorkflowLayout.insertWidget(3, self._note_display_widget)
+            self.ui.comfyuiWorkflowLayout.addWidget(self._note_display_widget)
 
     def _update_workflow_selector_visibility(self):
         """Update workflow selector visibility based on current preset."""

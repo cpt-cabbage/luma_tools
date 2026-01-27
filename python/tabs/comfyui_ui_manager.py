@@ -45,8 +45,15 @@ class ComfyUIWidgetManager:
         """Clear all dynamic widgets from the layout."""
         while self.layout.count():
             item = self.layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+
+        # Clear the layout's cached size constraints so new widgets
+        # get a fresh calculation instead of inheriting stale values.
+        self.layout.invalidate()
 
         self.dynamic_widgets = {}
         self.condition_map = {}
@@ -88,6 +95,13 @@ class ComfyUIWidgetManager:
 
         self.clear_widgets()
 
+        # Flush pending deleteLater() calls before adding new widgets.
+        # Without this, Qt's layout engine can retain stale size hints from
+        # widgets that are detached but not yet destroyed, causing overflow
+        # when switching from fewer to more widgets.
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
         if not workflow_path:
             return
 
@@ -97,7 +111,6 @@ class ComfyUIWidgetManager:
         total_image_nodes = sum(1 for node in editable_nodes
                                if node.widget_type == 'image'
                                and node_overrides.get(str(node.node_id), node_overrides.get(node.title, {})).get("enabled", True))
-        logger.info(f"[ComfyUI] Node overrides: {node_overrides}")
         logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
 
         # Collect widgets separately for horizontal layout
@@ -111,8 +124,6 @@ class ComfyUIWidgetManager:
             # Prefer node_id if available, fall back to title
             override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
             if not override.get("enabled", True):
-                # Node is disabled, skip it
-                logger.info(f"[ComfyUI] Skipping disabled node: {node.title} (ID: {node.node_id}, type: {node.widget_type})")
                 continue
 
             # Apply default value override if present (for text and string nodes)
@@ -135,12 +146,12 @@ class ComfyUIWidgetManager:
 
         # Layout strategy: if we have both non-image and image widgets, arrange horizontally
         # (non-image on left, images on right). Otherwise, arrange vertically.
-        logger.info(f"[ComfyUI] Non-image widgets: {len(non_image_widgets)}, Image widgets: {len(image_widgets)}")
-
         if non_image_widgets and image_widgets:
-            # Mixed layout: Create horizontal container with left (non-image) and right (image) sections
-            logger.info(f"[ComfyUI] Creating horizontal layout: {len(non_image_widgets)} non-image on left, {len(image_widgets)} image on right")
             horizontal_container = QWidget()
+            # Ignored horizontal policy forces the container to accept whatever
+            # width the parent gives it, preventing overflow from children's
+            # accumulated minimum widths (e.g. 3 image selectors with 160px labels).
+            horizontal_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             horizontal_layout = QHBoxLayout(horizontal_container)
             horizontal_layout.setContentsMargins(0, 0, 0, 0)
             horizontal_layout.setSpacing(15)
@@ -157,6 +168,7 @@ class ComfyUIWidgetManager:
 
             # Right section: image widgets stacked horizontally
             right_container = QWidget()
+            right_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             right_layout = QHBoxLayout(right_container)
             right_layout.setContentsMargins(0, 0, 0, 0)
             right_layout.setSpacing(10)
@@ -164,9 +176,9 @@ class ComfyUIWidgetManager:
                 right_layout.addWidget(widget, 1)  # Add stretch factor to expand
             horizontal_layout.addWidget(right_container)
 
-            # Set stretch factors: equal space for symmetry
+            # Give images proportionally more space based on count
             horizontal_layout.setStretch(0, 1)  # Left section (non-image)
-            horizontal_layout.setStretch(1, 1)  # Right section (images)
+            horizontal_layout.setStretch(1, max(1, len(image_widgets)))  # Right section
 
             self.layout.addWidget(horizontal_container)
             horizontal_container.is_mixed_layout = True
@@ -174,8 +186,8 @@ class ComfyUIWidgetManager:
         elif image_widgets and not non_image_widgets:
             # Only image widgets: arrange horizontally if multiple, vertically if single
             if len(image_widgets) > 1:
-                logger.info(f"[ComfyUI] Adding {len(image_widgets)} image widgets in horizontal layout")
                 image_row_container = QWidget()
+                image_row_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
                 image_row_layout = QHBoxLayout(image_row_container)
                 image_row_layout.setContentsMargins(0, 5, 0, 5)
                 image_row_layout.setSpacing(10)
@@ -186,15 +198,11 @@ class ComfyUIWidgetManager:
                 self.layout.addWidget(image_row_container, 1)  # Add stretch to container
                 image_row_container.is_image_row = True
             else:
-                # Single image widget
-                logger.info(f"[ComfyUI] Adding single image widget: {image_widgets[0][1].display_name}")
                 widget = image_widgets[0][0]
                 widget.setVisible(True)
                 self.layout.addWidget(widget, 1)  # Add stretch factor
 
         elif non_image_widgets and not image_widgets:
-            # Only non-image widgets: arrange vertically
-            logger.info(f"[ComfyUI] Adding {len(non_image_widgets)} non-image widgets vertically")
             for widget, node in non_image_widgets:
                 self.layout.addWidget(widget, 1)  # Add stretch factor for each widget
 
@@ -227,6 +235,27 @@ class ComfyUIWidgetManager:
 
         # Apply semantic values (for workflow switching within multi-workflow presets)
         self._apply_semantic_editable_values()
+
+        # Defer layout recalculation to next event loop tick.
+        # New widgets need one event loop pass to compute their sizeHints
+        # before we can force the parent tree to recalculate geometry.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._force_layout_update)
+
+    def _force_layout_update(self):
+        """Force full layout recalculation up the widget tree.
+
+        Called on a deferred timer so that newly-added widgets have already
+        computed their sizeHints before we invalidate cached geometry.
+        """
+        self.layout.activate()
+        parent = self.layout.parentWidget()
+        while parent:
+            parent.updateGeometry()
+            if parent.layout():
+                parent.layout().invalidate()
+                parent.layout().activate()
+            parent = parent.parentWidget()
 
     def _find_toggle_widget_by_name(self, condition_name):
         """Find a toggle widget by the condition node name."""

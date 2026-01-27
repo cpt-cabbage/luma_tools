@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.5.4.1
+- Morning coffee bugfixes and UI updates
+
 ## Version 0.5.4
 - Add caching for all thumbnails
 - Fix stacked view not repecting sort mode

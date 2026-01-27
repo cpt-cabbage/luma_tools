@@ -1014,8 +1014,18 @@ class LumaShotTools(QtWidgets.QWidget):
     def enable_log_redirect(self):
         """Enable stdout/stderr redirection to the log widget."""
         if getattr(self, '_log_redirect_pending', False):
+            # Redirect stdout/stderr for any remaining print() calls
             sys.stdout = self.log_stream
             sys.stderr = self.log_stream
+
+            # Bridge logging module → UI logs tab
+            # Without this, logger.info() etc. only write to the file handler
+            # and never reach the logs tab (LogStream only captures stdout/stderr)
+            ui_handler = logging.StreamHandler(self.log_stream)
+            ui_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+            ui_handler.setLevel(logging.INFO)
+            logging.getLogger().addHandler(ui_handler)
+
             self._log_redirect_pending = False
             logging.info("Log redirection enabled")
 
