@@ -125,21 +125,18 @@ class ComfyUITab(PollingMixin, BaseTab):
         if not hasattr(self.ui, 'comfyuiPresetButtonsLayout'):
             return
 
-        # Create spacer to separate buttons from workflow selector
-        spacer = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
-        self.ui.comfyuiPresetButtonsLayout.addItem(spacer)
-
-        # Add workflow label and combo to button row
+        # Add workflow label and combo to button row with proper stretch for symmetry
         self._workflow_label = QLabel("Workflow:")
         self._workflow_label.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_label)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_label, 0)
 
         self._workflow_selector_combo = QtWidgets.QComboBox()
         self._workflow_selector_combo.setMinimumWidth(150)
         self._workflow_selector_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._workflow_selector_combo.currentTextChanged.connect(self._on_workflow_selected)
         self._workflow_selector_combo.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_selector_combo)
+        # Use stretch factor of 1 to maintain symmetry with the 3 buttons (each also having stretch 1)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_selector_combo, 1)
 
     def _setup_note_display(self):
         """Set up the note display area for showing model/workflow notes."""
@@ -347,7 +344,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         self.state_manager.current_preset_name = preset_name
         display_name = self._get_preset_display_name(preset_name)
-        self.ui.ComfyUICurrentPreset.setText(display_name)
+        self.ui.ComfyUIChoosePreset.setText(display_name)
 
         # Check if this is a multi-workflow model
         is_multi = is_workflow_preset_multi(preset_name)
@@ -383,7 +380,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._update_note_display()
             self._save_state()
         else:
-            self.ui.ComfyUICurrentPreset.setText(f"{display_name} (missing)")
+            self.ui.ComfyUIChoosePreset.setText(f"{display_name} (missing)")
             self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
@@ -519,7 +516,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 )
                 self.state_manager.current_preset_name = new_name
                 self.state_manager.current_selected_workflow = None
-                self.ui.ComfyUICurrentPreset.setText(self._get_preset_display_name(new_name))
+                self.ui.ComfyUIChoosePreset.setText(self._get_preset_display_name(new_name))
                 self.show_status(f"Preset renamed to '{new_name}'", "success")
             else:
                 # Just update the existing preset

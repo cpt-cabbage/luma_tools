@@ -164,9 +164,9 @@ class ComfyUIWidgetManager:
                 right_layout.addWidget(widget, 1)  # Add stretch factor to expand
             horizontal_layout.addWidget(right_container)
 
-            # Set stretch factors: give more space to images
+            # Set stretch factors: equal space for symmetry
             horizontal_layout.setStretch(0, 1)  # Left section (non-image)
-            horizontal_layout.setStretch(1, 2)  # Right section (images)
+            horizontal_layout.setStretch(1, 1)  # Right section (images)
 
             self.layout.addWidget(horizontal_container)
             horizontal_container.is_mixed_layout = True
@@ -304,15 +304,19 @@ class ComfyUIWidgetManager:
 
         elif node.widget_type == '3d_model':
             # 3D model selector - file browser for GLB/OBJ/FBX files
-            label = QLabel(f"{node.display_name}:")
-            layout.addWidget(label)
-
             file_row = QHBoxLayout()
+
+            label = QLabel(f"{node.display_name}:")
+            label.setMinimumWidth(160)
+            label.setMaximumWidth(160)
+            file_row.addWidget(label)
+
             file_path_edit = QLineEdit()
             file_path_edit.setPlaceholderText("Select a 3D model file (GLB, OBJ, FBX)...")
+            file_path_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             if node.current_value:
                 file_path_edit.setText(str(node.current_value))
-            file_row.addWidget(file_path_edit)
+            file_row.addWidget(file_path_edit, 1)
 
             browse_btn = QPushButton("Browse...")
             browse_btn.setFixedWidth(80)
@@ -328,6 +332,8 @@ class ComfyUIWidgetManager:
             # Top row: Label and Presets button
             top_row = QHBoxLayout()
             label = QLabel(f"{node.display_name}:")
+            label.setMinimumWidth(160)
+            label.setMaximumWidth(160)
             top_row.addWidget(label)
             top_row.addStretch()
 
@@ -358,6 +364,8 @@ class ComfyUIWidgetManager:
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
             label = QLabel(f"{node.display_name}:")
+            label.setMinimumWidth(160)
+            label.setMaximumWidth(160)
             input_widget.toolbar_layout.insertWidget(0, label)
 
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
@@ -365,13 +373,19 @@ class ComfyUIWidgetManager:
 
         else:
             # Default: generic line edit for strings, ints, floats
+            row = QHBoxLayout()
+
             label = QLabel(f"{node.display_name}:")
-            layout.addWidget(label)
+            label.setMinimumWidth(160)
+            label.setMaximumWidth(160)
+            row.addWidget(label)
 
             input_widget = QLineEdit()
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             if node.current_value:
                 input_widget.setText(str(node.current_value))
-            layout.addWidget(input_widget)
+            row.addWidget(input_widget, 1)
+            layout.addLayout(row)
             container.input_widget = input_widget
 
         return container

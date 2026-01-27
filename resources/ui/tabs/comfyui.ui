@@ -67,6 +67,12 @@
             </property>
             <item>
              <widget class="QPushButton" name="ComfyUIChoosePreset">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                <horstretch>1</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
               <property name="text">
                <string>Choose Model</string>
               </property>
@@ -77,6 +83,12 @@
             </item>
             <item>
              <widget class="QPushButton" name="ComfyUIAddPreset">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                <horstretch>1</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
               <property name="text">
                <string>Add Model...</string>
               </property>
@@ -87,35 +99,17 @@
             </item>
             <item>
              <widget class="QPushButton" name="ComfyUIEditPreset">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                <horstretch>1</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
               <property name="text">
                <string>Edit Model...</string>
               </property>
               <property name="toolTip">
                <string>Edit the selected workflow preset</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="comfyuiPresetLayout">
-            <property name="spacing">
-             <number>6</number>
-            </property>
-            <item>
-             <widget class="QLabel" name="ComfyUIModelChosenLabel">
-              <property name="text">
-               <string>Model Chosen: </string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="ComfyUICurrentPreset">
-              <property name="text">
-               <string>No model selected</string>
-              </property>
-              <property name="styleSheet">
-               <string>font-weight: bold;</string>
               </property>
              </widget>
             </item>
@@ -169,7 +163,7 @@
           <widget class="QGroupBox" name="comfyuiSettingsGroupBox">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-             <horstretch>2</horstretch>
+             <horstretch>1</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
            </property>
@@ -190,10 +184,22 @@
                 <property name="text">
                  <string>Output:</string>
                 </property>
+                <property name="minimumWidth">
+                 <number>160</number>
+                </property>
+                <property name="maximumWidth">
+                 <number>160</number>
+                </property>
                </widget>
               </item>
               <item>
                <widget class="QLabel" name="ComfyUINetworkPathDisplay">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>1</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
                 <property name="text">
                  <string>(Not configured - set in Settings tab)</string>
                 </property>
@@ -217,10 +223,22 @@
                 <property name="text">
                  <string>Successive Generations:</string>
                 </property>
+                <property name="minimumWidth">
+                 <number>160</number>
+                </property>
+                <property name="maximumWidth">
+                 <number>160</number>
+                </property>
                </widget>
               </item>
               <item>
                <widget class="QSlider" name="ComfyUIGenerationCount">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                  <horstretch>1</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
                 <property name="minimum">
                  <number>1</number>
                 </property>
@@ -266,10 +284,22 @@
                 <property name="text">
                  <string>Seed:</string>
                 </property>
+                <property name="minimumWidth">
+                 <number>160</number>
+                </property>
+                <property name="maximumWidth">
+                 <number>160</number>
+                </property>
                </widget>
               </item>
               <item>
                <widget class="QSpinBox" name="ComfyUISeed">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                  <horstretch>1</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
                 <property name="minimum">
                  <number>0</number>
                 </property>
