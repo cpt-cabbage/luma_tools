@@ -11,6 +11,8 @@ Handles gallery UI management operations:
 import os
 import logging
 from PySide6.QtCore import QTimer, Qt
+from shiboken6 import isValid
+from ui_components import ThumbnailWidget, StackedThumbnailWidget
 
 
 class GalleryManager:
@@ -297,7 +299,7 @@ class GalleryManager:
         Returns:
             True if recycling was successful, False if full rebuild needed
         """
-        from shiboken6 import isValid
+
 
         container = self.tab.ui.galleryThumbnailContainer
 
@@ -364,7 +366,7 @@ class GalleryManager:
         Args:
             items: List of item dicts with job_prefix field
         """
-        from ui_components import StackedThumbnailWidget
+
 
         container = self.tab.ui.galleryThumbnailContainer
 
@@ -450,8 +452,8 @@ class GalleryManager:
         Args:
             items: List of item dicts with job_prefix field
         """
-        from ui_components import StackedThumbnailWidget
-        from shiboken6 import isValid
+
+
 
         container = self.tab.ui.galleryThumbnailContainer
 
@@ -590,7 +592,7 @@ class GalleryManager:
         Args:
             items: List of item dicts in sorted order
         """
-        from shiboken6 import isValid
+
 
         # Use the same grouping logic as display to get correct prefix order
         groups = self.group_items_by_prefix(items)
@@ -618,7 +620,7 @@ class GalleryManager:
 
     def _load_visible_stack_thumbnails(self):
         """Load thumbnails for visible stack widgets."""
-        from shiboken6 import isValid
+
 
         scroll_area = self.tab.ui.galleryScrollArea
         viewport = scroll_area.viewport()
@@ -693,7 +695,7 @@ class GalleryManager:
 
     def _cleanup_new_item_animations(self):
         """Clean up new item animation references and remove opacity effects."""
-        from shiboken6 import isValid
+
 
         for anim in getattr(self, '_new_item_animations', []):
             target = anim.targetObject()
@@ -743,7 +745,7 @@ class GalleryManager:
         Returns:
             The created thumbnail widget, or None on error
         """
-        from ui_components import ThumbnailWidget
+
 
         if is_editable is None:
             is_editable = self.tab._is_own_gallery()
@@ -815,7 +817,7 @@ class GalleryManager:
         Args:
             stale_paths: Set of paths to remove
         """
-        from shiboken6 import isValid
+
 
         for path in stale_paths:
             widget = self.tab._widget_cache.pop(path, None)
@@ -843,16 +845,11 @@ class GalleryManager:
             sorted_items: Full list of items in sorted order
             new_items: List of only the new items to add
         """
-        from ui_components import ThumbnailWidget
-
         container = self.tab.ui.galleryThumbnailContainer
         is_editable = self.tab._is_own_gallery()
 
         # Build a set of new paths for quick lookup
         new_paths = set(item['path'] for item in new_items)
-
-        # Get favorites manager once
-        favorites_manager = getattr(self.tab, '_favorites_manager', None)
 
         # Disable updates during insertion
         container.setUpdatesEnabled(False)
@@ -866,44 +863,12 @@ class GalleryManager:
                 if path not in new_paths:
                     continue
 
-                file_type = item['type']
-                is_new = path in self.tab._new_items
-                item_output_dir = os.path.dirname(path)
-                has_metadata = item.get('has_metadata', False)
-                job_prefix = item.get('job_prefix')
+                thumbnail = self._create_thumbnail_widget(item, container, is_editable)
+                if thumbnail is None:
+                    continue
 
-                # Use unified ThumbnailWidget
-                thumbnail = ThumbnailWidget(
-                    path,
-                    item_type=file_type,
-                    parent=container,
-                    output_dir=item_output_dir,
-                    editable=is_editable,
-                    is_new=is_new,
-                    gallery_tab=self.tab,
-                    has_metadata=has_metadata,
-                    job_prefix=job_prefix
-                )
-                thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-                thumbnail.deleted.connect(self.tab._on_item_deleted)
-                thumbnail.viewed.connect(self.tab._on_item_viewed)
-                thumbnail.selection_changed.connect(self.tab._on_selection_changed)
-
-                # Set favorites manager for likes/groups functionality
-                if favorites_manager:
-                    thumbnail.set_favorites_manager(favorites_manager)
-                    thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
-
-                if file_type == 'image':
-                    thumbnail.fullscreen_requested.connect(
-                        lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
-                    )
-                    thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-
-                # Add to cache
+                # Add to cache and insert at correct layout position
                 self.tab._widget_cache[path] = thumbnail
-
-                # Insert at the correct position in the layout
                 self.tab._flow_layout.insertWidget(target_index, thumbnail)
 
             # Update status count
@@ -933,7 +898,7 @@ class GalleryManager:
         Args:
             items: List of item dicts (already sorted)
         """
-        from shiboken6 import isValid
+
 
         container = self.tab.ui.galleryThumbnailContainer
         container.setUpdatesEnabled(False)
@@ -1002,8 +967,6 @@ class GalleryManager:
 
     def create_widget_batch(self):
         """Create a batch of widgets, then schedule the next batch."""
-        from ui_components import ThumbnailWidget
-
         container = self.tab.ui.galleryThumbnailContainer
 
         if not hasattr(self.tab, '_pending_items') or self.tab._widget_create_index >= len(self.tab._pending_items):
@@ -1015,9 +978,6 @@ class GalleryManager:
             return
 
         end_index = min(self.tab._widget_create_index + self.tab._widget_batch_size, len(self.tab._pending_items))
-
-        # Get favorites manager once for the batch
-        favorites_manager = getattr(self.tab, '_favorites_manager', None)
 
         for i in range(self.tab._widget_create_index, end_index):
             pending_item = self.tab._pending_items[i]
@@ -1031,36 +991,18 @@ class GalleryManager:
                 path, file_type = pending_item
                 has_metadata = False
                 job_prefix = None
-            is_new = path in self.tab._new_items
-            item_output_dir = os.path.dirname(path)
 
-            # Use unified ThumbnailWidget
-            thumbnail = ThumbnailWidget(
-                path,
-                item_type=file_type,
-                parent=container,
-                output_dir=item_output_dir,
-                editable=self.tab._is_editable_cache,
-                is_new=is_new,
-                gallery_tab=self.tab,
-                has_metadata=has_metadata,
-                job_prefix=job_prefix
-            )
-            thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
-            thumbnail.deleted.connect(self.tab._on_item_deleted)
-            thumbnail.viewed.connect(self.tab._on_item_viewed)
-            thumbnail.selection_changed.connect(self.tab._on_selection_changed)
+            # Convert tuple to item dict for _create_thumbnail_widget
+            item = {
+                'path': path,
+                'type': file_type,
+                'has_metadata': has_metadata,
+                'job_prefix': job_prefix
+            }
 
-            # Set favorites manager for likes/groups functionality
-            if favorites_manager:
-                thumbnail.set_favorites_manager(favorites_manager)
-                thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
-
-            if file_type == 'image':
-                thumbnail.fullscreen_requested.connect(
-                    lambda img_path=path: self.tab._open_viewer(img_path, fullscreen=True)
-                )
-                thumbnail.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
+            thumbnail = self._create_thumbnail_widget(item, container, self.tab._is_editable_cache)
+            if thumbnail is None:
+                continue
 
             self.tab._widget_cache[path] = thumbnail
             self.tab._flow_layout.addWidget(thumbnail)
@@ -1077,7 +1019,7 @@ class GalleryManager:
         Uses a guard flag to prevent parallel loading loops from rapid
         scroll/resize events.
         """
-        from shiboken6 import isValid
+
 
         # Prevent parallel loading batches - if already loading, defer
         if getattr(self.tab, '_thumbnail_loading_in_progress', False):
@@ -1143,7 +1085,7 @@ class GalleryManager:
 
     def load_thumbnail_batch(self):
         """Load thumbnails in small batches for better performance."""
-        from shiboken6 import isValid
+
 
         if not hasattr(self.tab, '_pending_thumbnail_loads'):
             self._finish_thumbnail_loading()

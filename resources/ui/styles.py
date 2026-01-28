@@ -5,8 +5,8 @@ Provides unified styling for loading screens, status indicators, and themes.
 """
 import os
 import logging
-from PySide6.QtCore import QFile, QTextStream
 from PySide6.QtGui import QColor, QFont
+from core.config import UIColors
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,8 @@ class LoadingStyles:
     TEXT_SECONDARY_COLOR = QColor(197, 202, 211)  # #c5cad3 - Light gray
     TEXT_TERTIARY_COLOR = QColor(121, 126, 137)  # #797e89 - Darker gray
 
-    # Color strings (for stylesheets)
-    PRIMARY_COLOR_STR = "#4a9eff"
+    # Color strings (for stylesheets) - reference UIColors for single source of truth
+    PRIMARY_COLOR_STR = UIColors.ACCENT_BLUE
     BACKGROUND_COLOR_STR = "#21252b"
     SECONDARY_BG_COLOR_STR = "#2c313a"
     TEXT_PRIMARY_COLOR_STR = "#ffffff"
@@ -141,45 +141,11 @@ class LoadingStyles:
 
 
 class StatusColors:
-    """Predefined colors for status messages - AYON Theme Palette."""
-    SUCCESS = "#10b981"  # Modern green
-    ERROR = "#ef4444"    # Modern red
-    WARNING = "#f59e0b"  # Modern orange
-    INFO = "#4a9eff"     # AYON blue
-    SCANNING = "#8b5cf6" # Modern purple
+    """Predefined colors for status messages - references UIColors as single source of truth."""
+    SUCCESS = UIColors.SUCCESS
+    ERROR = UIColors.ERROR
+    WARNING = UIColors.WARNING
+    INFO = UIColors.INFO
+    SCANNING = UIColors.SCANNING
 
 
-def load_stylesheet(path):
-    """
-    Load a Qt stylesheet from a file.
-
-    Args:
-        path: Path to the .qss stylesheet file
-
-    Returns:
-        str: The stylesheet content, or empty string if file not found
-    """
-    if not os.path.exists(path):
-        logger.warning(f"Stylesheet not found: {path}")
-        return ""
-
-    file = QFile(path)
-    if file.open(QFile.ReadOnly | QFile.Text):
-        stream = QTextStream(file)
-        stylesheet = stream.readAll()
-        file.close()
-        return stylesheet
-    return ""
-
-
-def apply_stylesheet(widget, path):
-    """
-    Apply a stylesheet to a widget.
-
-    Args:
-        widget: The QWidget to style
-        path: Path to the .qss stylesheet file
-    """
-    stylesheet = load_stylesheet(path)
-    if stylesheet:
-        widget.setStyleSheet(stylesheet)

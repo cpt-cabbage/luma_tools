@@ -314,10 +314,23 @@ _global_settings = SettingsAccessor('global')
 _user_settings = SettingsAccessor('user')
 
 
-def get_setting(name: str) -> Any:
-    """Get any registered setting by name."""
+_SENTINEL = object()
+
+
+def get_setting(name: str, default: Any = _SENTINEL) -> Any:
+    """Get any registered setting by name.
+
+    Args:
+        name: Setting key (must be in SETTINGS_REGISTRY unless default is provided)
+        default: Fallback value for unregistered keys (suppresses KeyError)
+
+    Raises:
+        KeyError: If name is not in SETTINGS_REGISTRY and no default provided
+    """
     defn = SETTINGS_REGISTRY.get(name)
     if not defn:
+        if default is not _SENTINEL:
+            return default
         raise KeyError(f"Unknown setting: {name}")
     accessor = _global_settings if defn.scope == "global" else _user_settings
     return accessor.get(defn.key, defn.default)
@@ -332,33 +345,6 @@ def set_setting(name: str, value: Any, verbose: bool = True):
         value = defn.validator(value)
     accessor = _global_settings if defn.scope == "global" else _user_settings
     accessor.set(defn.key, value, verbose=verbose)
-
-
-# ============================================================================
-# BACKWARDS-COMPATIBLE FUNCTION ALIASES
-# These wrap the registry for existing code that uses get_*/set_* functions
-# ============================================================================
-
-# NOTE: Lambda wrappers removed. Use get_setting() and set_setting() directly.
-# For backwards compatibility reference, these were the old wrapper functions:
-#   get_comfyui_path, set_comfyui_path -> get_setting("comfyui_path"), set_setting("comfyui_path", value)
-#   get_comfyui_mode, set_comfyui_mode -> get_setting("comfyui_mode"), set_setting("comfyui_mode", value)
-#   get_comfyui_python_path, set_comfyui_python_path -> get_setting("comfyui_python_path"), set_setting("comfyui_python_path", value)
-#   get_comfyui_fast_mode, set_comfyui_fast_mode -> get_setting("comfyui_fast_mode"), set_setting("comfyui_fast_mode", value)
-#   get_comfyui_network_output_path, set_comfyui_network_output_path -> get_setting("comfyui_network_output_path"), set_setting("comfyui_network_output_path", value)
-#   get_comfyui_timeout, set_comfyui_timeout -> get_setting("comfyui_timeout"), set_setting("comfyui_timeout", value)
-#   get_comfyui_server_not_found_behavior, set_comfyui_server_not_found_behavior -> get_setting("comfyui_server_not_found_behavior"), set_setting("comfyui_server_not_found_behavior", value)
-#   get_comfyui_server_wait_timeout, set_comfyui_server_wait_timeout -> get_setting("comfyui_server_wait_timeout"), set_setting("comfyui_server_wait_timeout", value)
-#   get_comfyui_tab_state -> get_setting("comfyui_tab_state")
-#   save_comfyui_tab_state -> set_setting("comfyui_tab_state", value, verbose=False)
-#   get_restricted_tabs -> get_setting("restricted_tabs")
-#   set_restricted_tabs -> set_setting("restricted_tabs", value, verbose=False) + print statement
-#   get_auto_extract_textures, set_auto_extract_textures -> get_setting("auto_extract_textures"), set_setting("auto_extract_textures", value)
-#   get_generate_3d_thumbnails, set_generate_3d_thumbnails -> get_setting("generate_3d_thumbnails"), set_setting("generate_3d_thumbnails", value)
-#   get_viewer_3d_shading_mode, set_viewer_3d_shading_mode -> get_setting("viewer_3d_shading_mode"), set_setting("viewer_3d_shading_mode", value, verbose=False)
-#   get_viewer_3d_lighting_mode, set_viewer_3d_lighting_mode -> get_setting("viewer_3d_lighting_mode"), set_setting("viewer_3d_lighting_mode", value, verbose=False)
-#   get_viewer_3d_hdri_name, set_viewer_3d_hdri_name -> get_setting("viewer_3d_hdri_name"), set_setting("viewer_3d_hdri_name", value, verbose=False)
-#   get_viewer_3d_light_strength, set_viewer_3d_light_strength -> get_setting("viewer_3d_light_strength"), set_setting("viewer_3d_light_strength", value, verbose=False)
 
 
 # ============================================================================

@@ -2,9 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Work Discipline
+
+**NEVER skip, simplify, or reduce the scope of tasks because they seem complex or because you feel you are "running out of context".** Complete every task fully as specified. If a task genuinely cannot be finished in the current session, **defer it explicitly** by either:
+- listing remaining steps clearly for the user to continue later OR
+- Deferring to a new task on task list so compact threshold can be hit.
+**Do not silently drop items, cut corners, or produce partial implementations. Every todo item created must be completed or explicitly handed off. "Good enough" is not acceptable when the full scope was requested.**
+
 ## Project Overview
 
-Luma Tools is a VFX shot management PySide6 GUI application for the Luma Animation pipeline handling render passes, AYON publishing, Deadline farm jobs, MP4 previews, ComfyUI AI workflows, and lookdev cleanup.
+Luma Tools is a PySide6 suite of tools for an animation studio, tools are separated by tabs. The goal is to aid Animation and VFX pipeline by providing a single interface to handle denoiser render pass combiner, AYON publishing, Deadline farm jobs, Tools for MP4 making, ComfyUI AI workflows, and shot cleanup.
 
 ## Running the Application
 
@@ -31,7 +38,8 @@ python python/core/luma_tools.py
 python/
 ├── core/         # luma_tools.py (main), config.py, state_manager.py, settings_manager.py, user_preferences.py
 │                 # error_handling.py, utils.py, import_utils.py
-├── comfyui/      # service.py, workflow.py, node_configs.py, presets_manager.py, runner.py, server.py
+├── comfyui/      # service.py (re-exports), workflow.py, editable.py, modifier.py, node_configs.py
+│                 # presets_manager.py, runner.py, server.py, client.py
 │                 # deadline_submitter.py, deadline_poller.py, metadata.py, ayon_publisher.py, utils.py
 ├── models/       # viewer.py, animation_controller.py, animation_utils.py, thumbnail_service.py
 │   └── loaders/  # base.py, factory.py, open3d_loader.py, trimesh_loader.py, assimp_loader.py, usd_loader.py, smpl_loader.py
@@ -124,6 +132,39 @@ except KeyError:
     value = False  # default
 ```
 
+**Adding New Settings:** Settings use a registry pattern in `core/settings_manager.py`. Add a `SettingDef` to `SETTINGS_REGISTRY`:
+```python
+SETTINGS_REGISTRY: Dict[str, SettingDef] = {
+    # scope: "global" (shared JSON on network) or "user" (local ~/.luma_tools/)
+    "my_new_setting": SettingDef("my_new_setting", default=False, scope="user"),
+    # With validation:
+    "my_validated_setting": SettingDef("my_validated_setting", "option_a", "global", _my_validator),
+}
+```
+Once registered, `get_setting("my_new_setting")` and `set_setting("my_new_setting", value)` work automatically. Settings are cached; `clear_settings_cache()` after external modifications.
+
+### State Manager (Thread-Safe Global State)
+`core/state_manager.py`: Singleton `ApplicationState` accessed via `app_state`. Uses `ThreadSafeProperty` descriptors with RLock for thread-safe property access from both GUI and worker threads.
+
+```python
+from core.state_manager import app_state
+
+# Read/write state (thread-safe automatically)
+app_state.jobname = "MyJob"
+current = app_state.jobname
+
+# Role checks (cached, thread-safe)
+if app_state.is_admin:       # Full access including Settings tab
+if app_state.is_sup:         # Supervisor access (ComfyUI, Gallery)
+if app_state.has_elevated_access:  # Admin or supervisor
+app_state.refresh_admin_status()   # Force re-check after role changes
+
+# Shot context
+if app_state.has_shot_context():   # True when launched with AYON context
+```
+
+State groups: command line args (jobname, shot, task, shotpath, user), Pass Builder (renders, channels, searchpath, frames), MP4 (mp4_renders, mp4_searchpath), rePublish (republish_renders), ComfyUI (comfyui_workflow_path, comfyui_iterate_mode), standalone_mode.
+
 ### 3D Model Loaders (Strategy Pattern)
 `models/loaders/factory.py`: `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL). Each loader in `models/loaders/` implements `BaseModelLoader` ABC.
 
@@ -169,10 +210,11 @@ class MyRenderTab(RenderScanMixin, BaseTab):
 ### ComfyUI
 1. Select preset, scan for `_editable` suffix nodes (dynamic UI), select images, configure params
 2. Submit to Deadline (each frame = different seed), `comfyui/runner.py` executes on farm
-3. **Editable Nodes:** See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py`
-4. **Subgraph Expansion:** `expand_subgraphs()` expands UUID component nodes into concrete nodes
-5. **Export Nodes:** Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param), add to `WIDGET_MAPPINGS`
-6. **Metadata:** `comfyui/metadata.py` stores/loads job metadata (job_prefix, is_output, source_images) in `_gallery_metadata.json` per directory
+3. **Module decomposition:** `workflow.py` (load/format detection/API conversion), `editable.py` (node extraction), `modifier.py` (parameter modification), `service.py` (re-exports all public APIs)
+4. **Editable Nodes:** See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py`
+5. **Subgraph Expansion:** `expand_subgraphs()` expands UUID component nodes into concrete nodes
+6. **Export Nodes:** Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param), add to `WIDGET_MAPPINGS`
+7. **Metadata:** `comfyui/metadata.py` stores/loads job metadata (job_prefix, is_output, source_images) in `_gallery_metadata.json` per directory
 
 ### Pass Building
 `find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
@@ -188,9 +230,10 @@ Scan renders → configure quality/burn-in → `services/mp4_maker.py` (FFmpeg)
 **Testing:**
 ```bash
 python -m pytest tests/              # Run all tests
-python tests/test_loaders.py         # Run individual test
+python -m pytest tests/test_config.py -v  # Run single test file
+python -m pytest tests/ -k "test_name"    # Run specific test by name
 ```
-Manual testing required (both launcher modes, with/without AYON env)
+`tests/conftest.py` auto-configures PYTHONPATH and skips `test_animation_controller` and `test_loaders` if numpy is broken (common in some venv states). Manual testing also required (both launcher modes, with/without AYON env).
 
 ### Windows PowerShell (for Claude Code)
 Always use PowerShell for Python scripts (Bash compatibility layer has path issues):
@@ -285,8 +328,10 @@ Edit `.ui` files in Qt Designer, update tab logic in `python/tabs/`, styles in `
 
 ### Adding Features
 1. Create service in domain package, add config to `core/config.py`
-2. For tabs: inherit BaseTab, register in TAB_CONFIG
-3. Long ops: wrap in Worker (store on self), use signals
+2. For tabs: inherit BaseTab, register in `TAB_CONFIG` (`tabs/__init__.py`)
+3. For new settings: add `SettingDef` to `SETTINGS_REGISTRY` in `core/settings_manager.py`
+4. For new app state: add `ThreadSafeProperty` to `ApplicationState` in `core/state_manager.py`
+5. Long ops: wrap in Worker (store on self), use signals
 
 ### AYON Publishing
 - Single files: `create_ayon_metadata_single_file()` in `ayon/service.py`

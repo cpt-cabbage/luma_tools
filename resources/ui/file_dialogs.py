@@ -11,6 +11,7 @@ import os
 from typing import Optional, Tuple
 
 from PySide6.QtWidgets import QWidget, QFileDialog
+from core.config import DEFAULT_VIDEOS_DIR
 
 
 def _get_start_directory(context: str, fallback_path: Optional[str] = None,
@@ -137,7 +138,7 @@ def save_file_with_memory(
         if fallback_path and os.path.exists(fallback_path):
             last_dir = fallback_path
         else:
-            last_dir = os.path.join(os.path.expanduser("~"), "Videos")
+            last_dir = DEFAULT_VIDEOS_DIR
             if not os.path.exists(last_dir):
                 last_dir = os.path.expanduser("~")
 
@@ -225,7 +226,7 @@ def browse_custom_renders_dir(parent: QWidget) -> Optional[str]:
         parent,
         context="renders_custom",
         title="Select Custom Render Directory",
-        fallback_path=os.path.join(os.path.expanduser("~"), "Videos")
+        fallback_path=DEFAULT_VIDEOS_DIR
     )
 
 

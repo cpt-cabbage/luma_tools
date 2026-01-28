@@ -5,8 +5,11 @@ Provides a common interface for tab initialization, UI loading, and signal conne
 """
 
 import os
+import logging
 from abc import ABC, abstractmethod
 from PySide6 import QtCore, QtWidgets, QtUiTools
+
+logger = logging.getLogger(__name__)
 
 
 class TabSignals(QtCore.QObject):
@@ -61,6 +64,14 @@ class BaseTab(ABC):
     def tab_id(self) -> str:
         """Return a unique identifier for this tab (used for settings, etc.)."""
         return self.tab_name.lower().replace(' ', '_')
+
+    @property
+    def animator(self):
+        """Get the main window's UI animator, or None if unavailable.
+
+        Use this instead of ``hasattr(self.main_window, 'animator')`` checks.
+        """
+        return getattr(self.main_window, 'animator', None)
 
     def get_ui_file_path(self) -> str:
         """Return the full path to the tab's UI file."""
@@ -121,7 +132,8 @@ class BaseTab(ABC):
         pass
 
     def log(self, message: str):
-        """Emit a log message signal."""
+        """Emit a log message signal and write to file logger."""
+        logger.info(message)
         self.signals.log_message.emit(message)
 
     def set_status(self, message: str):
@@ -143,16 +155,15 @@ class BaseTab(ABC):
             self.show_status("File saved successfully", "success")
             self.show_status("Invalid input", "warning")
         """
-        if hasattr(self.main_window, 'animator'):
-            animator = self.main_window.animator
+        if self.animator:
             if level == "info":
-                animator.show_info(message)
+                self.animator.show_info(message)
             elif level == "success":
-                animator.show_success(message)
+                self.animator.show_success(message)
             elif level == "warning":
-                animator.show_warning(message)
+                self.animator.show_warning(message)
             elif level == "error":
-                animator.show_error(message)
+                self.animator.show_error(message)
 
     def get_widget(self, name: str):
         """
@@ -205,22 +216,14 @@ class BaseTab(ABC):
                 on_result=self._on_submit_complete
             )
         """
-        from PySide6.QtCore import QThreadPool
-        from ui_components import Worker
-
-        if worker_kwargs:
-            self._worker = Worker(func, *args, **worker_kwargs)
-        else:
-            self._worker = Worker(func, *args)
-
-        if on_result:
-            self._worker.signals.result.connect(on_result)
-        if on_error:
-            self._worker.signals.error.connect(on_error)
-        if on_progress:
-            self._worker.signals.progress.connect(on_progress)
-
-        QThreadPool.globalInstance().start(self._worker)
+        from workers import start_worker_thread
+        self._worker = start_worker_thread(
+            func, *args,
+            on_result=on_result,
+            on_error=on_error,
+            on_progress=on_progress,
+            worker_kwargs=worker_kwargs
+        )
 
     def update_status_with_spinner(self, message: str, color, start: bool = True):
         """
@@ -246,8 +249,8 @@ class BaseTab(ABC):
         else:
             self.main_window.stop_status_spinner()
 
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.update_status_animated(message, color)
+        if self.animator:
+            self.animator.update_status_animated(message, color)
 
     def on_worker_success(self, message: str, status_message: str = None, log_message: str = None):
         """
@@ -273,8 +276,8 @@ class BaseTab(ABC):
             StatusColors.SUCCESS,
             start=False
         )
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.show_success(message)
+        if self.animator:
+            self.animator.show_success(message)
         if log_message:
             self.log(log_message)
 
@@ -319,6 +322,21 @@ class BaseTab(ABC):
             from dialog_helpers import show_error
             show_error("Error", error_msg, parent=self.main_window)
 
+    @staticmethod
+    def unpack_worker_error(error_tuple) -> tuple:
+        """Unpack a worker error tuple into (error_msg, traceback_str).
+
+        Worker error signals emit a tuple of (exc_type, exc_value, traceback_str).
+        This helper safely extracts the message and traceback.
+        """
+        if isinstance(error_tuple, tuple) and len(error_tuple) >= 2:
+            error_msg = str(error_tuple[1])
+            traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
+        else:
+            error_msg = str(error_tuple)
+            traceback_str = ""
+        return error_msg, traceback_str
+
     def pulse_button(self, widget):
         """
         Safely pulse a button using the animator.
@@ -329,8 +347,13 @@ class BaseTab(ABC):
         Args:
             widget: The button widget to pulse
         """
-        if hasattr(self.main_window, 'animator') and self.main_window.animator:
-            self.main_window.animator.pulse_button(widget)
+        if self.animator:
+            self.animator.pulse_button(widget)
+
+    def animate_button_click(self, widget):
+        """Safely animate a button click using the animator."""
+        if self.animator:
+            self.animator.animate_button_click(widget)
 
     def enable_button(self, widget, enabled: bool = True):
         """

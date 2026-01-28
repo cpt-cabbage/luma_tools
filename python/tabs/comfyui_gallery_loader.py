@@ -12,14 +12,15 @@ import os
 import re
 import logging
 
-logger = logging.getLogger(__name__)
+from core.config import (
+    GALLERY_IMAGE_EXTENSIONS as IMAGE_EXTENSIONS,
+    GALLERY_MODEL_EXTENSIONS as MODEL_EXTENSIONS,
+    GALLERY_VIDEO_EXTENSIONS as VIDEO_EXTENSIONS,
+    GALLERY_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS,
+    GALLERY_SUPPORTED_EXTENSIONS as SUPPORTED_EXTENSIONS,
+)
 
-# Supported file extensions
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr', '.tiff', '.tif', '.bmp', '.gif'}
-VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm'}
-AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.ogg'}
-MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
-SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | MODEL_EXTENSIONS
+logger = logging.getLogger(__name__)
 
 
 def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
@@ -58,7 +59,7 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 cleaned = re.sub(r'_\d+$', '', base)
                 prefix = cleaned if cleaned != base else None
                 result = (prefix, True)
-                logger.info(f"[Detection] {filename} -> OUTPUT (ComfyUI temp, prefix={result[0]})")
+                logger.debug(f"[Detection] {filename} -> OUTPUT (ComfyUI temp, prefix={result[0]})")
                 return result
             except Exception as e:
                 logger.error(f"[Detection] Error processing ComfyUI file {filename}: {e}")
@@ -73,7 +74,7 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 # Clean up trailing underscores
                 prefix = prefix.rstrip('_')
                 result = (prefix if prefix else None, True)
-                logger.info(f"[Detection] {filename} -> OUTPUT (has _genXX, prefix={result[0]})")
+                logger.debug(f"[Detection] {filename} -> OUTPUT (has _genXX, prefix={result[0]})")
                 return result
         except Exception as e:
             logger.error(f"[Detection] Error in _genXX pattern search for {filename}: {e}")
@@ -87,7 +88,7 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 # Extract prefix before sequence number
                 prefix = base[:sequence_match.start()]
                 result = (prefix if prefix else None, True)
-                logger.info(f"[Detection] {filename} -> OUTPUT (4+ digit sequence, prefix={result[0]})")
+                logger.debug(f"[Detection] {filename} -> OUTPUT (4+ digit sequence, prefix={result[0]})")
                 return result
         except Exception as e:
             logger.error(f"[Detection] Error in 4+ digit sequence search for {filename}: {e}")
@@ -101,7 +102,7 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 # Only treat as output if prefix is substantial (not just a few chars)
                 if len(prefix) > 3:
                     result = (prefix, True)
-                    logger.info(f"[Detection] {filename} -> OUTPUT (3 digit sequence, prefix={result[0]})")
+                    logger.debug(f"[Detection] {filename} -> OUTPUT (3 digit sequence, prefix={result[0]})")
                     return result
         except Exception as e:
             logger.error(f"[Detection] Error in 3 digit sequence search for {filename}: {e}")
@@ -115,7 +116,7 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
             is_output = file_type in ('model', 'video', 'audio')
             result = (cleaned if cleaned else None, is_output)
             status = 'OUTPUT' if is_output else 'INPUT'
-            logger.info(f"[Detection] {filename} -> {status} (no pattern match, type={file_type}, prefix={result[0]})")
+            logger.debug(f"[Detection] {filename} -> {status} (no pattern match, type={file_type}, prefix={result[0]})")
             return result
         except Exception as e:
             logger.error(f"[Detection] Error in cleanup for {filename}: {e}")
@@ -247,7 +248,7 @@ class GalleryLoader:
                             source_images = file_metadata.get('source_images', [])
                             if not isinstance(source_images, list):
                                 source_images = []
-                            logger.info(f"[Detection] {filename} -> {'OUTPUT' if is_output else 'INPUT'} (from metadata, prefix={job_prefix})")
+                            logger.debug(f"[Detection] {filename} -> {'OUTPUT' if is_output else 'INPUT'} (from metadata, prefix={job_prefix})")
                         except Exception as e:
                             logger.error(f"[Loader] Error reading metadata fields for {filename}: {e}")
                             is_output = None

@@ -5,8 +5,13 @@ Provides decorators and context managers for cleaner error handling.
 """
 
 import functools
-import traceback
+import logging
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+# Default log function uses the module logger instead of print
+_default_log = logger.error
 
 
 def safe_operation(operation_name, return_on_error=None, log_func=None):
@@ -16,7 +21,7 @@ def safe_operation(operation_name, return_on_error=None, log_func=None):
     Args:
         operation_name: Description of the operation (e.g., "finding render directory")
         return_on_error: Value to return on exception (default: None)
-        log_func: Function to log errors (default: print). Can be a logger.error callable.
+        log_func: Function to log errors (default: logger.error)
 
     Example:
         @safe_operation("reading config file", return_on_error={})
@@ -25,7 +30,7 @@ def safe_operation(operation_name, return_on_error=None, log_func=None):
                 return json.load(f)
     """
     if log_func is None:
-        log_func = print
+        log_func = _default_log
 
     def decorator(func):
         @functools.wraps(func)
@@ -46,7 +51,7 @@ def handle_errors(operation_name, log_func=None, reraise=False):
 
     Args:
         operation_name: Description of the operation
-        log_func: Function to log errors (default: print)
+        log_func: Function to log errors (default: logger.error)
         reraise: Whether to re-raise the exception after logging
 
     Example:
@@ -58,7 +63,7 @@ def handle_errors(operation_name, log_func=None, reraise=False):
             data = json.loads(content)
     """
     if log_func is None:
-        log_func = print
+        log_func = _default_log
 
     try:
         yield
@@ -76,40 +81,16 @@ def log_error(operation_name, error, variable=None, log_func=None):
         operation_name: Description of what was being done
         error: The exception or error message
         variable: Optional variable/path that was being processed
-        log_func: Function to log errors (default: print)
+        log_func: Function to log errors (default: logger.error)
 
     Example:
         except Exception as e:
             log_error("reading file", e, file_path)
     """
     if log_func is None:
-        log_func = print
+        log_func = _default_log
 
     if variable is not None:
         log_func(f"Error {operation_name} {variable}: {error}")
     else:
         log_func(f"Error {operation_name}: {error}")
-
-
-def format_error(operation_name, error, variable=None, include_traceback=False):
-    """
-    Format error message consistently.
-
-    Args:
-        operation_name: Description of what was being done
-        error: The exception or error message
-        variable: Optional variable/path that was being processed
-        include_traceback: Whether to include full traceback
-
-    Returns:
-        str: Formatted error message
-    """
-    if variable is not None:
-        msg = f"Error {operation_name} {variable}: {error}"
-    else:
-        msg = f"Error {operation_name}: {error}"
-
-    if include_traceback:
-        msg += f"\n{traceback.format_exc()}"
-
-    return msg

@@ -494,23 +494,34 @@ def wait_for_completion(
 # Workflow Modification
 # =============================================================================
 
+# Node types that accept a seed value, mapped to their seed parameter name
+_SEED_NODES = {
+    'KSampler': 'seed',
+    'RandomNoise': 'noise_seed',
+    'HYMotionGenerate': 'seed',
+    'Trellis2MeshWithVoxelAdvancedGenerator': 'seed',
+    'Trellis2ImageToShape': 'seed',
+    'Trellis2ShapeToTexturedMesh': 'seed',
+    'UltraShapeRefine': 'seed',
+}
+
+# Node types that accept an output filename prefix.
+# Values are dicts of {input_key: value_template} where None means use output_prefix.
+_PREFIX_NODES = {
+    'SaveImage': {'filename_prefix': None},
+    'HYMotionExportFBX': {'output_dir': '', 'filename_prefix': None},
+    'Trellis2ExportMesh': {'filename_prefix': None},
+    'Trellis2ExportGLB': {'filename_prefix': None},
+    'UltraShapeSaveGLB': {'filename_prefix': None},
+}
+
+
 def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     """Modify workflow to use a specific seed and output prefix.
 
-    Handles:
-    - KSampler nodes (seed)
-    - RandomNoise nodes (noise_seed)
-    - SaveImage nodes (filename_prefix)
-    - HYMotionExportFBX nodes (output_dir, filename_prefix)
-    - HYMotionGenerate nodes (seed)
-    - Trellis2MeshWithVoxelAdvancedGenerator nodes (seed)
-    - Trellis2ImageToShape nodes (seed)
-    - Trellis2ShapeToTexturedMesh nodes (seed)
-    - Trellis2ExportMesh nodes (filename_prefix)
-    - Trellis2ExportGLB nodes (filename_prefix)
-    - UltraShapeRefine nodes (seed)
-    - UltraShapeSaveGLB nodes (filename_prefix)
-    - PreviewImage nodes (converted to SaveImage)
+    Handles seed nodes (KSampler, RandomNoise, etc.), export/prefix nodes
+    (SaveImage, HYMotionExportFBX, etc.), and converts PreviewImage to SaveImage.
+    See _SEED_NODES and _PREFIX_NODES for the full list of supported node types.
     """
     modified = copy.deepcopy(workflow)
 
@@ -530,56 +541,18 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
         class_type = node_data.get('class_type')
         inputs = node_data.get('inputs', {})
 
-        # === Seed nodes ===
-        if class_type == 'KSampler':
-            inputs['seed'] = seed
-            logger.info(f"Set KSampler node {node_id} seed to: {seed}")
+        # Apply seed to matching node types
+        if class_type in _SEED_NODES:
+            seed_param = _SEED_NODES[class_type]
+            inputs[seed_param] = seed
+            logger.info(f"Set {class_type} node {node_id} {seed_param} to: {seed}")
 
-        elif class_type == 'RandomNoise':
-            inputs['noise_seed'] = seed
-            logger.info(f"Set RandomNoise node {node_id} seed to: {seed}")
-
-        elif class_type == 'HYMotionGenerate':
-            inputs['seed'] = seed
-            logger.info(f"Set HYMotionGenerate node {node_id} seed to: {seed}")
-
-        elif class_type == 'Trellis2MeshWithVoxelAdvancedGenerator':
-            inputs['seed'] = seed
-            logger.info(f"Set Trellis2MeshWithVoxelAdvancedGenerator node {node_id} seed to: {seed}")
-
-        elif class_type == 'Trellis2ImageToShape':
-            inputs['seed'] = seed
-            logger.info(f"Set Trellis2ImageToShape node {node_id} seed to: {seed}")
-
-        elif class_type == 'Trellis2ShapeToTexturedMesh':
-            inputs['seed'] = seed
-            logger.info(f"Set Trellis2ShapeToTexturedMesh node {node_id} seed to: {seed}")
-
-        elif class_type == 'UltraShapeRefine':
-            inputs['seed'] = seed
-            logger.info(f"Set UltraShapeRefine node {node_id} seed to: {seed}")
-
-        # === Export/output prefix nodes ===
-        elif class_type == 'SaveImage':
-            inputs['filename_prefix'] = output_prefix
-            logger.info(f"Set SaveImage node {node_id} prefix to: {output_prefix}")
-
-        elif class_type == 'HYMotionExportFBX':
-            inputs['output_dir'] = ''
-            inputs['filename_prefix'] = output_prefix
-            logger.info(f"Set HYMotionExportFBX node {node_id}: output_dir='', prefix={output_prefix}")
-
-        elif class_type == 'Trellis2ExportMesh':
-            inputs['filename_prefix'] = output_prefix
-            logger.info(f"Set Trellis2ExportMesh node {node_id} prefix to: {output_prefix}")
-
-        elif class_type == 'Trellis2ExportGLB':
-            inputs['filename_prefix'] = output_prefix
-            logger.info(f"Set Trellis2ExportGLB node {node_id} prefix to: {output_prefix}")
-
-        elif class_type == 'UltraShapeSaveGLB':
-            inputs['filename_prefix'] = output_prefix
-            logger.info(f"Set UltraShapeSaveGLB node {node_id} prefix to: {output_prefix}")
+        # Apply output prefix to matching node types
+        elif class_type in _PREFIX_NODES:
+            overrides = _PREFIX_NODES[class_type]
+            for key, value in overrides.items():
+                inputs[key] = output_prefix if value is None else value
+            logger.info(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
 
     return modified
 
@@ -803,22 +776,22 @@ def move_output_files(
     return moved_files
 
 
-def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:
-    """Collect input image paths from workflow image loading nodes.
+# Known image loading node types used for input image detection
+_IMAGE_LOADER_TYPES = frozenset([
+    'LoadImage',
+    'Trellis2LoadImageWithTransparency',
+    'LoadImageMask',
+    'LoadImageBatch',
+])
 
-    Supports various image loading node types including LoadImage,
-    Trellis2LoadImageWithTransparency, and others.
+
+def _find_workflow_image_names(workflow: dict) -> List[str]:
+    """Extract image filenames from all image loading nodes in a workflow.
+
+    Returns raw image name strings (not resolved paths). Used internally
+    by collect_input_images() and get_workflow_images().
     """
     images = []
-
-    # List of known image loading node types
-    IMAGE_LOADER_TYPES = [
-        'LoadImage',
-        'Trellis2LoadImageWithTransparency',
-        'LoadImageMask',
-        'LoadImageBatch',
-    ]
-
     for node_id, node_data in workflow.items():
         if not isinstance(node_data, dict):
             continue
@@ -826,68 +799,37 @@ def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:
         class_type = node_data.get('class_type', '')
         inputs = node_data.get('inputs', {})
 
-        # Check if this is a known image loader type
-        if class_type in IMAGE_LOADER_TYPES:
-            image_name = inputs.get('image')
-            if image_name and isinstance(image_name, str):
-                if os.path.isabs(image_name) and os.path.exists(image_name):
-                    images.append(image_name)
-                else:
-                    local_path = os.path.join(workflow_dir, image_name)
-                    if os.path.exists(local_path):
-                        images.append(local_path)
-        # Fallback for custom image loading nodes
-        elif 'image' in inputs:
-            image_name = inputs.get('image')
-            if image_name and isinstance(image_name, str) and not image_name.startswith('['):
-                if os.path.isabs(image_name) and os.path.exists(image_name):
-                    images.append(image_name)
-                else:
-                    local_path = os.path.join(workflow_dir, image_name)
-                    if os.path.exists(local_path):
-                        images.append(local_path)
-
+        # Check known image loader types, then fallback to any node with 'image' input
+        if class_type in _IMAGE_LOADER_TYPES or 'image' in inputs:
+            image = inputs.get('image')
+            if image and isinstance(image, str) and not image.startswith('['):
+                images.append(image)
     return images
+
+
+def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:
+    """Collect resolved input image paths from workflow image loading nodes.
+
+    Resolves image names to full paths using workflow_dir. Only includes
+    images that exist on disk.
+    """
+    resolved = []
+    for image_name in _find_workflow_image_names(workflow):
+        if os.path.isabs(image_name) and os.path.exists(image_name):
+            resolved.append(image_name)
+        else:
+            local_path = os.path.join(workflow_dir, image_name)
+            if os.path.exists(local_path):
+                resolved.append(local_path)
+    return resolved
 
 
 def get_workflow_images(workflow: dict) -> List[str]:
     """Extract all image filenames from image loading nodes in a workflow.
 
-    Supports various image loading node types including:
-    - LoadImage
-    - Trellis2LoadImageWithTransparency
-    - Any node with 'image' input parameter
+    Returns raw filenames without path resolution.
     """
-    images = []
-
-    # List of known image loading node types
-    IMAGE_LOADER_TYPES = [
-        'LoadImage',
-        'Trellis2LoadImageWithTransparency',
-        'LoadImageMask',
-        'LoadImageBatch',
-    ]
-
-    for node_id, node_data in workflow.items():
-        if not isinstance(node_data, dict):
-            continue
-
-        class_type = node_data.get('class_type', '')
-        inputs = node_data.get('inputs', {})
-
-        # Check if this is a known image loader type
-        if class_type in IMAGE_LOADER_TYPES:
-            image = inputs.get('image')
-            if image and isinstance(image, str):
-                images.append(image)
-        # Fallback: Check if any input parameter is named 'image' and contains a filename
-        elif 'image' in inputs:
-            image = inputs.get('image')
-            if image and isinstance(image, str) and not image.startswith('['):
-                # Avoid array/link references like "[1, 0]"
-                images.append(image)
-
-    return images
+    return _find_workflow_image_names(workflow)
 
 
 def copy_inputs_to_server(input_files: list, server_input_dir: str):

@@ -1030,7 +1030,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # and never reach the logs tab (LogStream only captures stdout/stderr)
             ui_handler = logging.StreamHandler(self.log_stream)
             ui_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
-            ui_handler.setLevel(logging.INFO)
+            ui_handler.setLevel(logging.DEBUG)
             logging.getLogger().addHandler(ui_handler)
 
             self._log_redirect_pending = False

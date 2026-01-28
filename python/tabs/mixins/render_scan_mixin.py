@@ -2,9 +2,10 @@
 Render Scan Mixin for tabs that work with render sequences.
 
 Provides common functionality for:
-- Source selection (for_comp, raw, custom)
+- Source selection via OptionButtonManager (for_comp, raw, custom)
 - Version handling
 - Render scanning and list population
+- Custom path browsing
 - Selection handling with frame range extraction
 
 Usage:
@@ -30,6 +31,8 @@ Usage:
 import os
 from typing import List, Tuple, Callable, Optional, Any
 
+from core.config import DEFAULT_VIDEOS_DIR, UIStyles
+
 
 class RenderScanMixin:
     """Mixin providing render scanning functionality for tabs."""
@@ -48,9 +51,6 @@ class RenderScanMixin:
     _searchpath_attr: str = "searchpath"
     _custom_path_attr: str = "custom_path"
 
-    # Internal state
-    _source: str = "for_comp"
-
     def _get_source_options(self) -> List[Tuple[str, str]]:
         """
         Return source options as list of (label, value) tuples.
@@ -62,63 +62,48 @@ class RenderScanMixin:
             ("Custom", "custom"),
         ]
 
-    def _init_render_scan_state(self):
-        """Initialize render scan state. Call from initialize()."""
-        self._source = "for_comp"
-        self._update_source_button_text()
+    def _get_initial_source(self) -> str:
+        """Return the initial source value. Override for custom default."""
+        return "for_comp"
 
-    def _get_source_button_label(self, source: str) -> str:
-        """
-        Get display label for a source value.
-        Override in subclass for custom label logic.
-        """
-        options = self._get_source_options()
-        label = next((l for l, v in options if v == source), source)
+    def _init_source_manager(self):
+        """Initialize the source OptionButtonManager. Call from initialize()."""
+        from option_button import OptionButtonManager
 
-        # Special handling for for_comp
-        if source == "for_comp" and hasattr(self.app_state, 'output_subdirectory'):
-            if self.app_state.output_subdirectory:
-                label = self.app_state.output_subdirectory.title()
-
-        return label
-
-    def _update_source_button_text(self):
-        """Update source button text to show current selection."""
-        source_button = self.get_widget(self._source_button)
-        if source_button:
-            label = self._get_source_button_label(self._source)
-            source_button.setText(f"Source: {label}")
-
-    def _on_source_button_clicked(self):
-        """Show popup menu with source options."""
-        from small_widgets import show_popup_menu
-
-        source_button = self.get_widget(self._source_button)
-        if not source_button:
-            return
-
-        # Build display options with dynamic labels
-        display_options = []
-        for label, value in self._get_source_options():
-            display_label = self._get_source_button_label(value) if value == "for_comp" else label
-            display_options.append((display_label, value))
-
-        result = show_popup_menu(
-            self.main_window,
-            source_button,
-            display_options,
-            current=self._source
+        self._source_manager = OptionButtonManager(
+            button=self.get_widget(self._source_button),
+            options=self._get_source_options(),
+            initial_value=self._get_initial_source(),
+            on_changed=self._on_source_changed,
+            label_prefix="Source: ",
+            parent_window=self.main_window,
+            label_func=self._get_source_label
         )
 
-        if result is not None:
-            self._source = result
-            self._update_source_button_text()
-            self._on_source_changed()
+    def _get_source_label(self, value: str) -> str:
+        """
+        Get dynamic display label for a source value.
+        Override in subclass for custom label logic.
+        """
+        if value == "for_comp" and getattr(self.app_state, 'output_subdirectory', ''):
+            return self.app_state.output_subdirectory.title()
+        label_map = {v: l for l, v in self._get_source_options()}
+        return label_map.get(value, value)
 
-    def _on_source_changed(self):
+    @property
+    def _source(self) -> str:
+        """Current source selection value."""
+        return self._source_manager.value
+
+    def _update_source_button_text(self):
+        """Refresh the source button text via the manager."""
+        if hasattr(self, '_source_manager'):
+            self._source_manager.refresh_text()
+
+    def _on_source_changed(self, value=None):
         """
         Handle source type change.
-        Override in subclass for custom behavior.
+        Override in subclass for custom visibility logic (call super first).
         Default: toggle custom path visibility and trigger scan.
         """
         is_custom = self._source == "custom"
@@ -136,7 +121,7 @@ class RenderScanMixin:
         self._on_scan_renders_clicked()
 
     def _on_browse_custom_path(self):
-        """Browse for custom directory."""
+        """Browse for custom directory containing render sequences."""
         from file_dialogs import browse_directory_with_memory
 
         context = f"{self.tab_id}_custom"
@@ -144,7 +129,7 @@ class RenderScanMixin:
             self.main_window,
             context=context,
             title="Select Directory with Render Sequences",
-            fallback_path=os.path.join(os.path.expanduser("~"), "Videos")
+            fallback_path=DEFAULT_VIDEOS_DIR
         )
 
         if custom_dir:
@@ -155,13 +140,19 @@ class RenderScanMixin:
             custom_label = self.get_widget(self._custom_path_label)
             if custom_label:
                 custom_label.setText(f"Custom path: {custom_dir}")
-                custom_label.setStyleSheet("color: white; font-size: 9pt;")
+                custom_label.setStyleSheet(UIStyles.LABEL_PATH)
 
             self.log(f"{self.tab_name}: Custom path set to: {custom_dir}")
-
             self.show_status(f"Custom: {os.path.basename(custom_dir)}", "info")
-
             self._on_scan_renders_clicked()
+
+    def _on_scan_renders_clicked(self):
+        """
+        Default scan implementation using _scan_renders_base().
+        Override if tab needs completely custom scanning logic.
+        """
+        from core.utils import scan_exr_sequences
+        self._scan_renders_base(scan_exr_sequences, self.tab_name)
 
     def _scan_renders_base(
         self,
@@ -245,10 +236,9 @@ class RenderScanMixin:
         self.log(f"{status_prefix}: Found {len(renders)} sequence(s)")
         if renders:
             for subdir, render_seq in renders:
-                display_name = str(render_seq).split("\\")[-1]
+                display_name = os.path.basename(str(render_seq))
                 render_list.addItem(display_name)
             render_list.setEnabled(True)
-
             self.show_status(f"Found {len(renders)} sequence(s)", "info")
         else:
             render_list.addItem("No Renders Found")

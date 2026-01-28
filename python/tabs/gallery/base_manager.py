@@ -8,10 +8,7 @@ Provides common functionality for all gallery manager components:
 - Worker thread management (delegates to tab, stores reference locally)
 """
 
-from typing import Callable, Optional, Set, Dict, Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from PySide6.QtCore import QThreadPool
+from typing import Callable, Optional, Set, Dict, Any
 
 
 class BaseGalleryManager:
@@ -77,23 +74,8 @@ class BaseGalleryManager:
         self.tab.log(message)
 
     def show_status(self, message: str, level: str = "info"):
-        """
-        Show a status message via the animator.
-
-        Args:
-            message: Message to display
-            level: One of "info", "success", "warning", "error"
-        """
-        if hasattr(self.main_window, 'animator'):
-            animator = self.main_window.animator
-            if level == "info":
-                animator.show_info(message)
-            elif level == "success":
-                animator.show_success(message)
-            elif level == "warning":
-                animator.show_warning(message)
-            elif level == "error":
-                animator.show_error(message)
+        """Show a status message. Delegates to tab's show_status."""
+        self.tab.show_status(message, level)
 
     def update_status_with_spinner(self, message: str, color, start: bool = True):
         """
@@ -123,6 +105,7 @@ class BaseGalleryManager:
         Start a worker thread with standard signal connections.
 
         Worker is stored on self._worker to prevent garbage collection.
+        Each manager stores its own worker to allow concurrent operations.
 
         Args:
             func: Function to run in worker thread
@@ -132,22 +115,14 @@ class BaseGalleryManager:
             on_progress: Optional callback for progress updates
             worker_kwargs: Optional dict of keyword arguments for the function
         """
-        from ui_components import Worker
-        from PySide6.QtCore import QThreadPool
-
-        if worker_kwargs:
-            self._worker = Worker(func, *args, **worker_kwargs)
-        else:
-            self._worker = Worker(func, *args)
-
-        if on_result:
-            self._worker.signals.result.connect(on_result)
-        if on_error:
-            self._worker.signals.error.connect(on_error)
-        if on_progress:
-            self._worker.signals.progress.connect(on_progress)
-
-        QThreadPool.globalInstance().start(self._worker)
+        from workers import start_worker_thread
+        self._worker = start_worker_thread(
+            func, *args,
+            on_result=on_result,
+            on_error=on_error,
+            on_progress=on_progress,
+            worker_kwargs=worker_kwargs
+        )
 
     # =========================================================================
     # Utility Methods

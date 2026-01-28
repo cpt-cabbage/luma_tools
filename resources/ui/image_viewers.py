@@ -14,6 +14,7 @@ from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
 from workers import Worker
+from dialog_helpers import get_active_window
 
 logger = logging.getLogger(__name__)
 
@@ -943,11 +944,7 @@ class EmbeddedImageViewer(QWidget):
 
     def _publish_to_ayon(self):
         """Publish this image to AYON."""
-        parent_window = None
-        for widget in QApplication.topLevelWidgets():
-            if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                parent_window = widget
-                break
+        parent_window = get_active_window()
 
         try:
             from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon

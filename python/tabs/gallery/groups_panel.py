@@ -518,47 +518,34 @@ class GroupsFilterPanel(QWidget):
             else:
                 item.show()
 
-    def _load_stack_colors(self):
-        """Load stack colors from settings."""
+    def _load_setting(self, key, default=None):
+        """Load a setting with optional default."""
         from core.settings_manager import get_setting
-        try:
-            colors = get_setting("gallery_stack_colors")
-            return colors if colors is not None else {}
-        except KeyError:
-            return {}
+        value = get_setting(key, default)
+        return value if value is not None else default
+
+    def _save_setting(self, key, value, verbose=False):
+        """Save a setting."""
+        from core.settings_manager import set_setting
+        set_setting(key, value, verbose=verbose)
+
+    def _load_stack_colors(self):
+        return self._load_setting("gallery_stack_colors", {})
 
     def _save_stack_colors(self):
-        """Save stack colors to settings."""
-        from core.settings_manager import set_setting
-        set_setting("gallery_stack_colors", self._stack_colors, verbose=False)
+        self._save_setting("gallery_stack_colors", self._stack_colors)
 
     def _load_stacks_data(self):
-        """Load cached stacks data from settings."""
-        from core.settings_manager import get_setting
-        try:
-            data = get_setting("gallery_stacks_data")
-            return data if data is not None else {}
-        except KeyError:
-            return {}
+        return self._load_setting("gallery_stacks_data", {})
 
     def _save_stacks_data(self):
-        """Save stacks data to settings for caching."""
-        from core.settings_manager import set_setting
-        set_setting("gallery_stacks_data", self._stacks_data, verbose=False)
+        self._save_setting("gallery_stacks_data", self._stacks_data)
 
     def _load_stacks_collapsed(self):
-        """Load stacks collapsed state from settings."""
-        from core.settings_manager import get_setting
-        try:
-            state = get_setting("gallery_stacks_collapsed")
-            return state if state is not None else False
-        except KeyError:
-            return False
+        return self._load_setting("gallery_stacks_collapsed", False)
 
     def _save_stacks_collapsed(self):
-        """Save stacks collapsed state to settings."""
-        from core.settings_manager import set_setting
-        set_setting("gallery_stacks_collapsed", self._stacks_collapsed, verbose=False)
+        self._save_setting("gallery_stacks_collapsed", self._stacks_collapsed)
 
     def _show_stack_context_menu(self, pos, stack_id):
         """Show context menu for a stack item."""
@@ -595,17 +582,10 @@ class GroupsFilterPanel(QWidget):
             self._rebuild_stacks()
 
     def _load_liked_color(self):
-        """Load liked filter color from settings."""
-        from core.settings_manager import get_setting
-        try:
-            return get_setting("gallery_liked_color")
-        except KeyError:
-            return None
+        return self._load_setting("gallery_liked_color")
 
     def _save_liked_color(self):
-        """Save liked filter color to settings."""
-        from core.settings_manager import set_setting
-        set_setting("gallery_liked_color", self._liked_color)
+        self._save_setting("gallery_liked_color", self._liked_color)
 
     def _show_liked_context_menu(self, pos):
         """Show context menu for the liked filter item."""
@@ -791,63 +771,46 @@ class GroupsFilterPanel(QWidget):
                 self._favorites_manager.create_group(name, color)
                 self.status_message.emit(f"Created group '{name}'")
 
-    def _toggle_collapse(self):
-        """Toggle collapsed state with smooth width animation."""
-        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
-
-        self._is_collapsed = not self._is_collapsed
-        duration = 200
+    def _animate_width(self, target_max, target_min, duration=200):
+        """Animate panel width to target max/min values."""
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
 
         # Cancel any running animation
         for anim in getattr(self, '_collapse_anims', []):
             anim.stop()
-        self._collapse_anims = []
+
+        max_anim = QPropertyAnimation(self, b"maximumWidth")
+        max_anim.setDuration(duration)
+        max_anim.setStartValue(self.maximumWidth())
+        max_anim.setEndValue(target_max)
+        max_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+        min_anim = QPropertyAnimation(self, b"minimumWidth")
+        min_anim.setDuration(duration)
+        min_anim.setStartValue(self.minimumWidth())
+        min_anim.setEndValue(target_min)
+        min_anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+        max_anim.start()
+        min_anim.start()
+        self._collapse_anims = [max_anim, min_anim]
+
+    def _toggle_collapse(self):
+        """Toggle collapsed state with smooth width animation."""
+        from PySide6.QtCore import QTimer
+
+        self._is_collapsed = not self._is_collapsed
+        duration = 200
 
         if self._is_collapsed:
             self._expanded_width = self.width()
-
-            # Hide content immediately (text clips during animation otherwise)
             self.content.hide()
             self.add_group_btn.hide()
             self.collapse_btn.setText("▶")
-
-            # Animate maxWidth and minWidth to 40
-            max_anim = QPropertyAnimation(self, b"maximumWidth")
-            max_anim.setDuration(duration)
-            max_anim.setStartValue(self.maximumWidth())
-            max_anim.setEndValue(40)
-            max_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
-            min_anim = QPropertyAnimation(self, b"minimumWidth")
-            min_anim.setDuration(duration)
-            min_anim.setStartValue(self.minimumWidth())
-            min_anim.setEndValue(40)
-            min_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
-            max_anim.start()
-            min_anim.start()
-            self._collapse_anims = [max_anim, min_anim]
+            self._animate_width(40, 40, duration)
         else:
             self.collapse_btn.setText("◀")
-
-            # Animate maxWidth and minWidth to expanded size
-            max_anim = QPropertyAnimation(self, b"maximumWidth")
-            max_anim.setDuration(duration)
-            max_anim.setStartValue(40)
-            max_anim.setEndValue(400)
-            max_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
-            min_anim = QPropertyAnimation(self, b"minimumWidth")
-            min_anim.setDuration(duration)
-            min_anim.setStartValue(40)
-            min_anim.setEndValue(120)
-            min_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
-            max_anim.start()
-            min_anim.start()
-            self._collapse_anims = [max_anim, min_anim]
-
-            # Show content midway through animation
+            self._animate_width(400, 120, duration)
             QTimer.singleShot(duration // 2, self._show_content_if_expanded)
 
         self.collapsed_changed.emit(self._is_collapsed)

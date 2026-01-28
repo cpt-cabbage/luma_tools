@@ -4,6 +4,8 @@ Pass Builder tab module for Luma Tools.
 Handles render scanning, pass detection, and pass building functionality.
 """
 
+import os
+
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QThreadPool
 
@@ -52,10 +54,9 @@ class PassBuilderTab(BaseTab):
             parent_window=self.main_window
         )
 
-    # Property for backward compatibility
     @property
     def _build_type(self):
-        return self._build_type_manager.value if hasattr(self, '_build_type_manager') else "local"
+        return self._build_type_manager.value
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
@@ -80,7 +81,7 @@ class PassBuilderTab(BaseTab):
 
         if len(self.app_state.renders) > 0:
             for render_seq in self.app_state.renders:
-                self.ui.RendersList.addItem(str(render_seq).split("\\")[-1])
+                self.ui.RendersList.addItem(os.path.basename(str(render_seq)))
             self.ui.RendersList.setEnabled(True)
             # Show result
             self.show_status(f"Found {len(self.app_state.renders)} render(s)", "info")
@@ -148,8 +149,7 @@ class PassBuilderTab(BaseTab):
             if len(channels) >= 1:
                 self.ui.BuildPasses.setEnabled(True)
                 self.show_status(f"Found {len(channels)} passes", "info")
-                if hasattr(self.main_window, 'animator'):
-                    self.main_window.animator.pulse_button(self.ui.BuildPasses)
+                self.pulse_button(self.ui.BuildPasses)
             else:
                 self.ui.BuildPasses.setEnabled(False)
 

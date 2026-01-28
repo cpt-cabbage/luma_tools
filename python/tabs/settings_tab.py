@@ -5,7 +5,6 @@ Handles user settings (local) and global settings management.
 """
 
 import os
-import json
 import logging
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
@@ -14,39 +13,40 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 from .base_tab import BaseTab
 from dialog_helpers import confirm_action, show_warning, show_error, show_info
 from core.utils import ensure_directory
+from core.config import APP_VERSION, get_changelog
 
 logger = logging.getLogger(__name__)
 
+# Widget type constants for settings mapping
+_CHECKBOX = "checkbox"
+_TEXT = "text"
+_SPINBOX = "spinbox"
 
-def get_version():
-    """Get the current version from version.json."""
-    config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    root_dir = os.path.dirname(config_dir)
-    version_file = os.path.join(root_dir, "version.json")
+# Declarative settings mappings: (setting_key, widget_name, widget_type[, load_converter, save_converter])
+# Adding a new setting only requires adding one entry here — load and save are automatic.
+_USER_SETTINGS_MAP = [
+    ("auto_extract_textures", "AutoExtractTextures", _CHECKBOX),
+    ("generate_3d_thumbnails", "Generate3DThumbnails", _CHECKBOX),
+    ("show_tray_notifications", "ShowTrayNotifications", _CHECKBOX),
+    ("viewer_3d_zoom_distance", "Viewer3DZoomSpinBox", _SPINBOX),
+]
 
-    if os.path.exists(version_file):
-        try:
-            with open(version_file, 'r') as f:
-                data = json.load(f)
-                return data.get("version", "0.1")
-        except Exception:
-            pass
-    return "0.1"
+_seconds_to_minutes = lambda s: s // 60  # noqa: E731
+_minutes_to_seconds = lambda m: m * 60   # noqa: E731
 
-
-def get_changelog():
-    """Get the changelog content from changelog.md."""
-    config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    root_dir = os.path.dirname(config_dir)
-    changelog_file = os.path.join(root_dir, "changelog.md")
-
-    if os.path.exists(changelog_file):
-        try:
-            with open(changelog_file, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception:
-            pass
-    return "No changelog available."
+_GLOBAL_SETTINGS_MAP = [
+    ("comfyui_path", "ComfyUIPathEdit", _TEXT),
+    ("comfyui_python_path", "ComfyUIPythonEdit", _TEXT),
+    ("comfyui_network_output_path", "ComfyUINetworkOutputEdit", _TEXT),
+    ("comfyui_fast_mode", "ComfyUIFastMode", _CHECKBOX),
+    ("comfyui_fp16_accumulation", "ComfyUIFP16Accumulation", _CHECKBOX),
+    ("comfyui_lowvram", "ComfyUILowVRAM", _CHECKBOX),
+    ("comfyui_highvram", "ComfyUIHighVRAM", _CHECKBOX),
+    ("comfyui_normalvram", "ComfyUINormalVRAM", _CHECKBOX),
+    ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
+    ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
+    ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
+]
 
 
 class SettingsTab(BaseTab):
@@ -159,7 +159,7 @@ class SettingsTab(BaseTab):
 
     def _load_version_ui(self):
         """Load version information into the UI."""
-        version = get_version()
+        version = APP_VERSION
         if hasattr(self.ui, 'versionValueLabel'):
             self.ui.versionValueLabel.setText(version)
 
@@ -245,25 +245,67 @@ class SettingsTab(BaseTab):
 
         dialog.exec()
 
-    def _load_user_settings_ui(self):
-        """Load user settings into the UI."""
+    def _load_settings_from_map(self, settings_map):
+        """Load settings into UI widgets using a declarative mapping.
+
+        Each entry in settings_map is a tuple:
+            (setting_key, widget_name, widget_type[, load_converter, save_converter])
+        Widgets that don't exist in the UI are silently skipped.
+        """
         from core.settings_manager import get_setting
 
-        # Auto-extract textures checkbox
-        if hasattr(self.ui, 'AutoExtractTextures'):
-            self.ui.AutoExtractTextures.setChecked(get_setting("auto_extract_textures"))
+        for entry in settings_map:
+            key, widget_name, widget_type = entry[0], entry[1], entry[2]
+            load_converter = entry[3] if len(entry) > 3 else None
 
-        # Generate 3D thumbnails checkbox
-        if hasattr(self.ui, 'Generate3DThumbnails'):
-            self.ui.Generate3DThumbnails.setChecked(get_setting("generate_3d_thumbnails"))
+            widget = getattr(self.ui, widget_name, None)
+            if not widget:
+                continue
 
-        # Show tray notifications checkbox
-        if hasattr(self.ui, 'ShowTrayNotifications'):
-            self.ui.ShowTrayNotifications.setChecked(get_setting("show_tray_notifications"))
+            value = get_setting(key)
+            if load_converter:
+                value = load_converter(value)
 
-        # 3D Viewer zoom distance
-        if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
-            self.ui.Viewer3DZoomSpinBox.setValue(get_setting("viewer_3d_zoom_distance"))
+            if widget_type == _CHECKBOX:
+                widget.setChecked(value)
+            elif widget_type == _TEXT:
+                widget.setText(str(value))
+            elif widget_type == _SPINBOX:
+                widget.setValue(value)
+
+    def _save_settings_from_map(self, settings_map):
+        """Save UI widget values to settings using a declarative mapping.
+
+        Each entry in settings_map is a tuple:
+            (setting_key, widget_name, widget_type[, load_converter, save_converter])
+        Widgets that don't exist in the UI are silently skipped.
+        """
+        from core.settings_manager import set_setting
+
+        for entry in settings_map:
+            key, widget_name, widget_type = entry[0], entry[1], entry[2]
+            save_converter = entry[4] if len(entry) > 4 else None
+
+            widget = getattr(self.ui, widget_name, None)
+            if not widget:
+                continue
+
+            if widget_type == _CHECKBOX:
+                value = widget.isChecked()
+            elif widget_type == _TEXT:
+                value = widget.text().strip()
+            elif widget_type == _SPINBOX:
+                value = widget.value()
+            else:
+                continue
+
+            if save_converter:
+                value = save_converter(value)
+            set_setting(key, value)
+
+    def _load_user_settings_ui(self):
+        """Load user settings into the UI."""
+        self._load_settings_from_map(_USER_SETTINGS_MAP)
 
     def _load_default_passes_ui(self):
         """Load default passes into the settings UI."""
@@ -301,52 +343,22 @@ class SettingsTab(BaseTab):
         """Load global settings into the settings UI."""
         from core.settings_manager import get_global_settings_path, get_setting
 
-        # Global settings path
+        # Global settings path (custom display logic)
         global_path = get_global_settings_path()
         self.ui.GlobalSettingsPathEdit.setText(global_path)
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
-        # ComfyUI mode - set via manager
-        comfyui_mode = get_setting("comfyui_mode")
-        self._comfyui_mode_manager.set_value(comfyui_mode)
+        # ComfyUI mode - set via OptionButtonManager
+        self._comfyui_mode_manager.set_value(get_setting("comfyui_mode"))
 
-        # ComfyUI paths
-        self.ui.ComfyUIPathEdit.setText(get_setting("comfyui_path"))
-        self.ui.ComfyUIPythonEdit.setText(get_setting("comfyui_python_path"))
-        self.ui.ComfyUINetworkOutputEdit.setText(get_setting("comfyui_network_output_path"))
+        # Load all mapped settings (paths, checkboxes, spinboxes with converters)
+        self._load_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
-        # ComfyUI performance settings
-        self.ui.ComfyUIFastMode.setChecked(get_setting("comfyui_fast_mode"))
-        self.ui.ComfyUIFP16Accumulation.setChecked(get_setting("comfyui_fp16_accumulation"))
-        self.ui.ComfyUILowVRAM.setChecked(get_setting("comfyui_lowvram"))
-
-        # ComfyUI memory management settings
-        if hasattr(self.ui, 'ComfyUIHighVRAM'):
-            self.ui.ComfyUIHighVRAM.setChecked(get_setting("comfyui_highvram"))
-        if hasattr(self.ui, 'ComfyUINormalVRAM'):
-            self.ui.ComfyUINormalVRAM.setChecked(get_setting("comfyui_normalvram"))
-        if hasattr(self.ui, 'ComfyUIDisableSmartMemory'):
-            self.ui.ComfyUIDisableSmartMemory.setChecked(get_setting("comfyui_disable_smart_memory"))
-
-        # ComfyUI timeout setting
-        if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
-            timeout_seconds = get_setting("comfyui_timeout")
-            # Convert to minutes for UI display
-            self.ui.ComfyUITimeoutSpinBox.setValue(timeout_seconds // 60)
-
-        # Server not found behavior setting
+        # Server not found behavior combo (custom bidirectional mapping)
         if hasattr(self.ui, 'ServerNotFoundCombo'):
             behavior = get_setting("comfyui_server_not_found_behavior")
-            # Index 0 = "Fail Immediately" (fail), Index 1 = "Wait for Server" (wait)
             self.ui.ServerNotFoundCombo.setCurrentIndex(0 if behavior == "fail" else 1)
-            # Connect signal to update wait timeout visibility
             self.ui.ServerNotFoundCombo.currentIndexChanged.connect(self._update_server_wait_visibility)
-
-        # Server wait timeout setting
-        if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
-            timeout_seconds = get_setting("comfyui_server_wait_timeout")
-            # Convert to minutes for UI display
-            self.ui.ServerWaitTimeoutSpinBox.setValue(timeout_seconds // 60)
 
         self._update_comfyui_python_visibility()
         self._update_server_wait_visibility()
@@ -448,7 +460,6 @@ class SettingsTab(BaseTab):
         """Save user settings."""
         from core.config import REQUIRED_PASSES
         from core.user_preferences import set_default_passes
-        from core.settings_manager import set_setting
 
         # Collect selected passes
         selected_passes = []
@@ -463,24 +474,10 @@ class SettingsTab(BaseTab):
         set_default_passes(selected_passes)
         self.log(f"Saved default passes: {selected_passes}")
 
-        # Save auto-extract textures setting
-        if hasattr(self.ui, 'AutoExtractTextures'):
-            set_setting("auto_extract_textures", self.ui.AutoExtractTextures.isChecked())
+        # Save all mapped user settings
+        self._save_settings_from_map(_USER_SETTINGS_MAP)
 
-        # Save generate 3D thumbnails setting
-        if hasattr(self.ui, 'Generate3DThumbnails'):
-            set_setting("generate_3d_thumbnails", self.ui.Generate3DThumbnails.isChecked())
-
-        # Save show tray notifications setting
-        if hasattr(self.ui, 'ShowTrayNotifications'):
-            set_setting("show_tray_notifications", self.ui.ShowTrayNotifications.isChecked())
-
-        # Save 3D viewer zoom setting
-        if hasattr(self.ui, 'Viewer3DZoomSpinBox'):
-            set_setting("viewer_3d_zoom_distance", self.ui.Viewer3DZoomSpinBox.value())
-
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.pulse_button(self.ui.SaveSettingsButton)
+        self.pulse_button(self.ui.SaveSettingsButton)
         self.show_status("User settings saved", "success")
 
     def _on_regenerate_thumbnails(self):
@@ -583,7 +580,7 @@ class SettingsTab(BaseTab):
         """Save all global settings."""
         from core.settings_manager import set_global_settings_path, set_setting
 
-        # Save global settings path
+        # Save global settings path (custom directory creation logic)
         new_global_path = self.ui.GlobalSettingsPathEdit.text().strip()
         if new_global_path:
             if not os.path.exists(new_global_path):
@@ -603,37 +600,16 @@ class SettingsTab(BaseTab):
             set_global_settings_path(new_global_path)
             self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
 
-        # Save ComfyUI settings
+        # ComfyUI mode (via OptionButtonManager)
         set_setting("comfyui_mode", self._comfyui_mode)
-        set_setting("comfyui_path", self.ui.ComfyUIPathEdit.text().strip())
-        set_setting("comfyui_python_path", self.ui.ComfyUIPythonEdit.text().strip())
-        set_setting("comfyui_network_output_path", self.ui.ComfyUINetworkOutputEdit.text().strip())
-        set_setting("comfyui_fast_mode", self.ui.ComfyUIFastMode.isChecked())
-        set_setting("comfyui_fp16_accumulation", self.ui.ComfyUIFP16Accumulation.isChecked())
-        set_setting("comfyui_lowvram", self.ui.ComfyUILowVRAM.isChecked())
 
-        # Save ComfyUI memory management settings
-        if hasattr(self.ui, 'ComfyUIHighVRAM'):
-            set_setting("comfyui_highvram", self.ui.ComfyUIHighVRAM.isChecked())
-        if hasattr(self.ui, 'ComfyUINormalVRAM'):
-            set_setting("comfyui_normalvram", self.ui.ComfyUINormalVRAM.isChecked())
-        if hasattr(self.ui, 'ComfyUIDisableSmartMemory'):
-            set_setting("comfyui_disable_smart_memory", self.ui.ComfyUIDisableSmartMemory.isChecked())
+        # Save all mapped global settings (paths, checkboxes, spinboxes with converters)
+        self._save_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
-        # Save ComfyUI timeout setting
-        if hasattr(self.ui, 'ComfyUITimeoutSpinBox'):
-            timeout_minutes = self.ui.ComfyUITimeoutSpinBox.value()
-            set_setting("comfyui_timeout", timeout_minutes * 60)  # Convert to seconds
-
-        # Save server not found behavior setting
+        # Server not found behavior combo (custom bidirectional mapping)
         if hasattr(self.ui, 'ServerNotFoundCombo'):
             behavior = "fail" if self.ui.ServerNotFoundCombo.currentIndex() == 0 else "wait"
             set_setting("comfyui_server_not_found_behavior", behavior)
-
-        # Save server wait timeout setting
-        if hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
-            timeout_minutes = self.ui.ServerWaitTimeoutSpinBox.value()
-            set_setting("comfyui_server_wait_timeout", timeout_minutes * 60)  # Convert to seconds
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()
@@ -725,14 +701,13 @@ class SettingsTab(BaseTab):
     # RESTRICTED TABS
     # =========================================================================
 
-    def _load_restricted_tabs_ui(self):
-        """Load restricted tabs settings into the checkboxes."""
-        from core.settings_manager import get_setting
+    def _get_restricted_tab_checkbox_map(self):
+        """Get the mapping of tab names to their restriction checkboxes.
 
-        restricted = get_setting("restricted_tabs")
-
-        # Map tab names to checkboxes (Settings is admin-only, not configurable here)
-        checkbox_map = {
+        Returns:
+            dict: {tab_name: checkbox_widget} (Settings is admin-only, not configurable here)
+        """
+        return {
             "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
             "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
             "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
@@ -741,7 +716,12 @@ class SettingsTab(BaseTab):
             "shotcleaner": getattr(self.ui, 'RestrictShotCleaner', None),
         }
 
-        for tab_name, checkbox in checkbox_map.items():
+    def _load_restricted_tabs_ui(self):
+        """Load restricted tabs settings into the checkboxes."""
+        from core.settings_manager import get_setting
+
+        restricted = get_setting("restricted_tabs")
+        for tab_name, checkbox in self._get_restricted_tab_checkbox_map().items():
             if checkbox:
                 checkbox.setChecked(tab_name in restricted)
 
@@ -749,21 +729,11 @@ class SettingsTab(BaseTab):
         """Save restricted tabs settings from the checkboxes."""
         from core.settings_manager import set_setting
 
-        restricted = []
-
-        # Map checkboxes to tab names (Settings is admin-only, not configurable here)
-        checkbox_map = {
-            "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
-            "comfyui_gallery": getattr(self.ui, 'RestrictComfyUIGallery', None),
-            "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
-            "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
-            "republish": getattr(self.ui, 'RestrictRePublish', None),
-            "shotcleaner": getattr(self.ui, 'RestrictShotCleaner', None),
-        }
-
-        for tab_name, checkbox in checkbox_map.items():
-            if checkbox and checkbox.isChecked():
-                restricted.append(tab_name)
+        restricted = [
+            tab_name
+            for tab_name, checkbox in self._get_restricted_tab_checkbox_map().items()
+            if checkbox and checkbox.isChecked()
+        ]
 
         set_setting("restricted_tabs", restricted, verbose=False)
         logger.info(f"Updated restricted tabs: {restricted}")

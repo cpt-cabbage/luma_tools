@@ -14,58 +14,42 @@ from core.error_handling import handle_errors, log_error
 logger = logging.getLogger(__name__)
 
 
-def cleanup_renders(lookdev_dir, render_dirs_to_delete):
-    """
-    Delete specified render directories.
+def _cleanup_directories(base_path, dirs_to_delete, label):
+    """Delete specified subdirectories under base_path.
 
     Args:
-        lookdev_dir: Base lookdev directory
-        render_dirs_to_delete: List of render directory names to delete
+        base_path: Parent directory containing the subdirectories
+        dirs_to_delete: List of directory names to delete
+        label: Human-readable label for logging (e.g. "render", "USD")
 
     Returns:
-        list: List of deleted directories
+        list: List of deleted directory names
     """
     deleted = []
-    renders_path = os.path.join(lookdev_dir, "img", "renders")
-
-    for dir_name in render_dirs_to_delete:
-        dir_path = os.path.join(renders_path, dir_name)
+    for dir_name in dirs_to_delete:
+        dir_path = os.path.join(base_path, dir_name)
         if not os.path.exists(dir_path):
             logger.warning(f"Directory not found: {dir_path}")
             continue
-        with handle_errors(f"deleting render directory {dir_path}"):
+        with handle_errors(f"deleting {label} directory {dir_path}"):
             shutil.rmtree(dir_path)
             deleted.append(dir_name)
-            logger.info(f"Removed render directory: {dir_path}")
-
+            logger.info(f"Removed {label} directory: {dir_path}")
     return deleted
+
+
+def cleanup_renders(lookdev_dir, render_dirs_to_delete):
+    """Delete specified render directories."""
+    return _cleanup_directories(
+        os.path.join(lookdev_dir, "img", "renders"), render_dirs_to_delete, "render"
+    )
 
 
 def cleanup_usd(lookdev_dir, usd_dirs_to_delete):
-    """
-    Delete specified USD directories.
-
-    Args:
-        lookdev_dir: Base lookdev directory
-        usd_dirs_to_delete: List of USD directory names to delete
-
-    Returns:
-        list: List of deleted directories
-    """
-    deleted = []
-    usd_path = os.path.join(lookdev_dir, "usd_files")
-
-    for dir_name in usd_dirs_to_delete:
-        dir_path = os.path.join(usd_path, dir_name)
-        if not os.path.exists(dir_path):
-            logger.warning(f"Directory not found: {dir_path}")
-            continue
-        with handle_errors(f"deleting USD directory {dir_path}"):
-            shutil.rmtree(dir_path)
-            deleted.append(dir_name)
-            logger.info(f"Removed USD directory: {dir_path}")
-
-    return deleted
+    """Delete specified USD directories."""
+    return _cleanup_directories(
+        os.path.join(lookdev_dir, "usd_files"), usd_dirs_to_delete, "USD"
+    )
 
 
 def cleanup_hip_backups(lookdev_dir):

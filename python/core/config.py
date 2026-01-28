@@ -174,6 +174,17 @@ def _load_version():
 
 APP_VERSION = _load_version()
 
+
+def get_changelog():
+    """Get the changelog content from changelog.md."""
+    changelog_file = os.path.join(_ROOT_DIR, "changelog.md")
+    try:
+        with open(changelog_file, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception:
+        return "No changelog available."
+
+
 # Frame padding
 FRAME_PADDING = 4
 
@@ -207,6 +218,13 @@ COMFYUI_OUTPUT_EXTENSIONS = [
     ".npy", ".npz", ".safetensors", ".pt", ".pth", ".ckpt", ".bin",
 ]
 
+# Gallery file extension sets (used by gallery loader and prewarm)
+GALLERY_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr', '.tiff', '.tif', '.bmp', '.gif'}
+GALLERY_MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
+GALLERY_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm'}
+GALLERY_AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.ogg'}
+GALLERY_SUPPORTED_EXTENSIONS = GALLERY_IMAGE_EXTENSIONS | GALLERY_MODEL_EXTENSIONS | GALLERY_VIDEO_EXTENSIONS | GALLERY_AUDIO_EXTENSIONS
+
 # File naming patterns
 DENOISED_SUBDIRECTORY = "denoised"
 
@@ -237,6 +255,9 @@ DEFAULT_PASSES = ["CryptoMaterials", "P", "depth", "uv", "normal"]
 # User settings file location (in user's home directory)
 USER_SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".luma_tools")
 USER_SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
+
+# Default fallback directories
+DEFAULT_VIDEOS_DIR = os.path.join(os.path.expanduser("~"), "Videos")
 
 # Global settings (shared across all users)
 # Default global settings path - relative to luma_tools root, can be overridden by user settings
@@ -281,6 +302,8 @@ class UIColors:
     ERROR_ALT = "#ff6b6b"
     WARNING = "#f59e0b"
     WARNING_DARK = "#d97706"
+    INFO = "#4a9eff"
+    SCANNING = "#8b5cf6"
 
     # Border colors
     BORDER = "#3c3c3c"

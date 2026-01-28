@@ -143,16 +143,12 @@ class ComfyUIGalleryTab(BaseTab):
         super().keyPressEvent(event)
 
     # =========================================================================
-    # DELEGATED METHODS - Selection
+    # MANAGER DELEGATION - Signal handlers and cross-manager coordination
+    # These methods are connected as Qt signal handlers from manager classes
+    # or called from external modules (comfyui_polling.py, settings_tab.py).
     # =========================================================================
 
-    def _process_rubber_band_selection(self):
-        """Select all items that intersect with the rubber band."""
-        self._selection_manager.process_rubber_band_selection()
-
-    def _select_all(self):
-        """Select all items in the gallery."""
-        self._selection_manager.select_all()
+    # -- Selection (signal handlers from thumbnails/toolbar) --
 
     def _clear_selection(self):
         """Clear all selected items."""
@@ -162,70 +158,22 @@ class ComfyUIGalleryTab(BaseTab):
         """Handle thumbnail selection state change."""
         self._selection_manager.on_selection_changed(image_path, is_selected)
 
-    def _on_shift_click_selection(self, clicked_path):
-        """Handle shift+click for range selection."""
-        self._selection_manager.on_shift_click(clicked_path)
+    def _on_view_selected(self):
+        """Open viewer showing only selected images."""
+        self._viewer_manager.view_selected()
 
-    def _create_selection_toolbar(self):
-        """Create the floating selection toolbar."""
-        self._selection_manager.create_toolbar()
-
-    def _position_toolbar_in_viewport(self):
-        """Position the selection toolbar."""
-        self._selection_manager._position_toolbar()
-
-    def _update_selection_toolbar(self):
-        """Show/hide and update the selection toolbar."""
-        self._selection_manager._update_toolbar()
-
-    def _update_checkmark_visibility(self):
-        """Update checkmark visibility for selected items."""
-        self._selection_manager._update_checkmark_visibility()
-
-    # =========================================================================
-    # DELEGATED METHODS - Viewer
-    # =========================================================================
+    # -- Viewer (signal handlers from thumbnails) --
 
     def _on_thumbnail_clicked(self, image_path):
         """Handle thumbnail click - open embedded viewer."""
         self._clear_selection()
         self._viewer_manager.open_viewer(image_path)
 
-    def _on_view_selected(self):
-        """Open viewer showing only selected images."""
-        self._viewer_manager.view_selected()
-
     def _open_viewer(self, start_image=None, fullscreen=False, image_paths=None):
         """Open the image viewer."""
         self._viewer_manager.open_viewer(start_image, fullscreen, image_paths)
 
-    def _get_image_paths(self):
-        """Get list of all media paths from current gallery."""
-        return self._viewer_manager._get_image_paths()
-
-    def _show_embedded_viewer(self, image_paths, start_index):
-        """Show the embedded image viewer."""
-        self._viewer_manager._show_embedded(image_paths, start_index)
-
-    def _show_viewer_loading(self):
-        """Show loading indicator while viewer is being created."""
-        self._viewer_manager._show_loading()
-
-    def _create_embedded_viewer_async(self):
-        """Create the embedded viewer asynchronously."""
-        self._viewer_manager._create_embedded_async()
-
-    def _close_embedded_viewer(self):
-        """Close the embedded viewer and show gallery grid."""
-        self._viewer_manager.close_embedded()
-
-    def _on_view_fullscreen(self, image_path, index):
-        """Handle request to view in fullscreen."""
-        self._viewer_manager._on_view_fullscreen(image_path, index)
-
-    # =========================================================================
-    # DELEGATED METHODS - Operations
-    # =========================================================================
+    # -- Operations (signal handlers from thumbnails/toolbar) --
 
     def _on_delete_selected(self):
         """Delete all selected items with confirmation."""
@@ -235,12 +183,8 @@ class ComfyUIGalleryTab(BaseTab):
         """Publish selected items to AYON."""
         self._operations_manager.publish_selected()
 
-    def _on_publish_batch_complete(self, results):
-        """Handle publish batch completion."""
-        self._operations_manager._on_publish_complete(results)
-
     def _on_item_deleted(self, item_path):
-        """Handle item deletion."""
+        """Handle item deletion (coordinates selection + operations managers)."""
         self._operations_manager._on_item_deleted(item_path)
         self._selection_manager.on_item_deleted(item_path)
 
@@ -252,149 +196,29 @@ class ComfyUIGalleryTab(BaseTab):
         """Handle request to copy settings from an image."""
         self._operations_manager.copy_settings_to_comfyui(metadata)
 
-    # =========================================================================
-    # DELEGATED METHODS - Refresh
-    # =========================================================================
+    # -- Refresh (called from comfyui_polling.py, settings_tab.py, and internally) --
 
     def _on_refresh(self, force=False, show_status=True):
         """Handle refresh request."""
         self._refresh_controller.on_refresh(force, show_status=show_status)
 
-    def _do_refresh(self):
-        """Actually perform the refresh scan."""
-        self._refresh_controller._do_refresh()
-
-    def _on_scan_error(self, msg, tb):
-        """Handle scan error."""
-        self._refresh_controller._on_scan_error(msg, tb)
-
-    def _on_scan_complete(self, items):
-        """Handle scan completion."""
-        self._refresh_controller._on_scan_complete(items)
-
-    def _use_prewarm_cache_sync(self):
-        """Use pre-warmed cache synchronously."""
-        self._refresh_controller.use_prewarm_cache_sync()
-
-    def _process_scan_results_sync(self, items):
-        """Process scan results synchronously."""
-        self._refresh_controller._process_scan_results_sync(items)
-
-    def _use_prewarm_cache(self):
-        """Use pre-warmed cache (async version)."""
-        self._refresh_controller.use_prewarm_cache_sync()
-
-    def _enrich_prewarm_items(self, items):
-        """Enrich pre-warmed items."""
-        return self._refresh_controller._enrich_prewarm_items(items)
-
     def _start_watcher(self, output_dir):
         """Start file system watcher."""
         self._refresh_controller.start_watcher(output_dir)
 
-    def _on_watch_directories_collected(self, result):
-        """Handle watch directories collection."""
-        self._refresh_controller._on_watch_directories_collected(result)
-
-    def _on_watcher_setup_error(self, msg, tb):
-        """Handle watcher setup error."""
-        self._refresh_controller._on_watcher_setup_error(msg, tb)
-
-    def _on_directory_changed(self, path):
-        """Handle directory change."""
-        self._refresh_controller._on_directory_changed(path)
-
-    def _start_network_polling(self):
-        """Start network polling."""
-        self._refresh_controller._start_network_polling()
-
-    def _stop_network_polling(self):
-        """Stop network polling."""
-        self._refresh_controller.stop_network_polling()
-
-    def _on_poll_refresh(self):
-        """Handle poll refresh."""
-        self._refresh_controller._on_poll_refresh()
-
-    def _is_network_path(self, path):
-        """Check if path is a network path."""
-        return self._refresh_controller._is_network_path(path)
-
-    # =========================================================================
-    # DELEGATED METHODS - UI
-    # =========================================================================
-
-    def _update_sort_button_text(self):
-        """Update sort button text."""
-        self._ui_manager.update_sort_button_text()
+    # -- UI (signal handlers from connect_signals + internal use) --
 
     def _on_sort_button_clicked(self):
         """Handle sort button click."""
         self._ui_manager.on_sort_button_clicked()
 
-    def _select_sort_mode(self, mode):
-        """Apply selected sort mode."""
-        self._ui_manager._select_sort_mode(mode)
-
-    def _create_filter_button(self):
-        """Create filter toggle button."""
-        self._ui_manager._create_filter_button()
-
-    def _update_filter_button_text(self):
-        """Update filter button text."""
-        self._ui_manager._update_filter_button_text()
-
-    def _on_filter_toggle(self):
-        """Toggle filter."""
-        self._ui_manager._on_filter_toggle()
-
-    def _create_stacked_toggle_button(self):
-        """Create view mode toggle button."""
-        self._ui_manager._create_view_mode_button()
-
-    def _update_view_button_text(self):
-        """Update view mode button text."""
-        self._ui_manager._update_view_button_text()
-
-    def _on_view_mode_toggle(self):
-        """Handle view mode toggle."""
-        self._ui_manager._on_view_mode_toggle()
-
-    def _redisplay_items(self):
-        """Redisplay items with current settings."""
-        self._ui_manager._redisplay_items()
-
-    def _populate_user_selector(self):
-        """Populate user selector."""
-        self._ui_manager.populate_user_selector()
-
-    def _discover_users_sync(self):
-        """Discover users synchronously."""
-        return self._ui_manager._discover_users_sync()
-
-    def _on_users_discovered(self, users):
-        """Handle users discovered."""
-        self._ui_manager._on_users_discovered(users)
-
-    def _update_user_button_text(self):
-        """Update user button text."""
-        self._ui_manager.update_user_button_text()
-
-    def _update_user_selector_visibility(self):
-        """Update user selector visibility."""
-        self._ui_manager._update_user_button_visibility()
-
     def _on_user_button_clicked(self):
         """Handle user button click."""
         self._ui_manager.on_user_button_clicked()
 
-    def _select_user(self, new_user):
-        """Select a user."""
-        self._ui_manager._select_user(new_user)
-
-    def _update_view_only_indicator(self):
-        """Update view only indicator."""
-        self._ui_manager._update_view_only_indicator()
+    def _redisplay_items(self):
+        """Redisplay items with current settings."""
+        self._ui_manager._redisplay_items()
 
     # =========================================================================
     # CORE METHODS (kept in main tab)
@@ -410,6 +234,11 @@ class ComfyUIGalleryTab(BaseTab):
         if not self._initial_scan_done:
             self._on_refresh()
             self._initial_scan_done = True
+
+    def on_tab_deactivated(self):
+        """Called when user switches away from this tab. Stop watchers and timers."""
+        self._refresh_controller.stop_watcher()
+        self._refresh_controller.stop_network_polling()
 
     def _on_scan_complete_impl(self, items):
         """Implementation of scan complete handling."""
@@ -617,10 +446,7 @@ class ComfyUIGalleryTab(BaseTab):
 
             # Load saved splitter sizes from settings
             from core.settings_manager import get_setting
-            try:
-                saved_sizes = get_setting("gallery_splitter_sizes")
-            except KeyError:
-                saved_sizes = None
+            saved_sizes = get_setting("gallery_splitter_sizes")
             if saved_sizes:
                 self._gallery_splitter.setSizes(saved_sizes)
             else:
@@ -635,10 +461,7 @@ class ComfyUIGalleryTab(BaseTab):
 
         # Load collapsed state from settings
         from core.settings_manager import get_setting
-        try:
-            collapsed = get_setting("gallery_sidebar_collapsed")
-        except KeyError:
-            collapsed = False
+        collapsed = get_setting("gallery_sidebar_collapsed")
         if collapsed:
             self._groups_panel._toggle_collapse()
 

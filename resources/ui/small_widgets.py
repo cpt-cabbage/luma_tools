@@ -9,146 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import (
-    QWidget, QMenu, QPushButton, QHBoxLayout, QLabel, QSizePolicy
+    QWidget, QMenu, QPushButton, QHBoxLayout, QLabel
 )
 from PySide6.QtCore import Signal, Qt
-from thumbnail_styles import ThumbnailStyler
-
-
-# ============================================================================
-# GALLERY SECTION HEADER WIDGET (legacy - kept for compatibility)
-# ============================================================================
-
-class GallerySectionHeader(QWidget):
-    """Collapsible section header for gallery grouping.
-
-    Displays a clickable header with expand/collapse chevron, section title,
-    and item count. Emits toggled signal when clicked.
-    """
-    toggled = Signal(str, bool)  # section_id, is_expanded
-
-    def __init__(self, section_id: str, title: str, count: int, expanded: bool = True, parent=None):
-        super().__init__(parent)
-        self.section_id = section_id
-        self._expanded = expanded
-        self._count = count
-
-        self.setFixedHeight(36)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
-
-        # Layout
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 16, 6)
-        layout.setSpacing(10)
-
-        # Chevron with animated-look icon
-        self.chevron = QLabel()
-        self.chevron.setFixedWidth(18)
-        self._update_chevron()
-        layout.addWidget(self.chevron)
-
-        # Title - truncate long names
-        display_title = title if len(title) <= 40 else title[:37] + "..."
-        self.title_label = QLabel(display_title)
-        self.title_label.setStyleSheet("""
-            color: #d8d8d8;
-            font-weight: 600;
-            font-size: 12px;
-        """)
-        layout.addWidget(self.title_label)
-
-        # Spacer
-        layout.addStretch()
-
-        # Count badge - pill style
-        self.count_label = QLabel(str(count))
-        self.count_label.setAlignment(Qt.AlignCenter)
-        self.count_label.setStyleSheet("""
-            QLabel {
-                background-color: rgba(74, 158, 255, 0.15);
-                color: #8ac4ff;
-                border-radius: 10px;
-                padding: 2px 8px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-        """)
-        self.count_label.setMinimumWidth(28)
-        layout.addWidget(self.count_label)
-
-        # Styling
-        self._apply_style()
-
-    def _apply_style(self):
-        """Apply visual styling based on state."""
-        if self._expanded:
-            bg_color = "#2d3139"
-            border_color = "#4a9eff"
-            border_left = "3px"
-        else:
-            bg_color = "#252830"
-            border_color = "#3c414b"
-            border_left = "3px"
-
-        self.setStyleSheet(f"""
-            GallerySectionHeader {{
-                background-color: {bg_color};
-                border-radius: 6px;
-                border: 1px solid {border_color};
-                border-left: {border_left} solid {border_color};
-            }}
-            GallerySectionHeader:hover {{
-                background-color: #353a45;
-                border: 1px solid #5ba3ff;
-                border-left: 3px solid #5ba3ff;
-            }}
-        """)
-
-    def _update_chevron(self):
-        """Update chevron direction based on expanded state."""
-        # Use cleaner arrow icons
-        arrow = "▾" if self._expanded else "▸"
-        color = "#4a9eff" if self._expanded else "#666666"
-        self.chevron.setText(arrow)
-        self.chevron.setStyleSheet(f"color: {color}; font-size: 14px;")
-
-    def mousePressEvent(self, event):
-        """Handle click to toggle expansion."""
-        if event.button() == Qt.LeftButton:
-            self._expanded = not self._expanded
-            self._update_chevron()
-            self._apply_style()
-            self.toggled.emit(self.section_id, self._expanded)
-        super().mousePressEvent(event)
-
-    def set_expanded(self, expanded: bool):
-        """Set the expanded state without emitting signal."""
-        if self._expanded != expanded:
-            self._expanded = expanded
-            self._update_chevron()
-            self._apply_style()
-
-    def is_expanded(self) -> bool:
-        """Return current expanded state."""
-        return self._expanded
-
-    def update_count(self, count: int):
-        """Update the item count display."""
-        self._count = count
-        self.count_label.setText(f"({count})")
-
-    def sizeHint(self):
-        """Return size hint with parent's width to take full row in FlowLayout."""
-        from PySide6.QtCore import QSize
-        # Use parent's width to take full row, with fallback to large value
-        parent = self.parentWidget()
-        if parent:
-            # Subtract some margin for padding
-            width = max(parent.width() - 20, 200)
-        else:
-            width = 10000  # Fallback to force full row
-        return QSize(width, 32)
+from thumbnail_styles import (
+    ThumbnailStyler, darken_color, color_with_alpha,
+    derive_background_from_color, derive_border_from_color,
+)
+from dialog_helpers import get_active_window
 
 
 # ============================================================================
@@ -349,8 +217,8 @@ class StackedThumbnailWidget(QWidget):
 
         # Derive colors from custom_color or use defaults
         if custom_color:
-            # Parse the custom color and create darker/lighter variants
-            bg_color, border_color = self._derive_colors_from_hex(custom_color)
+            bg_color = derive_background_from_color(custom_color)
+            border_color = derive_border_from_color(custom_color)
         elif self._is_top_item_model or not self._has_metadata:
             # Grey for 3D models and non-metadata items
             bg_color = "#2d3139"
@@ -378,12 +246,12 @@ class StackedThumbnailWidget(QWidget):
             else:
                 # Background cards - derive darker shades
                 alpha = max(180, 255 - i * 30)
-                darker_bg = self._darken_color(bg_color, 0.15 * i)
-                darker_border = self._darken_color(border_color, 0.1 * i)
+                darker_bg = darken_color(bg_color, 0.15 * i)
+                darker_border = darken_color(border_color, 0.1 * i)
                 label.setStyleSheet(f"""
                     QLabel {{
                         background-color: {darker_bg};
-                        border: 1px solid {self._color_with_alpha(darker_border, alpha)};
+                        border: 1px solid {color_with_alpha(darker_border, alpha)};
                         border-radius: 8px;
                     }}
                 """)
@@ -391,50 +259,6 @@ class StackedThumbnailWidget(QWidget):
         # Also update the styler for hover/selection states
         self._styler.group_color = custom_color
         self._apply_thumbnail_style()
-
-    def _derive_colors_from_hex(self, hex_color):
-        """Derive background and border colors from a hex color.
-
-        Returns a darker background and the original as border.
-        """
-        # Parse hex
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-
-        # Background: darken significantly for a tinted look
-        bg_r = int(r * 0.3)
-        bg_g = int(g * 0.3)
-        bg_b = int(b * 0.3)
-        bg_color = f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
-
-        # Border: slightly darkened original
-        border_r = int(min(255, r * 0.7))
-        border_g = int(min(255, g * 0.7))
-        border_b = int(min(255, b * 0.7))
-        border_color = f"#{border_r:02x}{border_g:02x}{border_b:02x}"
-
-        return bg_color, border_color
-
-    def _darken_color(self, hex_color, factor):
-        """Darken a hex color by a factor (0-1)."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        r = max(0, int(r * (1 - factor)))
-        g = max(0, int(g * (1 - factor)))
-        b = max(0, int(b * (1 - factor)))
-        return f"#{r:02x}{g:02x}{b:02x}"
-
-    def _color_with_alpha(self, hex_color, alpha):
-        """Convert hex color to rgba string with alpha (0-255)."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        return f"rgba({r}, {g}, {b}, {alpha})"
 
     def _setup_ui(self):
         """Setup the widget UI with fanned card effect."""
@@ -860,26 +684,11 @@ class StackedThumbnailWidget(QWidget):
         """Apply the appropriate icon and style for the file type - outline style."""
         if not self._top_item:
             return
+        from thumbnail_styles import get_type_indicator_style
         item_type = self._top_item.get('type', 'image')
-        # Type icon and color configuration (icon, border_color)
-        type_config = {
-            'image': ('▣', 'rgba(16, 185, 129, 0.8)'),   # Green squares
-            'video': ('▶', 'rgba(239, 68, 68, 0.8)'),    # Red play triangle
-            'audio': ('♫', 'rgba(168, 85, 247, 0.8)'),   # Purple music note
-            'model': ('⬣', 'rgba(74, 158, 255, 0.8)'),   # Blue hexagon/cube
-        }
-        icon, border_color = type_config.get(item_type, ('?', 'rgba(128, 128, 128, 0.8)'))
+        icon, stylesheet = get_type_indicator_style(item_type)
         self.type_indicator.setText(icon)
-        self.type_indicator.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgba(0, 0, 0, 0.4);
-                color: {border_color};
-                border: 1px solid {border_color};
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-        """)
+        self.type_indicator.setStyleSheet(stylesheet)
         self.type_indicator.show()
 
     def _apply_thumbnail_style(self):
@@ -1082,7 +891,7 @@ class StackedThumbnailWidget(QWidget):
 
     def _delete_all_items(self):
         """Delete all items in the stack."""
-        from PySide6.QtWidgets import QMessageBox, QApplication
+        from PySide6.QtWidgets import QMessageBox
 
         if not self._gallery_tab or not self._items:
             return
@@ -1092,11 +901,7 @@ class StackedThumbnailWidget(QWidget):
         count = len(paths)
 
         # Confirm deletion
-        parent_window = None
-        for widget in QApplication.topLevelWidgets():
-            if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                parent_window = widget
-                break
+        parent_window = get_active_window()
 
         reply = QMessageBox.question(
             parent_window, "Delete Stack",
@@ -1194,15 +999,10 @@ class StackedThumbnailWidget(QWidget):
             return
         
         try:
-            from PySide6.QtWidgets import QApplication
             import os
-            
-            parent_window = None
-            for widget in QApplication.topLevelWidgets():
-                if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                    parent_window = widget
-                    break
-            
+
+            parent_window = get_active_window()
+
             # Import here to avoid circular imports
             from properties_dialog import PropertiesDialog
             
@@ -1831,241 +1631,6 @@ class StackedThumbnailWidget(QWidget):
     def is_selected(self) -> bool:
         """Return whether the stack is currently selected."""
         return self._is_selected
-
-
-# ============================================================================
-# EXPANDED STACK CONTAINER (Shows expanded thumbnails in a box)
-# ============================================================================
-
-class ExpandedStackContainer(QWidget):
-    """Container widget that displays expanded stack items in a styled box.
-
-    This widget is inserted into the FlowLayout after the stack, pushing
-    other items down. It shows all thumbnails in a wrapped flow with a
-    visible border to indicate grouping.
-
-    Signals:
-        item_deleted(str): Emitted when an item is deleted (path)
-        thumbnail_clicked(str, dict): Emitted when a thumbnail is clicked (path, item)
-    """
-    item_deleted = Signal(str)  # path
-    thumbnail_clicked = Signal(str, dict)  # path, item
-
-    def __init__(self, stack_id: str, items: List[Dict], gallery_tab=None, parent_stack=None, parent=None):
-        """Initialize the expanded container.
-
-        Args:
-            stack_id: The stack identifier
-            items: List of item dicts to display
-            gallery_tab: Reference to the gallery tab
-            parent_stack: Reference to the parent StackedThumbnailWidget
-            parent: Parent widget
-        """
-        super().__init__(parent)
-        self.stack_id = stack_id
-        self._items = items
-        self._gallery_tab = gallery_tab
-        self._parent_stack = parent_stack
-        self._thumbnail_widgets = []
-
-        self._setup_ui()
-
-    def _setup_ui(self):
-        """Setup the container UI with styled box and flow layout."""
-        from PySide6.QtWidgets import QVBoxLayout, QFrame
-        from PySide6.QtCore import QSize
-        from layouts import FlowLayout
-
-        # Main layout
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 4, 0, 8)
-        main_layout.setSpacing(0)
-
-        # Styled container frame
-        self._frame = QFrame()
-        self._frame.setStyleSheet("""
-            QFrame {
-                background-color: rgba(74, 158, 255, 0.08);
-                border: 2px solid rgba(74, 158, 255, 0.4);
-                border-radius: 8px;
-            }
-        """)
-
-        # Flow layout inside the frame for thumbnails
-        frame_layout = QVBoxLayout(self._frame)
-        frame_layout.setContentsMargins(8, 8, 8, 8)
-        frame_layout.setSpacing(4)
-
-        # Header with stack name and close button
-        header = self._create_header()
-        frame_layout.addWidget(header)
-
-        # Thumbnail container with flow layout
-        self._thumb_container = QWidget()
-        self._flow_layout = FlowLayout(self._thumb_container, margin=4, spacing=6)
-        frame_layout.addWidget(self._thumb_container)
-
-        main_layout.addWidget(self._frame)
-
-        # Create thumbnail widgets
-        self._create_thumbnails()
-
-        # Calculate size based on content
-        self._update_size()
-
-    def _create_header(self):
-        """Create the header with stack name and collapse button."""
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton
-
-        header = QWidget()
-        header.setFixedHeight(28)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(4, 0, 4, 4)
-        header_layout.setSpacing(8)
-
-        # Stack name label
-        name_label = QLabel(f"{self.stack_id}")
-        name_label.setStyleSheet("""
-            QLabel {
-                color: #4a9eff;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        header_layout.addWidget(name_label)
-
-        # Item count
-        count_label = QLabel(f"({len(self._items)} items)")
-        count_label.setStyleSheet("color: #888888; font-size: 11px;")
-        header_layout.addWidget(count_label)
-
-        header_layout.addStretch()
-
-        # Close/collapse button
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #888888;
-                border: none;
-                font-size: 18px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                color: #ffffff;
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-            }
-        """)
-        close_btn.setToolTip("Collapse stack")
-        close_btn.clicked.connect(self._on_close_clicked)
-        header_layout.addWidget(close_btn)
-
-        return header
-
-    def _on_close_clicked(self):
-        """Handle close button click - collapse the parent stack."""
-        if self._parent_stack:
-            self._parent_stack.collapse()
-
-    def _create_thumbnails(self):
-        """Create thumbnail widgets for all items."""
-        from ui_components import ThumbnailWidget
-        import os
-
-        is_editable = False
-        if self._gallery_tab:
-            is_editable = self._gallery_tab._is_own_gallery()
-
-        for item in self._items:
-            path = item['path']
-            file_type = item.get('type', 'image')
-            item_output_dir = os.path.dirname(path)
-            has_metadata = item.get('has_metadata', False)
-
-            # Use unified ThumbnailWidget
-            thumb = ThumbnailWidget(
-                path,
-                item_type=file_type,
-                parent=self._thumb_container,
-                output_dir=item_output_dir,
-                editable=is_editable,
-                is_new=False,
-                gallery_tab=self._gallery_tab,
-                has_metadata=has_metadata
-            )
-
-            # Connect common signals
-            thumb.clicked.connect(lambda p=path, i=item: self.thumbnail_clicked.emit(p, i))
-            thumb.deleted.connect(self._on_thumb_deleted)
-            if self._gallery_tab:
-                thumb.viewed.connect(self._gallery_tab._on_item_viewed)
-                thumb.selection_changed.connect(self._gallery_tab._on_selection_changed)
-
-            # Connect image-specific signals
-            if file_type == 'image' and self._gallery_tab:
-                thumb.fullscreen_requested.connect(
-                    lambda img_path=path: self._gallery_tab._open_viewer(img_path, fullscreen=True)
-                )
-
-            self._flow_layout.addWidget(thumb)
-            self._thumbnail_widgets.append(thumb)
-
-    def _on_thumb_deleted(self, path):
-        """Handle thumbnail deletion."""
-        # Remove from our list
-        self._items = [item for item in self._items if item['path'] != path]
-
-        # Forward the signal
-        self.item_deleted.emit(path)
-
-        # Update size
-        self._update_size()
-
-    def _update_size(self):
-        """Update container size based on content."""
-        from PySide6.QtCore import QSize
-
-        # Calculate approximate size
-        # Each thumbnail is about 160x180, with 6px spacing
-        thumb_width = 166  # 160 + 6 spacing
-        thumb_height = 186  # 180 + 6 spacing
-
-        # Get parent width to determine how many thumbs per row
-        parent = self.parentWidget()
-        if parent:
-            available_width = parent.width() - 40  # margins
-        else:
-            available_width = 800
-
-        thumbs_per_row = max(1, available_width // thumb_width)
-        num_rows = (len(self._items) + thumbs_per_row - 1) // thumbs_per_row
-
-        # Calculate total height: header (28) + rows * thumb_height + padding
-        total_height = 28 + num_rows * thumb_height + 24  # 24 for padding
-
-        self.setMinimumHeight(total_height)
-
-    def load_thumbnails(self):
-        """Trigger thumbnail loading for all widgets."""
-        for thumb in self._thumbnail_widgets:
-            if hasattr(thumb, 'load_thumbnail_if_needed'):
-                thumb.load_thumbnail_if_needed()
-
-    def sizeHint(self):
-        """Return size hint to take full row width in FlowLayout."""
-        from PySide6.QtCore import QSize
-
-        parent = self.parentWidget()
-        if parent:
-            width = max(parent.width() - 20, 400)
-        else:
-            width = 10000  # Large value to force full row
-
-        # Height based on content
-        return QSize(width, self.minimumHeight() or 200)
 
 
 # ============================================================================

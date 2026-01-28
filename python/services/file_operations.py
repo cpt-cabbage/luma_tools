@@ -6,7 +6,6 @@ Handles directory scanning, file discovery, and file system queries.
 
 import logging
 import os
-import fileseq
 from pathlib import Path
 from typing import List, Tuple
 
@@ -43,18 +42,19 @@ def fast_scandir(dirname):
 
 def find_renders(render_path):
     """
-    Find render sequences in the specified path.
+    Find render sequences in the denoised subdirectory.
+
+    Delegates to core.utils.scan_exr_sequences for the actual scanning.
 
     Args:
-        render_path: Path to search for render sequences
+        render_path: Base render path (denoised/ subdirectory is appended)
 
     Returns:
-        list: List of fileseq.FrameSet objects for found sequences
+        list: List of fileseq.FileSequence objects for found sequences
     """
-    # Use the original path pattern with backslashes (Windows-style)
-    denoised_path = render_path + "\\denoised\\*.exr"
-    sequences = fileseq.findSequencesOnDisk(denoised_path)
-    return list(sequences) if sequences else []
+    from core.utils import scan_exr_sequences
+    denoised_path = os.path.join(render_path, "denoised")
+    return scan_exr_sequences(denoised_path)
 
 
 def find_hip_files(dirname):

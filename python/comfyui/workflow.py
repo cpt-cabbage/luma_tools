@@ -310,7 +310,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"  Subgraph definition not found for {sg_type}")
             continue
 
-        logger.info(f"  Expanding subgraph node {sg_node_id} (type: {sg_type[:8]}...)")
+        logger.debug(f"  Expanding subgraph node {sg_node_id} (type: {sg_type[:8]}...)")
         nodes_to_remove.add(sg_node_id)
 
         # Get subgraph internal structure
@@ -328,13 +328,13 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
         link_id_map = {}  # old_internal_link_id -> new_link_id
 
         # Assign new IDs to internal nodes
-        logger.info(f"    Remapping {len(sg_internal_nodes)} internal nodes (starting from ID {max_node_id + 1}):")
+        logger.debug(f"    Remapping {len(sg_internal_nodes)} internal nodes (starting from ID {max_node_id + 1}):")
         for internal_node in sg_internal_nodes:
             old_id = internal_node.get('id')
             node_type = internal_node.get('type', 'unknown')
             max_node_id += 1
             node_id_map[old_id] = max_node_id
-            logger.info(f"      {node_type}: {old_id} -> {max_node_id}")
+            logger.debug(f"      {node_type}: {old_id} -> {max_node_id}")
 
         # Assign new IDs to internal links
         for internal_link in sg_internal_links:
@@ -374,7 +374,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
         # Create remapped internal links
         # Skip links that reference boundary nodes (negative IDs or unmapped IDs)
-        logger.info(f"    Processing {len(sg_internal_links)} internal links:")
+        logger.debug(f"    Processing {len(sg_internal_links)} internal links:")
         for internal_link in sg_internal_links:
             # link format: [link_id, from_node, from_slot, to_node, to_slot, type]
             from_node_id = internal_link[1]
@@ -382,7 +382,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
             # Skip boundary links (negative IDs are subgraph input/output references)
             if from_node_id not in node_id_map or to_node_id not in node_id_map:
-                logger.info(f"      Link {internal_link[0]}: {from_node_id} -> {to_node_id} (SKIPPED - boundary)")
+                logger.debug(f"      Link {internal_link[0]}: {from_node_id} -> {to_node_id} (SKIPPED - boundary)")
                 continue
 
             new_link = list(internal_link)
@@ -390,14 +390,14 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             new_link[1] = node_id_map[from_node_id]
             new_link[3] = node_id_map[to_node_id]
             new_links.append(new_link)
-            logger.info(f"      Link {internal_link[0]}->{new_link[0]}: {from_node_id}->{new_link[1]} slot {internal_link[2]} -> {to_node_id}->{new_link[3]} slot {internal_link[4]}")
+            logger.debug(f"      Link {internal_link[0]}->{new_link[0]}: {from_node_id}->{new_link[1]} slot {internal_link[2]} -> {to_node_id}->{new_link[3]} slot {internal_link[4]}")
 
         # Handle external connections TO the subgraph (inputs)
         # The subgraph node's inputs connect to internal nodes
         # Find boundary links: links where from_node is negative (boundary input marker)
         # These indicate connections from external inputs to internal nodes
         sg_node_inputs = sg_node.get('inputs', [])
-        logger.info(f"    Processing {len(sg_inputs)} subgraph inputs, {len(sg_node_inputs)} connected inputs")
+        logger.debug(f"    Processing {len(sg_inputs)} subgraph inputs, {len(sg_node_inputs)} connected inputs")
 
         # Build map of boundary input slot -> LIST of (internal_node, internal_slot, link)
         # Boundary inputs use negative from_node IDs (e.g., -1, -2, etc.)
@@ -414,7 +414,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 if from_slot not in boundary_input_map:
                     boundary_input_map[from_slot] = []
                 boundary_input_map[from_slot].append((to_node, to_slot, il))
-                logger.info(f"    Found boundary input: slot {from_slot} -> internal node {to_node} slot {to_slot}")
+                logger.debug(f"    Found boundary input: slot {from_slot} -> internal node {to_node} slot {to_slot}")
 
         for i, sg_input_def in enumerate(sg_inputs):
             input_name = sg_input_def.get('name', f'input_{i}')
@@ -424,7 +424,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 ext_link_id = sg_node_inputs[i].get('link')
 
             if ext_link_id is None:
-                logger.info(f"    Input {i} ({input_name}): no external link connected")
+                logger.debug(f"    Input {i} ({input_name}): no external link connected")
                 continue
 
             # Get all internal targets for this input
@@ -440,10 +440,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             # Second try: use boundary input map by slot index (may have multiple targets)
             if not internal_targets and i in boundary_input_map:
                 internal_targets = boundary_input_map[i]
-                logger.info(f"    Input {i} ({input_name}): using boundary map -> {len(internal_targets)} target(s)")
+                logger.debug(f"    Input {i} ({input_name}): using boundary map -> {len(internal_targets)} target(s)")
 
             if not internal_targets:
-                logger.info(f"    Input {i} ({input_name}): no internal targets found")
+                logger.debug(f"    Input {i} ({input_name}): no internal targets found")
                 continue
 
             # Get the external link info for creating additional links
@@ -474,7 +474,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                         old_target = ext_link_data[3]
                         ext_link_data[3] = target_node_id
                         ext_link_data[4] = target_slot
-                        logger.info(f"    Rewired external link {ext_link_id}: target {old_target} -> {target_node_id}")
+                        logger.debug(f"    Rewired external link {ext_link_id}: target {old_target} -> {target_node_id}")
                     current_link_id = ext_link_id
                 else:
                     # Additional targets: create new links from the same source
@@ -489,7 +489,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     ]
                     new_links.append(new_link)
                     current_link_id = max_link_id
-                    logger.info(f"    Created new link {max_link_id} for additional target: -> node {target_node_id} slot {target_slot}")
+                    logger.debug(f"    Created new link {max_link_id} for additional target: -> node {target_node_id} slot {target_slot}")
 
                 # Update the target internal node's input
                 found_input = False
@@ -502,7 +502,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                             if slot_match or index_match:
                                 inp['link'] = current_link_id
                                 found_input = True
-                                logger.info(f"    Updated internal node {target_node_id} input slot {target_slot}: link={current_link_id}")
+                                logger.debug(f"    Updated internal node {target_node_id} input slot {target_slot}: link={current_link_id}")
                                 break
                         break
                 if not found_input:
@@ -522,10 +522,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 from_slot = il[2]    # The output slot on the internal node
                 to_slot = il[4]      # The subgraph output slot
                 boundary_output_map[to_slot] = (from_node, from_slot, il)
-                logger.info(f"    Found boundary output: internal node {from_node} slot {from_slot} -> output slot {to_slot}")
+                logger.debug(f"    Found boundary output: internal node {from_node} slot {from_slot} -> output slot {to_slot}")
 
         sg_node_outputs = sg_node.get('outputs', [])
-        logger.info(f"    Processing {len(sg_outputs)} subgraph outputs, {len(sg_node_outputs)} connected outputs")
+        logger.debug(f"    Processing {len(sg_outputs)} subgraph outputs, {len(sg_node_outputs)} connected outputs")
 
         for i, sg_output_def in enumerate(sg_outputs):
             output_name = sg_output_def.get('name', f'output_{i}')
@@ -541,16 +541,16 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     if il[0] == internal_link_id:
                         source_internal_node = il[1]
                         source_slot = il[2]
-                        logger.info(f"    Output {i} ({output_name}): found via link {internal_link_id}")
+                        logger.debug(f"    Output {i} ({output_name}): found via link {internal_link_id}")
                         break
 
             # Second try: use boundary output map by slot index
             if source_internal_node is None and i in boundary_output_map:
                 source_internal_node, source_slot, _ = boundary_output_map[i]
-                logger.info(f"    Output {i} ({output_name}): using boundary map -> node {source_internal_node} slot {source_slot}")
+                logger.debug(f"    Output {i} ({output_name}): using boundary map -> node {source_internal_node} slot {source_slot}")
 
             if source_internal_node is None:
-                logger.info(f"    Output {i} ({output_name}): no internal source found")
+                logger.debug(f"    Output {i} ({output_name}): no internal source found")
                 continue
 
             # Map to remapped node ID
@@ -562,7 +562,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
             # Find all external links that were connected to this subgraph output
             if i < len(sg_node_outputs):
                 output_links = sg_node_outputs[i].get('links', [])
-                logger.info(f"    Output {i} ({output_name}): {len(output_links) if output_links else 0} external links to rewire")
+                logger.debug(f"    Output {i} ({output_name}): {len(output_links) if output_links else 0} external links to rewire")
 
                 if output_links:
                     for ext_link_id in output_links:
@@ -573,7 +573,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                     old_from = link[1]
                                     link[1] = source_node_id
                                     link[2] = source_slot
-                                    logger.info(f"    Rewired external output link {ext_link_id}: source {old_from} -> {source_node_id}")
+                                    logger.debug(f"    Rewired external output link {ext_link_id}: source {old_from} -> {source_node_id}")
                                     break
 
                             # Update the source internal node's output
@@ -628,7 +628,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
     # Recursively expand in case of nested subgraphs
     if any(_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
            for n in expanded['nodes']):
-        logger.info("  Checking for nested subgraphs...")
+        logger.debug("  Checking for nested subgraphs...")
         return expand_subgraphs(expanded)
 
     logger.info(f"  Expansion complete: {len(expanded['nodes'])} nodes, {len(expanded['links'])} links")

@@ -84,25 +84,38 @@ class Worker(QRunnable):
             logger.error(tb)
 
 
-class ThreadedOperation(QObject):
+def start_worker_thread(func, *args, on_result=None, on_error=None, on_progress=None, worker_kwargs=None):
     """
-    Helper class to manage threaded operations with proper cleanup.
+    Create, connect signals, and start a Worker on the global thread pool.
 
-    Usage:
-        operation = ThreadedOperation(function, arg1, arg2)
-        operation.signals.result.connect(handle_result)
-        operation.signals.error.connect(handle_error)
-        operation.start()
+    Returns the Worker instance. Caller MUST store the returned worker on a
+    long-lived object (e.g. self._worker) to prevent garbage collection.
+
+    Args:
+        func: Function to run in background thread
+        *args: Positional arguments for the function
+        on_result: Callback for successful completion (receives result)
+        on_error: Callback for errors (receives error_msg, traceback_str)
+        on_progress: Callback for progress updates (receives int, str)
+        worker_kwargs: Dict of keyword arguments for the function
+
+    Returns:
+        Worker: The started worker instance
     """
+    if worker_kwargs:
+        worker = Worker(func, *args, **worker_kwargs)
+    else:
+        worker = Worker(func, *args)
 
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-        self.worker = Worker(fn, *args, **kwargs)
-        self.signals = self.worker.signals
+    if on_result:
+        worker.signals.result.connect(on_result)
+    if on_error:
+        worker.signals.error.connect(on_error)
+    if on_progress:
+        worker.signals.progress.connect(on_progress)
 
-    def start(self):
-        """Start the operation on a background thread."""
-        QThreadPool.globalInstance().start(self.worker)
+    QThreadPool.globalInstance().start(worker)
+    return worker
 
 
 def report_progress(callback, progress, message):

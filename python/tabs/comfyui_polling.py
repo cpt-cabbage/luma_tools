@@ -107,7 +107,7 @@ class PollingMixin:
         self.ui.ComfyUIUseAsInput.setEnabled(False)
 
         gen_count = self._iterate_total_tasks
-        self.main_window.animator.update_status_animated(
+        self.animator.update_status_animated(
             f"ComfyUI: Submitted {gen_count} job(s) - Waiting for worker...",
             StatusColors.INFO
         )
@@ -202,7 +202,7 @@ class PollingMixin:
             self._stop_iterate_polling()
             self.ui.ComfyUIIterateStatus.setText(f"Job failed: {error_message}")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI Failed: {error_message}",
                 StatusColors.ERROR
             )
@@ -264,7 +264,7 @@ class PollingMixin:
 
             self.ui.ComfyUIIterateStatus.setText(status_text)
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
-            self.main_window.animator.update_status_animated(main_status, StatusColors.INFO)
+            self.animator.update_status_animated(main_status, StatusColors.INFO)
 
     def _stop_iterate_polling(self):
         """Stop the iterate poll timer."""
@@ -304,7 +304,7 @@ class PollingMixin:
         self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
         self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
 
-        self.main_window.animator.update_status_animated(
+        self.animator.update_status_animated(
             f"ComfyUI Complete: {frames} job(s) in {elapsed_str}",
             StatusColors.SUCCESS
         )
@@ -361,7 +361,7 @@ class PollingMixin:
             self.log("[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 "Deadline: Completed but no output files found",
                 StatusColors.WARNING
             )
@@ -471,7 +471,7 @@ class PollingMixin:
             # Early log with immediate flush to capture any crash point
             status = result.get('status', 'Unknown') if isinstance(result, dict) else 'InvalidResult'
             pending = self._batch_poll_pending_results - 1
-            logger.info(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}")
+            logger.debug(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}")
 
             self.log(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
             self._batch_poll_results[job_id] = result
@@ -486,7 +486,7 @@ class PollingMixin:
         """Process all collected poll results and update status bar once."""
         import sys
         try:
-            logger.info(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...")
+            logger.debug(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...")
 
             from ui_components import StatusColors
 
@@ -608,9 +608,9 @@ class PollingMixin:
                 main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
                 status_color = StatusColors.INFO
 
-            logger.info(f"[Batch Poll] Updating status bar...")
-            self.main_window.animator.update_status_animated(main_status, status_color)
-            logger.info(f"[Batch Poll] Status update complete")
+            logger.debug(f"[Batch Poll] Updating status bar...")
+            self.animator.update_status_animated(main_status, status_color)
+            logger.debug(f"[Batch Poll] Status update complete")
         except Exception as e:
             import traceback
             import sys
@@ -671,7 +671,7 @@ class PollingMixin:
         if was_recovery and self._batch_poll_count <= 1:
             self.log("[Recovery] All batch jobs were already complete")
             self.show_status(f"{total_count} ComfyUI job(s) completed while app was closed", "success")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"Recovery: {total_count} job(s) already completed",
                 StatusColors.SUCCESS
             )
@@ -685,7 +685,7 @@ class PollingMixin:
                 )
         elif had_failures:
             self.show_status(f"ComfyUI: {failed_count}/{total_count} submission(s) failed!", "error")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI: {failed_count} failed, {success_count} succeeded - {completed_frames} jobs in {elapsed_str}",
                 StatusColors.ERROR
             )
@@ -699,7 +699,7 @@ class PollingMixin:
                 )
         else:
             self.show_status(f"All {total_count} ComfyUI submissions completed!", "success")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI Complete: {total_frames} jobs in {elapsed_str}",
                 StatusColors.SUCCESS
             )
@@ -785,13 +785,13 @@ class PollingMixin:
             self.log(f"[Cancel] Cancelled {succeeded} jobs, {failed} failed")
             for err in errors:
                 self.log(f"[Cancel] Error: {err}")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"Cancelled {succeeded} jobs, {failed} failed",
                 StatusColors.WARNING
             )
         else:
             self.log(f"[Cancel] Successfully cancelled {succeeded} jobs")
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"Cancelled {succeeded} job(s)",
                 StatusColors.WARNING
             )
@@ -936,8 +936,8 @@ class PollingMixin:
         self.log("[Recovery] Starting async Deadline query (this runs in background)...")
 
         # Show status feedback for recovery
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.start_activity(
+        if self.animator:
+            self.animator.start_activity(
                 "job_recovery", "Checking Deadline for running jobs"
             )
 
@@ -958,9 +958,9 @@ class PollingMixin:
         logger.error(traceback_str)
 
         # Update status
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.end_activity("job_recovery")
-            self.main_window.animator.show_warning(f"Could not check Deadline: {error_msg}", show_in_status=True)
+        if self.animator:
+            self.animator.end_activity("job_recovery")
+            self.animator.show_warning(f"Could not check Deadline: {error_msg}", show_in_status=True)
 
         # Fall back to persisted state recovery
         if persisted_state:
@@ -969,8 +969,8 @@ class PollingMixin:
     def _on_deadline_jobs_found(self, running_jobs, persisted_state):
         """Handle results from async Deadline job query."""
         # End the recovery activity
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.end_activity("job_recovery")
+        if self.animator:
+            self.animator.end_activity("job_recovery")
 
         try:
             running_jobs = running_jobs or []
@@ -978,9 +978,9 @@ class PollingMixin:
             if not running_jobs:
                 self.log("[Recovery] No running jobs found on Deadline for current user")
                 # Show status
-                if hasattr(self.main_window, 'animator'):
+                if self.animator:
                     from ui_components import StatusColors
-                    self.main_window.animator.update_status_animated(
+                    self.animator.update_status_animated(
                         "Ready", StatusColors.INFO
                     )
 
@@ -1084,7 +1084,7 @@ class PollingMixin:
 
             self.ui.ComfyUIIterateStatus.setText(f"Recovered: {job['status']}")
             self.ui.ComfyUIIterateProgress.setValue(0)
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI: Recovered job ({job['status']})",
                 StatusColors.INFO
             )
@@ -1130,7 +1130,7 @@ class PollingMixin:
             self._update_cancel_button_visibility()
             self.main_window.start_status_spinner()
 
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI: Recovered {len(job_ids)} job(s) from Deadline",
                 StatusColors.INFO
             )
@@ -1207,7 +1207,7 @@ class PollingMixin:
 
                 # Show immediate feedback
                 from ui_components import StatusColors
-                self.main_window.animator.update_status_animated(
+                self.animator.update_status_animated(
                     f"Recovering {len(job_ids)} ComfyUI job(s)...",
                     StatusColors.INFO
                 )
@@ -1283,7 +1283,7 @@ class PollingMixin:
             # Update both tab status and main status bar immediately
             self.ui.ComfyUIIterateStatus.setText(f"Recovered: {status}")
             self.ui.ComfyUIIterateProgress.setValue(0)
-            self.main_window.animator.update_status_animated(
+            self.animator.update_status_animated(
                 f"ComfyUI: Recovering job ({status}) - {total_tasks} task(s)",
                 StatusColors.INFO
             )

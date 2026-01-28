@@ -107,8 +107,8 @@ class RefreshController(BaseGalleryManager):
         self.tab.log(f"[Gallery] Scanning: {current_path}")
 
         # Show status feedback only for user-initiated refreshes
-        if show_status and hasattr(self.tab.main_window, 'animator'):
-            self.tab.main_window.animator.start_activity(
+        if show_status and self.tab.animator:
+            self.tab.animator.start_activity(
                 "gallery_scan", "Gallery: Scanning files"
             )
 
@@ -127,9 +127,9 @@ class RefreshController(BaseGalleryManager):
 
         # Show completion status only if we showed start status
         show_status = getattr(self, '_current_scan_show_status', True)
-        if show_status and hasattr(self.tab.main_window, 'animator'):
+        if show_status and self.tab.animator:
             count = len(items) if items else 0
-            self.tab.main_window.animator.end_activity(
+            self.tab.animator.end_activity(
                 "gallery_scan", f"Gallery: Found {count} items"
             )
 
@@ -143,8 +143,8 @@ class RefreshController(BaseGalleryManager):
         # Show error status only if we showed start status
         show_status = getattr(self, '_current_scan_show_status', True)
         if show_status:
-            if hasattr(self.tab.main_window, 'animator'):
-                self.tab.main_window.animator.end_activity("gallery_scan")
+            if self.tab.animator:
+                self.tab.animator.end_activity("gallery_scan")
             self.show_status(f"Gallery scan failed: {msg}", "error")
 
     def use_prewarm_cache_sync(self):

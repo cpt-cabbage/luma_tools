@@ -2,8 +2,7 @@
 Unified thumbnail styling for gallery widgets.
 
 Centralizes all thumbnail styling logic to ensure consistency across:
-- GalleryThumbnailWidget (images)
-- GLBThumbnailWidget (3D models)
+- ThumbnailWidget (images, videos, audio, 3D models)
 - StackedThumbnailWidget (grouped items)
 
 Usage:
@@ -16,6 +15,96 @@ Usage:
     style = self._styler.get_style(selected=self._is_selected, hover=False, is_new=self._is_new)
     self.thumbnail_label.setStyleSheet(style)
 """
+
+
+# ============================================================================
+# TYPE INDICATOR CONFIG (shared between ThumbnailWidget and StackedThumbnailWidget)
+# ============================================================================
+
+# Maps item type → (icon character, rgba color string)
+TYPE_INDICATOR_CONFIG = {
+    'image': ('▣', 'rgba(16, 185, 129, 0.8)'),   # Green squares
+    'video': ('▶', 'rgba(239, 68, 68, 0.8)'),    # Red play triangle
+    'audio': ('♫', 'rgba(168, 85, 247, 0.8)'),   # Purple music note
+    'model': ('⬣', 'rgba(74, 158, 255, 0.8)'),   # Blue hexagon/cube
+}
+
+TYPE_INDICATOR_DEFAULT = ('?', 'rgba(128, 128, 128, 0.8)')
+
+
+def get_type_indicator_style(item_type: str) -> tuple:
+    """Get the icon and stylesheet for a type indicator label.
+
+    Args:
+        item_type: One of 'image', 'video', 'audio', 'model'
+
+    Returns:
+        Tuple of (icon_text, stylesheet_string)
+    """
+    icon, color = TYPE_INDICATOR_CONFIG.get(item_type, TYPE_INDICATOR_DEFAULT)
+    stylesheet = f"""
+        QLabel {{
+            background-color: rgba(0, 0, 0, 0.4);
+            color: {color};
+            border: 1px solid {color};
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+    """
+    return icon, stylesheet
+
+
+# ============================================================================
+# COLOR UTILITIES (shared between thumbnail widgets)
+# ============================================================================
+
+def darken_color(hex_color: str, factor: float) -> str:
+    """Darken a hex color by a factor (0-1). Factor 0.3 = 30% darker."""
+    hex_color = hex_color.lstrip('#')
+    r = max(0, int(int(hex_color[0:2], 16) * (1 - factor)))
+    g = max(0, int(int(hex_color[2:4], 16) * (1 - factor)))
+    b = max(0, int(int(hex_color[4:6], 16) * (1 - factor)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def lighten_color(hex_color: str, factor: float = 0.2) -> str:
+    """Lighten a hex color by a factor (0-1). Factor 0.2 = 20% lighter."""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    r = min(255, int(r + (255 - r) * factor))
+    g = min(255, int(g + (255 - g) * factor))
+    b = min(255, int(b + (255 - b) * factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def color_with_alpha(hex_color: str, alpha: int) -> str:
+    """Convert hex color to rgba string with alpha (0-255)."""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def derive_background_from_color(hex_color: str) -> str:
+    """Derive a dark tinted background color from a hex color (30% brightness)."""
+    hex_color = hex_color.lstrip('#')
+    r = int(int(hex_color[0:2], 16) * 0.3)
+    g = int(int(hex_color[2:4], 16) * 0.3)
+    b = int(int(hex_color[4:6], 16) * 0.3)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def derive_border_from_color(hex_color: str) -> str:
+    """Derive a border color from a hex color (70% brightness)."""
+    hex_color = hex_color.lstrip('#')
+    r = int(min(255, int(hex_color[0:2], 16) * 0.7))
+    g = int(min(255, int(hex_color[2:4], 16) * 0.7))
+    b = int(min(255, int(hex_color[4:6], 16) * 0.7))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 class ThumbnailColors:
@@ -73,7 +162,7 @@ class ThumbnailStyler:
         """Get the appropriate background color."""
         # Get base background color first
         if self.group_color:
-            base_bg = self._derive_background_from_color(self.group_color)
+            base_bg = derive_background_from_color(self.group_color)
         elif self.is_model:
             base_bg = ThumbnailColors.BG_MODEL
         elif self.has_metadata:
@@ -83,23 +172,11 @@ class ThumbnailStyler:
 
         # Apply hover/selected modifications
         if selected and hover:
-            return self._lighten_color(base_bg, 0.25)
+            return lighten_color(base_bg, 0.25)
         if hover:
-            return self._lighten_color(base_bg, 0.15)
+            return lighten_color(base_bg, 0.15)
 
         return base_bg
-
-    def _derive_background_from_color(self, hex_color):
-        """Derive a dark tinted background color from a hex color."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        # Darken significantly for a tinted background look
-        bg_r = int(r * 0.3)
-        bg_g = int(g * 0.3)
-        bg_b = int(b * 0.3)
-        return f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
 
     def get_border_color(self, selected=False, hover=False, is_new=False):
         """Get the appropriate border color.
@@ -116,7 +193,7 @@ class ThumbnailStyler:
 
         # Get base border color
         if self.group_color:
-            base_border = self._derive_border_from_color(self.group_color)
+            base_border = derive_border_from_color(self.group_color)
         elif self.is_model:
             base_border = ThumbnailColors.BORDER_MODEL
         elif self.has_metadata:
@@ -126,32 +203,9 @@ class ThumbnailStyler:
 
         # Apply hover modification - brighten the current color
         if hover:
-            return self._lighten_color(base_border, 0.3)
+            return lighten_color(base_border, 0.3)
 
         return base_border
-
-    def _derive_border_from_color(self, hex_color):
-        """Derive a border color from a hex color (slightly darkened)."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        # Slightly darken for border
-        border_r = int(min(255, r * 0.7))
-        border_g = int(min(255, g * 0.7))
-        border_b = int(min(255, b * 0.7))
-        return f"#{border_r:02x}{border_g:02x}{border_b:02x}"
-
-    def _lighten_color(self, hex_color, factor=0.2):
-        """Lighten a hex color by a factor (0-1)."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        r = min(255, int(r + (255 - r) * factor))
-        g = min(255, int(g + (255 - g) * factor))
-        b = min(255, int(b + (255 - b) * factor))
-        return f"#{r:02x}{g:02x}{b:02x}"
 
     def get_border_width(self, selected=False):
         """Get border width - 3px when selected, 2px otherwise."""

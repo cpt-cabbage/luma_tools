@@ -130,8 +130,7 @@ class ShotCleanerTab(BaseTab):
         """Handle scan error."""
         from ui_components import StatusColors
 
-        error_msg = error_tuple[1] if len(error_tuple) > 1 else str(error_tuple)
-        traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
+        error_msg, traceback_str = self.unpack_worker_error(error_tuple)
 
         self.update_status_with_spinner(
             f"Shot Cleaner: Scan error - {error_msg}",
@@ -162,8 +161,7 @@ class ShotCleanerTab(BaseTab):
         from ui_components import StatusColors
         from services.cleanup_service import cleanup_renders, cleanup_usd, cleanup_hip_backups
 
-        if hasattr(self.main_window, 'animator'):
-            self.main_window.animator.animate_button_click(self.ui.CleanFiles)
+        self.animate_button_click(self.ui.CleanFiles)
 
         # Cleanup renders
         if self.ui.CleanRender.isChecked():
@@ -173,8 +171,7 @@ class ShotCleanerTab(BaseTab):
                 for dir_name in render_dirs:
                     count += 1
                     status_msg = f"Removing Renders: {self.app_state.lookdev_dir}\\img\\renders\\{dir_name}"
-                    if hasattr(self.main_window, 'animator'):
-                        self.main_window.animator.update_status_animated(status_msg, StatusColors.WARNING)
+                    self.show_status(status_msg, "warning")
                     self.log(status_msg)
                     self.ui.progressBar.setValue(int(count / len(render_dirs) * 100))
 
@@ -189,8 +186,7 @@ class ShotCleanerTab(BaseTab):
                     count += 1
                     self.ui.progressBar.setValue(int(count / len(usd_dirs) * 100))
                     status_msg = f"Removing USDs: {self.app_state.lookdev_dir}\\usd_files\\{dir_name}"
-                    if hasattr(self.main_window, 'animator'):
-                        self.main_window.animator.update_status_animated(status_msg, StatusColors.WARNING)
+                    self.show_status(status_msg, "warning")
                     self.log(status_msg)
 
                 cleanup_usd(self.app_state.lookdev_dir, usd_dirs)
@@ -199,8 +195,7 @@ class ShotCleanerTab(BaseTab):
         if self.ui.HIPBackups.isChecked():
             self.ui.progressBar.setValue(0)
             status_msg = f"Removing Hip Backups Folder: {self.app_state.lookdev_dir}\\backup\\"
-            if hasattr(self.main_window, 'animator'):
-                self.main_window.animator.update_status_animated(status_msg, StatusColors.WARNING)
+            self.show_status(status_msg, "warning")
             cleanup_hip_backups(self.app_state.lookdev_dir)
             self.ui.progressBar.setValue(100)
 

@@ -179,20 +179,21 @@ class ComfyUITab(PollingMixin, BaseTab):
             # Populate workflow options
             workflows = get_workflow_preset_workflows(self.state_manager.current_preset_name)
             self._workflow_selector_combo.blockSignals(True)
-            self._workflow_selector_combo.clear()
+            try:
+                self._workflow_selector_combo.clear()
 
-            for wf_name in sorted(workflows.keys()):
-                self._workflow_selector_combo.addItem(wf_name)
+                for wf_name in sorted(workflows.keys()):
+                    self._workflow_selector_combo.addItem(wf_name)
 
-            # Select first workflow by default or restore previously selected
-            if self.state_manager.current_selected_workflow and self.state_manager.current_selected_workflow in workflows:
-                self._workflow_selector_combo.setCurrentText(self.state_manager.current_selected_workflow)
-            elif workflows:
-                first_workflow = sorted(workflows.keys())[0]
-                self.state_manager.current_selected_workflow = first_workflow
-                self._workflow_selector_combo.setCurrentText(first_workflow)
-
-            self._workflow_selector_combo.blockSignals(False)
+                # Select first workflow by default or restore previously selected
+                if self.state_manager.current_selected_workflow and self.state_manager.current_selected_workflow in workflows:
+                    self._workflow_selector_combo.setCurrentText(self.state_manager.current_selected_workflow)
+                elif workflows:
+                    first_workflow = sorted(workflows.keys())[0]
+                    self.state_manager.current_selected_workflow = first_workflow
+                    self._workflow_selector_combo.setCurrentText(first_workflow)
+            finally:
+                self._workflow_selector_combo.blockSignals(False)
 
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
@@ -793,11 +794,11 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
-        self.main_window.animator.update_status_animated(
+        self.animator.update_status_animated(
             f"🎨 ComfyUI: Preparing {generation_count} generation(s)...",
             StatusColors.INFO
         )
-        self.main_window.animator.animate_button_click(self.ui.ComfyUISubmit)
+        self.animator.animate_button_click(self.ui.ComfyUISubmit)
 
         # Server mode is always enabled (persistent ComfyUI)
         use_server_mode = True
@@ -851,7 +852,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 job_count = len(job_ids)
                 total_gens = job_count * ctx["generation_count"]
                 self.show_status(f"Submitted {job_count} job(s), {total_gens} generations", "success")
-                self.main_window.animator.update_status_animated(
+                self.animator.update_status_animated(
                     f"ComfyUI: {job_count} job(s) submitted",
                     StatusColors.SUCCESS
                 )
@@ -866,7 +867,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             else:
                 self.main_window.stop_status_spinner()
                 self.show_status(f"Submission failed: {error_msg}", "error")
-                self.main_window.animator.update_status_animated(
+                self.animator.update_status_animated(
                     f"ComfyUI failed: {error_msg}",
                     StatusColors.ERROR
                 )
@@ -879,12 +880,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Handle ComfyUI job submission error."""
         from ui_components import StatusColors
 
-        error_msg = error_tuple[1] if len(error_tuple) > 1 else str(error_tuple)
-        traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
+        error_msg, traceback_str = self.unpack_worker_error(error_tuple)
 
         self.main_window.stop_status_spinner()
         self.show_status(f"Submission error: {error_msg}", "error")
-        self.main_window.animator.update_status_animated(
+        self.animator.update_status_animated(
             f"ComfyUI error: {error_msg}",
             StatusColors.ERROR
         )
@@ -896,7 +896,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Handle ComfyUI job submission progress."""
         from ui_components import StatusColors
 
-        self.main_window.animator.update_status_animated(
+        self.animator.update_status_animated(
             f"🎨 ComfyUI: {message}",
             StatusColors.INFO
         )

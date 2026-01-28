@@ -58,27 +58,26 @@ class OperationsManager(BaseGalleryManager):
 
             for item_path in items_to_delete:
                 try:
-                    if os.path.exists(item_path):
-                        os.remove(item_path)
-                        success_count += 1
+                    os.remove(item_path)
+                    success_count += 1
 
-                        # Remove widget from layout (for non-stacked items)
-                        if item_path in self.tab._widget_cache:
-                            widget = self.tab._widget_cache[item_path]
-                            self.tab._flow_layout.removeWidget(widget)
-                            widget.deleteLater()
-                            del self.tab._widget_cache[item_path]
-                        else:
-                            # Item might be in a stacked view - find which stack contains it
-                            stack_id = self._find_stack_containing_item(item_path)
-                            if stack_id:
-                                stacks_to_update.add(stack_id)
-
-                        # Clean up caches via tab's method
-                        self._on_item_deleted(item_path)
+                    # Remove widget from layout (for non-stacked items)
+                    if item_path in self.tab._widget_cache:
+                        widget = self.tab._widget_cache[item_path]
+                        self.tab._flow_layout.removeWidget(widget)
+                        widget.deleteLater()
+                        del self.tab._widget_cache[item_path]
                     else:
-                        self.tab.log(f"[Gallery] File not found: {item_path}")
-                        failed_items.append(os.path.basename(item_path))
+                        # Item might be in a stacked view - find which stack contains it
+                        stack_id = self._find_stack_containing_item(item_path)
+                        if stack_id:
+                            stacks_to_update.add(stack_id)
+
+                    # Clean up caches via tab's method
+                    self._on_item_deleted(item_path)
+                except FileNotFoundError:
+                    self.tab.log(f"[Gallery] File not found: {item_path}")
+                    failed_items.append(os.path.basename(item_path))
                 except Exception as e:
                     self.tab.log(f"[Gallery] Error deleting {item_path}: {e}")
                     failed_items.append(f"{os.path.basename(item_path)}: {e}")

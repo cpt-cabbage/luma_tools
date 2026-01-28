@@ -3,11 +3,10 @@ UI Components for Luma Tools.
 
 This module re-exports components from submodules for convenient importing.
 The actual implementations are in:
-- workers.py: Threading utilities (Worker, WorkerSignals, ThreadedOperation)
+- workers.py: Threading utilities (Worker, WorkerSignals)
 - styles.py: Style constants (LoadingStyles, StatusColors)
 - spinners.py: Loading animations (SpinnerWidget, InlineSpinner, PulsingDotsWidget)
 - effects.py: Visual effects (TabGlowEffect, TabGlowManager, UIAnimations)
-- notifications.py: Notification widgets (ComfyUIStatusBanner)
 - layouts.py: Custom layouts (FlowLayout)
 - dialogs.py: Edit dialogs (EditItemDialog, EditModelDialog)
 - batch_selector.py: Image selection (BatchImageSelector)
@@ -24,20 +23,20 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPainter, QColor, QPen, QPixmap
 from shiboken6 import isValid
+from dialog_helpers import get_active_window
 
 # Re-export from submodules (absolute imports since resources/ui is in path)
-from workers import Worker, WorkerSignals, ThreadedOperation, report_progress
-from styles import LoadingStyles, StatusColors, load_stylesheet as _load_simple_stylesheet, apply_stylesheet as _apply_simple_stylesheet
+from workers import Worker, WorkerSignals, report_progress
+from styles import LoadingStyles, StatusColors
 from spinners import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner
 from effects import TabGlowEffect, TabGlowManager, UIAnimations
 from thumbnail_styles import ThumbnailStyler
-from notifications import ComfyUIStatusBanner
 from layouts import FlowLayout
 from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog, GroupEditorDialog
 from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
-from small_widgets import GallerySectionHeader, StackedThumbnailWidget, show_popup_menu
+from small_widgets import StackedThumbnailWidget, show_popup_menu
 
 
 # ============================================================================
@@ -393,25 +392,10 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
 
     def _apply_type_indicator(self):
         """Apply the appropriate icon and style for the file type - outline style."""
-        # Type icon and color configuration (icon, border_color)
-        type_config = {
-            'image': ('▣', 'rgba(16, 185, 129, 0.8)'),   # Green squares
-            'video': ('▶', 'rgba(239, 68, 68, 0.8)'),    # Red play triangle
-            'audio': ('♫', 'rgba(168, 85, 247, 0.8)'),   # Purple music note
-            'model': ('⬣', 'rgba(74, 158, 255, 0.8)'),   # Blue hexagon/cube
-        }
-        icon, border_color = type_config.get(self.item_type, ('?', 'rgba(128, 128, 128, 0.8)'))
+        from thumbnail_styles import get_type_indicator_style
+        icon, stylesheet = get_type_indicator_style(self.item_type)
         self.type_indicator.setText(icon)
-        self.type_indicator.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgba(0, 0, 0, 0.4);
-                color: {border_color};
-                border: 1px solid {border_color};
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-        """)
+        self.type_indicator.setStyleSheet(stylesheet)
         self.type_indicator.show()
 
     # --- Likes and Groups ---
@@ -1250,11 +1234,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
 
     def _publish_to_ayon(self):
         """Publish this item to AYON."""
-        parent_window = None
-        for widget in QApplication.topLevelWidgets():
-            if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                parent_window = widget
-                break
+        parent_window = get_active_window()
         try:
             from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
             publish_comfyui_asset_to_ayon(self.path, parent_window, self.output_dir)
@@ -1287,11 +1267,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     def _delete_item(self):
         from PySide6.QtWidgets import QMessageBox
         filename = os.path.basename(self.path)
-        parent_window = None
-        for widget in QApplication.topLevelWidgets():
-            if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                parent_window = widget
-                break
+        parent_window = get_active_window()
         reply = QMessageBox.question(
             parent_window, "Delete Item",
             f"Are you sure you want to delete '{filename}'?\n\nThis will permanently delete the file from disk.",
@@ -1326,11 +1302,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
 
     def _edit_item(self):
         try:
-            parent_window = None
-            for widget in QApplication.topLevelWidgets():
-                if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                    parent_window = widget
-                    break
+            parent_window = get_active_window()
             if self.item_type == 'model':
                 dialog = EditModelDialog(self.path, self.output_dir, parent_window)
             else:
@@ -1344,11 +1316,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     def _show_properties(self):
         """Show comprehensive properties dialog for this item."""
         try:
-            parent_window = None
-            for widget in QApplication.topLevelWidgets():
-                if widget.isVisible() and hasattr(widget, 'windowTitle'):
-                    parent_window = widget
-                    break
+            parent_window = get_active_window()
 
             from properties_dialog import PropertiesDialog
             metadata = self._get_metadata()
@@ -1362,11 +1330,6 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
             dialog.exec()
         except Exception as e:
             logger.error(f"Error showing properties: {e}")
-
-
-# Aliases for backwards compatibility
-GalleryThumbnailWidget = ThumbnailWidget
-GLBThumbnailWidget = ThumbnailWidget
 
 
 

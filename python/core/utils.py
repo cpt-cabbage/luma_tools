@@ -197,7 +197,7 @@ class ByteSize(int):
         self.kilobytes = self.KB = self / self._KB**1
         self.megabytes = self.MB = self / self._KB**2
         self.gigabytes = self.GB = self / self._KB**3
-        self.teraabytes = self.TB = self / self._KB**4
+        self.terabytes = self.TB = self / self._KB**4
         *suffixes, last = self._suffixes
         suffix = next((
             suffix

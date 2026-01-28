@@ -25,8 +25,18 @@ from core.config import (
 )
 from core.settings_manager import get_setting
 from core.utils import ensure_directory
+from comfyui.utils import resolve_comfyui_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _get_comfyui_python_exe() -> str:
+    """Get ComfyUI Python executable path from settings."""
+    comfyui_path = get_setting("comfyui_path")
+    comfyui_mode = get_setting("comfyui_mode")
+    comfyui_python = get_setting("comfyui_python_path")
+    python_exe, _ = resolve_comfyui_paths(comfyui_path, comfyui_mode, comfyui_python or "python")
+    return python_exe
 
 
 def submit_comfyui_to_deadline_server_mode(
@@ -73,18 +83,7 @@ def submit_comfyui_to_deadline_server_mode(
 
     import shutil
 
-    # Get ComfyUI paths and mode from settings
-    comfyui_path = get_setting("comfyui_path")
-    comfyui_mode = get_setting("comfyui_mode")
-    comfyui_python = get_setting("comfyui_python_path")
-
-    # Determine Python executable based on mode
-    if comfyui_mode == "embedded":
-        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
-    elif comfyui_mode == "portable":
-        python_exe = os.path.join(comfyui_path, "venv", "Scripts", "python.exe")
-    else:
-        python_exe = comfyui_python if comfyui_python else "python"
+    python_exe = _get_comfyui_python_exe()
 
     # Get the script paths
     script_dir = os.path.dirname(__file__)
@@ -187,16 +186,7 @@ def submit_comfyui_to_deadline(
 
     import shutil
 
-    comfyui_path = get_setting("comfyui_path")
-    comfyui_mode = get_setting("comfyui_mode")
-    comfyui_python = get_setting("comfyui_python_path")
-
-    if comfyui_mode == "embedded":
-        python_exe = os.path.join(comfyui_path, "python_embeded", "python.exe")
-    elif comfyui_mode == "portable":
-        python_exe = os.path.join(comfyui_path, "venv", "Scripts", "python.exe")
-    else:
-        python_exe = comfyui_python if comfyui_python else "python"
+    python_exe = _get_comfyui_python_exe()
 
     script_dir = os.path.dirname(__file__)
     runner_script_source = os.path.join(script_dir, "runner.py")
