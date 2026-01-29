@@ -228,45 +228,60 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         Args:
             custom_color: Optional hex color to use as base. If None, uses default blue/grey.
         """
-        if not hasattr(self, '_stack_labels') or not self._stack_labels:
-            return
+        try:
+            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors START custom_color={custom_color}")
+            if not hasattr(self, '_stack_labels') or not self._stack_labels:
+                logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors no _stack_labels, returning")
+                return
 
-        # Check if drop highlight is active
-        drop_active = getattr(self, '_drop_highlight_active', False)
+            # Check widget validity before proceeding
+            from shiboken6 import isValid
+            if not isValid(self):
+                logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors widget invalid, returning")
+                return
 
-        # Derive colors from custom_color or use defaults
-        if custom_color:
-            bg_color = derive_background_from_color(custom_color)
-            border_color = derive_border_from_color(custom_color)
-        elif self._is_top_item_model or not self._has_metadata:
-            # Grey for 3D models and non-metadata items
-            bg_color = "#2d3139"
-            border_color = "#4a4a4a"
-        else:
-            # Blue for images with metadata
-            bg_color = "#1e3a5f"
-            border_color = "#4a6d8c"
+            # Check if drop highlight is active
+            drop_active = getattr(self, '_drop_highlight_active', False)
+            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors drop_active={drop_active}")
 
-        # Apply drop hover brightness only for items with custom colors (groups/likes)
-        # Don't brighten default blue/grey stacks
-        if drop_active and custom_color:
-            bg_color = lighten_color(bg_color, 0.4)
-            border_color = lighten_color(border_color, 0.5)
+            # Derive colors from custom_color or use defaults
+            if custom_color:
+                bg_color = derive_background_from_color(custom_color)
+                border_color = derive_border_from_color(custom_color)
+            elif self._is_top_item_model or not self._has_metadata:
+                # Grey for 3D models and non-metadata items
+                bg_color = "#2d3139"
+                border_color = "#4a4a4a"
+            else:
+                # Blue for images with metadata
+                bg_color = "#1e3a5f"
+                border_color = "#4a6d8c"
 
-        # Apply to all stack labels
-        stack_depth = len(self._stack_labels) - 1
-        for idx, label in enumerate(self._stack_labels):
-            # Labels are stored back-to-front, so index 0 is back card, last is top
-            i = stack_depth - idx  # Reverse to get depth from back
+            # Apply drop hover brightness only for items with custom colors (groups/likes)
+            # Don't brighten default blue/grey stacks
+            if drop_active and custom_color:
+                bg_color = lighten_color(bg_color, 0.4)
+                border_color = lighten_color(border_color, 0.5)
 
-            if i == 0:
-                # Top card - use full colors
-                label.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {bg_color};
-                        border: 2px solid {border_color};
-                        border-radius: 8px;
-                    }}
+            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors applying to {len(self._stack_labels)} labels")
+            # Apply to all stack labels
+            stack_depth = len(self._stack_labels) - 1
+            for idx, label in enumerate(self._stack_labels):
+                # Check label validity
+                if not isValid(label):
+                    logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors label {idx} invalid, skipping")
+                    continue
+                # Labels are stored back-to-front, so index 0 is back card, last is top
+                i = stack_depth - idx  # Reverse to get depth from back
+
+                if i == 0:
+                    # Top card - use full colors
+                    label.setStyleSheet(f"""
+                        QLabel {{
+                            background-color: {bg_color};
+                            border: 2px solid {border_color};
+                            border-radius: 8px;
+                        }}
                 """)
             else:
                 # Background cards - derive darker shades
@@ -281,9 +296,13 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                     }}
                 """)
 
-        # Also update the styler for hover/selection states
-        self._styler.group_color = custom_color
-        self._apply_thumbnail_style()
+            # Also update the styler for hover/selection states
+            self._styler.group_color = custom_color
+            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors calling _apply_thumbnail_style")
+            self._apply_thumbnail_style()
+            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors COMPLETE")
+        except Exception as e:
+            logger.error(f"[StackedThumbnailWidget] _apply_stack_colors error: {e}", exc_info=True)
 
     def _setup_ui(self):
         """Setup the widget UI with fanned card effect."""
@@ -695,27 +714,41 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state using unified styler."""
-        if self.thumbnail_label and not self._is_expanded:
-            style = self._styler.get_style(
-                selected=self._is_selected,
-                hover=self._is_hovered
-            )
-            self.thumbnail_label.setStyleSheet(style)
+        try:
+            logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style START")
+            from shiboken6 import isValid
+            if not isValid(self):
+                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style widget invalid, returning")
+                return
+            if self.thumbnail_label and not self._is_expanded:
+                if not isValid(self.thumbnail_label):
+                    logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style thumbnail_label invalid, returning")
+                    return
+                style = self._styler.get_style(
+                    selected=self._is_selected,
+                    hover=self._is_hovered
+                )
+                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style setting stylesheet")
+                self.thumbnail_label.setStyleSheet(style)
+                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style stylesheet set")
 
-            # Update shadow based on hover state
-            effect = self.thumbnail_label.graphicsEffect()
-            if effect:
-                from PySide6.QtGui import QColor
-                if self._is_hovered:
-                    effect.setBlurRadius(16)
-                    # Use dominant color for shadow if available
-                    dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
-                    hex_color = dominant.lstrip('#')
-                    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-                    effect.setColor(QColor(r, g, b, 60))
-                else:
-                    effect.setBlurRadius(12)
-                    effect.setColor(QColor(0, 0, 0, 80))
+                # Update shadow based on hover state
+                effect = self.thumbnail_label.graphicsEffect()
+                if effect:
+                    from PySide6.QtGui import QColor
+                    if self._is_hovered:
+                        effect.setBlurRadius(16)
+                        # Use dominant color for shadow if available
+                        dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
+                        hex_color = dominant.lstrip('#')
+                        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+                        effect.setColor(QColor(r, g, b, 60))
+                    else:
+                        effect.setBlurRadius(12)
+                        effect.setColor(QColor(0, 0, 0, 80))
+            logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style COMPLETE")
+        except Exception as e:
+            logger.error(f"[StackedThumbnailWidget] _apply_thumbnail_style error: {e}", exc_info=True)
 
     def enterEvent(self, event):
         """Handle mouse enter - show hover state."""
@@ -794,11 +827,29 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def _show_drop_highlight(self, show):
         """Show or hide drop highlight visual feedback."""
-        self._drop_highlight_active = show
-        # Always use current custom color to preserve group/liked/stack colors
-        custom_color = self._get_current_custom_color() if hasattr(self, '_get_current_custom_color') else None
-        if hasattr(self, '_apply_stack_colors'):
-            self._apply_stack_colors(custom_color)
+        try:
+            logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight START show={show} stack_id={self.stack_id}")
+            from shiboken6 import isValid
+            valid = isValid(self)
+            logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight isValid={valid}")
+            if not valid:
+                logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight widget invalid, returning")
+                return
+            visible = self.isVisible()
+            logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight isVisible={visible}")
+            # Skip style update if widget is not visible (e.g., tab switched)
+            if not visible:
+                logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight not visible, skipping style update")
+                self._drop_highlight_active = show
+                return
+            self._drop_highlight_active = show
+            logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight calling _apply_stack_colors")
+            # Use cached group color instead of recalculating
+            if hasattr(self, '_apply_stack_colors'):
+                self._apply_stack_colors(self._group_color)
+            logger.debug(f"[StackedThumbnailWidget] _show_drop_highlight COMPLETE")
+        except Exception as e:
+            logger.error(f"[StackedThumbnailWidget] _show_drop_highlight error: {e}", exc_info=True)
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click - toggle expansion."""

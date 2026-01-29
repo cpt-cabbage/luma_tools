@@ -207,8 +207,8 @@ class UIManager(BaseGalleryManager):
         from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 
         # Get current stacking mode from settings
-        from core.settings_manager import get_setting
-        current_mode = get_setting("gallery_stacking_mode")
+        from core.settings_manager import safe_get_setting
+        current_mode = safe_get_setting("gallery_stacking_mode", "job")
 
         # Decode mode to checkbox states
         # "grid" = neither, "job" = stacks only, "groups" = groups only, "both" = both

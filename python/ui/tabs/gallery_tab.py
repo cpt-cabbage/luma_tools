@@ -251,6 +251,9 @@ class GalleryTab(BaseTab):
 
     def on_tab_activated(self):
         """Called when tab becomes visible."""
+        # Re-enable drop targets on gallery widgets
+        self._set_gallery_drop_enabled(True)
+
         # Start file watcher if not already running
         if self._current_path:
             self._start_watcher(self._current_path)
@@ -270,14 +273,35 @@ class GalleryTab(BaseTab):
 
     def on_tab_deactivated(self):
         """Called when user switches away from this tab. Stop watchers and timers."""
+        self.log("[Gallery] on_tab_deactivated START")
         self._refresh_controller.stop_watcher()
         self._refresh_controller.stop_network_polling()
+
+        # Disable drop targets on all thumbnail widgets to prevent crash during drag
+        self._set_gallery_drop_enabled(False)
 
         # Update visibility state
         if EVENT_BUS_AVAILABLE:
             from core.state_manager import app_state
             app_state.gallery_visible = False
             pipeline_events.update_gallery_context(visible=False)
+        self.log("[Gallery] on_tab_deactivated COMPLETE")
+
+    def _set_gallery_drop_enabled(self, enabled):
+        """Enable or disable drop targets on gallery widgets."""
+        try:
+            # Disable drops on the scroll area content
+            if hasattr(self, '_gallery_manager') and self._gallery_manager:
+                content = self._gallery_manager._scroll_content
+                if content:
+                    # Find all widgets that accept drops
+                    from PySide6.QtWidgets import QWidget
+                    for child in content.findChildren(QWidget):
+                        if child.acceptDrops():
+                            child.setAcceptDrops(enabled)
+            self.log(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
+        except Exception as e:
+            self.log(f"[Gallery] Error setting drop enabled: {e}")
 
     def _on_scan_complete_impl(self, items):
         """Implementation of scan complete handling."""

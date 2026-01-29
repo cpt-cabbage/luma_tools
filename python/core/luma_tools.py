@@ -337,14 +337,15 @@ class ExpandingTabBar(QTabBar):
             pass
 
     def _on_drag_hover_timeout(self):
-        """Handle hover timeout during drag - tab switching is disabled.
-
-        Qt crashes when switching tabs during an active drag operation because
-        the drag source widget (on the source tab) gets invalidated. Tab switching
-        during drag is not supported.
-        """
-        # Tab switching during drag causes Qt crashes - disabled
-        pass
+        """Handle hover timeout during drag - switch to the hovered tab."""
+        try:
+            logging.debug(f"[ExpandingTabBar] _on_drag_hover_timeout START hover_tab={self._drag_hover_tab} current={self.currentIndex()}")
+            if self._drag_hover_tab >= 0 and self._drag_hover_tab != self.currentIndex():
+                logging.debug(f"[ExpandingTabBar] _on_drag_hover_timeout switching to tab {self._drag_hover_tab}")
+                self.setCurrentIndex(self._drag_hover_tab)
+                logging.debug(f"[ExpandingTabBar] _on_drag_hover_timeout tab switch COMPLETE")
+        except Exception as e:
+            logging.error(f"ExpandingTabBar._on_drag_hover_timeout error: {e}", exc_info=True)
 
     def tabSizeHint(self, index):
         """Calculate tab size to fill the tab bar width evenly."""
@@ -645,13 +646,22 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _on_tab_changed(self, index):
         """Handle tab change - notify tabs."""
-        # Get previous and current tab
-        for _, tab_instance in self.tabs.items():
-            tab_index = self.tab_widget.indexOf(tab_instance.ui)
-            if tab_index == index:
-                tab_instance.on_tab_activated()
-            else:
-                tab_instance.on_tab_deactivated()
+        logging.debug(f"[MainWindow] _on_tab_changed START index={index}")
+        try:
+            # Get previous and current tab
+            for tab_name, tab_instance in self.tabs.items():
+                tab_index = self.tab_widget.indexOf(tab_instance.ui)
+                if tab_index == index:
+                    logging.debug(f"[MainWindow] activating tab: {tab_name}")
+                    tab_instance.on_tab_activated()
+                    logging.debug(f"[MainWindow] tab activated: {tab_name}")
+                else:
+                    logging.debug(f"[MainWindow] deactivating tab: {tab_name}")
+                    tab_instance.on_tab_deactivated()
+                    logging.debug(f"[MainWindow] tab deactivated: {tab_name}")
+            logging.debug(f"[MainWindow] _on_tab_changed COMPLETE")
+        except Exception as e:
+            logging.error(f"[MainWindow] _on_tab_changed error: {e}", exc_info=True)
 
     def _on_tab_moved(self, _from_index, _to_index):
         """Save tab order when user reorders tabs."""

@@ -398,40 +398,80 @@ class DropTargetMixin:
 
     def dragEnterEvent(self, event):
         """Handle drag enter - check if we can accept the data."""
-        logger.debug(f"[DropTargetMixin] dragEnterEvent on {type(self).__name__}")
-        if can_accept_files(event.mimeData(), self._accepted_categories):
-            logger.debug(f"[DropTargetMixin] Accepting drop, calling _show_drop_highlight(True)")
-            event.acceptProposedAction()
-            self._show_drop_highlight(True)
-        else:
-            logger.debug(f"[DropTargetMixin] Rejecting drop - no acceptable files")
+        try:
+            from shiboken6 import isValid
+            if not isValid(self):
+                event.ignore()
+                return
+            logger.debug(f"[DropTargetMixin] dragEnterEvent on {type(self).__name__}")
+            if can_accept_files(event.mimeData(), self._accepted_categories):
+                logger.debug(f"[DropTargetMixin] Accepting drop, calling _show_drop_highlight(True)")
+                event.acceptProposedAction()
+                self._show_drop_highlight(True)
+            else:
+                logger.debug(f"[DropTargetMixin] Rejecting drop - no acceptable files")
+                event.ignore()
+        except Exception as e:
+            logger.debug(f"[DropTargetMixin] dragEnterEvent error: {e}")
             event.ignore()
 
     def dragMoveEvent(self, event):
         """Handle drag move - continue accepting if valid."""
-        if can_accept_files(event.mimeData(), self._accepted_categories):
-            event.acceptProposedAction()
-        else:
+        try:
+            from shiboken6 import isValid
+            if not isValid(self):
+                event.ignore()
+                return
+            if can_accept_files(event.mimeData(), self._accepted_categories):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        except Exception as e:
+            logger.debug(f"[DropTargetMixin] dragMoveEvent error: {e}")
             event.ignore()
 
     def dragLeaveEvent(self, event):
         """Handle drag leave - remove highlight."""
-        logger.debug(f"[DropTargetMixin] dragLeaveEvent on {type(self).__name__}")
-        self._show_drop_highlight(False)
-        event.accept()
+        try:
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent START on {type(self).__name__}")
+            from shiboken6 import isValid
+            valid = isValid(self)
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent isValid={valid}")
+            if not valid:
+                logger.debug(f"[DropTargetMixin] dragLeaveEvent widget invalid, accepting and returning")
+                event.accept()
+                return
+            visible = self.isVisible()
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent isVisible={visible}")
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent calling _show_drop_highlight(False)")
+            self._show_drop_highlight(False)
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent _show_drop_highlight done, calling event.accept()")
+            event.accept()
+            logger.debug(f"[DropTargetMixin] dragLeaveEvent COMPLETE")
+        except Exception as e:
+            logger.error(f"[DropTargetMixin] dragLeaveEvent error: {e}", exc_info=True)
+            event.accept()
 
     def dropEvent(self, event):
         """Handle drop - extract files and call handler."""
-        self._show_drop_highlight(False)
+        try:
+            from shiboken6 import isValid
+            if not isValid(self):
+                event.ignore()
+                return
+            self._show_drop_highlight(False)
 
-        paths = extract_files_from_mime_data(event.mimeData())
-        filtered_paths = filter_files_by_category(paths, self._accepted_categories)
+            paths = extract_files_from_mime_data(event.mimeData())
+            filtered_paths = filter_files_by_category(paths, self._accepted_categories)
 
-        if filtered_paths:
-            logger.debug(f"Dropped {len(filtered_paths)} file(s)")
-            self._on_files_dropped(filtered_paths)
-            event.acceptProposedAction()
-        else:
+            if filtered_paths:
+                logger.debug(f"Dropped {len(filtered_paths)} file(s)")
+                self._on_files_dropped(filtered_paths)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        except Exception as e:
+            logger.debug(f"[DropTargetMixin] dropEvent error: {e}")
             event.ignore()
 
     def _on_files_dropped(self, paths: List[str]):

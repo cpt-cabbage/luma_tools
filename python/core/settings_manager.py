@@ -104,6 +104,7 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "gallery_splitter_sizes": SettingDef("gallery_splitter_sizes", [200, 800], "user"),
     "gallery_stack_colors": SettingDef("gallery_stack_colors", {}, "user"),
     "gallery_liked_color": SettingDef("gallery_liked_color", None, "user"),
+    "gallery_likes_stack": SettingDef("gallery_likes_stack", False, "user"),
     "gallery_stacks_data": SettingDef("gallery_stacks_data", {}, "user"),
     "gallery_stacks_collapsed": SettingDef("gallery_stacks_collapsed", False, "user"),
     # UI display settings

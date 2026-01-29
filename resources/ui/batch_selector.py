@@ -426,68 +426,6 @@ class BatchImageSelector(QWidget):
         """Clear drag state - call when drag ends or leaves."""
         self._dragged_widget = None
 
-    def _lookup_gallery_colors(self, paths):
-        """Look up and store gallery colors for dropped images.
-
-        Checks if images have group colors or liked status in the gallery
-        and stores the colors for display in thumbnails.
-
-        Uses QTimer.singleShot to defer the lookup, allowing Qt to finish
-        processing any tab switch before we access the gallery tab.
-        """
-        from PySide6.QtCore import QTimer
-        # Defer the actual lookup to let Qt settle after any tab switch
-        QTimer.singleShot(50, lambda: self._do_gallery_color_lookup(paths))
-
-    def _do_gallery_color_lookup(self, paths):
-        """Actually perform the gallery color lookup (deferred)."""
-        try:
-            # Try to get FavoritesManager from a gallery tab
-            from core.luma_tools import get_main_window
-            main_window = get_main_window()
-            if not main_window:
-                return
-
-            # Find the gallery tab - main_window.tabs is a dict, not QTabWidget
-            gallery_tab = main_window.tabs.get('gallery')
-            if not gallery_tab or not hasattr(gallery_tab, '_favorites_manager'):
-                return
-
-            favorites_manager = gallery_tab._favorites_manager
-            if not favorites_manager:
-                return
-
-            # Look up color for each path
-            from core.settings_manager import safe_get_setting
-            liked_color = safe_get_setting("gallery_liked_color", "#10b981")
-
-            colors_found = False
-            for path in paths:
-                # Skip if path no longer in our selection (user may have removed it)
-                if path not in self.selected_files:
-                    continue
-
-                # Priority 1: Group color
-                group_colors = favorites_manager.get_item_group_colors(path)
-                if group_colors:
-                    self._gallery_colors[path] = group_colors[0]
-                    colors_found = True
-                    continue
-
-                # Priority 2: Liked color
-                if favorites_manager.is_liked(path):
-                    self._gallery_colors[path] = liked_color
-                    colors_found = True
-
-            # Rebuild grid to show colors if any were found
-            if colors_found:
-                self._rebuild_grid()
-
-        except Exception as e:
-            # Silently fail - gallery colors are a nice-to-have
-            import logging
-            logging.getLogger(__name__).debug(f"Could not lookup gallery colors: {e}")
-
     def _move_image(self, from_idx, to_idx):
         """Move an image from one position to another."""
         if 0 <= from_idx < len(self.selected_files) and 0 <= to_idx < len(self.selected_files):
@@ -551,80 +489,93 @@ class BatchImageSelector(QWidget):
 
     def dropEvent(self, event):
         """Handle drop - either external files or internal reordering."""
-        # Restore base style
-        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"[BatchImageSelector] dropEvent START")
+        try:
+            # Restore base style
+            self.drop_frame.setStyleSheet(self._drop_frame_base_style)
 
-        # Check if it's an internal drag (reordering within this widget)
-        if event.mimeData().hasText() and self._dragged_widget:
-            dragged_path = event.mimeData().text()
-            if dragged_path in self.selected_files:
-                # Find the target position based on drop location
-                drop_pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
-                target_widget = self.grid_container.childAt(drop_pos)
+            # Check if it's an internal drag (reordering within this widget)
+            if event.mimeData().hasText() and self._dragged_widget:
+                dragged_path = event.mimeData().text()
+                if dragged_path in self.selected_files:
+                    # Find the target position based on drop location
+                    drop_pos = event.position().toPoint() if hasattr(event.position(), 'toPoint') else event.pos()
+                    target_widget = self.grid_container.childAt(drop_pos)
 
-                # Walk up to find BatchImageThumbnail if we hit a child widget
-                while target_widget and not isinstance(target_widget, BatchImageThumbnail):
-                    target_widget = target_widget.parentWidget()
+                    # Walk up to find BatchImageThumbnail if we hit a child widget
+                    while target_widget and not isinstance(target_widget, BatchImageThumbnail):
+                        target_widget = target_widget.parentWidget()
 
-                if target_widget and isinstance(target_widget, BatchImageThumbnail):
-                    from_idx = self.selected_files.index(dragged_path)
-                    to_idx = self.selected_files.index(target_widget.image_path)
-                    if from_idx != to_idx:
-                        self._move_image(from_idx, to_idx)
+                    if target_widget and isinstance(target_widget, BatchImageThumbnail):
+                        from_idx = self.selected_files.index(dragged_path)
+                        to_idx = self.selected_files.index(target_widget.image_path)
+                        if from_idx != to_idx:
+                            self._move_image(from_idx, to_idx)
 
-                self._dragged_widget = None
+                    self._dragged_widget = None
+                    event.acceptProposedAction()
+                    return
+
+            # Check for drag from another BatchImageSelector (move operation)
+            if event.mimeData().hasFormat("application/x-luma-batch-image"):
+                data = event.mimeData().data("application/x-luma-batch-image").data().decode('utf-8')
+                path = data.strip()
+
+                # Get the source selector and remove from it (move, not copy)
+                source_selector, source_path = _get_and_clear_drag_source()
+
+                if path and os.path.isfile(path):
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in self.supported_extensions:
+                        # Only add if not already in this selector
+                        if path not in self.selected_files:
+                            self.add_images([path])
+
+                        # Remove from source (if it's a different selector)
+                        if source_selector and source_selector is not self:
+                            source_selector.remove_image(source_path or path)
+                            # Clear the source's drag state
+                            source_selector._clear_drag_state()
+
                 event.acceptProposedAction()
                 return
 
-        # Check for drag from another BatchImageSelector (move operation)
-        if event.mimeData().hasFormat("application/x-luma-batch-image"):
-            data = event.mimeData().data("application/x-luma-batch-image").data().decode('utf-8')
-            path = data.strip()
+            # Check for our custom MIME type (drag from gallery - copy, not move)
+            if event.mimeData().hasFormat("application/x-luma-files"):
+                logger.debug(f"[BatchImageSelector] dropEvent handling luma-files MIME type")
+                data = event.mimeData().data("application/x-luma-files").data().decode('utf-8')
+                paths = [p.strip() for p in data.split('\n') if p.strip()]
+                logger.debug(f"[BatchImageSelector] dropEvent got {len(paths)} paths from drag")
+                # Filter to only files that exist and match our extensions
+                valid_paths = []
+                for path in paths:
+                    if os.path.isfile(path):
+                        ext = os.path.splitext(path)[1].lower()
+                        if ext in self.supported_extensions:
+                            valid_paths.append(path)
+                logger.debug(f"[BatchImageSelector] dropEvent {len(valid_paths)} valid paths")
+                if valid_paths:
+                    self.add_images(valid_paths)
+                    logger.debug(f"[BatchImageSelector] dropEvent add_images done")
+                event.acceptProposedAction()
+                logger.debug(f"[BatchImageSelector] dropEvent COMPLETE (luma-files)")
+                return
 
-            # Get the source selector and remove from it (move, not copy)
-            source_selector, source_path = _get_and_clear_drag_source()
+            # External file drop (from file explorer)
+            if event.mimeData().hasUrls():
+                paths = []
+                for url in event.mimeData().urls():
+                    path = url.toLocalFile()
+                    if os.path.isfile(path):
+                        paths.append(path)
+                if paths:
+                    self.add_images(paths)
+                event.acceptProposedAction()
+                logger.debug(f"[BatchImageSelector] dropEvent COMPLETE (urls)")
+                return
 
-            if path and os.path.isfile(path):
-                ext = os.path.splitext(path)[1].lower()
-                if ext in self.supported_extensions:
-                    # Only add if not already in this selector
-                    if path not in self.selected_files:
-                        self.add_images([path])
-
-                    # Remove from source (if it's a different selector)
-                    if source_selector and source_selector is not self:
-                        source_selector.remove_image(source_path or path)
-                        # Clear the source's drag state
-                        source_selector._clear_drag_state()
-
-            event.acceptProposedAction()
-            return
-
-        # Check for our custom MIME type (drag from gallery - copy, not move)
-        if event.mimeData().hasFormat("application/x-luma-files"):
-            data = event.mimeData().data("application/x-luma-files").data().decode('utf-8')
-            paths = [p.strip() for p in data.split('\n') if p.strip()]
-            # Filter to only files that exist and match our extensions
-            valid_paths = []
-            for path in paths:
-                if os.path.isfile(path):
-                    ext = os.path.splitext(path)[1].lower()
-                    if ext in self.supported_extensions:
-                        valid_paths.append(path)
-            if valid_paths:
-                # Look up gallery colors for dropped images (deferred to avoid crash)
-                self._lookup_gallery_colors(valid_paths)
-                self.add_images(valid_paths)
-            event.acceptProposedAction()
-            return
-
-        # External file drop (from file explorer)
-        if event.mimeData().hasUrls():
-            paths = []
-            for url in event.mimeData().urls():
-                path = url.toLocalFile()
-                if os.path.isfile(path):
-                    paths.append(path)
-            if paths:
-                self.add_images(paths)
-            event.acceptProposedAction()
+            logger.debug(f"[BatchImageSelector] dropEvent COMPLETE (no handler)")
+        except Exception as e:
+            logger.error(f"[BatchImageSelector] dropEvent error: {e}", exc_info=True)

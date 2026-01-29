@@ -415,6 +415,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _update_like_indicator_style(self):
         """Update the like indicator appearance based on liked state - uses color from settings."""
         from core.settings_manager import get_setting
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        from PySide6.QtGui import QColor
 
         # Get liked color from settings (default mint green if not set)
         liked_color = get_setting("gallery_liked_color") or "#55ff9c"
@@ -431,6 +433,12 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                     font-size: 15px;
                 }}
             """)
+            # Add subtle glow effect
+            glow = QGraphicsDropShadowEffect(self.like_indicator)
+            glow.setBlurRadius(20)
+            glow.setColor(QColor(r, g, b, 200))
+            glow.setOffset(0, 0)
+            self.like_indicator.setGraphicsEffect(glow)
         else:
             self.like_indicator.setStyleSheet(f"""
                 QLabel {{
@@ -446,6 +454,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                     border: 2px solid rgba({r}, {g}, {b}, 0.7);
                 }}
             """)
+            # Remove glow effect
+            self.like_indicator.setGraphicsEffect(None)
 
     def _update_group_dots(self):
         """Update the group dots display based on group membership."""
@@ -1007,14 +1017,20 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     def _show_drop_highlight(self, show):
         """Show or hide drop highlight visual feedback."""
-        logger.debug(f"[ThumbnailWidget] _show_drop_highlight({show}) for {self.path}")
-        self._drop_highlight_active = show
-        if show:
-            # Just apply style with drop highlight
+        try:
+            from shiboken6 import isValid
+            if not isValid(self):
+                return
+            # Skip style update if widget is not visible (e.g., tab switched)
+            if not self.isVisible():
+                self._drop_highlight_active = show
+                return
+            logger.debug(f"[ThumbnailWidget] _show_drop_highlight({show}) for {self.path}")
+            self._drop_highlight_active = show
+            # Just apply style - don't access settings or recalculate colors during drag
             self._apply_thumbnail_style()
-        else:
-            # When hiding highlight, use _update_group_border to restore proper colors
-            self._update_group_border()
+        except Exception as e:
+            logger.debug(f"[ThumbnailWidget] _show_drop_highlight error: {e}")
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:

@@ -248,7 +248,7 @@ python -m pytest tests/ -k "test_name"    # Run specific test by name
 Always use PowerShell for Python scripts (Bash compatibility layer has path issues):
 ```powershell
 # Syntax check a file
-powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\tabs\file.py"
+powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\ui\tabs\file.py"
 
 # Run all tests
 powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m pytest tests/ -v"
