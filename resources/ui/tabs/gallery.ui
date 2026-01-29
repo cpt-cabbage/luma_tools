@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>GalleryTab</class>
+ <widget class="QWidget" name="GalleryTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1400</width>
+    <height>850</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="galleryMainLayout">
+   <property name="spacing">
+    <number>8</number>
+   </property>
+   <property name="leftMargin">
+    <number>16</number>
+   </property>
+   <property name="topMargin">
+    <number>16</number>
+   </property>
+   <property name="rightMargin">
+    <number>16</number>
+   </property>
+   <property name="bottomMargin">
+    <number>16</number>
+   </property>
+   <item>
+    <layout class="QHBoxLayout" name="galleryHeaderLayout">
+     <item>
+      <widget class="QPushButton" name="GallerySourceToggle">
+       <property name="text">
+        <string>Network Folder</string>
+       </property>
+       <property name="toolTip">
+        <string>Click to switch between network folder and custom folder</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="visible">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GalleryUserButton">
+       <property name="text">
+        <string>👤 You</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>Click to select user gallery to view</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GallerySortButton">
+       <property name="text">
+        <string>Newest First</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>160</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>Click to change sort order</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="galleryHeaderSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GalleryOpenExplorer">
+       <property name="text">
+        <string>Open in Explorer</string>
+       </property>
+       <property name="toolTip">
+        <string>Open the gallery folder in Windows Explorer</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>120</width>
+         <height>0</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GalleryRefresh">
+       <property name="text">
+        <string>Refresh</string>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>80</width>
+         <height>0</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="galleryScrollArea">
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <widget class="QWidget" name="galleryScrollContent">
+      <layout class="QVBoxLayout" name="galleryContentLayout">
+       <item>
+        <widget class="QWidget" name="galleryThumbnailContainer">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="galleryFooterLayout">
+     <item>
+      <widget class="QLabel" name="GalleryStatus">
+       <property name="text">
+        <string>No images found</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: #888888;</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="galleryFooterSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="GalleryViewOnlyLabel">
+       <property name="text">
+        <string>View Only</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: #4a9eff; font-weight: bold; padding: 2px 8px; background-color: rgba(74, 158, 255, 0.2); border-radius: 4px;</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

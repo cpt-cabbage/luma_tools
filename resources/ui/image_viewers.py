@@ -514,7 +514,7 @@ class EmbeddedImageViewer(QWidget):
             sys.path.insert(0, python_dir)
 
         try:
-            from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, get_prewarm_viewer
+            from geo.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, get_prewarm_viewer
             if is_threejs_viewer_available():
                 # The prewarm viewer was initialized in main window layout before window.show()
                 # to warm up the Chromium GPU thread. We do NOT reparent it (causes rendering issues).
@@ -685,7 +685,7 @@ class EmbeddedImageViewer(QWidget):
         # Apply saved lighting/shading preferences
         if self.glb_viewer:
             try:
-                from models.threejs_viewer import ShadingMode, LightingMode
+                from geo.threejs_viewer import ShadingMode, LightingMode
 
                 # Apply shading mode
                 if self._current_shading_mode:
@@ -826,7 +826,7 @@ class EmbeddedImageViewer(QWidget):
 
         if self.glb_viewer:
             try:
-                from models.threejs_viewer import ShadingMode
+                from geo.threejs_viewer import ShadingMode
                 mode_enum = ShadingMode(mode)
                 self.glb_viewer.set_shading_mode(mode_enum)
             except Exception as e:
@@ -847,7 +847,7 @@ class EmbeddedImageViewer(QWidget):
 
         if self.glb_viewer:
             try:
-                from models.threejs_viewer import LightingMode
+                from geo.threejs_viewer import LightingMode
                 mode_enum = LightingMode(mode)
                 self.glb_viewer.set_lighting_mode(mode_enum)
             except Exception as e:

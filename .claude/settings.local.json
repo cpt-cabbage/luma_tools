@@ -64,7 +64,9 @@
       "Bash(powershell -ExecutionPolicy Bypass -Command \"Get-Content ''W:\\\\LumaRND\\\\tmp\\\\ComfyUI_OUT\\\\_logs\\\\users\\\\luma_tools_christophe.leyder_ls-ws-lookdev01_20260127_065306.log'' | Select-Object -First 30\")",
       "Bash(powershell -ExecutionPolicy Bypass -Command \"Get-Content ''W:\\\\LumaRND\\\\tmp\\\\ComfyUI_OUT\\\\_logs\\\\users\\\\luma_tools_christophe.leyder_ls-ws-lookdev01_20260127_065306.log'' | Select-Object -Last 30\")",
       "Bash(powershell:*)",
-      "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_verify.ps1\")"
+      "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_verify.ps1\")",
+      "Bash(git mv:*)",
+      "Bash(move:*)"
     ],
     "deny": [],
     "ask": []

@@ -106,18 +106,25 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "gallery_liked_color": SettingDef("gallery_liked_color", None, "user"),
     "gallery_stacks_data": SettingDef("gallery_stacks_data", {}, "user"),
     "gallery_stacks_collapsed": SettingDef("gallery_stacks_collapsed", False, "user"),
+    # UI display settings
+    "show_statusbar_log": SettingDef("show_statusbar_log", False, "user"),
+    # ComfyUI-Gallery integration settings
+    "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
+    "comfyui_show_recent_outputs": SettingDef("comfyui_show_recent_outputs", True, "user"),
+    "gallery_show_job_status": SettingDef("gallery_show_job_status", True, "user"),
+    "gallery_show_quick_actions": SettingDef("gallery_show_quick_actions", True, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
-    "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "comfyui_gallery"], "global"),
+    "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }
 
 # Default constants (for external reference)
 DEFAULT_COMFYUI_TIMEOUT = 3600
 DEFAULT_SERVER_NOT_FOUND_WAIT = 300
-DEFAULT_RESTRICTED_TABS = ["comfyui", "comfyui_gallery"]  # Settings is admin-only, not in restricted list
+DEFAULT_RESTRICTED_TABS = ["comfyui", "gallery"]  # Settings is admin-only, not in restricted list
 
 TAB_RESTRICTION_MAP = {
     "comfyui": "RestrictComfyUI",
-    "comfyui_gallery": "RestrictComfyUIGallery",
+    "gallery": "RestrictGallery",
     # Settings tab is admin-only, not configurable
     "passbuilder": "RestrictPassBuilder",
     "mp4maker": "RestrictMP4Maker",
@@ -345,6 +352,59 @@ def set_setting(name: str, value: Any, verbose: bool = True):
         value = defn.validator(value)
     accessor = _global_settings if defn.scope == "global" else _user_settings
     accessor.set(defn.key, value, verbose=verbose)
+
+
+def safe_get_setting(name: str, default: Any = None) -> Any:
+    """
+    Get a setting with a guaranteed default if not found.
+
+    Unlike get_setting(), this never raises KeyError. Use when reading
+    settings that may not exist in older configurations or are optional.
+
+    Args:
+        name: Setting key (may or may not be in SETTINGS_REGISTRY)
+        default: Fallback value if setting not found (default: None)
+
+    Returns:
+        Setting value or default
+
+    Example:
+        # These are equivalent:
+        try:
+            value = get_setting("my_setting")
+        except KeyError:
+            value = False
+
+        value = safe_get_setting("my_setting", False)
+    """
+    defn = SETTINGS_REGISTRY.get(name)
+    if not defn:
+        return default
+    accessor = _global_settings if defn.scope == "global" else _user_settings
+    return accessor.get(defn.key, defn.default if default is None else default)
+
+
+def safe_set_setting(name: str, value: Any, verbose: bool = False) -> bool:
+    """
+    Set a setting without raising errors.
+
+    Unlike set_setting(), this catches exceptions and returns success status.
+    The verbose parameter defaults to False for cleaner logs.
+
+    Args:
+        name: Setting key
+        value: Value to set
+        verbose: Whether to log the change (default: False)
+
+    Returns:
+        True if setting was saved successfully, False otherwise
+    """
+    try:
+        set_setting(name, value, verbose=verbose)
+        return True
+    except (KeyError, Exception) as e:
+        logger.warning(f"Could not save setting {name}: {e}")
+        return False
 
 
 # ============================================================================

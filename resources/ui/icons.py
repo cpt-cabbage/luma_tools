@@ -24,7 +24,7 @@ TAB_COLORS = {
     "shot_cleaner": "#9fa5b0",  # Slate Gray
     "logs": "#9fa5b0",          # Slate Gray
     "comfyui": "#4a9eff",       # Blue Accent (AI feature)
-    "comfyui_gallery": "#9fa5b0",  # Slate Gray
+    "gallery": "#9fa5b0",       # Slate Gray
     "settings": "#797e89",      # Dim Gray
 }
 
@@ -221,7 +221,7 @@ class IconManager:
             "shot_cleaner": "trash",
             "logs": "terminal",
             "comfyui": "sparkles",
-            "comfyui_gallery": "image",
+            "gallery": "image",
             "settings": "settings",
         }
 

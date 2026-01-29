@@ -123,7 +123,7 @@ def submit_oiio_to_deadline(
         deadline_command.append('-prop')
         deadline_command.append(f'JobDependencies={parent_job_id}')
 
-    from services.deadline_utils import submit_deadline_job
+    from deadline.utils import submit_deadline_job
 
     buildjobid = submit_deadline_job(deadline_command)
     if buildjobid:

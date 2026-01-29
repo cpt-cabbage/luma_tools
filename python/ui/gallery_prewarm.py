@@ -123,7 +123,7 @@ def prewarm_model_thumbnails(items: List[Dict],
         Number of thumbnails generated
     """
     try:
-        from models.thumbnail_service import get_model_thumbnail_service
+        from geo.thumbnail_service import get_model_thumbnail_service
         service = get_model_thumbnail_service()
     except ImportError:
         logger.warning("[PreWarm] Model thumbnail service not available")

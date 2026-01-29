@@ -41,10 +41,67 @@ import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
+from core.subprocess_utils import run_command, start_process
+
 logger = logging.getLogger(__name__)
+
+
+def kill_process_on_port(port: int) -> bool:
+    """Kill any process using the specified port (Windows only).
+
+    Args:
+        port: The port number to free up
+
+    Returns:
+        True if a process was killed, False otherwise
+    """
+    if os.name != 'nt':
+        logger.warning("kill_process_on_port only implemented for Windows")
+        return False
+
+    try:
+        # Find PID using the port
+        result = run_command(['netstat', '-ano', '-p', 'TCP'])
+
+        target_pids = set()
+        for line in result.stdout.splitlines():
+            if f':{port}' in line and ('LISTENING' in line or 'ESTABLISHED' in line):
+                parts = line.split()
+                if parts:
+                    try:
+                        pid = int(parts[-1])
+                        if pid > 0:
+                            target_pids.add(pid)
+                    except ValueError:
+                        continue
+
+        if not target_pids:
+            return False
+
+        for pid in target_pids:
+            try:
+                logger.info(f"Killing process {pid} using port {port}")
+                run_command(['taskkill', '/F', '/PID', str(pid)])
+            except Exception as e:
+                logger.warning(f"Failed to kill PID {pid}: {e}")
+
+        # Wait a moment for the port to be released
+        time.sleep(1)
+        return True
+
+    except Exception as e:
+        logger.error(f"Error killing process on port {port}: {e}")
+        return False
 
 # Import shared utilities
 from comfyui.utils import check_server_health, wait_for_server, resolve_comfyui_paths
+
+# Try to use centralized logging utilities when available
+try:
+    from core.logging_utils import setup_file_logging as _setup_file_logging, get_network_log_dir, get_local_log_dir
+    _USE_CENTRAL_LOGGING = True
+except ImportError:
+    _USE_CENTRAL_LOGGING = False
 
 
 def setup_logging(global_settings: dict = None, log_dir_override: str = None) -> str:
@@ -60,6 +117,18 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
     Returns:
         Path to the log file
     """
+    # Use centralized logging module when available
+    if _USE_CENTRAL_LOGGING and not log_dir_override:
+        return _setup_file_logging(
+            log_prefix="comfyui_server",
+            subdirectory="server",
+            include_hostname=True,
+            include_username=False,
+            redirect_stdout=False,
+            tee_mode="handlers"
+        )
+
+    # Fallback to local implementation
     import socket
     hostname = socket.gethostname()
 
@@ -129,6 +198,7 @@ server_state = {
     'last_crash_time': None,
     'max_crash_restarts': 5,
     'crash_cooldown_seconds': 60,
+    'self_restart_pending': False,  # Set when ComfyUI initiates its own restart
 }
 
 
@@ -296,12 +366,7 @@ def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
     missing = []
     for package in required_packages:
         try:
-            result = subprocess.run(
-                [python_exe, '-m', 'pip', 'show', package],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            result = run_command([python_exe, '-m', 'pip', 'show', package], timeout=30)
             if result.returncode != 0:
                 missing.append(package)
         except Exception:
@@ -356,18 +421,7 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',  # Replace invalid characters instead of crashing
-        bufsize=1,
-        cwd=working_dir,
-        env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-    )
+    process = start_process(cmd, cwd=working_dir, env=env)
 
     return process
 
@@ -399,6 +453,12 @@ def stream_comfyui_output(process: subprocess.Popen):
                     server_state['jobs_completed'] += 1
                 elif "Error" in line and "node" in line.lower():
                     server_state['jobs_failed'] += 1
+
+                # Detect ComfyUI self-restart (e.g., from Manager or internal restart)
+                # This prevents treating exit code 0 as a crash
+                if "Restarting" in line and ("Legacy Mode" in line or "restarting" in line.lower()):
+                    logger.info("ComfyUI self-restart detected, will handle gracefully")
+                    server_state['self_restart_pending'] = True
 
                 # Check for fatal CUDA/GPU errors that require restart
                 for pattern in FATAL_ERROR_PATTERNS:
@@ -439,6 +499,7 @@ def restart_comfyui(reason: str = "manual"):
 
     server_state['is_ready'] = False
     server_state['restart_requested'] = False
+    server_state['self_restart_pending'] = False
 
     if server_state['comfyui_process']:
         logger.info("Terminating existing ComfyUI process...")
@@ -450,6 +511,9 @@ def restart_comfyui(reason: str = "manual"):
             logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
             server_state['comfyui_process'].wait()
+
+    # Also kill any orphaned processes on the port (from self-restarts)
+    kill_process_on_port(config['port'])
 
     time.sleep(2)
 
@@ -551,6 +615,9 @@ def shutdown(signum=None, frame=None):
     logger.info("\nShutdown requested...")
     server_state['shutdown_requested'] = True
 
+    config = server_state.get('startup_config', {})
+    port = config.get('port', 8188)
+
     if server_state['comfyui_process']:
         logger.info("Terminating ComfyUI...")
         server_state['comfyui_process'].terminate()
@@ -560,6 +627,11 @@ def shutdown(signum=None, frame=None):
         except subprocess.TimeoutExpired:
             logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
+
+    # Also kill any orphaned ComfyUI processes on the port
+    # (e.g., from self-restarts where we lost the process handle)
+    logger.info(f"Checking for orphaned processes on port {port}...")
+    kill_process_on_port(port)
 
     logger.info("Server shutdown complete")
     sys.exit(0)
@@ -780,12 +852,59 @@ def main():
                     logger.error("Restart failed, server will exit")
                     break
 
-            ret = process.poll()
+            # Check process status (may be None after self-restart)
+            if process is not None:
+                ret = process.poll()
+            else:
+                # No process handle - rely on health checks
+                # If we're not ready, trigger a restart
+                ret = None
+                if not server_state['is_ready']:
+                    config = server_state.get('startup_config', {})
+                    port = config.get('port', 8188)
+                    if not check_server_health(port):
+                        logger.warning("No process handle and ComfyUI not responding, restarting...")
+                        if restart_comfyui(reason="orphaned"):
+                            process = server_state['comfyui_process']
+                            last_stable_check = time.time()
+                        else:
+                            logger.error("Failed to restart orphaned ComfyUI")
+                            break
+
             if ret is not None:
-                # ComfyUI crashed or exited unexpectedly
+                # ComfyUI exited - check if it was a self-restart or a crash
                 server_state['is_ready'] = False
 
-                if handle_crash_recovery(ret):
+                # Handle ComfyUI self-restart (exit code 0 with restart pending)
+                # ComfyUI already spawned a new process - just wait for it to be ready
+                if ret == 0 and server_state['self_restart_pending']:
+                    logger.info("ComfyUI self-restart in progress, waiting for new instance...")
+                    server_state['self_restart_pending'] = False
+                    server_state['comfyui_process'] = None  # Old process is gone
+                    process = None
+
+                    config = server_state.get('startup_config', {})
+                    port = config.get('port', 8188)
+
+                    # Wait for the new ComfyUI instance that was spawned by the restart
+                    if wait_for_comfyui(port, timeout=120):
+                        logger.info("ComfyUI self-restart complete, new instance is ready")
+                        server_state['is_ready'] = True
+                        last_stable_check = time.time()
+                        # Note: We don't have a process handle for the new instance
+                        # but we can still monitor via health checks
+                    else:
+                        logger.error("ComfyUI self-restart failed - new instance not responding")
+                        # Kill any orphaned process and try a full restart
+                        kill_process_on_port(port)
+                        if restart_comfyui(reason="self_restart_failed"):
+                            process = server_state['comfyui_process']
+                            last_stable_check = time.time()
+                        else:
+                            logger.error("Failed to recover from self-restart failure")
+                            break
+                    continue  # Skip the crash recovery path
+                elif handle_crash_recovery(ret):
                     # Recovery successful, update process reference
                     process = server_state['comfyui_process']
                     last_stable_check = time.time()

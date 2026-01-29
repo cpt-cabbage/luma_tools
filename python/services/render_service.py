@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
 from core.utils import substring_after, remove_after, ensure_directory
+from core.subprocess_utils import run_command
 
 # Import UI utilities
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
@@ -33,13 +34,8 @@ def detect_passes(render_file):
         dict: Dictionary mapping pass names to channel lists
     """
     # Look for passes in file using OIIO
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = subprocess.SW_HIDE
-
-    command = f'{OIIO_INFO_PATH} -v -m channel "{render_file}"'
-    choutput = subprocess.check_output(command, startupinfo=startupinfo)
-    choutput = str(choutput, encoding='utf-8')
+    result = run_command([OIIO_INFO_PATH, '-v', '-m', 'channel', render_file])
+    choutput = result.stdout
 
     channelsraw = substring_after(choutput, "channel list:")
     channelsraw = re.sub(r"\(.*?\)", "", channelsraw)
@@ -221,13 +217,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         logger.info(f"Local Command: {local_command}")
 
         try:
-            result = subprocess.run(
-                local_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            result = run_command(local_command, shell=True)
             logger.info(f"STDOUT: {result.stdout}")
             if result.stderr:
                 logger.info(f"STDERR: {result.stderr}")
@@ -275,13 +265,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         report_progress(progress_callback, progress, f"Processing frame {frame_num}/{end_frame}...")
 
         try:
-            result = subprocess.run(
-                local_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
+            result = run_command(local_command, shell=True)
 
             if result.returncode != 0:
                 error_msg = f"Frame {frame_num} failed with code {result.returncode}"

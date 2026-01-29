@@ -295,7 +295,7 @@
           <item>
            <widget class="QCheckBox" name="Generate3DThumbnails">
             <property name="toolTip">
-             <string>Generate thumbnail previews for 3D objects in the ComfyUI gallery. Disable this to skip 3D thumbnail generation for faster loading.</string>
+             <string>Generate thumbnail previews for 3D objects in the gallery. Disable this to skip 3D thumbnail generation for faster loading.</string>
             </property>
             <property name="text">
              <string>Generate thumbnails for 3D objects</string>
@@ -312,6 +312,111 @@
             </property>
             <property name="text">
              <string>Show tray notifications for ComfyUI completions</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="ShowStatusbarLog">
+            <property name="toolTip">
+             <string>Show the last log message in the status bar (bottom right). Useful for monitoring activity.</string>
+            </property>
+            <property name="text">
+             <string>Show log messages in status bar</string>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="integrationSectionLabel">
+            <property name="text">
+             <string>ComfyUI + Gallery Integration:</string>
+            </property>
+            <property name="styleSheet">
+             <string>color: #4a9eff; font-weight: bold; margin-top: 8px;</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="completionSoundLayout">
+            <item>
+             <widget class="QLabel" name="completionSoundLabel">
+              <property name="text">
+               <string>Job completion sound:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="ComfyUICompletionSoundCombo">
+              <property name="toolTip">
+               <string>Play a sound when ComfyUI jobs complete</string>
+              </property>
+              <property name="minimumWidth">
+               <number>120</number>
+              </property>
+              <item>
+               <property name="text">
+                <string>None</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Subtle</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>System</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item>
+             <spacer name="completionSoundSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="ComfyUIShowRecentOutputs">
+            <property name="toolTip">
+             <string>Show a preview panel of recent outputs at the bottom of the ComfyUI tab</string>
+            </property>
+            <property name="text">
+             <string>Show recent outputs panel in ComfyUI tab</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="GalleryShowJobStatus">
+            <property name="toolTip">
+             <string>Show a status bar in Gallery when ComfyUI jobs are running</string>
+            </property>
+            <property name="text">
+             <string>Show job status bar in Gallery</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="GalleryShowQuickActions">
+            <property name="toolTip">
+             <string>Show quick action bar when images are selected in Gallery (Use in ComfyUI, Copy Prompt, etc.)</string>
+            </property>
+            <property name="text">
+             <string>Show quick actions bar for gallery selection</string>
             </property>
             <property name="checked">
              <bool>true</bool>
@@ -1037,9 +1142,9 @@
              </widget>
             </item>
             <item row="0" column="1">
-             <widget class="QCheckBox" name="RestrictComfyUIGallery">
+             <widget class="QCheckBox" name="RestrictGallery">
               <property name="text">
-               <string>ComfyUI Gallery</string>
+               <string>Gallery</string>
               </property>
               <property name="checked">
                <bool>true</bool>

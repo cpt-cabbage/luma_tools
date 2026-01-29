@@ -12,7 +12,7 @@ class TestGetFormatType:
 
     def test_gltf_formats(self):
         """Test GLTF/GLB format detection."""
-        from models.loaders.factory import get_format_type
+        from geo.loaders.factory import get_format_type
 
         assert get_format_type("model.glb") == "gltf"
         assert get_format_type("model.gltf") == "gltf"
@@ -21,7 +21,7 @@ class TestGetFormatType:
 
     def test_usd_formats(self):
         """Test USD format detection."""
-        from models.loaders.factory import get_format_type
+        from geo.loaders.factory import get_format_type
 
         assert get_format_type("model.usd") == "usd"
         assert get_format_type("model.usda") == "usd"
@@ -30,7 +30,7 @@ class TestGetFormatType:
 
     def test_other_formats(self):
         """Test other format detection."""
-        from models.loaders.factory import get_format_type
+        from geo.loaders.factory import get_format_type
 
         assert get_format_type("model.fbx") == "fbx"
         assert get_format_type("model.obj") == "obj"
@@ -39,7 +39,7 @@ class TestGetFormatType:
 
     def test_unknown_formats(self):
         """Test unknown format returns 'other'."""
-        from models.loaders.factory import get_format_type
+        from geo.loaders.factory import get_format_type
 
         assert get_format_type("model.xyz") == "other"
         assert get_format_type("model.txt") == "other"
@@ -51,7 +51,7 @@ class TestIsSupportedFormat:
 
     def test_supported_mesh_formats(self):
         """Test mesh formats are supported."""
-        from models.loaders.factory import is_supported_format
+        from geo.loaders.factory import is_supported_format
 
         assert is_supported_format("model.glb") is True
         assert is_supported_format("model.gltf") is True
@@ -62,7 +62,7 @@ class TestIsSupportedFormat:
 
     def test_supported_usd_formats(self):
         """Test USD formats are supported."""
-        from models.loaders.factory import is_supported_format
+        from geo.loaders.factory import is_supported_format
 
         assert is_supported_format("model.usd") is True
         assert is_supported_format("model.usda") is True
@@ -71,7 +71,7 @@ class TestIsSupportedFormat:
 
     def test_supported_other_formats(self):
         """Test other supported formats."""
-        from models.loaders.factory import is_supported_format
+        from geo.loaders.factory import is_supported_format
 
         assert is_supported_format("model.dae") is True
         assert is_supported_format("model.3ds") is True
@@ -80,7 +80,7 @@ class TestIsSupportedFormat:
 
     def test_unsupported_formats(self):
         """Test unsupported formats."""
-        from models.loaders.factory import is_supported_format
+        from geo.loaders.factory import is_supported_format
 
         assert is_supported_format("model.xyz") is False
         assert is_supported_format("model.txt") is False
@@ -90,7 +90,7 @@ class TestIsSupportedFormat:
 
     def test_case_insensitive(self):
         """Test format checking is case insensitive."""
-        from models.loaders.factory import is_supported_format
+        from geo.loaders.factory import is_supported_format
 
         assert is_supported_format("model.GLB") is True
         assert is_supported_format("model.FBX") is True
@@ -102,14 +102,14 @@ class TestLoaderAvailability:
 
     def test_returns_dict(self):
         """Test that loader availability returns a valid dict."""
-        from models.loaders.factory import get_loader_availability
+        from geo.loaders.factory import get_loader_availability
 
         availability = get_loader_availability()
         assert isinstance(availability, dict)
 
     def test_has_string_keys(self):
         """Test dictionary has string keys."""
-        from models.loaders.factory import get_loader_availability
+        from geo.loaders.factory import get_loader_availability
 
         availability = get_loader_availability()
         for key in availability.keys():
@@ -117,7 +117,7 @@ class TestLoaderAvailability:
 
     def test_has_bool_values(self):
         """Test dictionary has boolean values."""
-        from models.loaders.factory import get_loader_availability
+        from geo.loaders.factory import get_loader_availability
 
         availability = get_loader_availability()
         for value in availability.values():
@@ -125,7 +125,7 @@ class TestLoaderAvailability:
 
     def test_expected_loaders_present(self):
         """Test expected loaders are in availability dict."""
-        from models.loaders.factory import get_loader_availability
+        from geo.loaders.factory import get_loader_availability
 
         availability = get_loader_availability()
         # Check for expected loader names (lowercase)
@@ -139,7 +139,7 @@ class TestLoadModelErrors:
 
     def test_file_not_found(self):
         """Test FileNotFoundError for missing file."""
-        from models.loaders.factory import load_model
+        from geo.loaders.factory import load_model
         import pytest
 
         with pytest.raises(FileNotFoundError):
@@ -147,7 +147,7 @@ class TestLoadModelErrors:
 
     def test_unsupported_format(self):
         """Test ValueError for unsupported format."""
-        from models.loaders.factory import load_model
+        from geo.loaders.factory import load_model
         import pytest
 
         # Create a temp file with unsupported extension
@@ -167,7 +167,7 @@ class TestSupportedExtensions:
 
     def test_contains_common_formats(self):
         """Test that SUPPORTED_EXTENSIONS contains expected formats."""
-        from models.loaders.factory import SUPPORTED_EXTENSIONS
+        from geo.loaders.factory import SUPPORTED_EXTENSIONS
 
         assert '.glb' in SUPPORTED_EXTENSIONS
         assert '.gltf' in SUPPORTED_EXTENSIONS
@@ -177,7 +177,7 @@ class TestSupportedExtensions:
 
     def test_contains_usd_variants(self):
         """Test USD variants are supported."""
-        from models.loaders.factory import SUPPORTED_EXTENSIONS
+        from geo.loaders.factory import SUPPORTED_EXTENSIONS
 
         assert '.usda' in SUPPORTED_EXTENSIONS
         assert '.usdc' in SUPPORTED_EXTENSIONS
@@ -185,14 +185,14 @@ class TestSupportedExtensions:
 
     def test_contains_mesh_formats(self):
         """Test mesh-only formats are supported."""
-        from models.loaders.factory import SUPPORTED_EXTENSIONS
+        from geo.loaders.factory import SUPPORTED_EXTENSIONS
 
         assert '.stl' in SUPPORTED_EXTENSIONS
         assert '.ply' in SUPPORTED_EXTENSIONS
 
     def test_contains_npz(self):
         """Test NPZ format for SMPL data is supported."""
-        from models.loaders.factory import SUPPORTED_EXTENSIONS
+        from geo.loaders.factory import SUPPORTED_EXTENSIONS
 
         assert '.npz' in SUPPORTED_EXTENSIONS
 
@@ -202,7 +202,7 @@ class TestAssimpAvailable:
 
     def test_is_boolean(self):
         """Test that ASSIMP_AVAILABLE is properly exported."""
-        from models.loader import ASSIMP_AVAILABLE
+        from geo.loader import ASSIMP_AVAILABLE
 
         assert isinstance(ASSIMP_AVAILABLE, bool)
 
@@ -212,7 +212,7 @@ class TestLoaderPriority:
 
     def test_usd_priority(self):
         """Test USD format has USD loader first."""
-        from models.loaders.factory import _get_loaders, _get_loader_priority
+        from geo.loaders.factory import _get_loaders, _get_loader_priority
 
         loaders = _get_loaders()
         priority = _get_loader_priority('usd', loaders)
@@ -223,7 +223,7 @@ class TestLoaderPriority:
 
     def test_gltf_priority(self):
         """Test GLTF format has Trimesh loader first."""
-        from models.loaders.factory import _get_loaders, _get_loader_priority
+        from geo.loaders.factory import _get_loaders, _get_loader_priority
 
         loaders = _get_loaders()
         priority = _get_loader_priority('gltf', loaders)
@@ -234,7 +234,7 @@ class TestLoaderPriority:
 
     def test_fbx_priority(self):
         """Test FBX format has Assimp loader first."""
-        from models.loaders.factory import _get_loaders, _get_loader_priority
+        from geo.loaders.factory import _get_loaders, _get_loader_priority
 
         loaders = _get_loaders()
         priority = _get_loader_priority('fbx', loaders)
@@ -245,7 +245,7 @@ class TestLoaderPriority:
 
     def test_npz_priority(self):
         """Test NPZ format has SMPL loader."""
-        from models.loaders.factory import _get_loaders, _get_loader_priority
+        from geo.loaders.factory import _get_loaders, _get_loader_priority
 
         loaders = _get_loaders()
         priority = _get_loader_priority('npz', loaders)
@@ -258,7 +258,7 @@ class TestLoaderPriority:
 # Backward compatibility tests (original test functions)
 def test_get_format_type():
     """Test format detection for various file extensions."""
-    from models.loaders.factory import get_format_type
+    from geo.loaders.factory import get_format_type
 
     assert get_format_type("model.glb") == "gltf"
     assert get_format_type("model.gltf") == "gltf"
@@ -275,7 +275,7 @@ def test_get_format_type():
 
 def test_is_supported_format():
     """Test format support checking."""
-    from models.loaders.factory import is_supported_format
+    from geo.loaders.factory import is_supported_format
 
     # Supported formats
     assert is_supported_format("model.glb") is True
@@ -293,7 +293,7 @@ def test_is_supported_format():
 
 def test_loader_availability():
     """Test that loader availability returns a valid dict."""
-    from models.loaders.factory import get_loader_availability
+    from geo.loaders.factory import get_loader_availability
 
     availability = get_loader_availability()
 
@@ -308,7 +308,7 @@ def test_loader_availability():
 
 def test_assimp_available_export():
     """Test that ASSIMP_AVAILABLE is properly exported."""
-    from models.loader import ASSIMP_AVAILABLE
+    from geo.loader import ASSIMP_AVAILABLE
 
     # Should be a boolean
     assert isinstance(ASSIMP_AVAILABLE, bool)
@@ -316,7 +316,7 @@ def test_assimp_available_export():
 
 def test_supported_extensions():
     """Test that SUPPORTED_EXTENSIONS contains expected formats."""
-    from models.loader import SUPPORTED_EXTENSIONS
+    from geo.loader import SUPPORTED_EXTENSIONS
 
     assert '.glb' in SUPPORTED_EXTENSIONS
     assert '.fbx' in SUPPORTED_EXTENSIONS

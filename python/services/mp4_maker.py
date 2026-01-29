@@ -20,6 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resour
 
 from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config, FRAME_PADDING
 from core.utils import normalize_path, ensure_directory
+from core.subprocess_utils import run_command
 from ui_components import report_progress
 # Try to import Qt for processEvents
 try:
@@ -188,11 +189,7 @@ def convert_exr_to_png_with_oiio(
                 logger.info("=" * 60)
 
             # Execute OIIO
-            result = subprocess.run(
-                oiio_cmd,
-                capture_output=True,
-                text=True
-            )
+            result = run_command(oiio_cmd)
 
             if result.returncode != 0:
                 logger.error(f"OIIO conversion failed for frame {frame}")

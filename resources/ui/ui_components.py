@@ -37,6 +37,7 @@ from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
 from small_widgets import StackedThumbnailWidget, show_popup_menu
+from drag_drop import DraggableMixin, create_drag_pixmap
 
 
 # ============================================================================
@@ -196,7 +197,7 @@ def cache_image_thumbnail(path, data):
 # UNIFIED THUMBNAIL WIDGET (for images and 3D models)
 # ============================================================================
 
-class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
+class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
     """
     Unified thumbnail widget for both images and 3D models.
 
@@ -204,6 +205,9 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     - How thumbnails are generated/loaded
     - Whether the cube icon is shown
     - Context menu options
+
+    Supports drag-and-drop: items can be dragged to BatchImageSelector
+    or other input widgets. Use hover-to-switch-tab to drag across tabs.
     """
     clicked = Signal(str)
     fullscreen_requested = Signal(str)
@@ -251,6 +255,9 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         self._is_liked = False
         self._group_colors = []  # List of group colors this item belongs to
         self._favorites_manager = None  # Set by gallery tab after creation
+
+        # Initialize drag support
+        self._init_drag_state()
 
         # Styler uses is_model to determine border color
         self._styler = ThumbnailStyler(
@@ -727,7 +734,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     # --- Model thumbnail loading ---
     def _load_model_thumbnail(self):
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             cached = service.get_cached_thumbnail(self.path)
             if cached and not cached.isNull():
@@ -745,7 +752,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if self._thumbnail_loading:
             return
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             if service.is_pending(self.path):
                 return
@@ -760,7 +767,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if not isValid(self):
             return
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             pixmap = service.generate_thumbnail_sync(self.path)
             self._on_model_thumbnail_generated(pixmap)
@@ -771,7 +778,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
     def _on_model_thumbnail_generated(self, pixmap):
         self._thumbnail_loading = False
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             service.set_pending(self.path, False)
         except Exception:
@@ -913,7 +920,7 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
         if self.item_type == 'model':
             self._thumbnail_loading = False
             try:
-                from models.thumbnail_service import get_model_thumbnail_service
+                from geo.thumbnail_service import get_model_thumbnail_service
                 service = get_model_thumbnail_service()
                 service.set_pending(self.path, False)
             except Exception:
@@ -972,6 +979,9 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                 super().mousePressEvent(event)
                 return
 
+            # Store drag start position for potential drag operation
+            self._handle_drag_press(event)
+
             if mods & Qt.ShiftModifier:
                 if self._gallery_tab:
                     self._gallery_tab._on_shift_click_selection(self.path)
@@ -982,6 +992,33 @@ class ThumbnailWidget(MetadataCopyMixin, BaseThumbnailWidget):
                     self._gallery_tab._clear_selection()
                 self.set_selected(True)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for drag initiation."""
+        # Check if we should start a drag
+        if self._handle_drag_move(event):
+            return  # Drag was started
+        super().mouseMoveEvent(event)
+
+    def _get_drag_paths(self):
+        """Return paths to drag - this item plus any other selected items."""
+        if self._gallery_tab and hasattr(self._gallery_tab, '_selected_items'):
+            selected = self._gallery_tab._selected_items
+            if self.path in selected and len(selected) > 1:
+                # Multiple items selected - drag all of them
+                return list(selected)
+        # Single item
+        return [self.path]
+
+    def _get_drag_pixmap(self, paths):
+        """Create drag pixmap, using our thumbnail if available."""
+        if len(paths) == 1:
+            # Single item - use our thumbnail if loaded
+            pixmap = self.thumbnail_label.pixmap()
+            if pixmap and not pixmap.isNull():
+                return pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # Multiple items or no thumbnail - use default stack visualization
+        return create_drag_pixmap(paths)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1357,34 +1394,81 @@ class GallerySelectionToolbar(QWidget):
     view_selected = Signal()
     clear_selection = Signal()
 
+    # Signals for ComfyUI cross-tab actions
+    use_in_comfyui = Signal(list)  # List of selected paths
+    copy_prompt = Signal(str)  # Path of item to copy prompt from
+    compare_to_source = Signal(str)  # Path of item to compare
+    recreate_settings = Signal(str)  # Path of item to recreate from
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._selected_paths = []
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the toolbar UI."""
-        # Set as floating toolbar (will be positioned by parent)
+        # Enable styled background painting for QWidget with rgba colors
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
 
         # Main horizontal layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         # Selection count label
         self.count_label = QLabel("0 items selected")
         self.count_label.setStyleSheet("""
             QLabel {
                 color: #ffffff;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 padding: 4px;
             }
         """)
         layout.addWidget(self.count_label)
 
-        # Spacer
-        layout.addStretch()
+        # Separator
+        sep1 = QLabel("|")
+        sep1.setStyleSheet("color: rgba(255, 255, 255, 0.3);")
+        layout.addWidget(sep1)
+
+        # === ComfyUI Actions (show for single or multi-select) ===
+
+        # Use in ComfyUI button
+        self.use_comfyui_btn = QPushButton("Use in ComfyUI")
+        self.use_comfyui_btn.setToolTip("Load selected images as ComfyUI inputs")
+        self.use_comfyui_btn.clicked.connect(self._on_use_in_comfyui)
+        self.use_comfyui_btn.setStyleSheet(self._get_button_style("#059669"))  # Green
+        layout.addWidget(self.use_comfyui_btn)
+
+        # Copy Prompt button (single selection only)
+        self.copy_prompt_btn = QPushButton("Copy Prompt")
+        self.copy_prompt_btn.setToolTip("Copy the prompt text from this image")
+        self.copy_prompt_btn.clicked.connect(self._on_copy_prompt)
+        self.copy_prompt_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.copy_prompt_btn)
+
+        # Compare to Source button (single selection only)
+        self.compare_btn = QPushButton("Compare")
+        self.compare_btn.setToolTip("Open side-by-side with the source image")
+        self.compare_btn.clicked.connect(self._on_compare_to_source)
+        self.compare_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.compare_btn)
+
+        # Recreate Settings button (single selection only)
+        self.recreate_btn = QPushButton("Recreate")
+        self.recreate_btn.setToolTip("Restore all ComfyUI settings from this image")
+        self.recreate_btn.clicked.connect(self._on_recreate_settings)
+        self.recreate_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.recreate_btn)
+
+        # Separator
+        sep2 = QLabel("|")
+        sep2.setStyleSheet("color: rgba(255, 255, 255, 0.3);")
+        layout.addWidget(sep2)
+
+        # === Standard Actions ===
 
         # View selected button
         self.view_btn = QPushButton("View")
@@ -1394,7 +1478,7 @@ class GallerySelectionToolbar(QWidget):
         layout.addWidget(self.view_btn)
 
         # Publish to AYON button
-        self.publish_btn = QPushButton("Publish to AYON")
+        self.publish_btn = QPushButton("Publish")
         self.publish_btn.setToolTip("Publish selected images to AYON")
         self.publish_btn.clicked.connect(self.publish_selected.emit)
         self.publish_btn.setStyleSheet(self._get_button_style())
@@ -1410,7 +1494,7 @@ class GallerySelectionToolbar(QWidget):
         # Clear selection button
         self.clear_btn = QPushButton("✕")
         self.clear_btn.setToolTip("Clear selection (Escape)")
-        self.clear_btn.setFixedSize(32, 32)
+        self.clear_btn.setFixedSize(28, 28)
         self.clear_btn.clicked.connect(self.clear_selection.emit)
         self.clear_btn.setStyleSheet("""
             QPushButton {
@@ -1418,7 +1502,7 @@ class GallerySelectionToolbar(QWidget):
                 color: #9ca3af;
                 border: none;
                 border-radius: 4px;
-                font-size: 16px;
+                font-size: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -1428,11 +1512,11 @@ class GallerySelectionToolbar(QWidget):
         """)
         layout.addWidget(self.clear_btn)
 
-        # Toolbar background style
+        # Toolbar background style - 65% opacity with darker, less saturated blue
         self.setStyleSheet("""
             GallerySelectionToolbar {
-                background-color: rgba(59, 130, 246, 0.95);
-                border: 1px solid rgba(96, 165, 250, 0.5);
+                background-color: rgba(45, 65, 95, 0.65);
+                border: 1px solid rgba(70, 90, 120, 0.6);
                 border-radius: 8px;
             }
         """)
@@ -1458,12 +1542,54 @@ class GallerySelectionToolbar(QWidget):
             }}
         """
 
-    def update_count(self, count):
-        """Update the selection count display."""
+    def _on_use_in_comfyui(self):
+        """Handle 'Use in ComfyUI' action."""
+        if self._selected_paths:
+            self.use_in_comfyui.emit(self._selected_paths)
+
+    def _on_copy_prompt(self):
+        """Handle 'Copy Prompt' action."""
+        if self._selected_paths:
+            self.copy_prompt.emit(self._selected_paths[0])
+
+    def _on_compare_to_source(self):
+        """Handle 'Compare to Source' action."""
+        if self._selected_paths:
+            self.compare_to_source.emit(self._selected_paths[0])
+
+    def _on_recreate_settings(self):
+        """Handle 'Recreate Settings' action."""
+        if self._selected_paths:
+            self.recreate_settings.emit(self._selected_paths[0])
+
+    def update_count(self, count, selected_paths=None):
+        """Update the selection count display and button states.
+
+        Args:
+            count: Number of selected items
+            selected_paths: List of selected file paths (optional, for ComfyUI actions)
+        """
+        # Store paths for ComfyUI actions
+        self._selected_paths = list(selected_paths) if selected_paths else []
+
+        # Update count label
         if count == 1:
-            self.count_label.setText("1 item selected")
+            self.count_label.setText("1 selected")
         else:
-            self.count_label.setText(f"{count} items selected")
+            self.count_label.setText(f"{count} selected")
+
+        # Update button states based on selection count
+        has_single = count == 1
+        has_any = count > 0
+
+        # ComfyUI actions
+        self.use_comfyui_btn.setEnabled(has_any)
+        self.copy_prompt_btn.setEnabled(has_single)
+        self.copy_prompt_btn.setVisible(has_single)
+        self.compare_btn.setEnabled(has_single)
+        self.compare_btn.setVisible(has_single)
+        self.recreate_btn.setEnabled(has_single)
+        self.recreate_btn.setVisible(has_single)
 
     def position_at_bottom(self, parent_widget):
         """Position toolbar at bottom center of parent widget."""

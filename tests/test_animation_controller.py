@@ -25,7 +25,7 @@ class TestAnimationControllerInit:
 
     def test_default_values(self):
         """Test AnimationController initializes with correct defaults."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
 
@@ -38,14 +38,14 @@ class TestAnimationControllerInit:
 
     def test_animation_names_empty(self):
         """Test animation_names returns empty list when no animations."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         assert controller.animation_names == []
 
     def test_speed_options_defined(self):
         """Test SPEED_OPTIONS are defined."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         assert hasattr(AnimationController, 'SPEED_OPTIONS')
         assert len(AnimationController.SPEED_OPTIONS) > 0
@@ -58,7 +58,7 @@ class TestSpeedProperty:
 
     def test_minimum_bound(self):
         """Test speed is bounded at minimum 0.1."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.speed = 0.05  # Below minimum
@@ -66,7 +66,7 @@ class TestSpeedProperty:
 
     def test_maximum_bound(self):
         """Test speed is bounded at maximum 10.0."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.speed = 20.0  # Above maximum
@@ -74,7 +74,7 @@ class TestSpeedProperty:
 
     def test_valid_speed(self):
         """Test valid speed values are set correctly."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.speed = 2.0
@@ -85,7 +85,7 @@ class TestSpeedProperty:
 
     def test_boundary_values(self):
         """Test boundary values are accepted."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.speed = 0.1
@@ -101,14 +101,14 @@ class TestLoopProperty:
 
     def test_default_loop_enabled(self):
         """Test loop is enabled by default."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         assert controller.loop is True
 
     def test_set_loop_false(self):
         """Test setting loop to false."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.loop = False
@@ -116,7 +116,7 @@ class TestLoopProperty:
 
     def test_toggle_loop(self):
         """Test toggling loop on and off."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.loop = False
@@ -131,7 +131,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_play_without_animation(self):
         """Test play does nothing without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.play()
@@ -139,7 +139,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_pause_without_animation(self):
         """Test pause without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.pause()
@@ -147,7 +147,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_toggle_play_without_animation(self):
         """Test toggle_play without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.toggle_play()
@@ -156,7 +156,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_stop_without_animation(self):
         """Test stop without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.stop()
@@ -165,7 +165,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_seek_without_animation(self):
         """Test seek does nothing without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.seek(5.0)
@@ -174,7 +174,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_step_forward_without_animation(self):
         """Test step_forward without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.step_forward()
@@ -183,7 +183,7 @@ class TestPlaybackWithoutAnimation:
 
     def test_step_backward_without_animation(self):
         """Test step_backward without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.step_backward()
@@ -197,7 +197,7 @@ class TestSetAnimations:
 
     def test_set_empty_animations(self):
         """Test setting empty animation list."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.set_animations([])
@@ -206,7 +206,7 @@ class TestSetAnimations:
 
     def test_duration_without_animation(self):
         """Test duration is 0 without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         assert controller.duration == 0.0
@@ -218,7 +218,7 @@ class TestGetBoneTransforms:
 
     def test_empty_transforms_without_animation(self):
         """Test get_bone_transforms returns empty dict without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         transforms = controller.get_bone_transforms()
@@ -231,7 +231,7 @@ class TestSeekNormalized:
 
     def test_seek_normalized_without_animation(self):
         """Test seek_normalized does nothing without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.seek_normalized(0.5)
@@ -245,7 +245,7 @@ class TestNavigationMethods:
 
     def test_go_to_start_without_animation(self):
         """Test go_to_start without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.go_to_start()
@@ -253,7 +253,7 @@ class TestNavigationMethods:
 
     def test_go_to_end_without_animation(self):
         """Test go_to_end without animation."""
-        from models.animation_controller import AnimationController
+        from geo.animation_controller import AnimationController
 
         controller = AnimationController()
         controller.go_to_end()
@@ -268,7 +268,7 @@ def test_controller_initialization():
         print("Skipping test_controller_initialization - Qt not available")
         return
 
-    from models.animation_controller import AnimationController
+    from geo.animation_controller import AnimationController
 
     controller = AnimationController()
 
@@ -286,7 +286,7 @@ def test_speed_bounds():
         print("Skipping test_speed_bounds - Qt not available")
         return
 
-    from models.animation_controller import AnimationController
+    from geo.animation_controller import AnimationController
 
     controller = AnimationController()
 
@@ -309,7 +309,7 @@ def test_loop_property():
         print("Skipping test_loop_property - Qt not available")
         return
 
-    from models.animation_controller import AnimationController
+    from geo.animation_controller import AnimationController
 
     controller = AnimationController()
 
@@ -326,7 +326,7 @@ def test_animation_names_empty():
         print("Skipping test_animation_names_empty - Qt not available")
         return
 
-    from models.animation_controller import AnimationController
+    from geo.animation_controller import AnimationController
 
     controller = AnimationController()
     assert controller.animation_names == []
@@ -338,7 +338,7 @@ def test_play_pause_without_animation():
         print("Skipping test_play_pause_without_animation - Qt not available")
         return
 
-    from models.animation_controller import AnimationController
+    from geo.animation_controller import AnimationController
 
     controller = AnimationController()
 

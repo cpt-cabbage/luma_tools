@@ -31,7 +31,7 @@ from comfyui.modifier import (
 )
 
 # Re-export deadline submission functions
-from comfyui.deadline_submitter import (
+from deadline.submitter import (
     submit_comfyui_to_deadline_server_mode,
     submit_comfyui_to_deadline,
     submit_comfyui_job,
@@ -40,7 +40,7 @@ from comfyui.deadline_submitter import (
 )
 
 # Re-export deadline polling functions
-from comfyui.deadline_poller import (
+from deadline.poller import (
     poll_deadline_job_status,
     get_task_log,
     get_runner_log_from_network,

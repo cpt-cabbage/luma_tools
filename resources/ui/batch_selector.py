@@ -12,16 +12,48 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QPen, QFont, QDrag
 
 
+# Global registry for tracking active drags between BatchImageSelector widgets
+# This allows the target to know which source widget to remove the image from
+_active_drag_source = None  # (BatchImageSelector instance, image_path)
+
+
+def _set_drag_source(selector, path):
+    """Register an active drag operation from a BatchImageSelector."""
+    global _active_drag_source
+    _active_drag_source = (selector, path)
+
+
+def _get_and_clear_drag_source():
+    """Get and clear the active drag source. Returns (selector, path) or (None, None)."""
+    global _active_drag_source
+    result = _active_drag_source
+    _active_drag_source = None
+    return result if result else (None, None)
+
+
 class BatchImageThumbnail(QLabel):
-    """Thumbnail widget for batch image selection with drag/drop reordering."""
+    """Thumbnail widget for batch image selection with drag/drop reordering.
+
+    Supports gallery colors: if an image is dropped from the gallery with a
+    group color or liked status, that color is displayed as a border.
+    Order numbers are used to indicate image pairing for multiple LoadImage nodes.
+    """
     clicked = Signal(str)
     remove_requested = Signal(str)
     drag_started = Signal(object)  # Emits self
 
-    def __init__(self, image_path, pairing_color=None, order_num=None, parent=None):
+    def __init__(self, image_path, order_num=None, parent=None, gallery_color=None):
+        """Initialize thumbnail.
+
+        Args:
+            image_path: Path to the image file
+            order_num: Order number to display (1-based) - used for pairing indication
+            parent: Parent widget
+            gallery_color: Hex color string from gallery (group color, liked color)
+        """
         super().__init__(parent)
         self.image_path = image_path
-        self.pairing_color = pairing_color  # QColor or None
+        self.gallery_color = gallery_color  # Hex string or None (from gallery)
         self.order_num = order_num
         self.thumbnail_size = 120
 
@@ -44,7 +76,7 @@ class BatchImageThumbnail(QLabel):
         self._load_thumbnail()
 
     def _load_thumbnail(self):
-        """Load and display the thumbnail with color border and order number."""
+        """Load and display the thumbnail with gallery color border and order number."""
         pixmap = QPixmap(self.image_path)
         if pixmap.isNull():
             self.setText("Invalid")
@@ -63,9 +95,10 @@ class BatchImageThumbnail(QLabel):
         painter = QPainter(result)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Draw color border if pairing color is set
-        if self.pairing_color:
-            pen = QPen(self.pairing_color, 4)
+        # Draw gallery color border if available
+        if self.gallery_color:
+            border_color = QColor(self.gallery_color)
+            pen = QPen(border_color, 4)
             painter.setPen(pen)
             painter.drawRect(2, 2, self.thumbnail_size - 4, self.thumbnail_size - 4)
 
@@ -74,7 +107,7 @@ class BatchImageThumbnail(QLabel):
         y = (self.thumbnail_size - scaled.height()) // 2
         painter.drawPixmap(x, y, scaled)
 
-        # Draw order number in top-left corner
+        # Draw order number in top-left corner (used for pairing indication)
         if self.order_num is not None:
             # Semi-transparent background
             bg_color = QColor(0, 0, 0, 180)
@@ -91,10 +124,12 @@ class BatchImageThumbnail(QLabel):
         painter.end()
         self.setPixmap(result)
 
-    def update_display(self, pairing_color=None, order_num=None):
-        """Update the thumbnail with new pairing color or order number."""
-        self.pairing_color = pairing_color
-        self.order_num = order_num
+    def update_display(self, order_num=None, gallery_color=None):
+        """Update the thumbnail with new order number or gallery color."""
+        if order_num is not None:
+            self.order_num = order_num
+        if gallery_color is not None:
+            self.gallery_color = gallery_color
         self._load_thumbnail()
 
     def mousePressEvent(self, event):
@@ -115,12 +150,37 @@ class BatchImageThumbnail(QLabel):
         # Start drag operation
         drag = QDrag(self)
         mime_data = QMimeData()
+        # Set both text (for internal reordering) and custom MIME type (for cross-widget drops)
         mime_data.setText(self.image_path)
+        # Use a specific MIME type for BatchImageSelector drags (distinct from gallery drags)
+        mime_data.setData("application/x-luma-batch-image", self.image_path.encode('utf-8'))
+        # Also set the general luma-files type for compatibility
+        mime_data.setData("application/x-luma-files", self.image_path.encode('utf-8'))
         drag.setMimeData(mime_data)
         drag.setPixmap(self.pixmap().scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
+        # Register this drag so the target can remove from source (for move operation)
+        parent_selector = self._find_parent_selector()
+        if parent_selector:
+            _set_drag_source(parent_selector, self.image_path)
+
         self.drag_started.emit(self)
-        drag.exec_(Qt.MoveAction)
+        drag.exec_(Qt.MoveAction)  # Use MoveAction for input-to-input drags
+
+        # Drag ended (completed or cancelled) - clear state
+        if parent_selector:
+            parent_selector._clear_drag_state()
+        # Also clear global drag source in case drop wasn't handled
+        _get_and_clear_drag_source()
+
+    def _find_parent_selector(self):
+        """Find the parent BatchImageSelector widget."""
+        parent = self.parentWidget()
+        while parent:
+            if isinstance(parent, BatchImageSelector):
+                return parent
+            parent = parent.parentWidget()
+        return None
 
     def mouseReleaseEvent(self, event):
         """Handle mouse release for click."""
@@ -141,22 +201,11 @@ class BatchImageThumbnail(QLabel):
 class BatchImageSelector(QWidget):
     """
     Custom widget for selecting multiple images with preview thumbnails.
-    Supports drag and drop of image files, visual pairing for multiple load nodes,
-    and drag reordering.
+    Supports drag and drop of image files, order numbers for pairing indication
+    with multiple LoadImage nodes, and drag reordering.
     """
     images_changed = Signal(list)
     THUMBNAIL_SIZE = 120
-    COLORS_FOR_PAIRING = [
-        QColor("#4a9eff"),  # Blue
-        QColor("#50c878"),  # Green
-        QColor("#ff6b6b"),  # Red
-        QColor("#ffd93d"),  # Yellow
-        QColor("#a78bfa"),  # Purple
-        QColor("#fb923c"),  # Orange
-        QColor("#ec4899"),  # Pink
-        QColor("#14b8a6"),  # Teal
-    ]
-    UNPAIRED_COLOR = QColor("#ff3b3b")  # Red for unpaired images
 
     def __init__(self, supported_extensions=None, parent=None, total_image_nodes=1):
         super().__init__(parent)
@@ -166,6 +215,7 @@ class BatchImageSelector(QWidget):
         self._thumbnail_widgets = {}  # path -> BatchImageThumbnail
         self._total_image_nodes = total_image_nodes  # Total number of LoadImage nodes
         self._dragged_widget = None
+        self._gallery_colors = {}  # path -> hex color string (from gallery likes/groups)
 
         # Set size policy to expand vertically
         from PySide6.QtWidgets import QSizePolicy
@@ -193,10 +243,8 @@ class BatchImageSelector(QWidget):
 
         self.main_layout.addWidget(self.toolbar)
 
-        # Drop zone frame
-        self.drop_frame = QFrame()
-        self.drop_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Sunken)
-        self.drop_frame.setStyleSheet("""
+        # Drop zone frame - store base style for drag highlight toggling
+        self._drop_frame_base_style = """
             QFrame {
                 background-color: #2c313a;
                 border: 2px dashed #3c414b;
@@ -205,7 +253,17 @@ class BatchImageSelector(QWidget):
             QFrame:hover {
                 border-color: #4a9eff;
             }
-        """)
+        """
+        self._drop_frame_highlight_style = """
+            QFrame {
+                background-color: rgba(74, 158, 255, 0.15);
+                border: 2px solid #4a9eff;
+                border-radius: 6px;
+            }
+        """
+        self.drop_frame = QFrame()
+        self.drop_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Sunken)
+        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
         # Set size policy to expand vertically
         self.drop_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_frame.setAcceptDrops(True)
@@ -258,10 +316,10 @@ class BatchImageSelector(QWidget):
             self.add_images(files)
 
     def set_total_image_nodes(self, count):
-        """Set the total number of LoadImage nodes for pairing calculation."""
+        """Set the total number of LoadImage nodes for status display."""
         if self._total_image_nodes != count:
             self._total_image_nodes = count
-            self._rebuild_grid()  # Rebuild to recalculate colors
+            self._update_display()  # Update status label to show node count
 
     def add_images(self, paths):
         """Add images to the selection."""
@@ -278,49 +336,13 @@ class BatchImageSelector(QWidget):
         """Remove an image from the selection."""
         if path in self.selected_files:
             self.selected_files.remove(path)
+            # Also remove gallery color if stored
+            self._gallery_colors.pop(path, None)
             self._rebuild_grid()
             self.images_changed.emit(self.selected_files)
 
-    def _calculate_pairing(self):
-        """Calculate color pairing for images based on total_image_nodes.
-
-        Returns:
-            dict: Mapping of image path to (color, group_index) or (None, None) if unpaired
-        """
-        pairing = {}
-        total_images = len(self.selected_files)
-
-        if self._total_image_nodes <= 1:
-            # Single node or no pairing needed
-            for path in self.selected_files:
-                pairing[path] = (None, None)
-            return pairing
-
-        # Calculate how many images per node
-        images_per_node = total_images // self._total_image_nodes
-        remainder = total_images % self._total_image_nodes
-
-        # Assign colors to groups
-        current_idx = 0
-        for node_idx in range(self._total_image_nodes):
-            # Some nodes get an extra image if there's a remainder
-            group_size = images_per_node + (1 if node_idx < remainder else 0)
-            color = self.COLORS_FOR_PAIRING[node_idx % len(self.COLORS_FOR_PAIRING)]
-
-            for i in range(group_size):
-                if current_idx < total_images:
-                    pairing[self.selected_files[current_idx]] = (color, node_idx)
-                    current_idx += 1
-
-        # Mark any unpaired images (shouldn't happen with above logic, but just in case)
-        for path in self.selected_files:
-            if path not in pairing:
-                pairing[path] = (self.UNPAIRED_COLOR, None)
-
-        return pairing
-
     def _rebuild_grid(self):
-        """Rebuild the thumbnail grid with current pairing."""
+        """Rebuild the thumbnail grid with order numbers and gallery colors."""
         # Clear existing widgets
         for widget in list(self._thumbnail_widgets.values()):
             widget.deleteLater()
@@ -336,16 +358,18 @@ class BatchImageSelector(QWidget):
             self._update_display()
             return
 
-        # Calculate pairing
-        pairing = self._calculate_pairing()
-
-        # Create thumbnails
+        # Create thumbnails with order numbers (for pairing indication)
         columns = 4  # Fixed 4-column grid
         for idx, path in enumerate(self.selected_files):
-            color, group_idx = pairing.get(path, (None, None))
             order_num = idx + 1  # 1-based ordering
 
-            thumbnail = BatchImageThumbnail(path, color, order_num, self.grid_container)
+            # Get gallery color if available
+            gallery_color = self._gallery_colors.get(path)
+
+            thumbnail = BatchImageThumbnail(
+                path, order_num, self.grid_container,
+                gallery_color=gallery_color
+            )
             thumbnail.clicked.connect(self._on_thumbnail_clicked)
             thumbnail.remove_requested.connect(self.remove_image)
             thumbnail.drag_started.connect(self._on_drag_started)
@@ -361,6 +385,7 @@ class BatchImageSelector(QWidget):
     def clear_images(self):
         """Clear all selected images."""
         self.selected_files.clear()
+        self._gallery_colors.clear()  # Also clear gallery colors
         self._rebuild_grid()
         self.images_changed.emit(self.selected_files)
 
@@ -394,8 +419,74 @@ class BatchImageSelector(QWidget):
         pass
 
     def _on_drag_started(self, widget):
-        """Handle drag started from a thumbnail."""
+        """Handle drag started from a thumbnail (internal reordering)."""
         self._dragged_widget = widget
+
+    def _clear_drag_state(self):
+        """Clear drag state - call when drag ends or leaves."""
+        self._dragged_widget = None
+
+    def _lookup_gallery_colors(self, paths):
+        """Look up and store gallery colors for dropped images.
+
+        Checks if images have group colors or liked status in the gallery
+        and stores the colors for display in thumbnails.
+
+        Uses QTimer.singleShot to defer the lookup, allowing Qt to finish
+        processing any tab switch before we access the gallery tab.
+        """
+        from PySide6.QtCore import QTimer
+        # Defer the actual lookup to let Qt settle after any tab switch
+        QTimer.singleShot(50, lambda: self._do_gallery_color_lookup(paths))
+
+    def _do_gallery_color_lookup(self, paths):
+        """Actually perform the gallery color lookup (deferred)."""
+        try:
+            # Try to get FavoritesManager from a gallery tab
+            from core.luma_tools import get_main_window
+            main_window = get_main_window()
+            if not main_window:
+                return
+
+            # Find the gallery tab - main_window.tabs is a dict, not QTabWidget
+            gallery_tab = main_window.tabs.get('gallery')
+            if not gallery_tab or not hasattr(gallery_tab, '_favorites_manager'):
+                return
+
+            favorites_manager = gallery_tab._favorites_manager
+            if not favorites_manager:
+                return
+
+            # Look up color for each path
+            from core.settings_manager import safe_get_setting
+            liked_color = safe_get_setting("gallery_liked_color", "#10b981")
+
+            colors_found = False
+            for path in paths:
+                # Skip if path no longer in our selection (user may have removed it)
+                if path not in self.selected_files:
+                    continue
+
+                # Priority 1: Group color
+                group_colors = favorites_manager.get_item_group_colors(path)
+                if group_colors:
+                    self._gallery_colors[path] = group_colors[0]
+                    colors_found = True
+                    continue
+
+                # Priority 2: Liked color
+                if favorites_manager.is_liked(path):
+                    self._gallery_colors[path] = liked_color
+                    colors_found = True
+
+            # Rebuild grid to show colors if any were found
+            if colors_found:
+                self._rebuild_grid()
+
+        except Exception as e:
+            # Silently fail - gallery colors are a nice-to-have
+            import logging
+            logging.getLogger(__name__).debug(f"Could not lookup gallery colors: {e}")
 
     def _move_image(self, from_idx, to_idx):
         """Move an image from one position to another."""
@@ -418,21 +509,52 @@ class BatchImageSelector(QWidget):
         """Set the last browse directory."""
         self._last_browse_dir = directory
 
+    def _has_acceptable_drag_data(self, mime_data):
+        """Check if mime data contains files we can accept."""
+        # Check for drag from another BatchImageSelector (move operation)
+        if mime_data.hasFormat("application/x-luma-batch-image"):
+            return True
+        # Check for our custom MIME type (drag from gallery - copy operation)
+        if mime_data.hasFormat("application/x-luma-files"):
+            return True
+        # Check for URLs (file drops from explorer or other apps)
+        if mime_data.hasUrls():
+            return True
+        # Check for text (internal reordering)
+        if mime_data.hasText():
+            return True
+        return False
+
     def dragEnterEvent(self, event):
-        """Handle drag enter."""
-        if event.mimeData().hasUrls() or event.mimeData().hasText():
+        """Handle drag enter - show visual feedback."""
+        if self._has_acceptable_drag_data(event.mimeData()):
             event.acceptProposedAction()
+            # Check if this is an external drag (not from our own thumbnails)
+            # by checking if the drag source is from a different widget
+            is_internal = self._dragged_widget is not None
+            if not is_internal:
+                self.drop_frame.setStyleSheet(self._drop_frame_highlight_style)
 
     def dragMoveEvent(self, event):
         """Handle drag move - for internal reordering."""
         if event.mimeData().hasText() and self._dragged_widget:
             event.acceptProposedAction()
-        elif event.mimeData().hasUrls():
+        elif self._has_acceptable_drag_data(event.mimeData()):
             event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        """Handle drag leave - remove visual feedback."""
+        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+        # Note: Don't clear _dragged_widget here - it might be leaving temporarily
+        # (e.g., hovering over tab bar) and coming back
+        event.accept()
 
     def dropEvent(self, event):
         """Handle drop - either external files or internal reordering."""
-        # Check if it's an internal drag (reordering)
+        # Restore base style
+        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+
+        # Check if it's an internal drag (reordering within this widget)
         if event.mimeData().hasText() and self._dragged_widget:
             dragged_path = event.mimeData().text()
             if dragged_path in self.selected_files:
@@ -454,7 +576,49 @@ class BatchImageSelector(QWidget):
                 event.acceptProposedAction()
                 return
 
-        # External file drop
+        # Check for drag from another BatchImageSelector (move operation)
+        if event.mimeData().hasFormat("application/x-luma-batch-image"):
+            data = event.mimeData().data("application/x-luma-batch-image").data().decode('utf-8')
+            path = data.strip()
+
+            # Get the source selector and remove from it (move, not copy)
+            source_selector, source_path = _get_and_clear_drag_source()
+
+            if path and os.path.isfile(path):
+                ext = os.path.splitext(path)[1].lower()
+                if ext in self.supported_extensions:
+                    # Only add if not already in this selector
+                    if path not in self.selected_files:
+                        self.add_images([path])
+
+                    # Remove from source (if it's a different selector)
+                    if source_selector and source_selector is not self:
+                        source_selector.remove_image(source_path or path)
+                        # Clear the source's drag state
+                        source_selector._clear_drag_state()
+
+            event.acceptProposedAction()
+            return
+
+        # Check for our custom MIME type (drag from gallery - copy, not move)
+        if event.mimeData().hasFormat("application/x-luma-files"):
+            data = event.mimeData().data("application/x-luma-files").data().decode('utf-8')
+            paths = [p.strip() for p in data.split('\n') if p.strip()]
+            # Filter to only files that exist and match our extensions
+            valid_paths = []
+            for path in paths:
+                if os.path.isfile(path):
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in self.supported_extensions:
+                        valid_paths.append(path)
+            if valid_paths:
+                # Look up gallery colors for dropped images (deferred to avoid crash)
+                self._lookup_gallery_colors(valid_paths)
+                self.add_images(valid_paths)
+            event.acceptProposedAction()
+            return
+
+        # External file drop (from file explorer)
         if event.mimeData().hasUrls():
             paths = []
             for url in event.mimeData().urls():

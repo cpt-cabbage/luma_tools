@@ -24,8 +24,14 @@ EDITABLE_NODE_CONFIGS = {
     'CLIPTextEncode': [(0, 'text', 'text')],
     'HYMotionEncodeText': [(0, 'text', 'text')],
 
+    # SHARP 3D reconstruction nodes
+    'SharpPredict': [(1, 'output_prefix', 'string')],
+
     # HY-Motion export
     'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],
+
+    # Hunyuan Video nodes
+    'SaveVideo': [(0, 'filename_prefix', 'string')],
 
     # TRELLIS2 nodes
     'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # Old node
@@ -158,19 +164,27 @@ WIDGET_MAPPINGS = {
         'texture_guidance_interval_start', 'texture_guidance_interval_end',
         'use_tiled_decoder'
     ],
+    # NOTE: Trellis2PostProcessMesh has different widget counts between versions
+    # v1 (LQ): 9 widgets, v2 (HQ): 13 widgets - auto-discovery handles this
     'Trellis2PostProcessMesh': [
         'fill_holes', 'fill_holes_max_perimeter', 'remove_duplicate_faces',
         'repair_non_manifold_edges', 'remove_non_manifold_faces',
         'remove_small_connected_components', 'remove_small_connected_components_size',
-        'unify_faces_orientation', 'remove_floaters'
+        'unify_faces_orientation', 'remove_floaters',
+        # v2 additions:
+        'remove_infinite_vertices', 'merge_vertices', 'merge_distance', 'remove_nan_vertices'
     ],
     'Trellis2SimplifyMesh': ['target_face_num', 'method'],
+    # NOTE: Trellis2PostProcessAndUnWrapAndRasterizer has different widget counts between versions
+    # v1 (LQ): 16 widgets, v2 (HQ): 18 widgets - auto-discovery handles this
     'Trellis2PostProcessAndUnWrapAndRasterizer': [
         'mesh_cluster_threshold_cone_half_angle_rad', 'mesh_cluster_refine_iterations',
         'mesh_cluster_global_iterations', 'mesh_cluster_smooth_strength',
         'texture_size', 'remesh', 'remesh_band', 'remesh_project',
         'target_face_num', 'simplify_method', 'fill_holes', 'fill_holes_max_perimeter',
-        'texture_alpha_mode', 'dual_contouring_resolution', 'double_side_material', 'remove_floaters'
+        'texture_alpha_mode', 'dual_contouring_resolution', 'double_side_material', 'remove_floaters',
+        # v2 additions:
+        'bake_on_vertices', 'use_custom_normals'
     ],
     'Trellis2ExportMesh': ['filename_prefix', 'file_format', 'save_file'],
 
@@ -186,6 +200,36 @@ WIDGET_MAPPINGS = {
 
     # Switch nodes
     'easy anythingIndexSwitch': ['index'],
+    'Any Switch (rgthree)': [],  # Auto-selects first non-null input
+
+    # SHARP 3D reconstruction nodes (Image → PLY gaussian splat)
+    'LoadSharpModel': ['device', 'checkpoint_path'],
+    'SharpPredict': ['focal_length_mm', 'output_prefix'],
+    'LoadDepthPro': ['precision'],
+    'DepthPro': [],  # No widgets, just processes
+    'FocalPXtoMM': ['focal_px', 'sensor_mm', 'image_width', 'image_height'],
+    'GetImageSize': [],  # Display-only output
+    'GeomPackPreviewGaussian': [],  # Preview node
+
+    # Hunyuan Video 1.5 nodes (Image → Video)
+    'CLIPVisionLoader': ['clip_name'],
+    'CLIPVisionEncode': ['crop'],
+    'HunyuanVideo15ImageToVideo': ['width', 'height', 'length', 'batch_size'],
+    'HunyuanVideo15SuperResolution': ['noise_augmentation'],
+    'HunyuanVideo15LatentUpscaleWithModel': ['upscale_method', 'width', 'height', 'crop'],
+    'LatentUpscaleModelLoader': ['model_name'],
+    'CFGGuider': ['cfg'],
+    'ModelSamplingSD3': ['shift'],
+    'CreateVideo': ['fps'],
+    'SaveVideo': ['filename_prefix', 'format', 'codec'],
+    'EasyCache': ['reuse_threshold', 'start_percent', 'end_percent', 'verbose'],
+    'DisableNoise': [],
+    'VAEDecodeTiled': ['tile_size', 'overlap', 'temporal_size', 'temporal_overlap'],
+
+    # Qwen Image Edit nodes
+    'TorchCompileModelQwenImage': [],  # No widgets, just compiles model
+    'ReferenceLatent': [],  # No widgets, passes through
+    'ConditioningZeroOut': [],  # No widgets
 
     # Load3D node - widgets_values has 7 items in this order:
     # [0]: model_file, [1-3]: button text (upload3dmodel, uploadExtraResources, clear),
@@ -211,6 +255,8 @@ SKIP_NODE_TYPES = [
     'PreviewBridge',
     # rgthree UI-only control nodes
     'Fast Groups Muter (rgthree)', 'Image Comparer (rgthree)',
+    # Utility/cleanup nodes
+    'easy cleanGpuUsed', 'easy imageSizeByLongerSide',
 ]
 
 
@@ -234,4 +280,8 @@ EXPORT_NODE_TYPES = {
     'Trellis2ExportGLB': 'filename_prefix',
     'Trellis2ExportMesh': 'filename_prefix',
     'UltraShapeSaveGLB': 'filename_prefix',
+    # SHARP 3D reconstruction
+    'SharpPredict': 'output_prefix',
+    # Hunyuan Video
+    'SaveVideo': 'filename_prefix',
 }

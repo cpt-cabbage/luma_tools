@@ -97,6 +97,34 @@ class ApplicationState:
     comfyui_current_job_id = ThreadSafeProperty('comfyui_current_job_id', '')
     comfyui_last_generated_image = ThreadSafeProperty('comfyui_last_generated_image', '')
 
+    # Cross-tab awareness: Active job tracking
+    # List of job_ids currently being tracked (for persistence/recovery)
+    comfyui_active_job_ids = ThreadSafeProperty('comfyui_active_job_ids', [])
+    # Total outputs expected across all active jobs
+    comfyui_pending_output_count = ThreadSafeProperty('comfyui_pending_output_count', 0)
+    # Recent output paths (last N for quick access in ComfyUI tab)
+    comfyui_recent_outputs = ThreadSafeProperty('comfyui_recent_outputs', [])
+    # Generation stats for the current session
+    comfyui_session_stats = ThreadSafeProperty('comfyui_session_stats', {
+        'total_generated': 0,
+        'total_time_seconds': 0.0,
+        'jobs_completed': 0
+    })
+
+    # Cross-tab awareness: Gallery state
+    # Count of items added since user last viewed gallery
+    gallery_new_since_view = ThreadSafeProperty('gallery_new_since_view', 0)
+    # Currently selected paths in gallery
+    gallery_selected_paths = ThreadSafeProperty('gallery_selected_paths', [])
+    # Whether gallery tab is currently visible
+    gallery_visible = ThreadSafeProperty('gallery_visible', False)
+
+    # Cross-tab awareness: Workflow context
+    # Most recent input images used (for suggestions)
+    workflow_last_used_inputs = ThreadSafeProperty('workflow_last_used_inputs', [])
+    # Recent generation history for smart defaults
+    workflow_generation_history = ThreadSafeProperty('workflow_generation_history', [])
+
     # Standalone mode (running outside AYON context)
     standalone_mode = ThreadSafeProperty('standalone_mode', False)
 
@@ -162,6 +190,115 @@ class ApplicationState:
         """Check if shot context is available (job, shot, shotpath)."""
         with self._lock:
             return bool(self._jobname and self._shot and self._shotpath)
+
+    # =========================================================================
+    # Cross-Tab Awareness Helpers
+    # =========================================================================
+
+    def add_recent_output(self, path: str, max_count: int = 20) -> None:
+        """
+        Add a path to recent outputs list (for ComfyUI tab preview).
+
+        Args:
+            path: Path to the output file
+            max_count: Maximum number of recent outputs to keep
+        """
+        # Use property accessor (not _attr) to go through descriptor
+        outputs = list(self.comfyui_recent_outputs or [])
+        # Add to front, remove duplicates
+        if path in outputs:
+            outputs.remove(path)
+        outputs.insert(0, path)
+        # Trim to max
+        self.comfyui_recent_outputs = outputs[:max_count]
+
+    def update_session_stats(self, outputs_added: int = 0, time_seconds: float = 0.0,
+                             job_completed: bool = False) -> None:
+        """
+        Update session generation statistics.
+
+        Args:
+            outputs_added: Number of new outputs generated
+            time_seconds: Time taken for the generation
+            job_completed: Whether a job was completed
+        """
+        # Use property accessor (not _attr) to go through descriptor
+        stats = dict(self.comfyui_session_stats or {
+            'total_generated': 0,
+            'total_time_seconds': 0.0,
+            'jobs_completed': 0
+        })
+        stats['total_generated'] = stats.get('total_generated', 0) + outputs_added
+        stats['total_time_seconds'] = stats.get('total_time_seconds', 0.0) + time_seconds
+        if job_completed:
+            stats['jobs_completed'] = stats.get('jobs_completed', 0) + 1
+        self.comfyui_session_stats = stats
+
+    def get_session_stats(self) -> dict:
+        """Get session generation statistics."""
+        # Use property accessor (not _attr) to go through descriptor
+        return dict(self.comfyui_session_stats or {
+            'total_generated': 0,
+            'total_time_seconds': 0.0,
+            'jobs_completed': 0
+        })
+
+    def increment_gallery_new_count(self, count: int = 1) -> None:
+        """Increment the count of new items since gallery was last viewed."""
+        # Use property accessor (not _attr) to go through descriptor
+        current = self.gallery_new_since_view or 0
+        self.gallery_new_since_view = current + count
+
+    def reset_gallery_new_count(self) -> None:
+        """Reset the new items count (called when gallery becomes visible)."""
+        # Use property accessor (not _attr) to go through descriptor
+        self.gallery_new_since_view = 0
+
+    def add_to_generation_history(self, entry: dict, max_count: int = 50) -> None:
+        """
+        Add an entry to generation history for smart defaults.
+
+        Args:
+            entry: Dict with workflow_name, generation_count, seed, prompt, etc.
+            max_count: Maximum history entries to keep
+        """
+        # Use property accessor (not _attr) to go through descriptor
+        history = list(self.workflow_generation_history or [])
+        history.insert(0, entry)
+        self.workflow_generation_history = history[:max_count]
+
+    def get_workflow_defaults(self, workflow_name: str) -> dict:
+        """
+        Get smart defaults for a workflow based on history.
+
+        Args:
+            workflow_name: Name of the workflow preset
+
+        Returns:
+            Dict with suggested defaults (generation_count, etc.)
+        """
+        # Use property accessor (not _attr) to go through descriptor
+        history = self.workflow_generation_history or []
+        # Find recent entries for this workflow
+        workflow_entries = [
+            e for e in history
+            if e.get('workflow_name') == workflow_name
+        ][:10]  # Last 10 uses
+
+        if not workflow_entries:
+            return {}
+
+        # Calculate mode for generation count
+        gen_counts = [e.get('generation_count', 5) for e in workflow_entries]
+        if gen_counts:
+            suggested_count = max(set(gen_counts), key=gen_counts.count)
+        else:
+            suggested_count = 5
+
+        return {
+            'generation_count': suggested_count,
+            'uses': len(workflow_entries)
+        }
 
     def initialize_from_args(self, args):
         """

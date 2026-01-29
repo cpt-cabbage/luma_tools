@@ -11,145 +11,41 @@ This is the refactored version using the modular tab system.
 import sys
 import os
 import logging
-from datetime import datetime
 
 from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
-from core.utils import ensure_directory
+from core.logging_utils import setup_file_logging, cleanup_old_logs, setup_exception_hook, get_network_log_dir, get_local_log_dir
 
 
 # ============================================================================
 # File Logging Setup (must be early to catch all errors)
 # ============================================================================
-def setup_file_logging():
-    """Setup file-based logging to capture crashes and errors.
+# Initialize file logging immediately using centralized module
+LOG_FILE = setup_file_logging(
+    log_prefix="luma_tools",
+    subdirectory="users",
+    include_hostname=True,
+    include_username=True,
+    redirect_stdout=True,
+    tee_mode="stream"
+)
 
-    Writes to the network path from global settings (comfyui_network_output_path/_logs/)
-    for centralized debugging across all users/machines.
-    Falls back to ~/.luma_tools/logs/ if network path is unavailable.
-    Returns the log file path for reference.
-    """
-    import json
-    import socket
-    import getpass
+# Cleanup old log files
+import socket
+import getpass
+username = getpass.getuser()
+hostname = socket.gethostname()
+log_dir = get_network_log_dir("users") or get_local_log_dir()
+cleanup_old_logs(log_dir, f"luma_tools_{username}_{hostname}_", keep_count=5)
 
-    username = getpass.getuser()
-    hostname = socket.gethostname()
-
-    # Try network path from global settings for centralized logging
-    log_dir = None
-    try:
-        settings_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'global_settings', 'global_settings.json'),
-            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
-        ]
-        for settings_path in settings_paths:
-            norm_path = os.path.normpath(settings_path)
-            if os.path.exists(norm_path):
-                with open(norm_path, 'r') as f:
-                    settings = json.load(f)
-                network_path = settings.get('comfyui_network_output_path', '')
-                if network_path and os.path.isdir(network_path):
-                    log_dir = os.path.join(network_path, '_logs', 'users')
-                    os.makedirs(log_dir, exist_ok=True)
-                break
-    except Exception:
-        pass
-
-    # Fallback to local user directory
-    if not log_dir:
-        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-        ensure_directory(log_dir)
-
-    # Create timestamped log file with username and hostname for identification
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_prefix = f"luma_tools_{username}_{hostname}"
-    log_file = os.path.join(log_dir, f"{log_prefix}_{timestamp}.log")
-
-    # Setup logging
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-        ]
-    )
-
-    # Create a custom stream that writes to both original stdout AND log file
-    class TeeStream:
-        """Stream that writes to both the original stream and log file."""
-        def __init__(self, original_stream, log_func):
-            self.original = original_stream
-            self.log_func = log_func
-            self.buffer = ""
-
-        def write(self, text):
-            if self.original:
-                self.original.write(text)
-            # Buffer lines for logging
-            self.buffer += text
-            while '\n' in self.buffer:
-                line, self.buffer = self.buffer.split('\n', 1)
-                if line.strip():
-                    self.log_func(line)
-
-        def flush(self):
-            if self.original:
-                self.original.flush()
-            if self.buffer.strip():
-                self.log_func(self.buffer)
-                self.buffer = ""
-
-    # Wrap stdout and stderr to also write to log file
-    sys.stdout = TeeStream(sys.__stdout__, logging.info)
-    sys.stderr = TeeStream(sys.__stderr__, logging.error)
-
-    # Cleanup old log files (keep last 5 per user+hostname combination)
-    try:
-        log_files = sorted(
-            [f for f in os.listdir(log_dir) if f.startswith(f"{log_prefix}_") and f.endswith(".log")],
-            reverse=True
-        )
-        for old_file in log_files[5:]:
-            try:
-                os.remove(os.path.join(log_dir, old_file))
-            except OSError:
-                pass
-    except Exception:
-        pass
-
-    logging.info(f"=== Luma Tools Starting ===")
-    logging.info(f"Log file: {log_file}")
-
-    return log_file
-
-
-# Initialize file logging immediately
-LOG_FILE = setup_file_logging()
-
-
-def exception_hook(exc_type, exc_value, exc_traceback):
-    """Global exception handler to log unhandled exceptions."""
-    import traceback
-    logging.error("=" * 60)
-    logging.error("UNHANDLED EXCEPTION")
-    logging.error("=" * 60)
-    tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-    for line in tb_lines:
-        for subline in line.rstrip().split('\n'):
-            logging.error(subline)
-    logging.error("=" * 60)
-    # Also print to stderr for visibility
-    sys.__stderr__.write("".join(tb_lines))
-
+logging.info(f"=== Luma Tools Starting ===")
 
 # Install global exception hook
-sys.excepthook = exception_hook
+setup_exception_hook()
 
 # Set up Windows things
 if sys.platform == 'win32':
     import ctypes
-    kernel32 = ctypes.WinDLL('kernel32')
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
     user32 = ctypes.WinDLL('user32')
     SW_HIDE = 0
     hWnd = kernel32.GetConsoleWindow()
@@ -231,7 +127,7 @@ from icons import IconManager, TAB_COLORS, DEFAULT_ICON_COLOR
 from core.state_manager import app_state
 
 # Import tab configuration
-from tabs import TAB_CONFIG
+from ui.tabs import TAB_CONFIG
 
 
 # ============================================================================
@@ -242,8 +138,7 @@ from tabs import TAB_CONFIG
 
 _DEBUG_ARGS = {}
 _TAB_ALIASES = {
-    'gallery': 'comfyui_gallery',
-    'comfyui_gallery': 'comfyui_gallery',
+    'gallery': 'gallery',
     'comfyui': 'comfyui',
     'settings': 'settings',
     'logs': 'logs',
@@ -325,6 +220,19 @@ logging.info("OIIO INFO " + OIIO_INFO_ROOT)
 logging.info("FFMPEG " + FFMPEG_PATH)
 
 
+# Global reference to main window for cross-widget access
+_main_window = None
+
+
+def get_main_window():
+    """Get the main application window instance.
+
+    Returns:
+        LumaShotTools instance or None if not yet created.
+    """
+    return _main_window
+
+
 class LogStream(QtCore.QObject):
     """Custom stream that redirects output to the log widget."""
     message_written = QtCore.Signal(str)
@@ -338,10 +246,16 @@ class LogStream(QtCore.QObject):
 
 
 class ExpandingTabBar(QTabBar):
-    """Custom tab bar that expands tabs to fill the available width."""
+    """Custom tab bar that expands tabs to fill the available width.
+
+    Supports hover-to-switch during drag operations: when dragging files
+    over a tab header for 500ms, that tab becomes active.
+    """
 
     # Padding on each side of the tab bar
     HORIZONTAL_PADDING = 10
+    # Delay before switching tabs during drag hover (milliseconds)
+    DRAG_HOVER_DELAY = 500
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -351,6 +265,86 @@ class ExpandingTabBar(QTabBar):
         self.setUsesScrollButtons(False)
         # Enable document mode for cleaner look
         self.setDocumentMode(True)
+
+        # Enable drag-and-drop for hover-to-switch functionality
+        self.setAcceptDrops(True)
+
+        # Track drag hover state
+        self._drag_hover_tab = -1
+        self._drag_hover_timer = QtCore.QTimer(self)
+        self._drag_hover_timer.setSingleShot(True)
+        self._drag_hover_timer.timeout.connect(self._on_drag_hover_timeout)
+
+    def dragEnterEvent(self, event):
+        """Accept drag to enable hover-to-switch."""
+        try:
+            # Accept any drag that contains files (URLs or text with paths)
+            if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-luma-files"):
+                event.acceptProposedAction()
+                self._update_drag_hover(event.position().toPoint())
+            else:
+                event.ignore()
+        except Exception as e:
+            logging.debug(f"ExpandingTabBar.dragEnterEvent error: {e}")
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Track which tab is being hovered during drag."""
+        try:
+            if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-luma-files"):
+                event.acceptProposedAction()
+                self._update_drag_hover(event.position().toPoint())
+            else:
+                event.ignore()
+        except Exception as e:
+            logging.debug(f"ExpandingTabBar.dragMoveEvent error: {e}")
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Cancel hover timer when drag leaves."""
+        self._cancel_drag_hover()
+        event.accept()
+
+    def dropEvent(self, event):
+        """Don't handle the drop - let the actual target widget handle it."""
+        # Cancel hover timer
+        self._cancel_drag_hover()
+        # Ignore the drop so it propagates to the actual drop target
+        event.ignore()
+
+    def _update_drag_hover(self, pos):
+        """Update drag hover state based on cursor position."""
+        try:
+            tab_index = self.tabAt(pos)
+
+            if tab_index != self._drag_hover_tab:
+                # Hovering over a different tab, reset timer
+                self._drag_hover_tab = tab_index
+                self._drag_hover_timer.stop()
+
+                if tab_index >= 0 and tab_index != self.currentIndex():
+                    # Start timer to switch to this tab
+                    self._drag_hover_timer.start(self.DRAG_HOVER_DELAY)
+        except Exception as e:
+            logging.debug(f"ExpandingTabBar._update_drag_hover error: {e}")
+
+    def _cancel_drag_hover(self):
+        """Cancel any pending tab switch."""
+        try:
+            self._drag_hover_timer.stop()
+            self._drag_hover_tab = -1
+        except Exception:
+            pass
+
+    def _on_drag_hover_timeout(self):
+        """Handle hover timeout during drag - tab switching is disabled.
+
+        Qt crashes when switching tabs during an active drag operation because
+        the drag source widget (on the source tab) gets invalidated. Tab switching
+        during drag is not supported.
+        """
+        # Tab switching during drag causes Qt crashes - disabled
+        pass
 
     def tabSizeHint(self, index):
         """Calculate tab size to fill the tab bar width evenly."""
@@ -470,6 +464,9 @@ class LumaShotTools(QtWidgets.QWidget):
         self._version_check_timer.timeout.connect(self._check_deployed_version)
         self._version_check_timer.start(120000)  # 120000ms = 2 minutes
 
+        # Subscribe to event bus for window title progress updates
+        self._setup_event_bus_subscriptions()
+
     def _load_tabs(self):
         """Load all tabs using the modular tab system."""
         # Create main layout
@@ -512,6 +509,11 @@ class LumaShotTools(QtWidgets.QWidget):
         self.last_log_label.setStyleSheet("color: #888888; font-size: 11px;")
         status_layout.addWidget(self.last_log_label, 0)
 
+        # Hide log label by default, show only if user setting is enabled
+        from core.settings_manager import get_setting
+        self._show_statusbar_log = get_setting("show_statusbar_log")
+        self.last_log_label.setVisible(self._show_statusbar_log)
+
         status_widget = QtWidgets.QWidget()
         status_widget.setLayout(status_layout)
         layout.addWidget(status_widget, 0)  # stretch factor 0
@@ -523,7 +525,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
             # Skip ComfyUI and Gallery tabs for users without elevated access
             # Admins and Supervisors can access these tabs
-            if not app_state.has_elevated_access and restrict_key in ['comfyui', 'comfyui_gallery']:
+            if not app_state.has_elevated_access and restrict_key in ['comfyui', 'gallery']:
                 logging.info(f"Skipping initialization of '{restrict_key}' tab for regular user")
                 continue
 
@@ -592,11 +594,20 @@ class LumaShotTools(QtWidgets.QWidget):
             self.logs_tab.append_log(message)
 
         # Update last log label in status bar (truncate if too long)
-        if hasattr(self, 'last_log_label'):
+        # Only update if setting is enabled
+        if hasattr(self, 'last_log_label') and getattr(self, '_show_statusbar_log', False):
             clean_msg = message.strip()
             if len(clean_msg) > 80:
                 clean_msg = clean_msg[:77] + "..."
             self.last_log_label.setText(clean_msg)
+
+    def update_statusbar_log_visibility(self, visible: bool):
+        """Update the status bar log label visibility based on user setting."""
+        self._show_statusbar_log = visible
+        if hasattr(self, 'last_log_label'):
+            self.last_log_label.setVisible(visible)
+            if not visible:
+                self.last_log_label.setText("")
 
     def start_status_spinner(self):
         """Start the status bar spinner to indicate a background operation."""
@@ -654,10 +665,10 @@ class LumaShotTools(QtWidgets.QWidget):
         save_tab_order(tab_names)
 
     def select_tab_by_name(self, restrict_key):
-        """Select a tab by its restrict_key name (e.g. 'comfyui_gallery').
+        """Select a tab by its restrict_key name (e.g. 'gallery').
 
         Args:
-            restrict_key: Tab identifier from TAB_CONFIG (e.g. 'comfyui_gallery',
+            restrict_key: Tab identifier from TAB_CONFIG (e.g. 'gallery',
                          'comfyui', 'settings', 'logs', 'passbuilder', etc.)
 
         Returns:
@@ -738,7 +749,7 @@ class LumaShotTools(QtWidgets.QWidget):
         thumbnails during startup.
         """
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
             service.clear_cache()  # Clear all model thumbnails
             logging.info("Cleared thumbnail cache for new version")
@@ -848,7 +859,7 @@ class LumaShotTools(QtWidgets.QWidget):
             tab_name = widget.objectName()
 
             # Supervisors can see ComfyUI, Gallery, and Settings tabs (Settings is read-only)
-            if app_state.is_sup and tab_name in ['comfyui', 'comfyui_gallery', 'settings']:
+            if app_state.is_sup and tab_name in ['comfyui', 'gallery', 'settings']:
                 continue
 
             if tab_name in restricted:
@@ -878,7 +889,7 @@ class LumaShotTools(QtWidgets.QWidget):
             'shotcleaner': 'trash',
             'logs': 'terminal',
             'comfyui': 'sparkles',
-            'comfyui_gallery': 'image',
+            'gallery': 'image',
             'settings': 'settings',
         }
 
@@ -973,6 +984,80 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Show message for 5 seconds
         self._tray_icon.showMessage(title, message, icon, 5000)
+
+    def _setup_event_bus_subscriptions(self):
+        """Subscribe to event bus signals for window title updates."""
+        try:
+            from core.event_bus import pipeline_events
+
+            # Update window title when jobs progress
+            pipeline_events.job_progress.connect(self._on_job_progress_for_title)
+            pipeline_events.job_completed.connect(self._on_job_completed_for_title)
+            pipeline_events.all_jobs_completed.connect(self._on_all_jobs_completed_for_title)
+
+            logging.debug("Main window subscribed to event bus for title updates")
+        except ImportError:
+            logging.warning("Event bus not available - window title progress disabled")
+
+    def _on_job_progress_for_title(self, job_id, progress, message):
+        """Update window title with current progress."""
+        try:
+            from core.event_bus import pipeline_events
+            progress_info = pipeline_events.get_aggregate_progress()
+            self.update_window_title_progress(progress_info)
+        except Exception as e:
+            logging.debug(f"Error updating window title: {e}")
+
+    def _on_job_completed_for_title(self, job_id, output_paths):
+        """Update window title after job completion."""
+        try:
+            from core.event_bus import pipeline_events
+            progress_info = pipeline_events.get_aggregate_progress()
+            self.update_window_title_progress(progress_info)
+        except Exception as e:
+            logging.debug(f"Error updating window title: {e}")
+
+    def _on_all_jobs_completed_for_title(self, total_outputs, elapsed_seconds):
+        """Reset window title when all jobs complete."""
+        # Delay reset slightly to show completion state
+        QtCore.QTimer.singleShot(3000, lambda: self.update_window_title_progress(None))
+
+    def update_window_title_progress(self, progress_info=None):
+        """Update window title to show job progress.
+
+        Args:
+            progress_info: Dict with keys 'total_jobs', 'avg_progress', etc.
+                           If None, resets to normal title.
+        """
+        if progress_info is None or progress_info.get('total_jobs', 0) == 0:
+            # Reset to normal title
+            if app_state.standalone_mode:
+                self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}")
+            else:
+                self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}")
+            return
+
+        # Build progress string
+        total = progress_info.get('total_jobs', 0)
+        completed = progress_info.get('completed_jobs', 0)
+        avg_progress = progress_info.get('avg_progress', 0)
+        active = total - completed - progress_info.get('failed_jobs', 0)
+
+        if active > 0:
+            if completed > 0:
+                progress_str = f"{completed}/{total} jobs"
+            else:
+                progress_str = f"{active} jobs"
+            if avg_progress > 0:
+                progress_str += f" • {avg_progress}%"
+        else:
+            progress_str = f"{completed} jobs done"
+
+        # Update title with progress
+        if app_state.standalone_mode:
+            self.setWindowTitle(f"{APP_TITLE} ({progress_str}) - v{APP_VERSION}")
+        else:
+            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} ({progress_str}) - v{APP_VERSION}")
 
     def showEvent(self, event):
         """Override show event to force cursor update when window is first shown."""
@@ -1174,7 +1259,9 @@ def main():
         splash.update_progress(88, "Loading", "Creating application window...")
         app.processEvents()
 
+        global _main_window
         window = LumaShotTools()
+        _main_window = window  # Store reference for cross-widget access
 
         # NOTE: 3D viewer initialization moved to AFTER splash closes
         # to prevent blocking the splash screen during WebEngine initialization
@@ -1215,7 +1302,7 @@ def main():
         def init_threejs_viewer():
             """Initialize Three.js viewer in the background after UI is ready."""
             try:
-                from models.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
+                from geo.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
                 if is_threejs_viewer_available():
                     logging.info("Starting async 3D viewer initialization...")
                     _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)

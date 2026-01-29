@@ -68,56 +68,71 @@ except ImportError:
         resolve_comfyui_paths,
     )
 
+# Try to use centralized logging utilities, fall back to local implementations for farm execution
+try:
+    from core.logging_utils import TeeWriter, get_network_log_dir, get_local_log_dir
+    _USE_CENTRAL_LOGGING = True
+except ImportError:
+    _USE_CENTRAL_LOGGING = False
+
 
 # =============================================================================
-# LOGGING SETUP - Tee stdout/stderr to log file
+# LOGGING SETUP - Uses centralized module when available, falls back for farm
 # =============================================================================
 
-class TeeWriter:
-    """Writes to both the original stream and a log file."""
+if not _USE_CENTRAL_LOGGING:
+    # Local fallback implementations for standalone farm execution
 
-    def __init__(self, original_stream, log_file):
-        self.original_stream = original_stream
-        self.log_file = log_file
+    class TeeWriter:
+        """Writes to both the original stream and a log file."""
 
-    def write(self, message):
-        self.original_stream.write(message)
-        if message.strip():
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.log_file.write(f"{timestamp} | {message}")
-            if not message.endswith('\n'):
+        def __init__(self, original_stream, log_file):
+            self.original_stream = original_stream
+            self.log_file = log_file
+
+        def write(self, message):
+            self.original_stream.write(message)
+            if message.strip():
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.log_file.write(f"{timestamp} | {message}")
+                if not message.endswith('\n'):
+                    self.log_file.write('\n')
+            elif message == '\n':
                 self.log_file.write('\n')
-        elif message == '\n':
-            self.log_file.write('\n')
-        self.log_file.flush()
+            self.log_file.flush()
 
-    def flush(self):
-        self.original_stream.flush()
-        self.log_file.flush()
+        def flush(self):
+            self.original_stream.flush()
+            self.log_file.flush()
 
+    def get_network_log_dir(subdirectory: str = "runner") -> str:
+        """Get network log directory from global settings (fallback for farm)."""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            settings_paths = [
+                os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
+                r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
+            ]
+            for settings_path in settings_paths:
+                norm_path = os.path.normpath(settings_path)
+                if os.path.exists(norm_path):
+                    with open(norm_path, 'r') as f:
+                        settings = json.load(f)
+                    network_path = settings.get('comfyui_network_output_path', '')
+                    if network_path and os.path.isdir(network_path):
+                        log_dir = os.path.join(network_path, '_logs', subdirectory)
+                        os.makedirs(log_dir, exist_ok=True)
+                        return log_dir
+                    break
+        except Exception:
+            pass
+        return None
 
-def _get_network_log_dir() -> str:
-    """Get network log directory from global settings (comfyui_network_output_path/_logs/)."""
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        settings_paths = [
-            os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
-        ]
-        for settings_path in settings_paths:
-            norm_path = os.path.normpath(settings_path)
-            if os.path.exists(norm_path):
-                with open(norm_path, 'r') as f:
-                    settings = json.load(f)
-                network_path = settings.get('comfyui_network_output_path', '')
-                if network_path and os.path.isdir(network_path):
-                    log_dir = os.path.join(network_path, '_logs', 'runner')
-                    os.makedirs(log_dir, exist_ok=True)
-                    return log_dir
-                break
-    except Exception:
-        pass
-    return None
+    def get_local_log_dir() -> str:
+        """Get local fallback log directory."""
+        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        return log_dir
 
 
 def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
@@ -135,7 +150,7 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
         Path to the log file
     """
     # Primary: network log directory from global settings
-    log_dir = _get_network_log_dir()
+    log_dir = get_network_log_dir("runner")
 
     # Fallback: job output directory (also network-accessible)
     if not log_dir and network_output_dir and os.path.isdir(network_output_dir):
@@ -143,8 +158,7 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
 
     # Last resort: local user directory
     if not log_dir:
-        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-        os.makedirs(log_dir, exist_ok=True)
+        log_dir = get_local_log_dir()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if job_name:
@@ -166,9 +180,6 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
     sys.stderr = TeeWriter(sys.__stderr__, log_file)
 
     # Update the logging module's StreamHandler to use the tee'd stderr
-    # so logger.info() etc. also write to the log file via TeeWriter.
-    # (basicConfig creates a StreamHandler pointing to the original stderr
-    # before TeeWriter replaces it, so we need to update the reference.)
     for handler in logging.getLogger().handlers:
         if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
             handler.stream = sys.stderr  # Now points to TeeWriter

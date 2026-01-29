@@ -74,7 +74,7 @@
       }
     }
   },
-  "comfyui_path": "C:\\ComfyUI\\",
+  "comfyui_path": "D:\\ComfyUI\\",
   "comfyui_mode": "embedded",
   "comfyui_python_path": "C:\\ComfyUi\\Comfy_Ui_Data\\.venv\\Scripts\\python.exe",
   "admin_users": [
@@ -92,11 +92,11 @@
   "comfyui_disable_smart_memory": false,
   "restricted_tabs": [
     "comfyui",
-    "comfyui_gallery"
+    "gallery"
   ],
   "comfyui_timeout": 3600,
   "comfyui_server_not_found_behavior": "wait",
-  "comfyui_server_wait_timeout": 3600,
+  "comfyui_server_wait_timeout": 3360,
   "sup_users": [
     "bruce.mclaren",
     "craig.portnoy",

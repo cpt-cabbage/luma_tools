@@ -17,17 +17,21 @@ from thumbnail_styles import (
     derive_background_from_color, derive_border_from_color,
 )
 from dialog_helpers import get_active_window
+from drag_drop import DraggableMixin, create_drag_pixmap
 
 
 # ============================================================================
 # STACKED THUMBNAIL WIDGET (Photo stack style grouping)
 # ============================================================================
 
-class StackedThumbnailWidget(QWidget):
+class StackedThumbnailWidget(DraggableMixin, QWidget):
     """Stacked thumbnail widget showing a pile of images with count badge.
 
     Displays a representative thumbnail with stacked visual effect and a count
     badge. Clicking expands/collapses the stack with card-deck animation.
+
+    Supports drag-and-drop: all items in the stack can be dragged to
+    BatchImageSelector or other drop targets that accept files.
 
     Signals:
         clicked(str): Emitted with stack_id when the stack is clicked
@@ -82,6 +86,9 @@ class StackedThumbnailWidget(QWidget):
             border_radius=8,
             group_color=group_color
         )
+
+        # Initialize drag support
+        self._init_drag_state()
 
         self._setup_ui()
         self.setToolTip(f"{stack_id}\n{self._count} items - Click to expand")
@@ -530,7 +537,7 @@ class StackedThumbnailWidget(QWidget):
     def _load_model_thumbnail(self, path):
         """Load a 3D model thumbnail from cache or generate it."""
         try:
-            from models.thumbnail_service import get_model_thumbnail_service
+            from geo.thumbnail_service import get_model_thumbnail_service
             service = get_model_thumbnail_service()
 
             # Try to get cached thumbnail (returns QPixmap)
@@ -733,6 +740,9 @@ class StackedThumbnailWidget(QWidget):
         # Use QApplication.keyboardModifiers() for more reliable modifier detection
         mods = QApplication.keyboardModifiers()
         if event.button() == Qt.LeftButton:
+            # Store drag start position for potential drag operation
+            self._handle_drag_press(event)
+
             # Check for shift-click (range selection)
             if mods & Qt.ShiftModifier:
                 if self._gallery_tab and self._top_item:
@@ -747,6 +757,25 @@ class StackedThumbnailWidget(QWidget):
                 self.set_selected(True)
                 self.clicked.emit(self.stack_id)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for drag initiation."""
+        if self._handle_drag_move(event):
+            return  # Drag was started
+        super().mouseMoveEvent(event)
+
+    def _get_drag_paths(self):
+        """Return all paths in the stack for dragging."""
+        return [item['path'] for item in self._items]
+
+    def _get_drag_pixmap(self, paths):
+        """Create drag pixmap using our thumbnail if available."""
+        # Use our stacked thumbnail visualization
+        if self.thumbnail_label:
+            pixmap = self.thumbnail_label.pixmap()
+            if pixmap and not pixmap.isNull():
+                return pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return create_drag_pixmap(paths)
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click - toggle expansion."""
@@ -1303,6 +1332,7 @@ class StackedThumbnailWidget(QWidget):
         # Create individual backgrounds for each expanded widget
         # This avoids the issue of a single bounding box covering neighboring stacks
         self._expanded_backgrounds = []
+        self._bg_widget_map = {}  # widget -> bg_frame mapping for position tracking
 
         # Get the dominant color for this stack
         dominant_color = self._get_dominant_color()
@@ -1312,6 +1342,7 @@ class StackedThumbnailWidget(QWidget):
         from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
 
         self._bg_fade_animations = []
+        self._bg_padding = 4  # Store for use in eventFilter
 
         for idx, widget in enumerate(self._expanded_widgets):
             if not isValid(widget) or not widget.isVisible():
@@ -1320,7 +1351,7 @@ class StackedThumbnailWidget(QWidget):
             geom = widget.geometry()
 
             # Add small padding around each widget
-            padding = 4
+            padding = self._bg_padding
             bg_rect = QRect(
                 int(geom.x() - padding),
                 int(geom.y() - padding),
@@ -1359,6 +1390,10 @@ class StackedThumbnailWidget(QWidget):
             QTimer.singleShot(delay, fade_anim.start)
 
             self._expanded_backgrounds.append(bg_frame)
+            self._bg_widget_map[widget] = bg_frame
+
+            # Install event filter to track widget movement
+            widget.installEventFilter(self)
 
         # Keep reference to first one for compatibility (collapse cleanup)
         self._expanded_background = self._expanded_backgrounds[0] if self._expanded_backgrounds else None
@@ -1377,6 +1412,26 @@ class StackedThumbnailWidget(QWidget):
                     bg_frame.setGraphicsEffect(None)
             except RuntimeError:
                 pass
+
+    def eventFilter(self, watched, event):
+        """Track expanded widget movement and update background positions."""
+        from PySide6.QtCore import QEvent, QRect
+        from shiboken6 import isValid
+
+        if event.type() == QEvent.Move:
+            bg_frame = getattr(self, '_bg_widget_map', {}).get(watched)
+            if bg_frame and isValid(bg_frame):
+                padding = getattr(self, '_bg_padding', 4)
+                geom = watched.geometry()
+                bg_rect = QRect(
+                    int(geom.x() - padding),
+                    int(geom.y() - padding),
+                    int(geom.width() + 2 * padding),
+                    int(geom.height() + 2 * padding)
+                )
+                bg_frame.setGeometry(bg_rect)
+
+        return super().eventFilter(watched, event)
 
     def _get_dominant_color(self):
         """Get the dominant color for this stack (group > liked > default blue)."""
@@ -1424,6 +1479,14 @@ class StackedThumbnailWidget(QWidget):
         self._cancel_animations()
         self._is_expanded = False
         self.expanded.emit(self.stack_id, False)
+
+        # Remove event filters from expanded widgets
+        for widget in getattr(self, '_expanded_widgets', []):
+            try:
+                widget.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        self._bg_widget_map = {}
 
         # Remove backgrounds immediately
         for bg_frame in getattr(self, '_expanded_backgrounds', []):
