@@ -37,7 +37,7 @@ from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
 from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
 from small_widgets import StackedThumbnailWidget, show_popup_menu
-from drag_drop import DraggableMixin, create_drag_pixmap
+from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
 
 
 # ============================================================================
@@ -197,7 +197,7 @@ def cache_image_thumbnail(path, data):
 # UNIFIED THUMBNAIL WIDGET (for images and 3D models)
 # ============================================================================
 
-class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
+class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseThumbnailWidget):
     """
     Unified thumbnail widget for both images and 3D models.
 
@@ -208,6 +208,9 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
 
     Supports drag-and-drop: items can be dragged to BatchImageSelector
     or other input widgets. Use hover-to-switch-tab to drag across tabs.
+
+    Also acts as drop target: dropping items onto this thumbnail creates
+    a new group containing this item and the dropped items.
     """
     clicked = Signal(str)
     fullscreen_requested = Signal(str)
@@ -216,6 +219,7 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
     viewed = Signal(str)
     selection_changed = Signal(str, bool)  # path, is_selected
     like_toggled = Signal(str, bool)  # path, is_liked
+    group_items_requested = Signal(list)  # [paths] - create new group with these items
 
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,
@@ -258,6 +262,9 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
 
         # Initialize drag support
         self._init_drag_state()
+
+        # Initialize drop target support (accept images, videos, models)
+        self._init_drop_target({'image', 'video', 'model'})
 
         # Styler uses is_model to determine border color
         self._styler = ThumbnailStyler(
@@ -302,26 +309,6 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         self.filename_label.setContextMenuPolicy(Qt.NoContextMenu)
         layout.addWidget(self.filename_label)
 
-        # Note indicator (top-right) - outline style
-        self.note_indicator = QLabel(self.thumbnail_label)
-        self.note_indicator.setText("N")
-        self.note_indicator.setAlignment(Qt.AlignCenter)
-        self.note_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 0.4);
-                color: rgba(74, 158, 255, 0.9);
-                border: 1px solid rgba(74, 158, 255, 0.6);
-                border-radius: 9px;
-                font-size: 10px;
-                font-weight: bold;
-            }
-        """)
-        self.note_indicator.setFixedSize(18, 18)
-        self.note_indicator.move(self.THUMBNAIL_SIZE[0] - 22, 4)
-        self.note_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.note_indicator.setContextMenuPolicy(Qt.NoContextMenu)
-        self.note_indicator.hide()
-
         # Selection checkmark indicator (top-left) - outline style
         self.selection_indicator = QLabel(self.thumbnail_label)
         self.selection_indicator.setText("✓")
@@ -342,16 +329,16 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         self.selection_indicator.setContextMenuPolicy(Qt.NoContextMenu)
         self.selection_indicator.hide()
 
-        # Like indicator (heart icon, below selection indicator) - outline style
+        # Like indicator (heart icon, top-right corner) - always visible, toggleable
         self.like_indicator = QLabel(self.thumbnail_label)
         self.like_indicator.setText("♥")
         self.like_indicator.setAlignment(Qt.AlignCenter)
-        self.like_indicator.setFixedSize(22, 22)
-        self.like_indicator.move(4, 32)
+        self.like_indicator.setFixedSize(26, 26)
+        self.like_indicator.move(self.THUMBNAIL_SIZE[0] - 30, 4)
         self.like_indicator.setCursor(Qt.PointingHandCursor)
         self.like_indicator.setContextMenuPolicy(Qt.NoContextMenu)
-        self.like_indicator.hide()
         self._update_like_indicator_style()
+        # Always visible - no hide()
 
         # Group dots indicator (bottom-right, shows up to 3 colored dots)
         self.group_dots_container = QWidget(self.thumbnail_label)
@@ -365,15 +352,6 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         self._group_dots_layout.addStretch()
         self.group_dots_container.hide()
 
-        # File type indicator (bottom-left)
-        self.type_indicator = QLabel(self.thumbnail_label)
-        self.type_indicator.setAlignment(Qt.AlignCenter)
-        self.type_indicator.setFixedSize(20, 20)
-        self.type_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
-        self.type_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.type_indicator.setContextMenuPolicy(Qt.NoContextMenu)
-        self._apply_type_indicator()
-
         # NEW indicator (top-right, pulsing red notification dot for new items)
         # Uses same visual style as TabGlowEffect and ButtonNotificationBadge
         from effects import ThumbnailNotificationDot
@@ -386,24 +364,18 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
 
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state."""
+        drop_hover = getattr(self, '_drop_highlight_active', False)
         style = self._styler.get_style(
             selected=self._is_selected,
             hover=self._is_hovered,
-            is_new=self._is_new
+            is_new=self._is_new,
+            drop_hover=drop_hover
         )
         self.thumbnail_label.setStyleSheet(style)
 
     def _apply_filename_style(self):
         # New items no longer use green - they have a pulsing NEW badge instead
         self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
-
-    def _apply_type_indicator(self):
-        """Apply the appropriate icon and style for the file type - outline style."""
-        from thumbnail_styles import get_type_indicator_style
-        icon, stylesheet = get_type_indicator_style(self.item_type)
-        self.type_indicator.setText(icon)
-        self.type_indicator.setStyleSheet(stylesheet)
-        self.type_indicator.show()
 
     # --- Likes and Groups ---
     def set_favorites_manager(self, manager):
@@ -431,12 +403,9 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         """Update like and group visual state from favorites manager."""
         if not self._favorites_manager:
             return
-        # Update like state
+        # Update like state (heart is always visible, style changes when liked)
         self._is_liked = self._favorites_manager.is_liked(self.path)
         self._update_like_indicator_style()
-        # Show like indicator if liked (always visible when liked)
-        if self._is_liked:
-            self.like_indicator.show()
 
         # Update group colors
         self._group_colors = self._favorites_manager.get_item_group_colors(self.path)
@@ -444,31 +413,38 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         self._update_group_border()
 
     def _update_like_indicator_style(self):
-        """Update the like indicator appearance based on liked state - outline style."""
+        """Update the like indicator appearance based on liked state - uses color from settings."""
+        from core.settings_manager import get_setting
+
+        # Get liked color from settings (default mint green if not set)
+        liked_color = get_setting("gallery_liked_color") or "#55ff9c"
+        hex_color = liked_color.lstrip('#')
+        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+
         if self._is_liked:
-            self.like_indicator.setStyleSheet("""
-                QLabel {
+            self.like_indicator.setStyleSheet(f"""
+                QLabel {{
                     background-color: rgba(0, 0, 0, 0.4);
-                    color: rgba(239, 68, 68, 0.95);
-                    border: 2px solid rgba(239, 68, 68, 0.8);
-                    border-radius: 11px;
-                    font-size: 13px;
-                }
+                    color: rgba({r}, {g}, {b}, 0.95);
+                    border: 2px solid rgba({r}, {g}, {b}, 0.8);
+                    border-radius: 13px;
+                    font-size: 15px;
+                }}
             """)
         else:
-            self.like_indicator.setStyleSheet("""
-                QLabel {
+            self.like_indicator.setStyleSheet(f"""
+                QLabel {{
                     background-color: rgba(0, 0, 0, 0.3);
                     color: rgba(255, 255, 255, 0.5);
                     border: 1px solid rgba(255, 255, 255, 0.3);
-                    border-radius: 11px;
-                    font-size: 13px;
-                }
-                QLabel:hover {
+                    border-radius: 13px;
+                    font-size: 15px;
+                }}
+                QLabel:hover {{
                     background-color: rgba(0, 0, 0, 0.4);
-                    color: rgba(239, 68, 68, 0.9);
-                    border: 2px solid rgba(239, 68, 68, 0.7);
-                }
+                    color: rgba({r}, {g}, {b}, 0.9);
+                    border: 2px solid rgba({r}, {g}, {b}, 0.7);
+                }}
             """)
 
     def _update_group_dots(self):
@@ -500,24 +476,19 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         self.group_dots_container.show()
 
     def _update_group_border(self):
-        """Update thumbnail border color with priority: group > liked > stack."""
+        """Update thumbnail border color based on group membership.
+
+        Liked state is shown only via the heart icon, not the border.
+        """
         from core.settings_manager import get_setting
 
-        # Priority 1: Group color (highest)
+        # Priority 1: Group color (from user-defined groups)
         if self._group_colors:
             self._styler.group_color = self._group_colors[0]
             self._apply_thumbnail_style()
             return
 
-        # Priority 2: Liked color (if liked)
-        if self._is_liked:
-            liked_color = get_setting("gallery_liked_color")
-            # Default to green if no custom liked color is set
-            self._styler.group_color = liked_color or "#10b981"
-            self._apply_thumbnail_style()
-            return
-
-        # Priority 3: Stack color (if has job_prefix and custom stack color)
+        # Priority 2: Stack color (if has job_prefix and custom stack color)
         if self._job_prefix:
             stack_colors = get_setting("gallery_stack_colors") or {}
             stack_color = stack_colors.get(self._job_prefix)
@@ -526,7 +497,7 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
                 self._apply_thumbnail_style()
                 return
 
-        # No custom color - use default
+        # No custom color - use default (liked state shown via heart icon only)
         self._styler.group_color = None
         self._apply_thumbnail_style()
 
@@ -669,9 +640,6 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         tooltip_parts = [filename]
         if note:
             tooltip_parts.append(f"\nNote: {note}")
-            self.note_indicator.show()
-        else:
-            self.note_indicator.hide()
         self.setToolTip("\n".join(tooltip_parts))
 
     # --- Image thumbnail loading ---
@@ -1020,6 +988,34 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         # Multiple items or no thumbnail - use default stack visualization
         return create_drag_pixmap(paths)
 
+    # --- Drop target methods ---
+    def _on_files_dropped(self, paths):
+        """Handle files dropped on this thumbnail - create a new group."""
+        # Don't create group if dropped on self
+        if len(paths) == 1 and paths[0] == self.path:
+            return
+
+        # Filter out self from dropped paths if present
+        other_paths = [p for p in paths if p != self.path]
+        if not other_paths:
+            return
+
+        # Emit signal with this item + dropped items to create a new group
+        all_paths = [self.path] + other_paths
+        logger.info(f"[ThumbnailWidget] Group requested for {len(all_paths)} items")
+        self.group_items_requested.emit(all_paths)
+
+    def _show_drop_highlight(self, show):
+        """Show or hide drop highlight visual feedback."""
+        logger.debug(f"[ThumbnailWidget] _show_drop_highlight({show}) for {self.path}")
+        self._drop_highlight_active = show
+        if show:
+            # Just apply style with drop highlight
+            self._apply_thumbnail_style()
+        else:
+            # When hiding highlight, use _update_group_border to restore proper colors
+            self._update_group_border()
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._double_click_in_progress = True
@@ -1032,16 +1028,11 @@ class ThumbnailWidget(DraggableMixin, MetadataCopyMixin, BaseThumbnailWidget):
         super().enterEvent(event)
         self._is_hovered = True
         self._apply_thumbnail_style()
-        # Show like indicator on hover (hover-reveal)
-        self.like_indicator.show()
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self._is_hovered = False
         self._apply_thumbnail_style()
-        # Hide like indicator if not liked
-        if not self._is_liked:
-            self.like_indicator.hide()
 
     def contextMenuEvent(self, event):
         if self._gallery_tab and self._is_selected and len(self._gallery_tab._selected_items) > 1:

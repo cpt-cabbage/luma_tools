@@ -347,3 +347,153 @@ class GroupEditorDialog(QDialog):
             Tuple of (name, color) or (None, None) if cancelled
         """
         return (self.name_input.text().strip(), self._selected_color)
+
+
+class QuickGroupDialog(QDialog):
+    """
+    Quick dialog for creating a group via drag-and-drop.
+
+    Shows a simple name input field and automatically assigns a random color.
+    Used when dragging one thumbnail onto another to quickly create a group.
+    """
+
+    def __init__(self, item_count=2, parent=None):
+        """
+        Initialize the quick group dialog.
+
+        Args:
+            item_count: Number of items that will be in the group
+            parent: Parent widget
+        """
+        import random
+        super().__init__(parent)
+        self._item_count = item_count
+        self._selected_color = random.choice(GROUP_COLORS)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Set up the dialog UI."""
+        self.setWindowTitle("Create Group")
+        self.setMinimumWidth(280)
+        self.setModal(True)
+        self.setStyleSheet(EDIT_DIALOG_STYLESHEET + """
+            QLineEdit {
+                background-color: #2c313a;
+                color: #e0e0e0;
+                border: 1px solid #3c414b;
+                border-radius: 4px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border-color: #4a9eff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Header message
+        header = QLabel(f"Create a new group with {self._item_count} items")
+        header.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(header)
+
+        # Name input
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Group name...")
+        self.name_input.returnPressed.connect(self._on_create)
+        layout.addWidget(self.name_input)
+
+        # Color preview
+        color_layout = QHBoxLayout()
+        color_label = QLabel("Color:")
+        color_label.setStyleSheet("color: #888; font-size: 11px;")
+        color_layout.addWidget(color_label)
+
+        self._color_preview = QLabel()
+        self._color_preview.setFixedSize(20, 20)
+        self._color_preview.setStyleSheet(f"""
+            QLabel {{
+                background-color: {self._selected_color};
+                border-radius: 4px;
+            }}
+        """)
+        color_layout.addWidget(self._color_preview)
+        color_layout.addStretch()
+
+        # Change color button
+        change_btn = QPushButton("Change")
+        change_btn.setFixedWidth(60)
+        change_btn.setStyleSheet("""
+            QPushButton {
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+        """)
+        change_btn.clicked.connect(self._cycle_color)
+        color_layout.addWidget(change_btn)
+
+        layout.addLayout(color_layout)
+
+        layout.addStretch()
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        create_btn = QPushButton("Create")
+        create_btn.setProperty("primary", True)
+        create_btn.clicked.connect(self._on_create)
+        button_layout.addWidget(create_btn)
+
+        layout.addLayout(button_layout)
+
+        # Focus on name input
+        self.name_input.setFocus()
+
+    def _cycle_color(self):
+        """Cycle to next color in the palette."""
+        import random
+        # Pick a different random color
+        available = [c for c in GROUP_COLORS if c != self._selected_color]
+        if available:
+            self._selected_color = random.choice(available)
+        else:
+            self._selected_color = random.choice(GROUP_COLORS)
+        self._color_preview.setStyleSheet(f"""
+            QLabel {{
+                background-color: {self._selected_color};
+                border-radius: 4px;
+            }}
+        """)
+
+    def _on_create(self):
+        """Validate and accept the dialog."""
+        name = self.name_input.text().strip()
+        if not name:
+            self.name_input.setFocus()
+            self.name_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #2c313a;
+                    color: #e0e0e0;
+                    border: 2px solid #ef4444;
+                    border-radius: 4px;
+                    padding: 10px;
+                    font-size: 13px;
+                }
+            """)
+            return
+        self.accept()
+
+    def get_result(self):
+        """Get the name and color from the dialog.
+
+        Returns:
+            Tuple of (name, color) or (None, None) if cancelled
+        """
+        return (self.name_input.text().strip(), self._selected_color)

@@ -201,55 +201,68 @@ class UIManager(BaseGalleryManager):
     # VIEW MODE CONTROLS
     # =========================================================================
 
-    # Stacking mode options (groups shown via sidebar filter, not stacking)
-    STACKING_MODES = [
-        ("Grid", "grid"),
-        ("Stacked", "job"),
-    ]
-
     def _create_view_mode_button(self):
-        """Create the stacking mode dropdown button."""
+        """Create the view mode checkboxes (Stacks and Groups)."""
         from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 
         # Get current stacking mode from settings
         from core.settings_manager import get_setting
         current_mode = get_setting("gallery_stacking_mode")
 
-        self._stacking_btn = QPushButton()
-        self._stacking_btn.setObjectName("stackingModeButton")
-        self._stacking_btn.setCursor(Qt.ArrowCursor)
-        self._stacking_btn.setToolTip("Change how items are grouped in the gallery")
-        self._stacking_btn.clicked.connect(self._on_stacking_button_clicked)
-        self._update_stacking_button_text(current_mode)
+        # Decode mode to checkbox states
+        # "grid" = neither, "job" = stacks only, "groups" = groups only, "both" = both
+        stacks_on = current_mode in ("job", "both")
+        groups_on = current_mode in ("groups", "both")
+
+        # Create container widget
+        self._view_mode_container = QWidget()
+        self._view_mode_container.setObjectName("viewModeContainer")
+        layout = QHBoxLayout(self._view_mode_container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Create checkboxes
+        self._stacks_checkbox = QCheckBox("Stacks")
+        self._stacks_checkbox.setObjectName("stacksCheckbox")
+        self._stacks_checkbox.setToolTip("Stack items by job/iteration prefix")
+        self._stacks_checkbox.setChecked(stacks_on)
+        self._stacks_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
+
+        self._groups_checkbox = QCheckBox("Groups")
+        self._groups_checkbox.setObjectName("groupsCheckbox")
+        self._groups_checkbox.setToolTip("Stack items by user-defined groups")
+        self._groups_checkbox.setChecked(groups_on)
+        self._groups_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
+
+        layout.addWidget(self._stacks_checkbox)
+        layout.addWidget(self._groups_checkbox)
 
         # Insert after filters button in the header layout
         header_layout = self._find_header_layout()
         if header_layout:
             filter_index = header_layout.indexOf(self._filters_btn)
-            header_layout.insertWidget(filter_index + 1, self._stacking_btn)
+            header_layout.insertWidget(filter_index + 1, self._view_mode_container)
 
-    def _update_stacking_button_text(self, mode):
-        """Update the stacking button text based on current mode."""
-        mode_labels = {m: label for label, m in self.STACKING_MODES}
-        label = mode_labels.get(mode, "Grid")
-        self._stacking_btn.setText(label)
+    def _on_view_mode_checkbox_changed(self):
+        """Handle view mode checkbox state changes."""
+        stacks_on = self._stacks_checkbox.isChecked()
+        groups_on = self._groups_checkbox.isChecked()
 
-    def _on_stacking_button_clicked(self):
-        """Show stacking mode menu."""
-        from core.settings_manager import get_setting
-        current_mode = get_setting("gallery_stacking_mode")
+        # Map checkbox states to stacking mode
+        # neither = grid, stacks only = job, groups only = groups, both = both
+        if stacks_on and groups_on:
+            mode = "both"
+        elif stacks_on:
+            mode = "job"
+        elif groups_on:
+            mode = "groups"
+        else:
+            mode = "grid"
 
-        menu = QMenu(self._stacking_btn)
-        for label, mode in self.STACKING_MODES:
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(mode == current_mode)
-            action.triggered.connect(lambda checked, m=mode: self._select_stacking_mode(m))
+        self._apply_stacking_mode(mode)
 
-        pos = self._stacking_btn.mapToGlobal(self._stacking_btn.rect().bottomLeft())
-        menu.exec_(pos)
-
-    def _select_stacking_mode(self, mode):
+    def _apply_stacking_mode(self, mode):
         """Apply selected stacking mode."""
         from core.settings_manager import get_setting, set_setting
         current_mode = get_setting("gallery_stacking_mode")
@@ -258,10 +271,14 @@ class UIManager(BaseGalleryManager):
             return
 
         set_setting("gallery_stacking_mode", mode, verbose=False)
-        self._update_stacking_button_text(mode)
 
         # Show status feedback
-        mode_labels = {m: label for label, m in self.STACKING_MODES}
+        mode_labels = {
+            "grid": "Grid",
+            "job": "Stacks",
+            "groups": "Groups",
+            "both": "Stacks + Groups"
+        }
         label = mode_labels.get(mode, mode)
         if hasattr(self.tab, 'show_status_message'):
             self.tab.show_status_message(f"View mode: {label}")

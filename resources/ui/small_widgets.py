@@ -13,18 +13,18 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 from thumbnail_styles import (
-    ThumbnailStyler, darken_color, color_with_alpha,
+    ThumbnailStyler, darken_color, lighten_color, color_with_alpha,
     derive_background_from_color, derive_border_from_color,
 )
 from dialog_helpers import get_active_window
-from drag_drop import DraggableMixin, create_drag_pixmap
+from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
 
 
 # ============================================================================
 # STACKED THUMBNAIL WIDGET (Photo stack style grouping)
 # ============================================================================
 
-class StackedThumbnailWidget(DraggableMixin, QWidget):
+class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
     """Stacked thumbnail widget showing a pile of images with count badge.
 
     Displays a representative thumbnail with stacked visual effect and a count
@@ -33,14 +33,19 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
     Supports drag-and-drop: all items in the stack can be dragged to
     BatchImageSelector or other drop targets that accept files.
 
+    Also acts as drop target for groups: dropping items onto a group stack
+    adds them to that group.
+
     Signals:
         clicked(str): Emitted with stack_id when the stack is clicked
         expanded(str, bool): Emitted with (stack_id, is_expanded) when expansion state changes
         thumbnail_clicked(str, dict): Emitted when an expanded thumbnail is clicked (path, item)
+        add_to_group_requested(str, list): Emitted with (group_id, [paths]) to add items to group
     """
     clicked = Signal(str)  # stack_id
     expanded = Signal(str, bool)  # stack_id, is_expanded
     thumbnail_clicked = Signal(str, dict)  # path, item dict
+    add_to_group_requested = Signal(str, list)  # group_id, paths
 
     # Same thumbnail size as regular thumbnails
     THUMBNAIL_SIZE = (150, 150)
@@ -89,6 +94,9 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
 
         # Initialize drag support
         self._init_drag_state()
+
+        # Initialize drop target support (accept images, videos, models)
+        self._init_drop_target({'image', 'video', 'model'})
 
         self._setup_ui()
         self.setToolTip(f"{stack_id}\n{self._count} items - Click to expand")
@@ -179,38 +187,39 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
             if group:
                 self._common_group_color = group.color
 
+    def _get_current_custom_color(self):
+        """Get the current custom color based on priority: group > stack.
+
+        Liked state is shown only via individual thumbnail heart icons, not stack border.
+
+        Returns:
+            Hex color string or None if using default colors.
+        """
+        from core.settings_manager import get_setting
+
+        # Priority 1: Common group color (all items share a group from favorites manager)
+        common_group_color = getattr(self, '_common_group_color', None)
+        if common_group_color:
+            return common_group_color
+
+        # Priority 2: Explicit group color (from group stacking mode at creation)
+        if self._group_color:
+            return self._group_color
+
+        # Priority 3: Stack color (if has stack_id and custom stack color in settings)
+        stack_colors = get_setting("gallery_stack_colors") or {}
+        stack_color = stack_colors.get(self.stack_id)
+        if stack_color:
+            return stack_color
+
+        return None
+
     def _update_border_color(self):
         """Update thumbnail border color with priority: group > liked > stack.
 
         Similar to ThumbnailWidget._update_group_border().
         """
-        from core.settings_manager import get_setting
-
-        custom_color = None
-
-        # Priority 1: Common group color (all items share a group from favorites manager)
-        common_group_color = getattr(self, '_common_group_color', None)
-        if common_group_color:
-            custom_color = common_group_color
-
-        # Priority 2: Explicit group color (from group stacking mode at creation)
-        elif self._group_color:
-            custom_color = self._group_color
-
-        # Priority 3: Liked color (if ALL items are liked)
-        elif self._is_all_liked:
-            liked_color = get_setting("gallery_liked_color")
-            # Default to green if no custom liked color is set
-            custom_color = liked_color or "#10b981"
-
-        # Priority 4: Stack color (if has stack_id and custom stack color in settings)
-        else:
-            stack_colors = get_setting("gallery_stack_colors") or {}
-            stack_color = stack_colors.get(self.stack_id)
-            if stack_color:
-                custom_color = stack_color
-
-        # Apply the color to all stack cards
+        custom_color = self._get_current_custom_color()
         self._apply_stack_colors(custom_color)
 
     def _apply_stack_colors(self, custom_color=None):
@@ -221,6 +230,9 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
         """
         if not hasattr(self, '_stack_labels') or not self._stack_labels:
             return
+
+        # Check if drop highlight is active
+        drop_active = getattr(self, '_drop_highlight_active', False)
 
         # Derive colors from custom_color or use defaults
         if custom_color:
@@ -234,6 +246,12 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
             # Blue for images with metadata
             bg_color = "#1e3a5f"
             border_color = "#4a6d8c"
+
+        # Apply drop hover brightness only for items with custom colors (groups/likes)
+        # Don't brighten default blue/grey stacks
+        if drop_active and custom_color:
+            bg_color = lighten_color(bg_color, 0.4)
+            border_color = lighten_color(border_color, 0.5)
 
         # Apply to all stack labels
         stack_depth = len(self._stack_labels) - 1
@@ -351,15 +369,6 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
         self.count_badge.raise_()
         self.count_badge.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        # File type indicator (bottom-left corner)
-        self.type_indicator = QLabel(self.thumbnail_container)
-        self.type_indicator.setAlignment(Qt.AlignCenter)
-        self.type_indicator.setFixedSize(20, 20)
-        self.type_indicator.move(4, self.THUMBNAIL_SIZE[1] - 24)
-        self.type_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._apply_type_indicator()
-        self.type_indicator.raise_()
-
         # Filename label (shows stack name) - cleaner style
         display_name = self.stack_id if len(self.stack_id) <= 25 else self.stack_id[:22] + "..."
         self.filename_label = QLabel(display_name)
@@ -435,9 +444,6 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
         # Recalculate metadata status and model type
         self._has_metadata = self._check_items_have_metadata(items)
         self._is_top_item_model = self._top_item and self._top_item.get('type') == 'model'
-
-        # Update type indicator for new top item
-        self._apply_type_indicator()
 
         # Update count badge
         self.count_badge.setText(str(self._count))
@@ -687,17 +693,6 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
             # Apply current style state
             self._apply_thumbnail_style()
 
-    def _apply_type_indicator(self):
-        """Apply the appropriate icon and style for the file type - outline style."""
-        if not self._top_item:
-            return
-        from thumbnail_styles import get_type_indicator_style
-        item_type = self._top_item.get('type', 'image')
-        icon, stylesheet = get_type_indicator_style(item_type)
-        self.type_indicator.setText(icon)
-        self.type_indicator.setStyleSheet(stylesheet)
-        self.type_indicator.show()
-
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state using unified styler."""
         if self.thumbnail_label and not self._is_expanded:
@@ -776,6 +771,34 @@ class StackedThumbnailWidget(DraggableMixin, QWidget):
             if pixmap and not pixmap.isNull():
                 return pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         return create_drag_pixmap(paths)
+
+    # --- Drop target methods ---
+    def _on_files_dropped(self, paths):
+        """Handle files dropped on this stack - add to group if this is a group stack."""
+        # Only emit if this is a group stack (stack_id starts with group indicator)
+        if not self.stack_id.startswith('🏷'):
+            # Not a group stack - ignore drops
+            logger.debug(f"[StackedThumbnailWidget] Drop ignored, not a group stack: {self.stack_id}")
+            return
+
+        # Filter out items already in this stack
+        existing_paths = set(item['path'] for item in self._items)
+        new_paths = [p for p in paths if p not in existing_paths]
+        if not new_paths:
+            return
+
+        # Extract group ID from stack_id (format: "🏷 GroupName")
+        # The actual group_id is looked up by the handler
+        logger.info(f"[StackedThumbnailWidget] Add to group requested: {self.stack_id}, {len(new_paths)} items")
+        self.add_to_group_requested.emit(self.stack_id, new_paths)
+
+    def _show_drop_highlight(self, show):
+        """Show or hide drop highlight visual feedback."""
+        self._drop_highlight_active = show
+        # Always use current custom color to preserve group/liked/stack colors
+        custom_color = self._get_current_custom_color() if hasattr(self, '_get_current_custom_color') else None
+        if hasattr(self, '_apply_stack_colors'):
+            self._apply_stack_colors(custom_color)
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click - toggle expansion."""

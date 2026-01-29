@@ -398,10 +398,13 @@ class DropTargetMixin:
 
     def dragEnterEvent(self, event):
         """Handle drag enter - check if we can accept the data."""
+        logger.debug(f"[DropTargetMixin] dragEnterEvent on {type(self).__name__}")
         if can_accept_files(event.mimeData(), self._accepted_categories):
+            logger.debug(f"[DropTargetMixin] Accepting drop, calling _show_drop_highlight(True)")
             event.acceptProposedAction()
             self._show_drop_highlight(True)
         else:
+            logger.debug(f"[DropTargetMixin] Rejecting drop - no acceptable files")
             event.ignore()
 
     def dragMoveEvent(self, event):
@@ -413,6 +416,7 @@ class DropTargetMixin:
 
     def dragLeaveEvent(self, event):
         """Handle drag leave - remove highlight."""
+        logger.debug(f"[DropTargetMixin] dragLeaveEvent on {type(self).__name__}")
         self._show_drop_highlight(False)
         event.accept()
 

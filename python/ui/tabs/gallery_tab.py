@@ -864,3 +864,91 @@ class GalleryTab(BaseTab):
         from core.state_manager import app_state
         app_state.gallery_selected_paths = list(selected)
         pipeline_events.selection_changed.emit(list(selected), len(selected))
+
+    # =========================================================================
+    # DRAG-TO-GROUP HANDLERS
+    # =========================================================================
+
+    def _on_group_items_requested(self, paths):
+        """Handle request to create a new group from dropped items.
+
+        Called when items are dragged onto a thumbnail to create a group.
+
+        Args:
+            paths: List of paths to add to the new group
+        """
+        from dialogs import QuickGroupDialog
+
+        if not paths or len(paths) < 2:
+            return
+
+        # Show quick group dialog
+        dialog = QuickGroupDialog(item_count=len(paths), parent=self)
+        if dialog.exec() != dialog.Accepted:
+            return
+
+        name, color = dialog.get_result()
+        if not name:
+            return
+
+        # Create the group
+        group = self._favorites_manager.create_group(name, color)
+        if not group:
+            self.show_status_message("Failed to create group", duration=2000)
+            return
+
+        # Add all items to the group
+        for path in paths:
+            self._favorites_manager.add_to_group(path, group.group_id)
+
+        logger.info(f"[Gallery] Created group '{name}' with {len(paths)} items")
+        self.show_status_message(f"Created group '{name}' with {len(paths)} items")
+
+        # Refresh the display to show the new grouping
+        self._ui_manager._redisplay_items(force_rebuild=True)
+
+    def _on_add_to_existing_group(self, stack_id, paths):
+        """Handle request to add items to an existing group.
+
+        Called when items are dragged onto a group stack widget.
+
+        Args:
+            stack_id: The stack_id of the group (format: "🏷 GroupName")
+            paths: List of paths to add to the group
+        """
+        if not paths:
+            return
+
+        # Extract group name from stack_id (format: "🏷 GroupName")
+        if not stack_id.startswith('🏷 '):
+            logger.warning(f"[Gallery] Invalid group stack_id: {stack_id}")
+            return
+
+        group_name = stack_id[2:].strip()  # Remove "🏷 " prefix
+
+        # Find the group by name
+        group = None
+        for g in self._favorites_manager.get_groups():
+            if g.name == group_name:
+                group = g
+                break
+
+        if not group:
+            logger.warning(f"[Gallery] Group not found: {group_name}")
+            self.show_status_message(f"Group '{group_name}' not found", duration=2000)
+            return
+
+        # Add all items to the group
+        added_count = 0
+        for path in paths:
+            if self._favorites_manager.add_to_group(path, group.group_id):
+                added_count += 1
+
+        if added_count > 0:
+            logger.info(f"[Gallery] Added {added_count} items to group '{group_name}'")
+            self.show_status_message(f"Added {added_count} item(s) to '{group_name}'")
+
+            # Refresh the display to show the updated grouping
+            self._ui_manager._redisplay_items(force_rebuild=True)
+        else:
+            self.show_status_message("Items already in group")

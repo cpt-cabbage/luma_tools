@@ -169,7 +169,10 @@ class GalleryManager:
                 for prefix, job_items in job_groups.items():
                     result[prefix] = job_items
             else:
-                result['Ungrouped'] = ungrouped  # Already sorted from input
+                # Show each ungrouped item individually (single-item "groups")
+                for item in ungrouped:
+                    # Use path as unique key for individual items
+                    result[item['path']] = [item]
 
         # Add inputs group at the end
         if input_group:
@@ -397,8 +400,16 @@ class GalleryManager:
         from core.settings_manager import get_setting
         stacking_mode = get_setting("gallery_stacking_mode")
 
-        # Group items by job prefix (user groups are shown via sidebar filter, not stacking)
-        groups = self.group_items_by_prefix(items)
+        # Group items based on stacking mode
+        if stacking_mode == "groups":
+            # Groups only - stack by user-defined groups, ungrouped items shown individually
+            groups = self.group_items_by_groups(items, fallback_to_job=False)
+        elif stacking_mode == "both":
+            # Both - stack by groups first, then ungrouped items stack by job prefix
+            groups = self.group_items_by_groups(items, fallback_to_job=True)
+        else:
+            # "job" mode - stack by job prefix only (original behavior)
+            groups = self.group_items_by_prefix(items)
 
         # Get favorites manager once for all stacks
         favorites_manager = getattr(self.tab, '_favorites_manager', None)
@@ -425,6 +436,11 @@ class GalleryManager:
                 # Connect signals for tracking expanded state
                 stack.expanded.connect(self._on_stack_expanded)
                 stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
+
+                # Connect group add signal (drag-to-group for group stacks)
+                if hasattr(stack, 'add_to_group_requested'):
+                    stack.add_to_group_requested.connect(self.tab._on_add_to_existing_group)
+
                 self._stack_widgets[prefix] = stack
                 self.tab._flow_layout.addWidget(stack)
 
@@ -471,8 +487,17 @@ class GalleryManager:
 
         container = self.tab.ui.galleryThumbnailContainer
 
-        # Group new items by prefix
-        new_groups = self.group_items_by_prefix(items)
+        # Get stacking mode from settings
+        from core.settings_manager import get_setting
+        stacking_mode = get_setting("gallery_stacking_mode")
+
+        # Group items based on stacking mode
+        if stacking_mode == "groups":
+            new_groups = self.group_items_by_groups(items, fallback_to_job=False)
+        elif stacking_mode == "both":
+            new_groups = self.group_items_by_groups(items, fallback_to_job=True)
+        else:
+            new_groups = self.group_items_by_prefix(items)
 
         # Get existing prefixes from stacks and single items
         existing_stack_prefixes = set(self._stack_widgets.keys())
@@ -558,6 +583,11 @@ class GalleryManager:
 
                     stack.expanded.connect(self._on_stack_expanded)
                     stack.thumbnail_clicked.connect(self._on_expanded_thumbnail_clicked)
+
+                    # Connect group add signal (drag-to-group for group stacks)
+                    if hasattr(stack, 'add_to_group_requested'):
+                        stack.add_to_group_requested.connect(self.tab._on_add_to_existing_group)
+
                     self._stack_widgets[prefix] = stack
                     self.tab._flow_layout.addWidget(stack)
                     new_widgets.append(stack)
@@ -796,6 +826,10 @@ class GalleryManager:
                 thumbnail.set_favorites_manager(favorites_manager)
                 # Connect like toggle signal
                 thumbnail.like_toggled.connect(self._on_thumbnail_like_toggled)
+
+            # Connect group creation signal (drag-to-group)
+            if hasattr(thumbnail, 'group_items_requested'):
+                thumbnail.group_items_requested.connect(self.tab._on_group_items_requested)
 
             # Connect image-specific signals
             if file_type == 'image':

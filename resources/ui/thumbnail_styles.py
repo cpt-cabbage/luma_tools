@@ -158,7 +158,7 @@ class ThumbnailStyler:
         self.border_radius = border_radius
         self.group_color = group_color
 
-    def get_background_color(self, hover=False, selected=False):
+    def get_background_color(self, hover=False, selected=False, drop_hover=False):
         """Get the appropriate background color."""
         # Get base background color first
         if self.group_color:
@@ -171,6 +171,9 @@ class ThumbnailStyler:
             base_bg = ThumbnailColors.BG_WITHOUT_METADATA
 
         # Apply hover/selected modifications
+        # Drop hover is brightest (like a more intense hover) - only for items with group_color
+        if drop_hover and self.group_color:
+            return lighten_color(base_bg, 0.4)
         if selected and hover:
             return lighten_color(base_bg, 0.25)
         if hover:
@@ -178,14 +181,14 @@ class ThumbnailStyler:
 
         return base_bg
 
-    def get_border_color(self, selected=False, hover=False, is_new=False):
+    def get_border_color(self, selected=False, hover=False, is_new=False, drop_hover=False):
         """Get the appropriate border color.
 
         Note: is_new parameter is kept for backwards compatibility but no longer
         affects border color. New items now use a pulsing indicator instead.
         """
         if selected:
-            if hover:
+            if hover or drop_hover:
                 return ThumbnailColors.BORDER_SELECTED_HOVER
             return ThumbnailColors.BORDER_SELECTED_STACK if self.is_stacked else ThumbnailColors.BORDER_SELECTED
 
@@ -202,6 +205,9 @@ class ThumbnailStyler:
             base_border = ThumbnailColors.BORDER_WITHOUT_METADATA
 
         # Apply hover modification - brighten the current color
+        # Drop hover is even brighter than normal hover - only for items with group_color
+        if drop_hover and self.group_color:
+            return lighten_color(base_border, 0.5)
         if hover:
             return lighten_color(base_border, 0.3)
 
@@ -211,7 +217,7 @@ class ThumbnailStyler:
         """Get border width - 3px when selected, 2px otherwise."""
         return 3 if selected else 2
 
-    def get_style(self, selected=False, hover=False, is_new=False):
+    def get_style(self, selected=False, hover=False, is_new=False, drop_hover=False):
         """
         Get the complete stylesheet for the thumbnail label.
 
@@ -219,12 +225,13 @@ class ThumbnailStyler:
             selected: Whether the item is selected
             hover: Whether the mouse is hovering
             is_new: Whether this is a newly generated item
+            drop_hover: Whether items are being dragged over (brighter than normal hover)
 
         Returns:
             QString stylesheet for QLabel
         """
-        bg = self.get_background_color(hover=hover, selected=selected)
-        border = self.get_border_color(selected=selected, hover=hover, is_new=is_new)
+        bg = self.get_background_color(hover=hover, selected=selected, drop_hover=drop_hover)
+        border = self.get_border_color(selected=selected, hover=hover, is_new=is_new, drop_hover=drop_hover)
         width = self.get_border_width(selected=selected)
 
         return f"""
