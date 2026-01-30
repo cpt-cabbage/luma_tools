@@ -92,6 +92,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Display network path from global settings
         self._update_network_path_display()
 
+        # Setup contextual tooltips for guidance
+        self._setup_tooltips()
+
+        # Setup session resume banner (shows if previous session available)
+        self._setup_session_resume_banner()
+
         # Restore saved state
         self._restore_state()
 
@@ -115,6 +121,116 @@ class ComfyUITab(PollingMixin, BaseTab):
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         self._validate_inputs()
+
+    # =========================================================================
+    # CONTEXTUAL TOOLTIPS & GUIDANCE
+    # =========================================================================
+
+    def _setup_tooltips(self):
+        """Set up contextual tooltips for better user guidance."""
+        # Preset selection
+        self.ui.ComfyUIChoosePreset.setToolTip(
+            "Select a workflow preset.\n\n"
+            "Each preset defines what kind of AI generation you want to do:\n"
+            "• Image generation from text prompts\n"
+            "• Image upscaling and enhancement\n"
+            "• Style transfer and variations\n"
+            "• Video generation"
+        )
+
+        # Generation count
+        self.ui.ComfyUIGenerationCount.setToolTip(
+            "Number of images to generate.\n\n"
+            "Each generation uses a different seed for variety.\n"
+            "Higher counts take longer but give more options."
+        )
+
+        # Seed control
+        self.ui.ComfyUISeed.setToolTip(
+            "Random seed for reproducibility.\n\n"
+            "Same seed + same parameters = same result.\n"
+            "Use this to recreate or iterate on specific outputs."
+        )
+
+        self.ui.ComfyUIRandomizeSeed.setToolTip(
+            "Generate a new random seed.\n\n"
+            "Click to get fresh, unpredictable results."
+        )
+
+        # Submit button
+        self.ui.ComfyUISubmit.setToolTip(
+            "Submit workflow to render farm.\n\n"
+            "Jobs are processed by the Deadline render farm.\n"
+            "You can continue working while jobs render."
+        )
+
+        # Cancel button
+        self.ui.ComfyUICancelJobs.setToolTip(
+            "Cancel all running jobs.\n\n"
+            "Stops pending and rendering jobs on the farm."
+        )
+
+        # Network path
+        self.ui.ComfyUINetworkPathDisplay.setToolTip(
+            "Network output directory.\n\n"
+            "Generated images are saved here.\n"
+            "Configure in Settings tab."
+        )
+
+    def _setup_session_resume_banner(self):
+        """Set up the session resume banner if a previous session is available."""
+        from empty_states import SessionResumeBanner
+
+        # Check for recent sessions
+        sessions = self.state_manager.get_recent_sessions()
+        if not sessions:
+            return
+
+        # Get the most recent session
+        recent_session = sessions[0]
+        display_text = recent_session.get('display_text', 'Previous session')
+
+        # Create and show the banner
+        self._session_banner = SessionResumeBanner(display_text, session_index=0)
+        self._session_banner.resume_clicked.connect(self._on_resume_session)
+        self._session_banner.dismiss_clicked.connect(self._on_dismiss_session_banner)
+
+        # Insert at the top of the main layout
+        if hasattr(self.ui, 'comfyuiLayout'):
+            self.ui.comfyuiLayout.insertWidget(0, self._session_banner)
+
+    def _on_resume_session(self, session_index: int):
+        """Handle click on session resume button."""
+        pending_values = self.state_manager.restore_session(
+            session_index, self.ui, self._select_preset
+        )
+
+        if pending_values:
+            self.widget_manager.pending_editable_values = pending_values
+            self.widget_manager._apply_pending_editable_values()
+
+        # Get input images from session
+        input_images = self.state_manager.get_session_input_images(session_index)
+        if input_images:
+            # Find image input widget and add images
+            for node_id, container in self.widget_manager.dynamic_widgets.items():
+                input_widget = getattr(container, 'input_widget', None)
+                if input_widget and hasattr(input_widget, 'add_images'):
+                    # Filter to existing files only
+                    existing_images = [img for img in input_images if os.path.exists(img)]
+                    if existing_images:
+                        input_widget.add_images(existing_images)
+                    break
+
+        self.show_status("Session restored", "success")
+        self._on_dismiss_session_banner()
+
+    def _on_dismiss_session_banner(self):
+        """Handle click on session banner dismiss button."""
+        if hasattr(self, '_session_banner') and self._session_banner:
+            self._session_banner.hide()
+            self._session_banner.deleteLater()
+            self._session_banner = None
 
     # =========================================================================
     # NETWORK PATH DISPLAY
@@ -812,7 +928,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
         self.animator.update_status_animated(
-            f"🎨 ComfyUI: Preparing {generation_count} generation(s)...",
+            f"ComfyUI: Preparing {generation_count} generation(s)...",
             StatusColors.INFO
         )
         self.animator.animate_button_click(self.ui.ComfyUISubmit)
@@ -914,7 +1030,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from ui_components import StatusColors
 
         self.animator.update_status_animated(
-            f"🎨 ComfyUI: {message}",
+            f"ComfyUI: {message}",
             StatusColors.INFO
         )
 
@@ -946,12 +1062,22 @@ class ComfyUITab(PollingMixin, BaseTab):
                 - base_seed: The seed value used
                 - generation_count: Number of generations
                 - editable_values: Dict of node_id -> {display_name, value, ...}
+                - source_images: List of input image basenames
+                - source_models: List of input 3D model basenames
+                - _output_dir: Directory where the output was saved (for finding source files)
         """
         if not metadata:
             self.show_status("No settings metadata found for this image", "warning")
             return
 
-        self.log(f"[ComfyUI] Applying settings from image metadata...")
+        # Debug: show what metadata keys we received
+        self.log(f"[ComfyUI] Applying settings from metadata. Keys: {list(metadata.keys())}")
+        if 'source_images' in metadata:
+            self.log(f"[ComfyUI]   source_images: {metadata.get('source_images')}")
+        if 'input_image' in metadata:
+            self.log(f"[ComfyUI]   input_image: {metadata.get('input_image')}")
+        if '_output_dir' in metadata:
+            self.log(f"[ComfyUI]   _output_dir: {metadata.get('_output_dir')}")
 
         # Use state manager to apply metadata
         pending_values = self.state_manager.apply_settings_from_metadata(
@@ -964,10 +1090,89 @@ class ComfyUITab(PollingMixin, BaseTab):
             self.widget_manager._apply_pending_editable_values()
             self.log(f"[ComfyUI] Applied {len(pending_values)} editable value(s)")
 
+        # Restore source images/models to input widgets
+        self._restore_source_files_from_metadata(metadata)
+
         self.show_status("Settings applied from image", "success")
 
         # Switch to this tab
         self.main_window.switch_to_tab("comfyui")
+
+    def _restore_source_files_from_metadata(self, metadata):
+        """Restore source images and models from metadata to input widgets.
+
+        Args:
+            metadata: Metadata dict with source_images, source_models, and _output_dir
+        """
+        output_dir = metadata.get('_output_dir', '')
+
+        # Handle both new format (source_images list) and old format (input_image string)
+        # Note: metadata may have None values, so we need to handle that
+        source_images = metadata.get('source_images') or []
+        if not source_images:
+            # Fallback to input_image for backward compatibility
+            input_image = metadata.get('input_image', '')
+            if input_image:
+                source_images = [input_image]
+
+        source_models = metadata.get('source_models') or []
+
+        if not output_dir:
+            self.log("[ComfyUI] Cannot restore source files - no output directory in metadata")
+            return
+
+        if not source_images and not source_models:
+            self.log("[ComfyUI] No source files found in metadata")
+            return
+
+        # Build full paths for source files
+        image_paths = []
+        for basename in source_images:
+            if not basename:
+                continue
+            full_path = os.path.join(output_dir, basename)
+            if os.path.exists(full_path):
+                image_paths.append(full_path)
+            else:
+                self.log(f"[ComfyUI] Source image not found: {full_path}")
+
+        model_paths = []
+        for basename in source_models:
+            if not basename:
+                continue
+            full_path = os.path.join(output_dir, basename)
+            if os.path.exists(full_path):
+                model_paths.append(full_path)
+            else:
+                self.log(f"[ComfyUI] Source model not found: {full_path}")
+
+        # Find and populate input widgets
+        for node_id, container in self.widget_manager.dynamic_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            if not input_widget:
+                continue
+
+            node = getattr(container, 'editable_node', None)
+            if not node:
+                continue
+
+            # Add images to image input widgets
+            if node.widget_type == 'image' and image_paths:
+                if hasattr(input_widget, 'set_images'):
+                    input_widget.set_images(image_paths)
+                    self.log(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+                elif hasattr(input_widget, 'add_images'):
+                    if hasattr(input_widget, 'clear_images'):
+                        input_widget.clear_images()
+                    input_widget.add_images(image_paths)
+                    self.log(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+
+            # Add models to 3D model input widgets
+            elif node.widget_type == '3d_model' and model_paths:
+                if hasattr(input_widget, 'setText'):
+                    # For single model input (text field)
+                    input_widget.setText(model_paths[0])
+                    self.log(f"[ComfyUI] Restored source model: {model_paths[0]}")
 
     # =========================================================================
     # STATE PERSISTENCE
@@ -1084,6 +1289,19 @@ class ComfyUITab(PollingMixin, BaseTab):
         pipeline_events.all_jobs_completed.connect(self._on_all_own_jobs_completed)
 
         logger.debug("ComfyUI tab subscribed to event bus")
+
+    def _on_gallery_selection_changed(self, paths: list, count: int):
+        """Handle gallery selection change event.
+
+        This allows the ComfyUI tab to be aware of what's selected in the gallery.
+
+        Args:
+            paths: List of selected file paths
+            count: Number of selected items
+        """
+        # Currently just for awareness - could enable features like
+        # "Use Selected as Input" button when items are selected
+        pass
 
     def _on_use_images_from_gallery(self, paths: list):
         """Handle request to use gallery images as inputs."""

@@ -4,8 +4,10 @@ Properties Dialog for Gallery Items.
 Shows comprehensive information about images and models including:
 - File properties (name, path, size, date)
 - Metadata (workflow, settings, prompt)
-- Relationships (input images, source models, generated outputs)
+- Generation details (seed, execution time, node trace)
+- Relationships (input images, source models, lineage/parent)
 - User notes
+- Metadata completeness indicator
 """
 
 import os
@@ -210,7 +212,10 @@ class PropertiesDialog(QDialog):
         
         # Add sections
         self._add_file_properties_section()
+        self._add_metadata_completeness_section()
         self._add_metadata_section()
+        self._add_execution_section()
+        self._add_lineage_section()
         self._add_relationships_section()
         self._add_workflow_section()
         self._add_notes_section()
@@ -286,7 +291,123 @@ class PropertiesDialog(QDialog):
             self._add_property(group, "Error:", f"Could not read file properties: {e}")
         
         self.content_layout.addWidget(group)
-    
+
+    def _add_metadata_completeness_section(self):
+        """Add metadata completeness indicator section."""
+        completeness = self._calculate_metadata_completeness()
+
+        # Create a horizontal indicator bar
+        indicator_frame = QFrame()
+        indicator_frame.setStyleSheet("""
+            QFrame {
+                background-color: #252530;
+                border: 1px solid #3a4050;
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        indicator_layout = QHBoxLayout(indicator_frame)
+        indicator_layout.setSpacing(12)
+        indicator_layout.setContentsMargins(12, 8, 12, 8)
+
+        # Icon based on completeness
+        icon_label = QLabel()
+        icon_label.setFixedSize(24, 24)
+        icon_label.setAlignment(Qt.AlignCenter)
+
+        status_label = QLabel()
+        status_label.setStyleSheet("font-weight: bold;")
+
+        if completeness['level'] == 'full':
+            icon_label.setText("✓")
+            icon_label.setStyleSheet("color: #4CAF50; font-size: 16px; font-weight: bold;")
+            status_label.setText("Full Metadata")
+            status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        elif completeness['level'] == 'partial':
+            icon_label.setText("◐")
+            icon_label.setStyleSheet("color: #FFC107; font-size: 16px;")
+            status_label.setText("Partial Metadata")
+            status_label.setStyleSheet("color: #FFC107; font-weight: bold;")
+        else:
+            icon_label.setText("○")
+            icon_label.setStyleSheet("color: #888888; font-size: 16px;")
+            status_label.setText("No Metadata")
+            status_label.setStyleSheet("color: #888888; font-weight: bold;")
+
+        indicator_layout.addWidget(icon_label)
+        indicator_layout.addWidget(status_label)
+
+        # Details about what's available
+        details = []
+        if completeness['has_workflow']:
+            details.append("workflow")
+        if completeness['has_seed']:
+            details.append("seed")
+        if completeness['has_prompt']:
+            details.append("prompt")
+        if completeness['has_lineage']:
+            details.append("lineage")
+        if completeness['has_execution_trace']:
+            details.append("execution trace")
+
+        if details:
+            details_label = QLabel(f"({', '.join(details)})")
+            details_label.setStyleSheet("color: #888888; font-size: 11px;")
+            indicator_layout.addWidget(details_label)
+
+        indicator_layout.addStretch()
+
+        self.content_layout.addWidget(indicator_frame)
+
+    def _calculate_metadata_completeness(self) -> dict:
+        """Calculate the completeness level of metadata."""
+        result = {
+            'level': 'none',
+            'has_workflow': False,
+            'has_seed': False,
+            'has_prompt': False,
+            'has_lineage': False,
+            'has_execution_trace': False,
+        }
+
+        if not self._metadata:
+            return result
+
+        # Check what we have
+        result['has_workflow'] = bool(
+            self._metadata.get('workflow_preset') or
+            self._metadata.get('workflow')
+        )
+        result['has_seed'] = (
+            self._metadata.get('base_seed') is not None or
+            self._metadata.get('actual_seed') is not None
+        )
+        result['has_prompt'] = bool(self._metadata.get('prompt'))
+        result['has_lineage'] = bool(
+            self._metadata.get('parent_id') or
+            self._metadata.get('file_id')
+        )
+        result['has_execution_trace'] = bool(
+            self._metadata.get('node_execution_trace') or
+            self._metadata.get('execution_time_ms')
+        )
+
+        # Determine level
+        checks = [
+            result['has_workflow'],
+            result['has_seed'],
+            result['has_prompt'],
+        ]
+
+        if all(checks) and (result['has_lineage'] or result['has_execution_trace']):
+            result['level'] = 'full'
+        elif any(checks):
+            result['level'] = 'partial'
+        else:
+            result['level'] = 'none'
+
+        return result
+
     def _add_metadata_section(self):
         """Add metadata section."""
         if not self._metadata:
@@ -360,21 +481,124 @@ class PropertiesDialog(QDialog):
         
         if has_content:
             self.content_layout.addWidget(group)
-    
+
+    def _add_execution_section(self):
+        """Add execution details section (timing, node trace)."""
+        if not self._metadata:
+            return
+
+        group = self._create_group("Execution Details")
+        has_content = False
+
+        # Actual seed (per-file, may differ from base_seed)
+        actual_seed = self._metadata.get('actual_seed')
+        if actual_seed is not None:
+            self._add_property(group, "Actual Seed:", str(actual_seed))
+            has_content = True
+
+        # Frame index
+        frame_index = self._metadata.get('frame_index')
+        if frame_index is not None:
+            self._add_property(group, "Frame Index:", str(frame_index))
+            has_content = True
+
+        # Execution time
+        exec_time_ms = self._metadata.get('execution_time_ms')
+        if exec_time_ms is not None:
+            if exec_time_ms >= 60000:
+                time_str = f"{exec_time_ms / 60000:.1f} min"
+            elif exec_time_ms >= 1000:
+                time_str = f"{exec_time_ms / 1000:.1f} sec"
+            else:
+                time_str = f"{exec_time_ms} ms"
+            self._add_property(group, "Execution Time:", time_str)
+            has_content = True
+
+        # Error status
+        error = self._metadata.get('error')
+        if error:
+            self._add_separator(group)
+            error_label = QLabel("Error:")
+            error_label.setStyleSheet("font-weight: bold; color: #f44336; margin-top: 8px;")
+            group.layout().addWidget(error_label)
+            self._add_text_property(group, "", error)
+            has_content = True
+
+        # Node execution trace
+        node_trace = self._metadata.get('node_execution_trace')
+        if node_trace and isinstance(node_trace, list):
+            self._add_separator(group)
+            trace_label = QLabel("Node Execution Trace:")
+            trace_label.setStyleSheet("font-weight: bold; color: #4a9eff; margin-top: 8px;")
+            group.layout().addWidget(trace_label)
+
+            for node in node_trace:
+                if isinstance(node, dict):
+                    node_name = node.get('name', node.get('node_id', 'Unknown'))
+                    duration_ms = node.get('duration_ms', 0)
+                    if duration_ms >= 1000:
+                        duration_str = f"{duration_ms / 1000:.1f}s"
+                    else:
+                        duration_str = f"{duration_ms}ms"
+                    self._add_property(group, f"  {node_name}:", duration_str)
+            has_content = True
+
+        if has_content:
+            self.content_layout.addWidget(group)
+
+    def _add_lineage_section(self):
+        """Add lineage/iteration tracking section."""
+        if not self._metadata:
+            return
+
+        group = self._create_group("Lineage")
+        has_content = False
+
+        # File ID (unique identifier for this file)
+        file_id = self._metadata.get('file_id')
+        if file_id:
+            # Show truncated ID with copy capability
+            display_id = f"{file_id[:8]}...{file_id[-4:]}" if len(file_id) > 16 else file_id
+            self._add_property(group, "File ID:", display_id, selectable=True)
+            has_content = True
+
+        # Parent ID (for iteration tracking)
+        parent_id = self._metadata.get('parent_id')
+        if parent_id:
+            display_parent = f"{parent_id[:8]}...{parent_id[-4:]}" if len(parent_id) > 16 else parent_id
+            self._add_property(group, "Parent ID:", display_parent, selectable=True)
+            self._add_property(group, "Iteration:", "This image was iterated from another")
+            has_content = True
+
+        # Parent filename (more user-friendly than ID)
+        parent_filename = self._metadata.get('parent_filename')
+        if parent_filename:
+            self._add_property(group, "Parent File:", parent_filename)
+            has_content = True
+
+        # Iteration depth (how many generations from original)
+        iteration_depth = self._metadata.get('iteration_depth')
+        if iteration_depth is not None and iteration_depth > 0:
+            self._add_property(group, "Iteration Depth:", f"Generation {iteration_depth}")
+            has_content = True
+
+        if has_content:
+            self.content_layout.addWidget(group)
+
     def _add_relationships_section(self):
         """Add relationships section (inputs/outputs)."""
         if not self._metadata:
             return
-        
+
         group = self._create_group("Relationships")
         has_content = False
-        
+
         # Input image
         input_image = self._metadata.get('input_image')
         if input_image:
             self._add_property(group, "Primary Input:", input_image)
             has_content = True
-        
+
         # All source images
         source_images = self._metadata.get('source_images')
         if source_images and isinstance(source_images, list) and len(source_images) > 0:

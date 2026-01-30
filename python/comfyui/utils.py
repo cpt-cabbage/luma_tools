@@ -208,9 +208,23 @@ def wait_for_completion_websocket(
     port: int = None,
     timeout: int = 3600,
     output_dir: str = None,
-    on_image_output: callable = None
+    on_image_output: callable = None,
+    track_node_timing: bool = False
 ) -> bool:
-    """Wait for workflow execution using WebSocket for progress + HTTP polling for completion."""
+    """Wait for workflow execution using WebSocket for progress + HTTP polling for completion.
+
+    Args:
+        prompt_id: The prompt ID to wait for
+        server_url: Server URL
+        port: Server port
+        timeout: Timeout in seconds
+        output_dir: Directory for output files
+        on_image_output: Callback for image outputs
+        track_node_timing: If True, track node execution timing (returns dict instead of bool)
+
+    Returns:
+        bool if track_node_timing=False, otherwise dict with success and node_timing
+    """
     base_url = _normalize_server_url(server_url, port)
     ws_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://')
     client_id = str(uuid.uuid4())
@@ -219,6 +233,10 @@ def wait_for_completion_websocket(
     result = {'success': None, 'error': None, 'outputs': {}}
     start_time = time.time()
     last_progress = {'value': 0, 'max': 0}
+
+    # Node execution timing tracking
+    node_timing = {}  # node_id -> {start_time, end_time, duration_ms, node_type}
+    current_node = {'id': None, 'start': None}
 
     def on_message(ws, message):
         nonlocal result, last_progress
@@ -244,11 +262,39 @@ def wait_for_completion_websocket(
                 if exec_data.get('prompt_id') == prompt_id:
                     node_id = exec_data.get('node')
                     if node_id is None:
+                        # Execution completed - finalize timing for last node
+                        if track_node_timing and current_node['id'] is not None:
+                            end_time = time.time()
+                            duration_ms = int((end_time - current_node['start']) * 1000)
+                            if current_node['id'] in node_timing:
+                                node_timing[current_node['id']]['end_time'] = end_time
+                                node_timing[current_node['id']]['duration_ms'] = duration_ms
+
                         elapsed = int(time.time() - start_time)
                         logger.info(f"Execution completed in {elapsed}s")
                         result['success'] = True
                         ws.close()
                     else:
+                        # New node starting - finalize previous node timing
+                        if track_node_timing:
+                            now = time.time()
+                            if current_node['id'] is not None:
+                                duration_ms = int((now - current_node['start']) * 1000)
+                                if current_node['id'] in node_timing:
+                                    node_timing[current_node['id']]['end_time'] = now
+                                    node_timing[current_node['id']]['duration_ms'] = duration_ms
+
+                            # Start tracking new node
+                            current_node['id'] = node_id
+                            current_node['start'] = now
+                            node_timing[node_id] = {
+                                'node_id': node_id,
+                                'start_time': now,
+                                'end_time': None,
+                                'duration_ms': None,
+                                'node_type': None  # Will be filled from executed message
+                            }
+
                         elapsed = int(time.time() - start_time)
                         logger.info(f"Executing node {node_id}... ({elapsed}s)")
                         last_progress = {'value': 0, 'max': 0}
@@ -271,6 +317,14 @@ def wait_for_completion_websocket(
                     node_id = exec_data.get('node')
                     output = exec_data.get('output', {})
                     result['outputs'][node_id] = output
+
+                    # Update node timing with type info if available
+                    if track_node_timing and node_id in node_timing:
+                        # Try to extract node type from execution data
+                        node_type = exec_data.get('node_type')
+                        if node_type:
+                            node_timing[node_id]['node_type'] = node_type
+
                     if 'images' in output:
                         for img in output['images']:
                             logger.info(f"  Output: {img.get('filename', 'unknown')}")
@@ -358,7 +412,18 @@ def wait_for_completion_websocket(
 
         time.sleep(0.1)
 
-    return result['success'] == True
+    success = result['success'] == True
+
+    if track_node_timing:
+        # Return detailed result with node timing
+        return {
+            'success': success,
+            'error': result.get('error'),
+            'node_timing': list(node_timing.values()),
+            'total_duration_ms': int((time.time() - start_time) * 1000) if success else None
+        }
+
+    return success
 
 
 def wait_for_completion_http(

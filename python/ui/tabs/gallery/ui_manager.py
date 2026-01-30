@@ -202,7 +202,7 @@ class UIManager(BaseGalleryManager):
     # =========================================================================
 
     def _create_view_mode_button(self):
-        """Create the view mode checkboxes (Stacks and Groups)."""
+        """Create the view mode checkboxes (Generations and Groups)."""
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 
@@ -211,7 +211,7 @@ class UIManager(BaseGalleryManager):
         current_mode = safe_get_setting("gallery_stacking_mode", "job")
 
         # Decode mode to checkbox states
-        # "grid" = neither, "job" = stacks only, "groups" = groups only, "both" = both
+        # "grid" = neither, "job" = generations only, "groups" = groups only, "both" = both
         stacks_on = current_mode in ("job", "both")
         groups_on = current_mode in ("groups", "both")
 
@@ -223,15 +223,15 @@ class UIManager(BaseGalleryManager):
         layout.setSpacing(8)
 
         # Create checkboxes
-        self._stacks_checkbox = QCheckBox("Stacks")
+        self._stacks_checkbox = QCheckBox("Generations")
         self._stacks_checkbox.setObjectName("stacksCheckbox")
-        self._stacks_checkbox.setToolTip("Stack items by job/iteration prefix")
+        self._stacks_checkbox.setToolTip("Group items by generation/job prefix")
         self._stacks_checkbox.setChecked(stacks_on)
         self._stacks_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
 
         self._groups_checkbox = QCheckBox("Groups")
         self._groups_checkbox.setObjectName("groupsCheckbox")
-        self._groups_checkbox.setToolTip("Stack items by user-defined groups")
+        self._groups_checkbox.setToolTip("Group items by user-defined groups")
         self._groups_checkbox.setChecked(groups_on)
         self._groups_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
 
@@ -275,9 +275,9 @@ class UIManager(BaseGalleryManager):
         # Show status feedback
         mode_labels = {
             "grid": "Grid",
-            "job": "Stacks",
+            "job": "Generations",
             "groups": "Groups",
-            "both": "Stacks + Groups"
+            "both": "Generations + Groups"
         }
         label = mode_labels.get(mode, mode)
         if hasattr(self.tab, 'show_status_message'):

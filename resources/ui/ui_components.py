@@ -233,7 +233,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,
-                 job_prefix=None):
+                 job_prefix=None, metadata_level=None):
         """
         Initialize thumbnail widget.
 
@@ -247,6 +247,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             gallery_tab: Reference to gallery tab for selection callbacks
             has_metadata: Whether item has associated metadata (affects styling)
             job_prefix: Job prefix for stack color lookup
+            metadata_level: Metadata completeness level ('full', 'partial', 'none')
         """
         super().__init__(parent)
         self.path = path
@@ -258,6 +259,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         self._job_prefix = job_prefix
         self._is_hovered = False
         self._has_metadata = has_metadata
+        self._metadata_level = metadata_level  # 'full', 'partial', 'none', or None
         self._gallery_tab = gallery_tab
         self._double_click_in_progress = False
         self._cached_metadata = None
@@ -372,6 +374,41 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         if self._is_new:
             self._new_indicator.show_dot()
 
+        # Metadata indicator (bottom-left, shows metadata completeness level)
+        self._metadata_indicator = QLabel(self.thumbnail_label)
+        self._metadata_indicator.setAlignment(Qt.AlignCenter)
+        self._metadata_indicator.setFixedSize(16, 16)
+        self._metadata_indicator.move(4, self.THUMBNAIL_SIZE[1] - 20)
+        self._metadata_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._metadata_indicator.setContextMenuPolicy(Qt.NoContextMenu)
+        self._update_metadata_indicator()
+
+    def _update_metadata_indicator(self):
+        """Update the metadata indicator badge based on metadata level."""
+        from thumbnail_styles import (
+            get_metadata_indicator_style,
+            METADATA_LEVEL_FULL, METADATA_LEVEL_PARTIAL, METADATA_LEVEL_NONE
+        )
+
+        # Determine metadata level
+        if self._metadata_level:
+            level = self._metadata_level
+        elif self._has_metadata:
+            level = METADATA_LEVEL_PARTIAL  # Legacy: has_metadata means job-level
+        else:
+            level = METADATA_LEVEL_NONE
+
+        icon, stylesheet, tooltip = get_metadata_indicator_style(level)
+        self._metadata_indicator.setText(icon)
+        self._metadata_indicator.setStyleSheet(stylesheet)
+        self._metadata_indicator.setToolTip(tooltip)
+
+        # Only show if not "none" level (to reduce visual clutter)
+        if level == METADATA_LEVEL_NONE:
+            self._metadata_indicator.hide()
+        else:
+            self._metadata_indicator.show()
+
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state."""
         drop_hover = getattr(self, '_drop_highlight_active', False)
@@ -386,6 +423,15 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _apply_filename_style(self):
         # New items no longer use green - they have a pulsing NEW badge instead
         self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+
+    def set_metadata_level(self, level):
+        """Update the metadata level and refresh the indicator.
+
+        Args:
+            level: One of 'full', 'partial', 'none'
+        """
+        self._metadata_level = level
+        self._update_metadata_indicator()
 
     # --- Likes and Groups ---
     def set_favorites_manager(self, manager):
@@ -648,18 +694,73 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     @staticmethod
     def _get_tooltip_data(output_dir, path):
-        from comfyui.metadata import get_model_note
+        """Get rich tooltip data including metadata if available."""
+        from comfyui.metadata import get_model_note, get_item_metadata
         filename = os.path.basename(path)
         note = get_model_note(output_dir, filename)
-        return (filename, note)
+
+        # Try to get rich metadata for images
+        metadata = None
+        try:
+            metadata = get_item_metadata(output_dir, filename)
+        except Exception:
+            pass  # Metadata may not exist
+
+        return (filename, note, metadata)
 
     def _on_tooltip_loaded(self, data):
+        """Build rich tooltip from metadata."""
         if not isValid(self):
             return
-        filename, note = data
-        tooltip_parts = [filename]
+        filename, note, metadata = data
+        tooltip_parts = [f"📄 {filename}"]
+
+        if metadata:
+            # Show workflow preset
+            if metadata.get('workflow_preset'):
+                preset = metadata['workflow_preset']
+                # Show just the preset name, not full path
+                if '/' in preset:
+                    preset = preset.split('/')[-1]
+                tooltip_parts.append(f"🎨 Workflow: {preset}")
+
+            # Show seed
+            if metadata.get('base_seed'):
+                tooltip_parts.append(f"🎲 Seed: {metadata['base_seed']}")
+
+            # Show prompt (truncated)
+            if metadata.get('prompt'):
+                prompt = metadata['prompt']
+                if len(prompt) > 80:
+                    prompt = prompt[:77] + "..."
+                tooltip_parts.append(f"💬 Prompt: {prompt}")
+
+            # Show timestamp
+            if metadata.get('timestamp'):
+                try:
+                    from datetime import datetime
+                    ts = datetime.fromisoformat(metadata['timestamp'].replace('Z', '+00:00'))
+                    tooltip_parts.append(f"⏰ Generated: {ts.strftime('%Y-%m-%d %H:%M')}")
+                except Exception:
+                    pass
+
+            # Show source images
+            source_images = metadata.get('source_images', [])
+            if source_images:
+                if len(source_images) == 1:
+                    tooltip_parts.append(f"📷 Source: {source_images[0]}")
+                else:
+                    tooltip_parts.append(f"📷 Sources: {len(source_images)} images")
+
+        # Add note for 3D models
         if note:
-            tooltip_parts.append(f"\nNote: {note}")
+            tooltip_parts.append(f"📝 Note: {note}")
+
+        # Hint at bottom
+        if metadata:
+            tooltip_parts.append("")
+            tooltip_parts.append("Right-click for more options")
+
         self.setToolTip("\n".join(tooltip_parts))
 
     # --- Image thumbnail loading ---
@@ -1623,7 +1724,7 @@ class GallerySelectionToolbar(QWidget):
 
 def load_stylesheet():
     """Load combined QDarkStyle and custom stylesheet."""
-    from config import QDARKSTYLE_PATH, CUSTOM_STYLE_PATH
+    from core.config import QDARKSTYLE_PATH, CUSTOM_STYLE_PATH
     file = QFile(QDARKSTYLE_PATH)
     file.open(QFile.ReadOnly | QFile.Text)
     stream = QTextStream(file)

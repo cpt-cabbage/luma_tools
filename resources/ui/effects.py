@@ -1103,7 +1103,7 @@ class UIAnimations:
         logger.info(f"SUCCESS: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
-            self._status_queue.post(f"✓ {message}", StatusColors.SUCCESS,
+            self._status_queue.post(message, StatusColors.SUCCESS,
                                    priority=StatusMessageQueue.HIGH)
 
     def show_error(self, message, show_in_status=True):
@@ -1117,7 +1117,7 @@ class UIAnimations:
         logger.error(f"ERROR: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
-            self._status_queue.post(f"✗ {message}", StatusColors.ERROR,
+            self._status_queue.post(message, StatusColors.ERROR,
                                    priority=StatusMessageQueue.URGENT)
 
     def show_warning(self, message, show_in_status=True):
@@ -1131,7 +1131,7 @@ class UIAnimations:
         logger.warning(f"WARNING: {message}")
         if show_in_status and hasattr(self, '_status_queue'):
             from styles import StatusColors
-            self._status_queue.post(f"⚠ {message}", StatusColors.WARNING,
+            self._status_queue.post(message, StatusColors.WARNING,
                                    priority=StatusMessageQueue.HIGH)
 
     def show_info(self, message, show_in_status=True):

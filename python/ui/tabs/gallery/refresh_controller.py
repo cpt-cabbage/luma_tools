@@ -64,7 +64,9 @@ class RefreshController(BaseGalleryManager):
 
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
-            self.show_status("Refresh already in progress", "info")
+            # Only show status message for user-initiated refreshes, not auto-refreshes
+            if show_status:
+                self.show_status("Refresh already in progress", "info")
             return
 
         # Store show_status for use in _do_refresh

@@ -15,16 +15,27 @@ from PySide6.QtWidgets import (
 
 
 class GroupFilterItem(QWidget):
-    """A clickable filter item (All, Liked, or a group)."""
+    """A clickable filter item (All, Liked, or a group).
+
+    Groups (items with color) accept drag-drop to add items to the group.
+    """
 
     clicked = Signal(str)  # Emits filter_id
+    files_dropped = Signal(str, list)  # Emits (filter_id, [paths]) when files are dropped
 
-    def __init__(self, filter_id, name, color=None, count=0, icon=None, parent=None):
+    def __init__(self, filter_id, name, color=None, count=0, icon=None, parent=None,
+                 is_group=False):
         super().__init__(parent)
         self.filter_id = filter_id
         self._color = color
         self._is_active = False
+        self._is_group = is_group  # True if this represents a user-created group
+        self._drop_highlight_active = False
         self._setup_ui(name, icon, count)
+
+        # Enable drop support for groups
+        if self._is_group:
+            self.setAcceptDrops(True)
 
     def _setup_ui(self, name, icon, count):
         self.setFixedHeight(32)
@@ -121,6 +132,73 @@ class GroupFilterItem(QWidget):
             """)
             self.name_label.setStyleSheet("color: #e0e0e0; font-size: 12px;")
 
+    # --- Drag-drop support for groups ---
+    def dragEnterEvent(self, event):
+        """Accept drag if this is a group and files are being dragged."""
+        if not self._is_group:
+            event.ignore()
+            return
+
+        from drag_drop import can_accept_files
+        if can_accept_files(event.mimeData(), {'image', 'video', 'model'}):
+            event.acceptProposedAction()
+            self._show_drop_highlight(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Continue accepting drag."""
+        if not self._is_group:
+            event.ignore()
+            return
+
+        from drag_drop import can_accept_files
+        if can_accept_files(event.mimeData(), {'image', 'video', 'model'}):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Remove drop highlight."""
+        self._show_drop_highlight(False)
+        event.accept()
+
+    def dropEvent(self, event):
+        """Handle drop - emit signal with paths."""
+        self._show_drop_highlight(False)
+
+        if not self._is_group:
+            event.ignore()
+            return
+
+        from drag_drop import extract_files_from_mime_data, filter_files_by_category
+        paths = extract_files_from_mime_data(event.mimeData())
+        filtered_paths = filter_files_by_category(paths, {'image', 'video', 'model'})
+
+        if filtered_paths:
+            logger.info(f"[GroupFilterItem] Drop on group {self.filter_id}: {len(filtered_paths)} files")
+            self.files_dropped.emit(self.filter_id, filtered_paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _show_drop_highlight(self, show):
+        """Show or hide drop highlight."""
+        self._drop_highlight_active = show
+
+        if show:
+            # Use green drop target color
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: rgba(74, 222, 128, 0.3);
+                    border: 2px dashed #4ade80;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            # Restore normal style
+            self._update_style()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self.filter_id)
@@ -129,12 +207,12 @@ class GroupFilterItem(QWidget):
 
 class GroupsFilterPanel(QWidget):
     """
-    Collapsible sidebar for filtering gallery by likes, groups, and stacks.
+    Collapsible sidebar for filtering gallery by likes, groups, and generations.
 
     Signals:
         filter_changed(filter_type, filter_id): Emitted when filter selection changes
-            filter_type: "all", "liked", "group", "ungrouped", "stack"
-            filter_id: group_id for groups, stack_id for stacks, None for others
+            filter_type: "all", "liked", "group", "ungrouped", "stack" (internal name for generations)
+            filter_id: group_id for groups, generation_id for generations, None for others
         collapsed_changed(is_collapsed): Emitted when panel is collapsed/expanded
     """
 
@@ -272,10 +350,21 @@ class GroupsFilterPanel(QWidget):
 
     def _build_filter_list(self):
         """Build the list of filter items."""
-        # Clear existing items
-        for item in self._filter_items.values():
-            item.deleteLater()
+        # Clear ALL widgets from the content layout (not just tracked items)
+        # This prevents stretches and separators from accumulating
+        while self.content_layout.count():
+            layout_item = self.content_layout.takeAt(0)
+            widget = layout_item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        # Clear tracking dictionaries
         self._filter_items.clear()
+        self._stack_items.clear()
+        self._stacks_separator = None
+        self._stacks_header = None
+        self._stacks_toggle = None
 
         # "All Items" option
         all_item = GroupFilterItem("all", "All Items", icon="📁", count=0)
@@ -320,9 +409,12 @@ class GroupsFilterPanel(QWidget):
                     group.group_id,
                     group.name,
                     color=group.color,
-                    count=count
+                    count=count,
+                    is_group=True  # Enable drag-drop support
                 )
                 item.clicked.connect(lambda fid, gid=group.group_id: self._on_filter_clicked("group", gid))
+                # Connect drag-drop handler
+                item.files_dropped.connect(self._on_files_dropped_on_group)
                 # Right-click for edit/delete
                 item.setContextMenuPolicy(Qt.CustomContextMenu)
                 item.customContextMenuRequested.connect(
@@ -463,7 +555,7 @@ class GroupsFilterPanel(QWidget):
             header_layout.addWidget(self._stacks_toggle)
 
             # Header text with count
-            header_text = QLabel(f"Stacks ({len(self._stacks_data)})")
+            header_text = QLabel(f"Generations ({len(self._stacks_data)})")
             header_text.setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;")
             header_layout.addWidget(header_text)
             header_layout.addStretch()
@@ -675,7 +767,7 @@ class GroupsFilterPanel(QWidget):
             if group:
                 self.status_message.emit(f"Showing group: {group.name}")
         elif filter_type == "stack" and filter_id:
-            self.status_message.emit(f"Showing stack: {filter_id}")
+            self.status_message.emit(f"Showing generation: {filter_id}")
 
     def _update_active_state(self):
         """Update which filter item appears active."""
@@ -778,6 +870,33 @@ class GroupsFilterPanel(QWidget):
             if name and self._favorites_manager:
                 self._favorites_manager.create_group(name, color)
                 self.status_message.emit(f"Created group '{name}'")
+
+    def _on_files_dropped_on_group(self, group_id, paths):
+        """Handle files dropped on a group filter item.
+
+        Args:
+            group_id: The group ID that received the drop
+            paths: List of file paths that were dropped
+        """
+        if not self._favorites_manager or not paths:
+            return
+
+        group = self._favorites_manager.get_group(group_id)
+        if not group:
+            logger.warning(f"[GroupsPanel] Group not found: {group_id}")
+            return
+
+        # Add all items to the group
+        added_count = 0
+        for path in paths:
+            if self._favorites_manager.add_to_group(path, group_id):
+                added_count += 1
+
+        if added_count > 0:
+            logger.info(f"[GroupsPanel] Added {added_count} items to group '{group.name}'")
+            self.status_message.emit(f"Added {added_count} item(s) to '{group.name}'")
+        else:
+            self.status_message.emit("Items already in group")
 
     def _animate_width(self, target_max, target_min, duration=200):
         """Animate panel width to target max/min values."""

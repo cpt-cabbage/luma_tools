@@ -203,7 +203,7 @@ class PassBuilderTab(BaseTab):
 
         # Show status bar progress (no overlay so user can still interact)
         self.update_status_with_spinner(
-            f"🔧 Pass Builder: Building passes ({build_type_display})...",
+            f"Pass Builder: Building passes ({build_type_display})...",
             StatusColors.INFO
         )
 
@@ -222,7 +222,7 @@ class PassBuilderTab(BaseTab):
             """Called when build completes."""
             self.log(f"Build completed: {result}")
             self.update_status_with_spinner(
-                "✅ Pass Builder: Build completed successfully",
+                "Pass Builder: Build completed successfully",
                 StatusColors.SUCCESS,
                 start=False
             )

@@ -32,6 +32,48 @@ TYPE_INDICATOR_CONFIG = {
 TYPE_INDICATOR_DEFAULT = ('?', 'rgba(128, 128, 128, 0.8)')
 
 
+# ============================================================================
+# METADATA LEVEL CONFIG (for metadata completeness indicator badge)
+# ============================================================================
+
+# Metadata completeness levels
+METADATA_LEVEL_FULL = "full"      # Per-file metadata with execution trace
+METADATA_LEVEL_PARTIAL = "partial"  # Job-level metadata only
+METADATA_LEVEL_NONE = "none"      # No metadata available
+
+# Maps metadata level → (icon character, rgba color, tooltip)
+METADATA_INDICATOR_CONFIG = {
+    METADATA_LEVEL_FULL: ('✓', 'rgba(16, 185, 129, 0.9)', 'Full metadata - all parameters recoverable'),
+    METADATA_LEVEL_PARTIAL: ('◐', 'rgba(251, 191, 36, 0.9)', 'Partial metadata - job-level only'),
+    METADATA_LEVEL_NONE: ('?', 'rgba(128, 128, 128, 0.7)', 'No metadata - origin unknown'),
+}
+
+
+def get_metadata_indicator_style(level: str) -> tuple:
+    """Get the icon, stylesheet, and tooltip for a metadata indicator badge.
+
+    Args:
+        level: One of METADATA_LEVEL_FULL, METADATA_LEVEL_PARTIAL, METADATA_LEVEL_NONE
+
+    Returns:
+        Tuple of (icon_text, stylesheet_string, tooltip_text)
+    """
+    config = METADATA_INDICATOR_CONFIG.get(level, METADATA_INDICATOR_CONFIG[METADATA_LEVEL_NONE])
+    icon, color, tooltip = config
+    stylesheet = f"""
+        QLabel {{
+            background-color: rgba(0, 0, 0, 0.5);
+            color: {color};
+            border: 1px solid {color};
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px;
+        }}
+    """
+    return icon, stylesheet, tooltip
+
+
 def get_type_indicator_style(item_type: str) -> tuple:
     """Get the icon and stylesheet for a type indicator label.
 
@@ -119,6 +161,10 @@ class ThumbnailColors:
     BG_HOVER = "#353a45"              # Standard hover background
     BG_HOVER_SELECTED = "#2a4a6f"     # Brighter blue for selected + hover
 
+    # Drop target colors (when dragging items over)
+    BG_DROP_TARGET = "#2a4a3f"        # Green-tinted background for drop targets
+    BORDER_DROP_TARGET = "#4ade80"    # Bright green border for drop targets
+
     # Border colors - normal state
     BORDER_WITH_METADATA = "#4a6d8c"  # Blue border for metadata items
     BORDER_WITHOUT_METADATA = "#3c414b"  # Grey border for non-metadata
@@ -158,6 +204,10 @@ class ThumbnailStyler:
 
     def get_background_color(self, hover=False, selected=False, drop_hover=False):
         """Get the appropriate background color."""
+        # Drop hover takes priority - use distinct drop target color
+        if drop_hover:
+            return ThumbnailColors.BG_DROP_TARGET
+
         # Get base background color first
         if self.group_color:
             base_bg = derive_background_from_color(self.group_color)
@@ -169,9 +219,6 @@ class ThumbnailStyler:
             base_bg = ThumbnailColors.BG_WITHOUT_METADATA
 
         # Apply hover/selected modifications
-        # Drop hover is brightest (like a more intense hover) - only for items with group_color
-        if drop_hover and self.group_color:
-            return lighten_color(base_bg, 0.4)
         if selected and hover:
             return lighten_color(base_bg, 0.25)
         if hover:
@@ -185,8 +232,12 @@ class ThumbnailStyler:
         Note: is_new parameter is kept for backwards compatibility but no longer
         affects border color. New items now use a pulsing indicator instead.
         """
+        # Drop hover takes priority - use distinct drop target border color
+        if drop_hover:
+            return ThumbnailColors.BORDER_DROP_TARGET
+
         if selected:
-            if hover or drop_hover:
+            if hover:
                 return ThumbnailColors.BORDER_SELECTED_HOVER
             return ThumbnailColors.BORDER_SELECTED_STACK if self.is_stacked else ThumbnailColors.BORDER_SELECTED
 
@@ -203,9 +254,6 @@ class ThumbnailStyler:
             base_border = ThumbnailColors.BORDER_WITHOUT_METADATA
 
         # Apply hover modification - brighten the current color
-        # Drop hover is even brighter than normal hover - only for items with group_color
-        if drop_hover and self.group_color:
-            return lighten_color(base_border, 0.5)
         if hover:
             return lighten_color(base_border, 0.3)
 

@@ -625,7 +625,8 @@ class LumaShotTools(QtWidgets.QWidget):
         logging.info(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
 
         if not hasattr(self, 'tab_glow_manager'):
-            logging.error(f"[TabAttention] No tab_glow_manager!")
+            # This can happen during startup before tab_glow_manager is initialized
+            logging.debug(f"[TabAttention] tab_glow_manager not yet initialized, skipping")
             return
 
         # Find the tab index for this tab instance

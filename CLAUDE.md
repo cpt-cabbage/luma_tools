@@ -53,7 +53,9 @@ python/
 │       └── dialogs/  # feature_request_dialog.py
 resources/
 ├── ui/           # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py
-│                 # file_dialogs.py, dialog_helpers.py, option_button.py
+│                 # file_dialogs.py, dialog_helpers.py, option_button.py, properties_dialog.py
+│                 # thumbnail_base.py, thumbnail_styles.py, splash_screen.py, spinners.py
+│   └── tabs/     # .ui files for each tab (Qt Designer)
 ├── version.json  # App version
 └── changelog.md  # Release notes
 scripts/          # install_venv.py (venv installer), deploy.py (production deployment)
@@ -119,6 +121,15 @@ QThreadPool.globalInstance().start(self._worker)
 - Never update Qt widgets from worker threads (use signals)
 - `app_state` is thread-safe (RLock)
 - Workers auto-inject `progress_callback(percent: int, message: str)` if in function signature
+
+**Thread-Safe Caching:** When caching data accessed from multiple threads, use locks:
+```python
+import threading
+self._cache_lock = threading.Lock()
+
+with self._cache_lock:
+    self._cache[key] = value  # Thread-safe access
+```
 
 ### Settings
 
@@ -309,9 +320,10 @@ Read tool on log path with offset=-100
 
 **Debug CLI Arguments:** The app supports debug flags that can be appended after the normal positional arguments:
 ```
---tab <name>       Select a tab on startup (gallery, comfyui, settings, logs, passbuilder, mp4, republish, cleaner)
+--tab <name>       Select a tab on startup (passbuilder, mp4maker, republish, shotcleaner, logs, comfyui, gallery, settings)
 --auto-close <sec> Auto-close the app after N seconds (for automated testing)
 ```
+Tab names match `restrict_key` values in `TAB_CONFIG` (`ui/tabs/__init__.py`).
 
 **Running the app from Claude Code for debugging:**
 Because PYTHONPATH must be set (uses `$env:` which bash mangles), write a `.ps1` script:
@@ -358,6 +370,18 @@ Edit `.ui` files in Qt Designer, update tab logic in `python/ui/tabs/`, styles i
 ```python
 # ❌ worker = Worker(func); QThreadPool.start(worker)  # Gets GC'd
 # ✅ self._worker = Worker(func); QThreadPool.start(self._worker)
+```
+
+### Lambda Closure Bug
+When creating lambdas in loops, capture variables by value:
+```python
+# ❌ Wrong: all lambdas share same 'i' reference
+for i in range(5):
+    button.clicked.connect(lambda: print(i))  # Always prints 4
+
+# ✅ Correct: capture 'i' by value using default argument
+for i in range(5):
+    button.clicked.connect(lambda x=i: print(x))  # Prints 0, 1, 2, 3, 4
 ```
 
 ### Other Issues
@@ -452,3 +476,12 @@ from deadline.parser import parse_deadline_output, extract_job_id
 - `self.on_worker_success()` / `self.on_worker_error()` - standard completion handlers
 
 **ui/tabs/gallery/base_manager.py:** Base class for gallery manager components with same helpers as BaseTab
+
+**resources/ui/ Additional Modules:**
+- `properties_dialog.py` - Comprehensive properties dialog for gallery items (file info, metadata, workflow details, relationships)
+- `thumbnail_base.py` - Base class for thumbnail widgets with disk/memory cache management
+- `thumbnail_styles.py` - `ThumbnailStyler` for consistent thumbnail appearance (borders, badges, colors)
+- `splash_screen.py` - Application splash screen with async loading progress
+- `spinners.py` - Loading spinner widgets for async operations
+- `batch_selector.py` - Batch/range selection widget for frame ranges
+- `effects.py` - UI animation effects (pulse, glow, fade)

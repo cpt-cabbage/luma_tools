@@ -266,6 +266,15 @@ class GalleryLoader:
                             # 3D models/video/audio default to output, images to input
                             is_output = file_type in ('model', 'video', 'audio')
 
+                    # Determine metadata completeness level
+                    # 'full' = per-file metadata, 'partial' = job-level only, 'none' = no metadata
+                    try:
+                        from comfyui.metadata import get_metadata_level
+                        metadata_level = get_metadata_level(output_dir, filename)
+                    except Exception:
+                        # Fallback if function not available or errors
+                        metadata_level = 'partial' if has_metadata else 'none'
+
                     items_dict[filename] = {
                         'path': full_path,
                         'mtime': mtime,
@@ -276,6 +285,7 @@ class GalleryLoader:
                         'is_input': not is_output,  # If not a generated output, treat as input
                         'source_images': source_images,  # Input images used
                         'has_metadata': has_metadata,  # Whether metadata was found for this file
+                        'metadata_level': metadata_level,  # 'full', 'partial', or 'none'
                     }
 
                 # Detect and bundle _view/_export pairs if enabled
@@ -328,6 +338,7 @@ class GalleryLoader:
                                 'is_input': view_item.get('is_input', False),
                                 'source_images': view_item.get('source_images', []),
                                 'has_metadata': view_item.get('has_metadata', False),
+                                'metadata_level': view_item.get('metadata_level', 'none'),
                                 'is_bundled': True
                             })
                         else:

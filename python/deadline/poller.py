@@ -41,6 +41,15 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         output = result.stdout.strip()
 
+        # Debug: Log raw Deadline response
+        logger.info(f"[Poll Debug] Job {job_id}: returncode={result.returncode}, stderr='{result.stderr[:100] if result.stderr else ''}', stdout_len={len(output)}")
+        if "Status=" in output:
+            # Extract just the status line for debug
+            for line in output.split('\n'):
+                if line.startswith('Status='):
+                    logger.info(f"[Poll Debug] Job {job_id}: {line}")
+                    break
+
         # Check if job was deleted
         if is_job_not_found(result.returncode, result.stderr, output):
             # Import here to avoid circular dependency
@@ -190,49 +199,64 @@ def get_task_log(job_id: str, task_id: int) -> Optional[str]:
 
 def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]:
     """
-    Get the ComfyUI runner log from the network output directory.
+    Get the ComfyUI runner log from the network log directory.
 
-    The runner writes logs to the network output directory with pattern:
+    The runner writes logs to <network_path>/_logs/runner/ with pattern:
     comfyui_runner_{job_name}_{timestamp}.log
 
     Args:
-        output_dir: Network output directory
+        output_dir: Network output directory (used as fallback and to derive network path)
         job_name: Job name/output prefix
 
     Returns:
         Log file contents, or None if not found/readable
     """
     import glob
-    try:
-        if not output_dir or not os.path.isdir(output_dir):
-            logger.info(f"[Debug] Output dir not valid: {output_dir}")
-            return None
+    from core.logging_utils import get_network_log_dir
 
+    try:
         # Find the most recent log file matching the job name
         # Don't truncate - UUIDs can be longer than 50 chars
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
 
-        # Search recursively in subdirectories (logs written to user/uuid/ subdirs)
-        pattern = os.path.join(output_dir, "**", f"comfyui_runner_{safe_name}_*.log")
-        logger.info(f"[Debug] Looking for log with pattern: {pattern}")
-        log_files = glob.glob(pattern, recursive=True)
-        logger.info(f"[Debug] Found {len(log_files)} log files: {log_files[:3] if len(log_files) > 3 else log_files}")
+        # Primary location: network log directory (_logs/runner/)
+        log_dir = get_network_log_dir("runner")
 
-        if not log_files:
-            return None
+        if log_dir and os.path.isdir(log_dir):
+            pattern = os.path.join(log_dir, f"comfyui_runner_{safe_name}_*.log")
+            logger.debug(f"[Poll Debug] Looking for log with pattern: {pattern}")
+            log_files = glob.glob(pattern)
+            logger.debug(f"[Poll Debug] Found {len(log_files)} log files in runner dir")
 
-        # Get the most recent log file
-        latest_log = max(log_files, key=os.path.getmtime)
-        logger.info(f"[Debug] Reading log file: {latest_log}")
+            if log_files:
+                latest_log = max(log_files, key=os.path.getmtime)
+                logger.debug(f"[Poll Debug] Reading log file: {latest_log}")
 
-        # Read the log file
-        with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-            logger.info(f"[Debug] Read {len(content)} bytes from log file")
-            return content
+                with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                    logger.debug(f"[Poll Debug] Read {len(content)} bytes from runner log")
+                    return content
+
+        # Fallback: search in output directory itself (legacy location)
+        if output_dir and os.path.isdir(output_dir):
+            pattern = os.path.join(output_dir, "**", f"comfyui_runner_{safe_name}_*.log")
+            logger.debug(f"[Poll Debug] Fallback: looking in output_dir: {pattern}")
+            log_files = glob.glob(pattern, recursive=True)
+
+            if log_files:
+                latest_log = max(log_files, key=os.path.getmtime)
+                logger.debug(f"[Poll Debug] Reading fallback log file: {latest_log}")
+
+                with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                    logger.debug(f"[Poll Debug] Read {len(content)} bytes from fallback log")
+                    return content
+
+        logger.debug(f"[Poll Debug] No log files found for job: {job_name}")
+        return None
 
     except Exception as e:
-        logger.error(f"[Debug] Error reading runner log: {e}", exc_info=True)
+        logger.error(f"[Poll Debug] Error reading runner log: {e}", exc_info=True)
         return None
 
 
@@ -295,11 +319,30 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     if 'RESTART' in log_content.upper() or 'Server restart' in log_content:
         is_loading_model = True
 
-    # Pattern: Progress: 42% (5/12) (15s) or Progress: 42% (5/12)
-    pattern = r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?'
+    # Pattern 1: Runner format - Progress: 42% (5/12) (15s) or Progress: 42% (5/12)
+    pattern_runner = r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?'
 
-    # Search from end of log (most recent progress)
-    matches = list(re.finditer(pattern, log_content))
+    # Pattern 2: tqdm format - " 12%|█▎        | 1/8 [00:03<00:24,  3.46s/it]"
+    # Uses [^\|]* to match ANY characters between pipes (tqdm uses many unicode block chars)
+    # Captures: percent, current, total
+    pattern_tqdm = r'\s*(\d+)%\|[^\|]*\|\s*(\d+)/(\d+)\s*\['
+
+    # Search from end of log (most recent progress) - try runner format first
+    matches = list(re.finditer(pattern_runner, log_content))
+
+    # If no runner format matches, try tqdm format
+    if not matches:
+        tqdm_matches = list(re.finditer(pattern_tqdm, log_content))
+        if tqdm_matches:
+            last_tqdm = tqdm_matches[-1]
+            return {
+                'progress_pct': int(last_tqdm.group(1)),
+                'current_node': int(last_tqdm.group(2)),
+                'total_nodes': int(last_tqdm.group(3)),
+                'elapsed_seconds': None,
+                'is_loading_model': is_loading_model and int(last_tqdm.group(2)) == 0
+            }
+
     if not matches:
         # No progress yet - check if execution has started
         # If we see "Execution started" or "Executing node" but no progress,
@@ -311,13 +354,15 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
                 'current_node': 0,
                 'total_nodes': 0,
                 'elapsed_seconds': None,
-                'is_loading_model': is_loading_model or execution_started
+                'is_loading_model': is_loading_model or execution_started,
+                'current_node_name': None
             }
         return None
 
     last_match = matches[-1]
     # Once we have actual progress (current_node > 0), models are loaded
     current_node = int(last_match.group(2))
+
     return {
         'progress_pct': int(last_match.group(1)),
         'current_node': current_node,

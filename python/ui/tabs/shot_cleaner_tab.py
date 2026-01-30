@@ -94,7 +94,7 @@ class ShotCleanerTab(BaseTab):
 
         # Show status bar progress (no overlay so user can still interact)
         self.update_status_with_spinner(
-            "🔍 Shot Cleaner: Scanning directories...",
+            "Shot Cleaner: Scanning directories...",
             StatusColors.INFO
         )
 
@@ -117,7 +117,7 @@ class ShotCleanerTab(BaseTab):
 
         # Stop spinner and update status
         self.update_status_with_spinner(
-            "✅ Shot Cleaner: Scan complete",
+            "Shot Cleaner: Scan complete",
             StatusColors.SUCCESS,
             start=False
         )

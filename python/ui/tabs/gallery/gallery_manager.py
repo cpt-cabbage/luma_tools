@@ -195,6 +195,14 @@ class GalleryManager(BaseGalleryManager):
         """
         container = self.tab.ui.galleryThumbnailContainer
 
+        # Handle empty state
+        if not items:
+            self._show_empty_state()
+            self.update_status_count([])
+            return
+        else:
+            self._hide_empty_state()
+
         # Stacked mode
         stacked = view_mode == "stacked"
 
@@ -802,6 +810,13 @@ class GalleryManager(BaseGalleryManager):
         has_metadata = item.get('has_metadata', False)
         job_prefix = item.get('job_prefix')
 
+        # Determine metadata level: 'full' (per-file), 'partial' (job-level), 'none'
+        # For now, has_metadata means 'partial' (job-level only)
+        # 'full' will be used when per-file metadata is implemented
+        metadata_level = item.get('metadata_level')
+        if metadata_level is None:
+            metadata_level = 'partial' if has_metadata else 'none'
+
         try:
             # Use unified ThumbnailWidget with item_type parameter
             thumbnail = ThumbnailWidget(
@@ -813,7 +828,8 @@ class GalleryManager(BaseGalleryManager):
                 is_new=is_new,
                 gallery_tab=self.tab,
                 has_metadata=has_metadata,
-                job_prefix=job_prefix
+                job_prefix=job_prefix,
+                metadata_level=metadata_level
             )
             thumbnail.clicked.connect(self.tab._on_thumbnail_clicked)
             thumbnail.deleted.connect(self.tab._on_item_deleted)
@@ -1189,3 +1205,42 @@ class GalleryManager(BaseGalleryManager):
             if model_count > 0:
                 parts.append(f"{model_count} 3D model{'s' if model_count != 1 else ''}")
             self.tab.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
+
+    # =========================================================================
+    # EMPTY STATE GUIDANCE
+    # =========================================================================
+
+    def _show_empty_state(self):
+        """Show empty state guidance when gallery has no items."""
+        if hasattr(self, '_empty_state_widget') and self._empty_state_widget:
+            self._empty_state_widget.show()
+            return
+
+        # Create empty state widget
+        from empty_states import GalleryEmptyState
+
+        self._empty_state_widget = GalleryEmptyState()
+        self._empty_state_widget.get_started_clicked.connect(self._on_empty_state_get_started)
+        self._empty_state_widget.browse_folder_clicked.connect(self._on_empty_state_browse)
+
+        # Add to flow layout
+        self.tab._flow_layout.addWidget(self._empty_state_widget)
+        self._empty_state_widget.show()
+
+    def _hide_empty_state(self):
+        """Hide the empty state widget."""
+        if hasattr(self, '_empty_state_widget') and self._empty_state_widget:
+            if isValid(self._empty_state_widget):
+                self.tab._flow_layout.removeWidget(self._empty_state_widget)
+                self._empty_state_widget.deleteLater()
+            self._empty_state_widget = None
+
+    def _on_empty_state_get_started(self):
+        """Handle click on 'Go to ComfyUI' button in empty state."""
+        if hasattr(self.tab, 'main_window') and self.tab.main_window:
+            self.tab.main_window.select_tab_by_name("comfyui")
+
+    def _on_empty_state_browse(self):
+        """Handle click on 'Browse Folder' button in empty state."""
+        if hasattr(self.tab, '_browse_custom_folder'):
+            self.tab._browse_custom_folder()

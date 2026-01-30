@@ -258,11 +258,12 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 bg_color = "#1e3a5f"
                 border_color = "#4a6d8c"
 
-            # Apply drop hover brightness only for items with custom colors (groups/likes)
-            # Don't brighten default blue/grey stacks
-            if drop_active and custom_color:
-                bg_color = lighten_color(bg_color, 0.4)
-                border_color = lighten_color(border_color, 0.5)
+            # Apply drop target styling when dropping items onto this stack
+            # Use distinct green color for visibility
+            if drop_active:
+                from thumbnail_styles import ThumbnailColors
+                bg_color = ThumbnailColors.BG_DROP_TARGET
+                border_color = ThumbnailColors.BORDER_DROP_TARGET
 
             logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors applying to {len(self._stack_labels)} labels")
             # Apply to all stack labels
@@ -726,9 +727,11 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 if not isValid(self.thumbnail_label):
                     logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style thumbnail_label invalid, returning")
                     return
+                drop_hover = getattr(self, '_drop_highlight_active', False)
                 style = self._styler.get_style(
                     selected=self._is_selected,
-                    hover=self._is_hovered
+                    hover=self._is_hovered,
+                    drop_hover=drop_hover
                 )
                 logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style setting stylesheet")
                 self.thumbnail_label.setStyleSheet(style)

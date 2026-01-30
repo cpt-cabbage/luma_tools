@@ -489,9 +489,214 @@ class QuickGroupDialog(QDialog):
         self.accept()
 
     def get_result(self):
-        """Get the name and color from the dialog.
+        """Get the name and color from the dialog (QuickGroupDialog).
 
         Returns:
             Tuple of (name, color) or (None, None) if cancelled
         """
         return (self.name_input.text().strip(), self._selected_color)
+
+
+class MetadataDiffDialog(QDialog):
+    """Dialog showing side-by-side metadata comparison between two images.
+
+    Highlights differences in parameters like seed, prompt, and editable values.
+    """
+
+    def __init__(self, parent, path_a: str, path_b: str, metadata_a: dict, metadata_b: dict):
+        """Initialize the diff dialog.
+
+        Args:
+            parent: Parent widget
+            path_a: Path to first image (left)
+            path_b: Path to second image (right)
+            metadata_a: Metadata dict for first image
+            metadata_b: Metadata dict for second image
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Parameter Comparison")
+        self.setMinimumSize(600, 400)
+        self.resize(700, 500)
+
+        self._path_a = path_a
+        self._path_b = path_b
+        self._metadata_a = metadata_a or {}
+        self._metadata_b = metadata_b or {}
+
+        self._setup_ui()
+        self._compute_diff()
+
+    def _setup_ui(self):
+        """Set up the dialog UI."""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e22;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+            QScrollArea {
+                border: none;
+                background-color: #1e1e22;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Header with filenames
+        header = QHBoxLayout()
+        name_a = os.path.basename(self._path_a)
+        name_b = os.path.basename(self._path_b)
+
+        label_a = QLabel(f"A: {name_a}")
+        label_a.setStyleSheet("font-weight: bold; font-size: 12px; color: #4a9eff;")
+        label_b = QLabel(f"B: {name_b}")
+        label_b.setStyleSheet("font-weight: bold; font-size: 12px; color: #10b981;")
+
+        header.addWidget(label_a)
+        header.addStretch()
+        header.addWidget(label_b)
+        layout.addLayout(header)
+
+        # Diff content area
+        from PySide6.QtWidgets import QScrollArea, QWidget
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        self._diff_container = QWidget()
+        self._diff_layout = QGridLayout(self._diff_container)
+        self._diff_layout.setColumnStretch(0, 1)  # Parameter name
+        self._diff_layout.setColumnStretch(1, 2)  # Value A
+        self._diff_layout.setColumnStretch(2, 2)  # Value B
+        scroll.setWidget(self._diff_container)
+        layout.addWidget(scroll, 1)
+
+        # Close button
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3c414b;
+                color: #e0e0e0;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #4a5160;
+            }
+        """)
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+    def _compute_diff(self):
+        """Compute and display the diff between metadata."""
+        row = 0
+
+        # Add header row
+        header_style = "font-weight: bold; color: #888; font-size: 10px; padding: 4px;"
+        for col, text in enumerate(["Parameter", "Image A", "Image B"]):
+            label = QLabel(text)
+            label.setStyleSheet(header_style)
+            self._diff_layout.addWidget(label, row, col)
+        row += 1
+
+        # Parameters to compare
+        params = [
+            ("workflow_preset", "Workflow Preset"),
+            ("base_seed", "Base Seed"),
+            ("generation_count", "Generation Count"),
+            ("prompt", "Prompt"),
+            ("timestamp", "Timestamp"),
+        ]
+
+        for key, display_name in params:
+            val_a = self._metadata_a.get(key)
+            val_b = self._metadata_b.get(key)
+            self._add_diff_row(row, display_name, val_a, val_b)
+            row += 1
+
+        # Compare editable values
+        editable_a = self._metadata_a.get('editable_values', {})
+        editable_b = self._metadata_b.get('editable_values', {})
+
+        if editable_a or editable_b:
+            # Section header
+            section_label = QLabel("-- Editable Parameters --")
+            section_label.setStyleSheet("color: #888; font-size: 10px; padding-top: 8px;")
+            self._diff_layout.addWidget(section_label, row, 0, 1, 3)
+            row += 1
+
+            # Collect all keys
+            all_keys = set(editable_a.keys()) | set(editable_b.keys())
+
+            for node_key in sorted(all_keys):
+                node_a = editable_a.get(node_key, {})
+                node_b = editable_b.get(node_key, {})
+
+                display_name = node_a.get('display_name') or node_b.get('display_name') or node_key
+                val_a = node_a.get('value')
+                val_b = node_b.get('value')
+
+                # Truncate long values
+                if isinstance(val_a, str) and len(val_a) > 50:
+                    val_a = val_a[:47] + "..."
+                if isinstance(val_b, str) and len(val_b) > 50:
+                    val_b = val_b[:47] + "..."
+
+                self._add_diff_row(row, f"  {display_name}", val_a, val_b)
+                row += 1
+
+        # Add stretch
+        self._diff_layout.setRowStretch(row, 1)
+
+    def _add_diff_row(self, row: int, name: str, val_a, val_b):
+        """Add a row to the diff display."""
+        # Format values
+        str_a = str(val_a) if val_a is not None else "-"
+        str_b = str(val_b) if val_b is not None else "-"
+
+        # Determine if different
+        is_different = val_a != val_b
+
+        # Styles
+        name_style = "color: #aaa; font-size: 11px; padding: 4px;"
+        value_style_same = "color: #888; font-size: 11px; padding: 4px; background-color: #252528;"
+        value_style_diff_a = "color: #4a9eff; font-size: 11px; padding: 4px; background-color: #1e2a3f; border-left: 2px solid #4a9eff;"
+        value_style_diff_b = "color: #10b981; font-size: 11px; padding: 4px; background-color: #1e2f28; border-left: 2px solid #10b981;"
+
+        # Name label
+        name_label = QLabel(name)
+        name_label.setStyleSheet(name_style)
+        self._diff_layout.addWidget(name_label, row, 0)
+
+        # Value labels
+        val_label_a = QLabel(str_a)
+        val_label_b = QLabel(str_b)
+
+        if is_different:
+            val_label_a.setStyleSheet(value_style_diff_a)
+            val_label_b.setStyleSheet(value_style_diff_b)
+        else:
+            val_label_a.setStyleSheet(value_style_same)
+            val_label_b.setStyleSheet(value_style_same)
+
+        self._diff_layout.addWidget(val_label_a, row, 1)
+        self._diff_layout.addWidget(val_label_b, row, 2)
+
+
+def show_metadata_diff_dialog(parent, path_a: str, path_b: str, metadata_a: dict, metadata_b: dict):
+    """Show a metadata comparison dialog.
+
+    Args:
+        parent: Parent widget
+        path_a: Path to first image
+        path_b: Path to second image
+        metadata_a: Metadata dict for first image
+        metadata_b: Metadata dict for second image
+    """
+    dialog = MetadataDiffDialog(parent, path_a, path_b, metadata_a, metadata_b)
+    dialog.exec()

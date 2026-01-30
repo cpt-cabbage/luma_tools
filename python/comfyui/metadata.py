@@ -25,8 +25,23 @@ logger = logging.getLogger(__name__)
 # OUTPUT FILE MANAGEMENT
 # ============================================================================
 
-def get_job_output_files(output_dir: str) -> List[str]:
-    """Get the output files from a job's output directory."""
+def get_job_output_files(
+    output_dir: str,
+    job_prefix: Optional[str] = None,
+    min_mtime: Optional[float] = None
+) -> List[str]:
+    """Get the output files from a job's output directory.
+
+    Args:
+        output_dir: Directory to scan for output files
+        job_prefix: Optional job prefix to filter files (e.g., 'sh0010_luma_tools_myimage')
+                   If provided, only returns files whose names start with this prefix.
+        min_mtime: Optional minimum modification time (Unix timestamp).
+                   If provided, only returns files modified after this time.
+
+    Returns:
+        List of file paths, sorted by modification time (newest first)
+    """
     if not output_dir or not os.path.isdir(output_dir):
         return []
 
@@ -36,8 +51,14 @@ def get_job_output_files(output_dir: str) -> List[str]:
     for filename in os.listdir(output_dir):
         ext = os.path.splitext(filename)[1].lower()
         if ext in supported_extensions:
+            # Filter by job prefix if provided
+            if job_prefix and not filename.startswith(job_prefix):
+                continue
             full_path = os.path.join(output_dir, filename)
             mtime = os.path.getmtime(full_path)
+            # Filter by minimum modification time if provided
+            if min_mtime is not None and mtime < min_mtime:
+                continue
             files.append((full_path, mtime))
 
     files.sort(key=lambda x: x[1], reverse=True)
@@ -377,7 +398,13 @@ def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) ->
                 continue
 
             prefix = key[8:]  # Remove "_prefix_" prefix
+            # Check if basename starts with prefix (normal case)
             if basename.startswith(prefix):
+                if isinstance(value, dict):
+                    return value
+            # Also check if prefix ends with basename (job name prefix case)
+            # e.g., prefix="luma_tools_job_filename" matches basename="filename"
+            if prefix.endswith(basename) or prefix.endswith(f"_{basename}"):
                 if isinstance(value, dict):
                     return value
     except Exception as e:
@@ -438,3 +465,297 @@ def set_model_note(output_dir: str, filename: str, note: str) -> bool:
         del metadata[note_key]
 
     return save_gallery_metadata(output_dir, metadata)
+
+
+# ============================================================================
+# PER-FILE METADATA (Phase 2 Enhancement)
+# ============================================================================
+
+def add_per_file_metadata(
+    output_dir: str,
+    filename: str,
+    file_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    frame_index: Optional[int] = None,
+    actual_seed: Optional[int] = None,
+    execution_time_ms: Optional[int] = None,
+    node_execution_trace: Optional[list] = None,
+    error: Optional[str] = None,
+) -> bool:
+    """Store per-file metadata for enhanced traceability.
+
+    This provides granular metadata per output file, complementing the
+    job-level metadata stored via add_item_metadata().
+
+    Args:
+        output_dir: Directory containing the file
+        filename: The output filename
+        file_id: Unique identifier for this file (UUID, auto-generated if None)
+        parent_id: UUID of parent/source file (for iteration lineage)
+        job_id: Deadline job ID
+        frame_index: Frame number within the job
+        actual_seed: The exact seed used for this file (not base seed)
+        execution_time_ms: Total execution time in milliseconds
+        node_execution_trace: List of dicts with node_id, name, duration_ms
+        error: Error message if generation failed
+
+    Returns:
+        bool: True if saved successfully
+    """
+    import uuid
+
+    try:
+        metadata = load_gallery_metadata(output_dir)
+    except Exception as e:
+        logger.error(f"[Metadata] Error loading metadata for per-file: {e}")
+        metadata = {}
+
+    # Generate file_id if not provided
+    if file_id is None:
+        file_id = str(uuid.uuid4())
+
+    # Create per-file entry with _file_ prefix
+    basename = os.path.splitext(filename)[0]
+    file_key = f"_file_{basename}"
+
+    entry = {
+        "file_id": file_id,
+        "parent_id": parent_id,
+        "job_id": job_id,
+        "frame_index": frame_index,
+        "actual_seed": actual_seed,
+        "execution_time_ms": execution_time_ms,
+        "node_execution_trace": node_execution_trace,
+        "error": error,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    # Remove None values to keep JSON clean
+    entry = {k: v for k, v in entry.items() if v is not None}
+
+    metadata[file_key] = entry
+
+    try:
+        return save_gallery_metadata(output_dir, metadata)
+    except Exception as e:
+        logger.error(f"[Metadata] Error saving per-file metadata: {e}")
+        return False
+
+
+def get_per_file_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
+    """Get per-file metadata for a specific output file.
+
+    Args:
+        output_dir: Directory containing the file
+        filename: The output filename
+
+    Returns:
+        Dict with per-file metadata, or None if not found
+    """
+    try:
+        metadata = load_gallery_metadata(output_dir)
+        basename = os.path.splitext(filename)[0]
+        file_key = f"_file_{basename}"
+        return metadata.get(file_key)
+    except Exception as e:
+        logger.error(f"[Metadata] Error getting per-file metadata: {e}")
+        return None
+
+
+def get_file_lineage(output_dir: str, filename: str) -> list:
+    """Get the lineage chain for a file (iteration history).
+
+    Traces back through parent_id references to build the full lineage.
+
+    Args:
+        output_dir: Directory containing the file
+        filename: Starting filename
+
+    Returns:
+        List of dicts with file_id, filename, timestamp (oldest first)
+    """
+    metadata = load_gallery_metadata(output_dir)
+    lineage = []
+
+    # Build a lookup by file_id
+    file_id_to_entry = {}
+    file_id_to_filename = {}
+
+    for key, value in metadata.items():
+        if key.startswith("_file_") and isinstance(value, dict):
+            file_id = value.get("file_id")
+            if file_id:
+                file_id_to_entry[file_id] = value
+                file_id_to_filename[file_id] = key[6:]  # Remove "_file_" prefix
+
+    # Get starting file's metadata
+    basename = os.path.splitext(filename)[0]
+    file_key = f"_file_{basename}"
+    current = metadata.get(file_key)
+
+    if not current:
+        return []
+
+    # Trace back through parents
+    visited = set()
+    while current:
+        file_id = current.get("file_id")
+        if file_id in visited:
+            break  # Avoid infinite loops
+        visited.add(file_id)
+
+        lineage.append({
+            "file_id": file_id,
+            "filename": file_id_to_filename.get(file_id, "unknown"),
+            "timestamp": current.get("timestamp"),
+            "actual_seed": current.get("actual_seed"),
+        })
+
+        # Move to parent
+        parent_id = current.get("parent_id")
+        if parent_id and parent_id in file_id_to_entry:
+            current = file_id_to_entry[parent_id]
+        else:
+            break
+
+    # Return oldest first
+    lineage.reverse()
+    return lineage
+
+
+def has_per_file_metadata(output_dir: str, filename: str) -> bool:
+    """Check if a file has per-file metadata (full traceability).
+
+    Args:
+        output_dir: Directory containing the file
+        filename: The output filename
+
+    Returns:
+        bool: True if per-file metadata exists
+    """
+    return get_per_file_metadata(output_dir, filename) is not None
+
+
+def get_metadata_level(output_dir: str, filename: str) -> str:
+    """Determine the metadata completeness level for a file.
+
+    Args:
+        output_dir: Directory containing the file
+        filename: The output filename
+
+    Returns:
+        'full' - Per-file metadata exists
+        'partial' - Only job-level metadata exists
+        'none' - No metadata available
+    """
+    # Check for per-file metadata first
+    if has_per_file_metadata(output_dir, filename):
+        return "full"
+
+    # Check for job-level metadata
+    if get_item_metadata(output_dir, filename) is not None:
+        return "partial"
+
+    return "none"
+
+
+def establish_lineage(output_dir: str, child_filename: str, parent_filename: str) -> bool:
+    """Establish a parent-child lineage relationship between two files.
+
+    This is used when we know a file was generated from another (iteration),
+    and we want to record that relationship in the per-file metadata.
+
+    Args:
+        output_dir: Directory containing both files
+        child_filename: The output file (child)
+        parent_filename: The input file used (parent)
+
+    Returns:
+        bool: True if lineage was established
+    """
+    try:
+        # Get parent's file_id (create one if needed)
+        parent_meta = get_per_file_metadata(output_dir, parent_filename)
+        if parent_meta:
+            parent_id = parent_meta.get('file_id')
+        else:
+            # Parent doesn't have per-file metadata - create minimal entry
+            import uuid
+            parent_id = str(uuid.uuid4())
+            add_per_file_metadata(output_dir, parent_filename, file_id=parent_id)
+
+        if not parent_id:
+            logger.warning(f"[Metadata] Could not get/create parent_id for {parent_filename}")
+            return False
+
+        # Get or create child's per-file metadata with parent_id
+        child_meta = get_per_file_metadata(output_dir, child_filename)
+        if child_meta:
+            # Update existing entry with parent_id
+            metadata = load_gallery_metadata(output_dir)
+            basename = os.path.splitext(child_filename)[0]
+            file_key = f"_file_{basename}"
+            if file_key in metadata:
+                metadata[file_key]['parent_id'] = parent_id
+                return save_gallery_metadata(output_dir, metadata)
+        else:
+            # Create new entry with parent_id
+            return add_per_file_metadata(output_dir, child_filename, parent_id=parent_id)
+
+    except Exception as e:
+        logger.error(f"[Metadata] Error establishing lineage: {e}")
+        return False
+
+
+def auto_establish_lineage_from_job_metadata(output_dir: str) -> int:
+    """Automatically establish lineage for all files based on source_images in job metadata.
+
+    Scans job-level metadata and creates per-file entries with parent_id
+    for files that have a single source_image.
+
+    Args:
+        output_dir: Directory to process
+
+    Returns:
+        int: Number of lineage relationships established
+    """
+    metadata = load_gallery_metadata(output_dir)
+    established = 0
+
+    # First pass: collect all files and their source_images from job metadata
+    for key, value in metadata.items():
+        if not key.startswith("_prefix_"):
+            continue
+        if not isinstance(value, dict):
+            continue
+
+        source_images = value.get('source_images', [])
+        job_prefix = value.get('job_prefix', key[8:])  # Remove "_prefix_"
+
+        # Only establish lineage if there's exactly one source image
+        if len(source_images) != 1:
+            continue
+
+        parent_filename = source_images[0]
+
+        # Find files that match this job prefix
+        for filename in os.listdir(output_dir):
+            if not filename.startswith(job_prefix):
+                continue
+
+            # Skip non-output files
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in COMFYUI_OUTPUT_EXTENSIONS:
+                continue
+
+            # Check if lineage already established
+            file_meta = get_per_file_metadata(output_dir, filename)
+            if file_meta and file_meta.get('parent_id'):
+                continue  # Already has lineage
+
+            # Establish lineage
+            if establish_lineage(output_dir, filename, parent_filename):
+                established += 1
+
+    return established

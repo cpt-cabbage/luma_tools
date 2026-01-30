@@ -479,7 +479,7 @@ class GalleryTab(BaseTab):
     def _get_item_metadata(self, path: str) -> dict:
         """Get metadata for an item by its file path.
 
-        Loads metadata from the _gallery_metadata.json file in the item's directory.
+        Loads metadata from the comfyui_gallery_metadata.json file in the item's directory.
 
         Args:
             path: Full path to the item
@@ -488,34 +488,15 @@ class GalleryTab(BaseTab):
             dict: Item metadata or empty dict if not found
         """
         try:
-            from comfyui.metadata import load_gallery_metadata
+            from comfyui.metadata import get_item_metadata
 
             # Get the directory and filename
             dir_path = os.path.dirname(path)
             filename = os.path.basename(path)
 
-            # Load all metadata for this directory
-            all_metadata = load_gallery_metadata(dir_path)
-            if not all_metadata:
-                return {}
-
-            # Look for metadata by filename (without extension for flexibility)
-            name_without_ext = os.path.splitext(filename)[0]
-
-            # Try exact filename match first
-            if filename in all_metadata:
-                return all_metadata[filename]
-
-            # Try without extension
-            if name_without_ext in all_metadata:
-                return all_metadata[name_without_ext]
-
-            # Try prefix match (for job_prefix based metadata)
-            for key, meta in all_metadata.items():
-                if filename.startswith(key) or name_without_ext.startswith(key):
-                    return meta
-
-            return {}
+            # Use centralized metadata lookup
+            result = get_item_metadata(dir_path, filename)
+            return result if result else {}
         except Exception as e:
             logger.error(f"Error getting metadata for {path}: {e}")
             return {}
@@ -587,6 +568,9 @@ class GalleryTab(BaseTab):
         if not metadata:
             self.show_status("No metadata found for this image", "warning")
             return
+
+        # Add the output directory to metadata so source images can be found
+        metadata['_output_dir'] = os.path.dirname(path)
 
         # Emit through event bus or direct call
         if EVENT_BUS_AVAILABLE:

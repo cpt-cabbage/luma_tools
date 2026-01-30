@@ -15,7 +15,7 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QTimer, QUrl
 
 from core.utils import ensure_directory
 
@@ -162,6 +162,11 @@ class ModelThumbnailService:
         if viewer:
             try:
                 viewer.hide()
+                # Close the web view explicitly to terminate any pending operations
+                if hasattr(viewer, '_web_view') and viewer._web_view:
+                    viewer._web_view.setUrl(QUrl())  # Clear URL to stop any loading
+                    viewer._web_view.close()
+                viewer.close()
                 viewer.deleteLater()
             except Exception as e:
                 logger.error(f"[ThumbnailService] Error cleaning up viewer: {e}")
@@ -261,6 +266,8 @@ class ModelThumbnailService:
 
             if not viewer._viewer_ready:
                 logger.warning("[ThumbnailService] Viewer failed to initialize")
+                # Clean up the failed viewer
+                self._cleanup_viewer(viewer)
                 return None
 
             # Load the model

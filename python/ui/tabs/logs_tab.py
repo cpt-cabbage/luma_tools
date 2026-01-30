@@ -4,7 +4,9 @@ Logs tab module for Luma Tools.
 Handles the terminal log output display and clear functionality.
 """
 
-from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat
+from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QClipboard
+from PySide6.QtWidgets import QMenu, QApplication
+from PySide6.QtCore import Qt
 
 from .base_tab import BaseTab
 from core.settings_manager import get_setting, set_setting
@@ -66,11 +68,57 @@ class LogsTab(BaseTab):
         self.ui.VerboseLogsCheckbox.setChecked(self._show_debug)
         self.ui.VerboseLogsCheckbox.setText("Show debug")
 
+        # Use custom context menu to avoid Qt parenting bug in tab widgets
+        # "QWidgetWindow must be a top level window" error
+        self.ui.LogOutput.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ui.LogOutput.customContextMenuRequested.connect(self._show_log_context_menu)
+
     def _on_verbose_logs_toggled(self, checked: bool):
         """Handle debug logs checkbox toggle (view filter only)."""
         self._show_debug = checked
         set_setting("show_verbose_logs", checked, verbose=False)
         self._rerender_log()
+
+    def _show_log_context_menu(self, position):
+        """Show custom context menu for log output.
+
+        Uses a custom menu instead of the default QTextEdit context menu
+        to avoid Qt parenting bug ("QWidgetWindow must be a top level window")
+        that occurs with context menus inside tab widgets.
+        """
+        # Capture selection BEFORE showing menu (right-click can clear selection)
+        cursor = self.ui.LogOutput.textCursor()
+        selected_text = cursor.selectedText()
+        has_selection = bool(selected_text)
+
+        # Parent menu to main window to avoid tab widget parenting issues
+        menu = QMenu(self.main_window)
+
+        # Copy action - use captured selection
+        copy_action = menu.addAction("Copy")
+        copy_action.setEnabled(has_selection)
+        if has_selection:
+            # Capture by value to preserve selection
+            copy_action.triggered.connect(lambda checked=False, text=selected_text: self._copy_to_clipboard(text))
+
+        # Select all action
+        select_all_action = menu.addAction("Select All")
+        select_all_action.triggered.connect(self.ui.LogOutput.selectAll)
+
+        menu.addSeparator()
+
+        # Clear action
+        clear_action = menu.addAction("Clear Log")
+        clear_action.triggered.connect(self._on_clear_log_clicked)
+
+        # Use popup() instead of exec_() to avoid blocking issues
+        menu.popup(self.ui.LogOutput.mapToGlobal(position))
+
+    def _copy_to_clipboard(self, text: str):
+        """Copy text to clipboard."""
+        # QTextEdit selection uses paragraph separator (U+2029), convert to newlines
+        text = text.replace('\u2029', '\n')
+        QApplication.clipboard().setText(text)
 
     def _on_clear_log_clicked(self):
         """Clear the log output."""
@@ -106,16 +154,19 @@ class LogsTab(BaseTab):
 
         Always uses QTextCursor + QTextCharFormat so the foreground color is
         embedded in the document and cannot be overridden by QSS.
+        Uses a separate cursor for editing to preserve user's text selection.
         """
         text = message.rstrip()
-        cursor = self.ui.LogOutput.textCursor()
+        # Create a NEW cursor from the document to avoid clearing user's selection
+        # (Using textCursor() and setTextCursor() would replace the user's selection)
+        cursor = QTextCursor(self.ui.LogOutput.document())
         cursor.movePosition(QTextCursor.End)
         if not self.ui.LogOutput.document().isEmpty():
             cursor.insertBlock()
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(self._get_message_color(message)))
         cursor.insertText(text, fmt)
-        self.ui.LogOutput.setTextCursor(cursor)
+        # Don't call setTextCursor() - that would clear any user selection
 
     def _append_to_log(self, message: str):
         """Internal method to append a message to the log widget."""
