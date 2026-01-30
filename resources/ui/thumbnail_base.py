@@ -1,20 +1,27 @@
 """
 Base class for thumbnail widgets with shared placeholder functionality.
 """
+import threading
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 from PySide6.QtGui import QPainter, QColor, QPixmap
 
 
 class BaseThumbnailWidget(QWidget):
-    """Base class for thumbnail widgets with shared placeholder caching logic."""
+    """Base class for thumbnail widgets with shared placeholder caching logic.
+
+    Thread-safe: Uses lock for placeholder cache access.
+    """
 
     THUMBNAIL_SIZE = (150, 150)
     _placeholder_cache = {}
+    _placeholder_cache_lock = threading.Lock()
 
     def _create_placeholder(self, text, bg_color="#3c414b", fg_color="#888888", font_size=14):
         """
         Create a placeholder pixmap with cached results.
+
+        Thread-safe: Uses lock for cache access.
 
         Args:
             text: Text to display in the placeholder
@@ -28,11 +35,12 @@ class BaseThumbnailWidget(QWidget):
         # Create a cache key based on all parameters
         cache_key = f"{text}_{bg_color}_{fg_color}_{font_size}"
 
-        # Return cached version if available
-        if cache_key in BaseThumbnailWidget._placeholder_cache:
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        # Return cached version if available (thread-safe)
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key in BaseThumbnailWidget._placeholder_cache:
+                return BaseThumbnailWidget._placeholder_cache[cache_key]
 
-        # Create new placeholder
+        # Create new placeholder (outside lock - pixmap creation is slow)
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor(bg_color))
         painter = QPainter(pixmap)
@@ -45,6 +53,9 @@ class BaseThumbnailWidget(QWidget):
         painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
         painter.end()
 
-        # Cache and return
-        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-        return pixmap
+        # Cache and return (thread-safe)
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            # Double-check in case another thread added it while we were creating
+            if cache_key not in BaseThumbnailWidget._placeholder_cache:
+                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+            return BaseThumbnailWidget._placeholder_cache[cache_key]

@@ -18,6 +18,7 @@ from thumbnail_styles import (
 )
 from dialog_helpers import get_active_window
 from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
+from effects import create_property_animation
 
 
 # ============================================================================
@@ -475,9 +476,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         # If expanded, update the expanded view
         if self._is_expanded and self._expanded_widgets:
             # Close and reopen to refresh with new items
-            self._collapse_stack()
+            self.collapse(animated=False)
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(100, self._expand_stack)
+            QTimer.singleShot(100, self.expand)
         else:
             # Update top thumbnail if we have a new top item
             self._thumbnail_loaded = False
@@ -485,7 +486,8 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def load_thumbnail_if_needed(self):
         """Load the thumbnail for the top item if not already loaded."""
-        if self._thumbnail_loaded or not self._top_item:
+        from shiboken6 import isValid
+        if not isValid(self) or self._thumbnail_loaded or not self._top_item:
             return
 
         self._thumbnail_loaded = True
@@ -1142,7 +1144,8 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def expand(self):
         """Expand the stack by inserting thumbnails directly into the main flow layout."""
-        if self._is_expanded:
+        from shiboken6 import isValid
+        if not isValid(self) or self._is_expanded:
             return
 
         self._cancel_animations()
@@ -1247,6 +1250,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def _load_expanded_thumbnails(self):
         """Load thumbnails for expanded widgets."""
+        from shiboken6 import isValid
+        if not isValid(self):
+            return
         for thumb in getattr(self, '_expanded_widgets', []):
             if hasattr(thumb, 'load_thumbnail_if_needed'):
                 thumb.load_thumbnail_if_needed()
@@ -1316,18 +1322,10 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             widget.move(stack_pos)
 
             # Position animation
-            pos_anim = QPropertyAnimation(widget, b"pos")
-            pos_anim.setDuration(duration)
-            pos_anim.setStartValue(stack_pos)
-            pos_anim.setEndValue(final_pos)
-            pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+            pos_anim = create_property_animation(widget, b"pos", stack_pos, final_pos, duration)
 
             # Opacity animation
-            fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
-            fade_anim.setDuration(duration)
-            fade_anim.setStartValue(0.0)
-            fade_anim.setEndValue(1.0)
-            fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+            fade_anim = create_property_animation(opacity_effect, b"opacity", 0.0, 1.0, duration)
 
             self._expand_animations.extend([pos_anim, fade_anim])
 
@@ -1343,11 +1341,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             new_pos = post_positions.get(widget)
             if new_pos and old_pos != new_pos:
                 widget.move(old_pos)
-                pos_anim = QPropertyAnimation(widget, b"pos")
-                pos_anim.setDuration(duration)
-                pos_anim.setStartValue(old_pos)
-                pos_anim.setEndValue(new_pos)
-                pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+                pos_anim = create_property_animation(widget, b"pos", old_pos, new_pos, duration)
                 pos_anim.start()
                 self._expand_animations.append(pos_anim)
 
@@ -1453,11 +1447,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             opacity_effect.setOpacity(0.0)
             bg_frame.setGraphicsEffect(opacity_effect)
 
-            fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
-            fade_anim.setDuration(200)
-            fade_anim.setStartValue(0.0)
-            fade_anim.setEndValue(1.0)
-            fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+            fade_anim = create_property_animation(opacity_effect, b"opacity", 0.0, 1.0, 200)
             self._bg_fade_animations.append(fade_anim)
 
             delay = idx * 30
@@ -1634,23 +1624,19 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             widget.move(current_pos)
             widget.raise_()
 
-            # Position animation
-            pos_anim = QPropertyAnimation(widget, b"pos")
-            pos_anim.setDuration(duration)
-            pos_anim.setStartValue(current_pos)
-            pos_anim.setEndValue(stack_pos)
-            pos_anim.setEasingCurve(QEasingCurve.InCubic)
+            # Position animation (use InCubic for collapse)
+            pos_anim = create_property_animation(
+                widget, b"pos", current_pos, stack_pos, duration, QEasingCurve.InCubic
+            )
 
             # Opacity animation
             existing_effect = widget.graphicsEffect()
             if not isinstance(existing_effect, QGraphicsOpacityEffect):
                 existing_effect = QGraphicsOpacityEffect(widget)
                 widget.setGraphicsEffect(existing_effect)
-            fade_anim = QPropertyAnimation(existing_effect, b"opacity")
-            fade_anim.setDuration(duration)
-            fade_anim.setStartValue(existing_effect.opacity())
-            fade_anim.setEndValue(0.0)
-            fade_anim.setEasingCurve(QEasingCurve.InCubic)
+            fade_anim = create_property_animation(
+                existing_effect, b"opacity", existing_effect.opacity(), 0.0, duration, QEasingCurve.InCubic
+            )
 
             pos_anim.start()
             fade_anim.start()
@@ -1661,11 +1647,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             old_pos = pre_positions.get(w)
             new_pos = post_positions[w]
             if old_pos and old_pos != new_pos:
-                pos_anim = QPropertyAnimation(w, b"pos")
-                pos_anim.setDuration(duration)
-                pos_anim.setStartValue(old_pos)
-                pos_anim.setEndValue(new_pos)
-                pos_anim.setEasingCurve(QEasingCurve.OutCubic)
+                pos_anim = create_property_animation(w, b"pos", old_pos, new_pos, duration)
                 pos_anim.start()
                 self._collapse_animations.append(pos_anim)
 
@@ -1674,6 +1656,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def _finish_collapse(self):
         """Complete collapse by deleting expanded widgets and restoring layout."""
+        from shiboken6 import isValid
+        if not isValid(self):
+            return
         self._collapse_animations = []
 
         # Delete expanded widgets

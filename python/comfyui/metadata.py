@@ -11,6 +11,7 @@ Handles:
 import os
 import json
 import logging
+import threading
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 
@@ -107,6 +108,7 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
 
 GALLERY_METADATA_FILE = "comfyui_gallery_metadata.json"
 _gallery_metadata_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
+_gallery_metadata_cache_lock = threading.Lock()
 
 
 def _get_metadata_path(output_dir: str) -> str:
@@ -115,16 +117,19 @@ def _get_metadata_path(output_dir: str) -> str:
 
 
 def clear_gallery_metadata_cache(output_dir: str = None) -> None:
-    """Clear the gallery metadata cache."""
+    """Clear the gallery metadata cache. Thread-safe."""
     global _gallery_metadata_cache
-    if output_dir:
-        _gallery_metadata_cache.pop(output_dir, None)
-    else:
-        _gallery_metadata_cache.clear()
+    with _gallery_metadata_cache_lock:
+        if output_dir:
+            _gallery_metadata_cache.pop(output_dir, None)
+        else:
+            _gallery_metadata_cache.clear()
 
 
 def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
     """Load gallery metadata from the output directory.
+
+    Thread-safe: Uses lock for cache access.
 
     Returns:
         Dict with metadata, or empty dict if file missing/corrupted
@@ -146,16 +151,18 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
     try:
         current_mtime = os.path.getmtime(metadata_path)
 
-        # Check cache
-        if use_cache and output_dir in _gallery_metadata_cache:
-            try:
-                cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
-                if cached_mtime == current_mtime and isinstance(cached_data, dict):
-                    return cached_data
-            except Exception as e:
-                logger.error(f"[Metadata] Error reading cache: {e}")
+        # Check cache (thread-safe)
+        if use_cache:
+            with _gallery_metadata_cache_lock:
+                if output_dir in _gallery_metadata_cache:
+                    try:
+                        cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
+                        if cached_mtime == current_mtime and isinstance(cached_data, dict):
+                            return cached_data
+                    except Exception as e:
+                        logger.error(f"[Metadata] Error reading cache: {e}")
 
-        # Load from file
+        # Load from file (outside lock - file I/O can be slow)
         with open(metadata_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
@@ -164,7 +171,9 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
                 logger.warning(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
                 return {}
 
-            _gallery_metadata_cache[output_dir] = (current_mtime, data)
+            # Update cache (thread-safe)
+            with _gallery_metadata_cache_lock:
+                _gallery_metadata_cache[output_dir] = (current_mtime, data)
             return data
 
     except json.JSONDecodeError as e:

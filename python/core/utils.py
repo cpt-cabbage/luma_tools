@@ -28,22 +28,22 @@ def get_trailing_number(s):
     return matches[-1] if matches else None
 
 
-def remove_after(string, suffix):
+def truncate_at_suffix(string, suffix):
     """
     Truncate string at the end of the suffix, keeping everything up to and including it.
 
     Args:
         string: Input string
-        suffix: Substring to find and truncate after
+        suffix: Substring to find and truncate at (suffix is kept in result)
 
     Returns:
-        str: String truncated after the suffix
+        str: String truncated at end of suffix (e.g., "hello_world_test" -> "hello_world")
 
     Raises:
         ValueError: If suffix is not found in string
 
     Example:
-        >>> remove_after("hello_world_test", "_world")
+        >>> truncate_at_suffix("hello_world_test", "_world")
         'hello_world'
     """
     return string[:string.index(suffix) + len(suffix)]
@@ -349,24 +349,6 @@ class ByteSize(int):
     def __format__(self, format_spec):
         suffix, val = self.readable
         return '{val:{fmt}} {suf}'.format(val=val, fmt=format_spec, suf=suffix)
-
-    def __sub__(self, other):
-        return self.__class__(super().__sub__(other))
-
-    def __add__(self, other):
-        return self.__class__(super().__add__(other))
-
-    def __mul__(self, other):
-        return self.__class__(super().__mul__(other))
-
-    def __rsub__(self, other):
-        return self.__class__(super().__sub__(other))
-
-    def __radd__(self, other):
-        return self.__class__(super().__add__(other))
-
-    def __rmul__(self, other):
-        return self.__class__(super().__rmul__(other))
 
 
 def pad_frame_number(frame_number, padding=4):

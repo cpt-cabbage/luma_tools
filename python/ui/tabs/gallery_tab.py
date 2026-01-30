@@ -297,8 +297,8 @@ class GalleryTab(BaseTab):
         except Exception as e:
             self.log(f"[Gallery] Error setting drop enabled: {e}")
 
-    def _on_scan_complete_impl(self, items):
-        """Implementation of scan complete handling."""
+    def _handle_scan_complete(self, items):
+        """Handle scan complete event with item processing."""
         # Store in cache
         self._cached_items = items
 

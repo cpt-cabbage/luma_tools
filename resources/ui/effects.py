@@ -7,13 +7,89 @@ import logging
 
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect,
-    QSequentialAnimationGroup, QObject, QRectF, Signal
+    QSequentialAnimationGroup, QObject, QRectF, Signal, QEvent
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush, QPen
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# ANIMATION HELPERS
+# ============================================================================
+
+def create_property_animation(
+    target,
+    property_name: bytes,
+    start_value,
+    end_value,
+    duration: int = 300,
+    easing: QEasingCurve.Type = QEasingCurve.OutCubic
+) -> QPropertyAnimation:
+    """
+    Create a property animation with common settings.
+
+    Reduces boilerplate for creating QPropertyAnimation instances.
+
+    Args:
+        target: The QObject to animate
+        property_name: Property name as bytes (e.g., b"pos", b"opacity")
+        start_value: Starting value for the animation
+        end_value: Ending value for the animation
+        duration: Animation duration in milliseconds (default: 300)
+        easing: Easing curve type (default: OutCubic)
+
+    Returns:
+        QPropertyAnimation: Configured animation (call .start() to begin)
+
+    Example:
+        anim = create_property_animation(widget, b"pos", QPoint(0, 0), QPoint(100, 100))
+        anim.start()
+    """
+    anim = QPropertyAnimation(target, property_name)
+    anim.setDuration(duration)
+    anim.setStartValue(start_value)
+    anim.setEndValue(end_value)
+    anim.setEasingCurve(easing)
+    return anim
+
+
+def create_fade_animation(
+    widget: QWidget,
+    fade_in: bool = True,
+    duration: int = 200,
+    easing: QEasingCurve.Type = QEasingCurve.OutCubic
+) -> QPropertyAnimation:
+    """
+    Create a fade in/out animation for a widget.
+
+    Creates or reuses a QGraphicsOpacityEffect on the widget.
+
+    Args:
+        widget: The widget to fade
+        fade_in: True to fade in (0->1), False to fade out (1->0)
+        duration: Animation duration in milliseconds
+        easing: Easing curve type
+
+    Returns:
+        QPropertyAnimation: Configured fade animation
+    """
+    # Get or create opacity effect
+    effect = widget.graphicsEffect()
+    if not isinstance(effect, QGraphicsOpacityEffect):
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+
+    start_val = 0.0 if fade_in else 1.0
+    end_val = 1.0 if fade_in else 0.0
+
+    return create_property_animation(effect, b"opacity", start_val, end_val, duration, easing)
+
+
+# ============================================================================
+# TAB GLOW EFFECT
+# ============================================================================
 
 class TabGlowEffect(QObject):
     """
@@ -319,7 +395,7 @@ class ButtonNotificationBadge(QWidget):
     def eventFilter(self, obj, event):
         """Reposition badge when parent button resizes."""
         if obj == self._parent_button and event.type() in (
-            event.Type.Resize, event.Type.Move, event.Type.Show
+            QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show
         ):
             self._update_position()
         return super().eventFilter(obj, event)

@@ -344,10 +344,10 @@ def cleanup_old_logs(log_dir: str, prefix: str, keep_count: int = 5):
         for old_file in log_files[keep_count:]:
             try:
                 os.remove(os.path.join(log_dir, old_file))
-            except OSError:
-                pass
-    except Exception:
-        pass
+            except OSError as e:
+                logger.debug(f"Could not remove old log file {old_file}: {e}")
+    except Exception as e:
+        logger.debug(f"Error during log cleanup: {e}")
 
 
 def setup_exception_hook():

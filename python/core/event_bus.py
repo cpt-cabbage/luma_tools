@@ -16,6 +16,7 @@ Usage:
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from PySide6.QtCore import QObject, Signal
@@ -127,6 +128,7 @@ class PipelineEventBus(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._active_jobs: Dict[str, JobInfo] = {}
+        self._jobs_lock = threading.RLock()  # Thread safety for job tracking
         self._gallery_context = GalleryContext()
         logger.debug("PipelineEventBus initialized")
 
@@ -138,6 +140,8 @@ class PipelineEventBus(QObject):
                      workflow_name: str = "") -> JobInfo:
         """
         Register a new job for tracking.
+
+        Thread-safe: Uses lock for job dictionary access.
 
         Args:
             job_id: Deadline job ID
@@ -156,7 +160,8 @@ class PipelineEventBus(QObject):
             workflow_name=workflow_name,
             start_time=time.time()
         )
-        self._active_jobs[job_id] = job_info
+        with self._jobs_lock:
+            self._active_jobs[job_id] = job_info
         logger.info(f"Registered job {job_id}: {expected_outputs} outputs expected")
         self.job_submitted.emit(job_id, expected_outputs, job_prefix)
         return job_info
@@ -167,6 +172,8 @@ class PipelineEventBus(QObject):
         """
         Update progress for a tracked job.
 
+        Thread-safe: Uses lock for job dictionary access.
+
         Args:
             job_id: Deadline job ID
             progress: Progress percentage (0-100)
@@ -175,16 +182,16 @@ class PipelineEventBus(QObject):
             total_nodes: Total nodes in workflow
             eta_seconds: Estimated time remaining
         """
-        # Use .get() to avoid race condition if job is removed between check and access
-        job = self._active_jobs.get(job_id)
-        if job:
-            job.progress = progress
-            job.status = status
-            job.current_node = current_node
-            job.total_nodes = total_nodes
-            job.eta_seconds = eta_seconds
+        with self._jobs_lock:
+            job = self._active_jobs.get(job_id)
+            if job:
+                job.progress = progress
+                job.status = status
+                job.current_node = current_node
+                job.total_nodes = total_nodes
+                job.eta_seconds = eta_seconds
 
-        # Build storytelling message
+        # Build storytelling message (outside lock - no mutation)
         message = self._build_progress_story(job_id, progress, status,
                                              current_node, total_nodes, eta_seconds)
         self.job_progress.emit(job_id, progress, message)
@@ -193,15 +200,18 @@ class PipelineEventBus(QObject):
         """
         Record that an output file is ready.
 
+        Thread-safe: Uses lock for job dictionary access.
+
         Args:
             job_id: Deadline job ID
             output_path: Path to the completed output file
         """
-        if job_id in self._active_jobs:
-            job = self._active_jobs[job_id]
-            if output_path not in job.output_paths:
-                job.output_paths.append(output_path)
-                job.completed_outputs = len(job.output_paths)
+        with self._jobs_lock:
+            if job_id in self._active_jobs:
+                job = self._active_jobs[job_id]
+                if output_path not in job.output_paths:
+                    job.output_paths.append(output_path)
+                    job.completed_outputs = len(job.output_paths)
 
         self.job_output_ready.emit(job_id, output_path)
         logger.debug(f"Job {job_id} output ready: {output_path}")
@@ -211,19 +221,26 @@ class PipelineEventBus(QObject):
         """
         Mark a job as completed.
 
+        Thread-safe: Uses lock for job dictionary access.
+
         Args:
             job_id: Deadline job ID
             success: Whether the job completed successfully
             error_message: Error message if failed
         """
-        if job_id in self._active_jobs:
-            job = self._active_jobs[job_id]
-            job.status = "completed" if success else "failed"
-            job.progress = 100 if success else job.progress
+        output_paths = []
+        with self._jobs_lock:
+            if job_id in self._active_jobs:
+                job = self._active_jobs[job_id]
+                job.status = "completed" if success else "failed"
+                job.progress = 100 if success else job.progress
+                output_paths = list(job.output_paths)
 
+        # Emit signals outside lock to avoid deadlock
+        if output_paths or job_id in self._active_jobs:
             if success:
-                self.job_completed.emit(job_id, job.output_paths)
-                logger.info(f"Job {job_id} completed: {len(job.output_paths)} outputs")
+                self.job_completed.emit(job_id, output_paths)
+                logger.info(f"Job {job_id} completed: {len(output_paths)} outputs")
             else:
                 self.job_failed.emit(job_id, error_message)
                 logger.warning(f"Job {job_id} failed: {error_message}")
@@ -232,35 +249,42 @@ class PipelineEventBus(QObject):
             self._check_all_jobs_completed()
 
     def remove_job(self, job_id: str) -> None:
-        """Remove a job from tracking."""
-        if job_id in self._active_jobs:
-            del self._active_jobs[job_id]
-            logger.debug(f"Removed job {job_id} from tracking")
+        """Remove a job from tracking. Thread-safe."""
+        with self._jobs_lock:
+            if job_id in self._active_jobs:
+                del self._active_jobs[job_id]
+                logger.debug(f"Removed job {job_id} from tracking")
 
     def get_active_jobs(self) -> Dict[str, JobInfo]:
-        """Get all currently tracked jobs."""
-        return self._active_jobs.copy()
+        """Get all currently tracked jobs. Thread-safe."""
+        with self._jobs_lock:
+            return self._active_jobs.copy()
 
     def get_job_info(self, job_id: str) -> Optional[JobInfo]:
-        """Get info for a specific job."""
-        return self._active_jobs.get(job_id)
+        """Get info for a specific job. Thread-safe."""
+        with self._jobs_lock:
+            return self._active_jobs.get(job_id)
 
     def has_active_jobs(self) -> bool:
-        """Check if there are any active (non-completed) jobs."""
-        return any(
-            job.status not in ("completed", "failed")
-            for job in self._active_jobs.values()
-        )
+        """Check if there are any active (non-completed) jobs. Thread-safe."""
+        with self._jobs_lock:
+            return any(
+                job.status not in ("completed", "failed")
+                for job in self._active_jobs.values()
+            )
 
     def get_aggregate_progress(self) -> Dict[str, Any]:
         """
         Get aggregate progress across all active jobs.
 
+        Thread-safe: Uses lock for job dictionary access.
+
         Returns:
             Dict with keys: total_jobs, completed_jobs, rendering_jobs,
             queued_jobs, total_expected, total_completed, avg_progress
         """
-        jobs = list(self._active_jobs.values())
+        with self._jobs_lock:
+            jobs = list(self._active_jobs.values())
         if not jobs:
             return {
                 "total_jobs": 0,
@@ -342,8 +366,9 @@ class PipelineEventBus(QObject):
         Returns a contextual, human-friendly progress message.
         """
         if status == "queued" or status == "pending":
-            # Count jobs ahead
-            jobs = list(self._active_jobs.values())
+            # Count jobs ahead (thread-safe)
+            with self._jobs_lock:
+                jobs = list(self._active_jobs.values())
             position = next(
                 (i + 1 for i, j in enumerate(jobs)
                  if j.job_id == job_id and j.status in ("queued", "pending")),
@@ -378,7 +403,8 @@ class PipelineEventBus(QObject):
                 return f"Almost there! {progress}%{node_info}{eta_info}"
 
         elif status == "completed":
-            job = self._active_jobs.get(job_id)
+            with self._jobs_lock:
+                job = self._active_jobs.get(job_id)
             if job:
                 return f"Done! {job.completed_outputs} new image(s) ready"
             return "Complete!"
@@ -389,8 +415,9 @@ class PipelineEventBus(QObject):
         return f"{status}: {progress}%"
 
     def _check_all_jobs_completed(self) -> None:
-        """Check if all tracked jobs are done and emit signal if so."""
-        jobs = list(self._active_jobs.values())
+        """Check if all tracked jobs are done and emit signal if so. Thread-safe."""
+        with self._jobs_lock:
+            jobs = list(self._active_jobs.values())
         if not jobs:
             return
 

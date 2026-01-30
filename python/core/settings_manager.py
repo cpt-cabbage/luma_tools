@@ -43,10 +43,16 @@ def _validate_comfyui_mode(v):
     return _validate_enum(v, ("embedded", "portable", "standalone"), "embedded")
 
 def _validate_timeout(v, min_val=60, max_val=86400):
-    return max(min_val, min(max_val, int(v)))
+    try:
+        return max(min_val, min(max_val, int(v)))
+    except (ValueError, TypeError):
+        return min_val
 
 def _validate_server_wait_timeout(v):
-    return max(30, min(3600, int(v)))
+    try:
+        return max(30, min(3600, int(v)))
+    except (ValueError, TypeError):
+        return 30
 
 def _validate_server_behavior(v):
     return _validate_enum(v, ("fail", "wait"), "fail")

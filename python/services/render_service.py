@@ -12,7 +12,7 @@ import re
 logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
-from core.utils import substring_after, remove_after, ensure_directory, replace_frame_tokens
+from core.utils import substring_after, truncate_at_suffix, ensure_directory, replace_frame_tokens
 from core.subprocess_utils import run_command
 from core.progress_utils import report_progress
 
@@ -42,7 +42,7 @@ def detect_passes(render_file):
         if not any(excluded in ch for excluded in EXCLUDED_CHANNELS):
             if "." in ch:
                 try:
-                    key = remove_after(ch, ".")
+                    key = truncate_at_suffix(ch, ".")
                     key = key.replace(".", "")
                 except (ValueError, AttributeError, Exception):
                     key = ch

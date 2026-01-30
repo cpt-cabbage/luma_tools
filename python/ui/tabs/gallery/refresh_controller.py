@@ -133,7 +133,7 @@ class RefreshController(BaseGalleryManager):
                 "gallery_scan", f"Gallery: Found {count} items"
             )
 
-        self.tab._on_scan_complete_impl(items)
+        self.tab._handle_scan_complete(items)
 
     def _on_scan_error(self, msg, tb):
         """Handle scan error."""

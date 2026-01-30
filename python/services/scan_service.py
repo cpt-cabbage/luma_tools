@@ -1,7 +1,7 @@
 import logging
 import os
 from PySide6.QtCore import QObject, Signal
-from core.utils import get_trailing_number, remove_after, get_folder_size
+from core.utils import get_trailing_number, truncate_at_suffix, get_folder_size
 
 logger = logging.getLogger(__name__)
 from services.file_operations import (
@@ -146,7 +146,7 @@ class DirectoryScanner:
 
             try:
                 render_directory = render_folders[0]
-                render_directory = remove_after(render_directory, r"lookdev\img\renders")
+                render_directory = truncate_at_suffix(render_directory, r"lookdev\img\renders")
                 self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
             except (IndexError, Exception) as e:
                 self.signals.set_widget_enabled.emit('RendersList', False)
@@ -181,7 +181,7 @@ class DirectoryScanner:
 
             try:
                 usd_directory = usd_folders[0]
-                usd_directory = remove_after(usd_directory, r"lookdev\usd_files")
+                usd_directory = truncate_at_suffix(usd_directory, r"lookdev\usd_files")
                 self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
             except (IndexError, Exception) as e:
                 usd_directory = ""
@@ -232,7 +232,7 @@ class DirectoryScanner:
         self.state.working_dir = ""
 
         if render_directory != "":
-            self.state.working_dir = remove_after(render_directory, "lookdev")
+            self.state.working_dir = truncate_at_suffix(render_directory, "lookdev")
             renderdir = sorted(next(os.walk(render_directory))[1])
 
             if len(renderdir) < 2:
@@ -336,7 +336,7 @@ class DirectoryScanner:
 
             try:
                 comp_directory = comp_folders[0]
-                comp_directory = remove_after(comp_directory, r"\Compositing" + "\\")
+                comp_directory = truncate_at_suffix(comp_directory, r"\Compositing" + "\\")
                 comps = sorted(find_comp_files(comp_directory))
                 latestcomp = comps[-1]
                 self.signals.set_label_text.emit('Complabel', f'Latest Comp Found: {comp_directory + latestcomp}')

@@ -40,6 +40,41 @@ def _get_comfyui_config() -> Tuple[str, str, str, str]:
     return comfyui_path, comfyui_mode, comfyui_python, python_exe
 
 
+def _build_runner_performance_flags() -> str:
+    """Build runner performance flags from global settings.
+
+    Returns:
+        String of flags to append to runner command (e.g., " --lowvram")
+    """
+    flags = []
+    if get_setting("comfyui_lowvram"):
+        flags.append("--lowvram")
+    return " " + " ".join(flags) if flags else ""
+
+
+def _build_server_mode_flags(use_server_mode: bool) -> str:
+    """Build server mode flags based on settings.
+
+    Args:
+        use_server_mode: Whether server mode is enabled
+
+    Returns:
+        String of flags for server mode
+    """
+    if not use_server_mode:
+        return ""
+
+    flags = " --persistent"
+    server_behavior = get_setting("comfyui_server_not_found_behavior")
+    flags += f" --server-not-found {server_behavior}"
+
+    if server_behavior == "wait":
+        server_wait_timeout = get_setting("comfyui_server_wait_timeout")
+        flags += f" --server-wait-timeout {server_wait_timeout}"
+
+    return flags
+
+
 def submit_comfyui_to_deadline(
     workflow_path: str,
     seeds_file: str,
@@ -123,13 +158,8 @@ def submit_comfyui_to_deadline(
     if comfyui_mode == "standalone" and comfyui_python:
         runner_args += f' --python-path "{comfyui_python}"'
 
-    if use_server_mode:
-        runner_args += ' --persistent'
-        server_behavior = get_setting("comfyui_server_not_found_behavior")
-        runner_args += f' --server-not-found {server_behavior}'
-        if server_behavior == 'wait':
-            server_wait_timeout = get_setting("comfyui_server_wait_timeout")
-            runner_args += f' --server-wait-timeout {server_wait_timeout}'
+    # Server mode flags
+    runner_args += _build_server_mode_flags(use_server_mode)
 
     if full_restart:
         runner_args += ' --full-restart'
@@ -137,9 +167,8 @@ def submit_comfyui_to_deadline(
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
-    # Add performance flags from global settings
-    if get_setting("comfyui_lowvram"):
-        runner_args += ' --lowvram'
+    # Performance flags from settings
+    runner_args += _build_runner_performance_flags()
 
     job_info_path = os.path.join(output_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine

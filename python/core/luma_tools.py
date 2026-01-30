@@ -5,7 +5,7 @@ VFX shot management application for the Luma Animation pipeline.
 Handles render pass management, AYON publishing, Deadline farm submission,
 and lookdev file cleanup for shot-based workflows.
 
-This is the refactored version using the modular tab system.
+Uses modular tab-based architecture with BaseTab pattern.
 """
 
 import sys

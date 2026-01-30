@@ -75,7 +75,9 @@ class PollingMixin:
     - self.main_window: Main window reference
     - self.app_state: Application state
     - self.log(): Logging method
-    - self._comfyui_dynamic_widgets: Widget dict for editable nodes
+    - self.widget_manager: UI manager with dynamic_widgets dict
+    - self.animator: Animation controller
+    - self.show_status(): Status display method
     """
 
     def _init_polling_state(self):
@@ -441,7 +443,7 @@ class PollingMixin:
             self.show_status("No generated image available", "error")
             return
 
-        for node_id, container in self._comfyui_dynamic_widgets.items():
+        for node_id, container in self.widget_manager.dynamic_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if input_widget and hasattr(input_widget, 'add_images'):
                 input_widget.clear_images()

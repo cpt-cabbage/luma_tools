@@ -20,7 +20,7 @@ from core.config import (
     EXR_EXTENSION,
     DENOISED_SUBDIRECTORY
 )
-from core.utils import remove_after, remove_suffix
+from core.utils import truncate_at_suffix, remove_suffix
 from core.error_handling import safe_operation
 
 
@@ -141,14 +141,14 @@ def find_render_directory(shot_path):
         tuple: (render_directory, all_render_folders) or (None, [])
     """
     try:
-        lookdev_dir = remove_after(shot_path, "work")
+        lookdev_dir = truncate_at_suffix(shot_path, "work")
         lookdev_dir = lookdev_dir + LOOKDEV_SUBPATH
 
         dirs = fast_scandir(lookdev_dir)
         render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
 
         if render_folders:
-            render_directory = remove_after(render_folders[0], RENDERS_SUBPATH)
+            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
             return render_directory, render_folders
 
     except Exception as e:
@@ -168,14 +168,14 @@ def find_usd_directory(shot_path):
         tuple: (usd_directory, all_usd_folders) or (None, [])
     """
     try:
-        lookdev_dir = remove_after(shot_path, "work")
+        lookdev_dir = truncate_at_suffix(shot_path, "work")
         lookdev_dir = lookdev_dir + LOOKDEV_SUBPATH
 
         dirs = fast_scandir(lookdev_dir)
         usd_folders = [d for d in dirs if USD_SUBPATH in d]
 
         if usd_folders:
-            usd_directory = remove_after(usd_folders[0], USD_SUBPATH)
+            usd_directory = truncate_at_suffix(usd_folders[0], USD_SUBPATH)
             return usd_directory, usd_folders
 
     except Exception as e:
@@ -226,7 +226,7 @@ def get_lookdev_directory(shot_path):
     Returns:
         str: Path to lookdev directory
     """
-    lookdev_dir = remove_after(shot_path, "work")
+    lookdev_dir = truncate_at_suffix(shot_path, "work")
     lookdev_dir = lookdev_dir + "\\lookdev"
     return lookdev_dir
 
@@ -241,7 +241,7 @@ def get_working_directory(shot_path):
     Returns:
         str: Path to working directory
     """
-    working_dir = remove_after(shot_path, LOOKDEV_SUBPATH)
+    working_dir = truncate_at_suffix(shot_path, LOOKDEV_SUBPATH)
     return working_dir
 
 
@@ -255,6 +255,6 @@ def get_comp_directory(shot_path):
     Returns:
         str: Path to compositing directory
     """
-    comp_dir = remove_after(shot_path, "work")
+    comp_dir = truncate_at_suffix(shot_path, "work")
     comp_dir = comp_dir + "\\Compositing"
     return comp_dir

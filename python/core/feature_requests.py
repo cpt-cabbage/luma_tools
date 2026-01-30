@@ -8,6 +8,7 @@ Each user has their own requests file stored in the ComfyUI network output folde
 import os
 import json
 import logging
+import tempfile
 from typing import Dict, Any, List
 from datetime import datetime
 from .settings_manager import (
@@ -19,6 +20,31 @@ from .error_handling import log_error, handle_errors
 from .utils import ensure_directory
 
 logger = logging.getLogger(__name__)
+
+
+def _atomic_json_write(file_path: str, data: Any) -> None:
+    """Write JSON data atomically using temp file + rename.
+
+    This prevents file corruption if multiple processes write simultaneously
+    or if the write is interrupted.
+    """
+    dir_path = os.path.dirname(file_path)
+    ensure_directory(dir_path)
+
+    # Write to temp file in same directory (same filesystem for atomic rename)
+    fd, temp_path = tempfile.mkstemp(suffix='.tmp', dir=dir_path)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        # Atomic rename (on same filesystem)
+        os.replace(temp_path, file_path)
+    except Exception:
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ============================================================================
@@ -101,9 +127,8 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         # Append new request
         requests.append(new_request)
 
-        # Write back to file
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(requests, f, indent=2, ensure_ascii=False)
+        # Write back to file atomically
+        _atomic_json_write(file_path, requests)
 
         logger.info(f"Feature request created: {category} by {username}")
         return True
@@ -147,10 +172,9 @@ def get_feature_requests() -> List[Dict[str, str]]:
                                 modified = True
                                 logger.info(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
 
-                        # Save back if modified
+                        # Save back if modified (atomic write for safety)
                         if modified:
-                            with open(file_path, 'w', encoding='utf-8') as f_out:
-                                json.dump(user_requests, f_out, indent=2, ensure_ascii=False)
+                            _atomic_json_write(file_path, user_requests)
                             logger.info(f"Updated {filename} with missing IDs")
 
                         all_requests.extend(user_requests)
@@ -206,9 +230,8 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
                         break
 
                 if modified:
-                    # Write back to file
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump(requests, f, indent=2, ensure_ascii=False)
+                    # Write back to file atomically
+                    _atomic_json_write(file_path, requests)
                     logger.info(f"Marked request {request_id} as completed by {admin_username}")
                     # Notify the user who made the request
                     for req in requests:
@@ -261,9 +284,8 @@ def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_use
         }
         notifications.append(notification)
 
-        # Write notifications
-        with open(notification_file, 'w', encoding='utf-8') as f:
-            json.dump(notifications, f, indent=2, ensure_ascii=False)
+        # Write notifications atomically
+        _atomic_json_write(notification_file, notifications)
 
         logger.info(f"Notification created for {username}")
 
@@ -323,9 +345,8 @@ def mark_notifications_read(username: str):
         for notification in notifications:
             notification['read'] = True
 
-        # Write back
-        with open(notification_file, 'w', encoding='utf-8') as f:
-            json.dump(notifications, f, indent=2, ensure_ascii=False)
+        # Write back atomically
+        _atomic_json_write(notification_file, notifications)
 
         logger.info(f"Marked all notifications as read for {username}")
 

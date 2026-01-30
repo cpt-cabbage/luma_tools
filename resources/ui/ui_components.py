@@ -121,6 +121,7 @@ class MetadataCopyMixin:
 # ============================================================================
 
 import hashlib
+import threading
 from core.utils import ensure_directory
 
 # Disk cache directory (shared with model thumbnails)
@@ -130,6 +131,7 @@ ensure_directory(_THUMBNAIL_CACHE_DIR)
 # In-memory cache for fast access within a session
 # Key: image path, Value: PNG bytes data
 _image_thumbnail_cache = {}
+_image_thumbnail_cache_lock = threading.Lock()
 _IMAGE_THUMBNAIL_CACHE_MAX_SIZE = 500  # Limit cache size
 
 
@@ -142,12 +144,15 @@ def _get_thumbnail_disk_path(image_path):
 def get_cached_image_thumbnail(path):
     """Get cached image thumbnail bytes if available (memory then disk).
 
+    Thread-safe: Uses lock for memory cache access.
+
     Returns PNG bytes if cached, None otherwise.
     """
-    # Check in-memory cache first
-    data = _image_thumbnail_cache.get(path)
-    if data:
-        return data
+    # Check in-memory cache first (thread-safe)
+    with _image_thumbnail_cache_lock:
+        data = _image_thumbnail_cache.get(path)
+        if data:
+            return data
 
     # Check disk cache
     cache_path = _get_thumbnail_disk_path(path)
@@ -163,8 +168,9 @@ def get_cached_image_thumbnail(path):
             with open(cache_path, 'rb') as f:
                 data = f.read()
             if data:
-                # Promote to memory cache
-                _image_thumbnail_cache[path] = data
+                # Promote to memory cache (thread-safe)
+                with _image_thumbnail_cache_lock:
+                    _image_thumbnail_cache[path] = data
                 return data
         except (OSError, IOError):
             pass
@@ -173,16 +179,20 @@ def get_cached_image_thumbnail(path):
 
 
 def cache_image_thumbnail(path, data):
-    """Cache image thumbnail bytes (memory + disk)."""
+    """Cache image thumbnail bytes (memory + disk).
+
+    Thread-safe: Uses lock for memory cache access.
+    """
     if not data:
         return
 
-    # Memory cache with LRU-like eviction
-    if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
-        keys = list(_image_thumbnail_cache.keys())
-        for key in keys[:len(keys) // 2]:
-            del _image_thumbnail_cache[key]
-    _image_thumbnail_cache[path] = data
+    # Memory cache with LRU-like eviction (thread-safe)
+    with _image_thumbnail_cache_lock:
+        if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
+            keys = list(_image_thumbnail_cache.keys())
+            for key in keys[:len(keys) // 2]:
+                del _image_thumbnail_cache[key]
+        _image_thumbnail_cache[path] = data
 
     # Write to disk cache
     cache_path = _get_thumbnail_disk_path(path)
@@ -1037,7 +1047,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             self._double_click_in_progress = True
             self.mark_as_viewed()
             self.clicked.emit(self.path)
-            QTimer.singleShot(300, lambda: setattr(self, '_double_click_in_progress', False))
+            QTimer.singleShot(300, lambda: isValid(self) and setattr(self, '_double_click_in_progress', False))
         super().mouseDoubleClickEvent(event)
 
     def enterEvent(self, event):
