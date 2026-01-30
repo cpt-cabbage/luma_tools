@@ -113,8 +113,8 @@ def check_server_health(server_url: str = None, port: int = None, timeout: int =
     """Check if ComfyUI server is healthy and ready."""
     url = f"{_normalize_server_url(server_url, port)}/system_stats"
     try:
-        req = urllib.request.urlopen(url, timeout=timeout)
-        return req.status == 200
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status == 200
     except Exception as e:
         logger.warning(f"Server health check failed: {e}")
         return False
@@ -156,11 +156,11 @@ def submit_workflow(workflow: dict, server_url: str = None, port: int = None) ->
     )
 
     try:
-        response = urllib.request.urlopen(req, timeout=30)
-        result = json.loads(response.read().decode('utf-8'))
-        prompt_id = result.get('prompt_id')
-        logger.info(f"Workflow submitted, prompt_id: {prompt_id}")
-        return prompt_id
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            prompt_id = result.get('prompt_id')
+            logger.info(f"Workflow submitted, prompt_id: {prompt_id}")
+            return prompt_id
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
         logger.error(f"HTTP Error {e.code}: {e.reason}")
@@ -180,20 +180,20 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
     base_url = _normalize_server_url(server_url, port)
     history_url = f"{base_url}/history/{prompt_id}"
     try:
-        response = urllib.request.urlopen(history_url, timeout=5)
-        history = json.loads(response.read().decode('utf-8'))
+        with urllib.request.urlopen(history_url, timeout=5) as response:
+            history = json.loads(response.read().decode('utf-8'))
 
-        if prompt_id in history:
-            prompt_data = history[prompt_id]
-            status_data = prompt_data.get('status', {})
-            outputs = prompt_data.get('outputs', {})
+            if prompt_id in history:
+                prompt_data = history[prompt_id]
+                status_data = prompt_data.get('status', {})
+                outputs = prompt_data.get('outputs', {})
 
-            if status_data.get('status_str') == 'success' or outputs:
-                return {'status': 'success', 'outputs': outputs}
-            elif status_data.get('status_str') == 'error':
-                return {'status': 'error', 'messages': status_data.get('messages', [])}
+                if status_data.get('status_str') == 'success' or outputs:
+                    return {'status': 'success', 'outputs': outputs}
+                elif status_data.get('status_str') == 'error':
+                    return {'status': 'error', 'messages': status_data.get('messages', [])}
 
-        return {'status': 'pending'}
+            return {'status': 'pending'}
     except Exception:
         return {'status': 'pending'}
 
@@ -382,8 +382,8 @@ def wait_for_completion_http(
         elapsed = int(time.time() - start_time)
 
         try:
-            queue_response = urllib.request.urlopen(queue_url, timeout=10)
-            queue_data = json.loads(queue_response.read().decode('utf-8'))
+            with urllib.request.urlopen(queue_url, timeout=10) as queue_response:
+                queue_data = json.loads(queue_response.read().decode('utf-8'))
 
             running = queue_data.get('queue_running', [])
             pending = queue_data.get('queue_pending', [])
@@ -403,8 +403,8 @@ def wait_for_completion_http(
                     logger.info(status)
                     last_status = status
             else:
-                response = urllib.request.urlopen(history_url, timeout=10)
-                history = json.loads(response.read().decode('utf-8'))
+                with urllib.request.urlopen(history_url, timeout=10) as response:
+                    history = json.loads(response.read().decode('utf-8'))
 
                 if prompt_id in history:
                     consecutive_errors = 0
@@ -601,11 +601,11 @@ def upload_image_to_server(image_path: str, server_url: str = None, port: int = 
     req = urllib.request.Request(url, data=body, headers=headers, method='POST')
 
     try:
-        response = urllib.request.urlopen(req, timeout=30)
-        result = json.loads(response.read().decode('utf-8'))
-        server_filename = result.get('name', filename)
-        logger.info(f"Uploaded image to server: {filename} -> {server_filename}")
-        return server_filename
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            server_filename = result.get('name', filename)
+            logger.info(f"Uploaded image to server: {filename} -> {server_filename}")
+            return server_filename
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
         logger.error(f"Failed to upload image: HTTP {e.code} - {error_body}")
@@ -639,17 +639,17 @@ def download_image_from_server(
     url = f"{base_url}/view?{params}"
 
     try:
-        response = urllib.request.urlopen(url, timeout=30)
-        image_data = response.read()
+        with urllib.request.urlopen(url, timeout=30) as response:
+            image_data = response.read()
 
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            local_path = os.path.join(output_dir, filename)
-            with open(local_path, 'wb') as f:
-                f.write(image_data)
-            logger.info(f"Downloaded: {filename} -> {local_path}")
-            return local_path
-        return None
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+                local_path = os.path.join(output_dir, filename)
+                with open(local_path, 'wb') as f:
+                    f.write(image_data)
+                logger.info(f"Downloaded: {filename} -> {local_path}")
+                return local_path
+            return None
 
     except urllib.error.HTTPError as e:
         logger.error(f"Failed to download {filename}: HTTP {e.code}")

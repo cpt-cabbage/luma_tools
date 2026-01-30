@@ -32,13 +32,8 @@ from .comfyui_state_manager import ComfyUIStateManager
 
 logger = logging.getLogger(__name__)
 
-# Import event bus for cross-tab communication
-try:
-    from core.event_bus import pipeline_events
-    EVENT_BUS_AVAILABLE = True
-except ImportError:
-    EVENT_BUS_AVAILABLE = False
-    logger.warning("Event bus not available - cross-tab communication disabled")
+from core.import_utils import get_event_bus
+pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 
 
 class ComfyUITab(PollingMixin, BaseTab):
@@ -470,7 +465,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
-        from comfyui.service import extract_editable_nodes
+        from comfyui.editable import extract_editable_nodes
         from comfyui.presets_manager import (
             get_comfyui_workflow_presets,
             save_comfyui_workflow_preset,
@@ -759,7 +754,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _on_submit_clicked(self):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import StatusColors
-        from comfyui.service import submit_comfyui_job
+        from deadline.submitter import submit_comfyui_job
         from core.settings_manager import get_setting
         from comfyui.presets_manager import get_workflow_config
 

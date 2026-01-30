@@ -210,6 +210,11 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
                     with open(file_path, 'w', encoding='utf-8') as f:
                         json.dump(requests, f, indent=2, ensure_ascii=False)
                     logger.info(f"Marked request {request_id} as completed by {admin_username}")
+                    # Notify the user who made the request
+                    for req in requests:
+                        if req.get('id') == request_id:
+                            _notify_user_of_completion(req.get('username', ''), req, admin_username)
+                            break
                     return True
 
             except Exception as e:

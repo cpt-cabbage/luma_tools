@@ -175,8 +175,9 @@ class PipelineEventBus(QObject):
             total_nodes: Total nodes in workflow
             eta_seconds: Estimated time remaining
         """
-        if job_id in self._active_jobs:
-            job = self._active_jobs[job_id]
+        # Use .get() to avoid race condition if job is removed between check and access
+        job = self._active_jobs.get(job_id)
+        if job:
             job.progress = progress
             job.status = status
             job.current_node = current_node

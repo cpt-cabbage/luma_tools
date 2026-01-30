@@ -10,7 +10,7 @@ import subprocess
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Callable
 
 from core.utils import normalize_path, ensure_directory
 

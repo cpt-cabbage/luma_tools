@@ -8,7 +8,6 @@ Scans directories, pre-generates GLB thumbnails, and caches results.
 import os
 import sys
 import logging
-import subprocess
 from typing import Optional, List, Dict, Callable
 
 logger = logging.getLogger(__name__)

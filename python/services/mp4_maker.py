@@ -15,18 +15,10 @@ from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
-import sys
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
-
-from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config, FRAME_PADDING
+from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config
 from core.utils import normalize_path, ensure_directory
 from core.subprocess_utils import run_command
-from ui_components import report_progress
-# Try to import Qt for processEvents
-try:
-    from PySide6.QtWidgets import QApplication
-except ImportError:
-    QApplication = None
+from core.progress_utils import report_progress
 
 
 def get_crf_value(quality_index: int) -> int:
@@ -45,79 +37,6 @@ def get_crf_value(quality_index: int) -> int:
         2: 28   # Low quality
     }
     return quality_map.get(quality_index, 23)
-
-
-def build_ffmpeg_command(
-    input_pattern: str,
-    output_path: str,
-    start_frame: int,
-    end_frame: int,
-    crf: int = 23,
-    burn_in_timecode: bool = False,
-    ocio_config: Optional[str] = None
-) -> list:
-    """
-    Build FFmpeg command for image sequence to MP4 conversion.
-
-    Args:
-        input_pattern: Input file pattern (e.g., "render.%04d.exr", "frame.%04d.png")
-        output_path: Output MP4 file path
-        start_frame: Start frame number
-        end_frame: End frame number
-        crf: Constant Rate Factor (18-28, lower = higher quality)
-        burn_in_timecode: Whether to burn in frame numbers
-        ocio_config: Path to OCIO config file (uses environment if None)
-
-    Returns:
-        List of command arguments for subprocess
-    """
-    # Calculate frame count
-    frame_count = end_frame - start_frame + 1
-
-    # Build base command
-    cmd = [
-        FFMPEG_PATH,
-        "-y",  # Overwrite output file
-        "-start_number", str(start_frame),
-        "-framerate", "25",  # Standard framerate
-        "-i", input_pattern,
-        "-frames:v", str(frame_count),
-    ]
-
-    # Add video filter chain
-    filters = []
-
-    # EXR to MP4 conversion using the eq filter for basic exposure/gamma correction
-    # This is simpler and more universal than colorspace conversions
-    # Apply: gamma correction to convert linear to display
-    # filters.append("eq=gamma=2.2:gamma_r=2.2:gamma_g=2.2:gamma_b=2.2")  # Apply gamma 2.2 (converts linear to sRGB-like)
-    filters.append("format=yuv420p")  # H.264 pixel format
-
-    # Add timecode burn-in if requested
-    if burn_in_timecode:
-        # Create frame counter text overlay
-        timecode_filter = (
-            f"drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:"
-            f"text='Frame\\: %{{expr\\:n+{start_frame}}}':"
-            f"fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:"
-            f"boxborderw=5:x=10:y=10"
-        )
-        filters.append(timecode_filter)
-
-    # Combine filters
-    if filters:
-        cmd.extend(["-vf", ",".join(filters)])
-
-    # Add encoding settings for H.264
-    cmd.extend([
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", str(crf),
-        "-pix_fmt", "yuv420p",
-        output_path
-    ])
-
-    return cmd
 
 
 def convert_exr_to_png_with_oiio(
@@ -204,7 +123,6 @@ def convert_exr_to_png_with_oiio(
                     min(progress, 50),
                     f"Converting frame {frame} to PNG ({i+1}/{frame_count})..."
                 )
-                QApplication.processEvents()
 
         return True
 
@@ -366,7 +284,6 @@ def generate_mp4(
                             min(progress, 95),
                             f"Encoding MP4: frame {current_frame}/{frame_count}..."
                         )
-                        QApplication.processEvents()
                 except (ValueError, IndexError):
                     pass
 

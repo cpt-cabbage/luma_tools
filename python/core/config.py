@@ -161,10 +161,10 @@ AYON_DEFAULT_HEIGHT = 1080
 APP_ID = u'luma.tools.shotbuilder.001'
 APP_TITLE = "Luma Tools"
 
-# Load version from version.json
+# Load version from resources/version.json
 def _load_version():
-    """Load version from version.json."""
-    version_file = os.path.join(_ROOT_DIR, "version.json")
+    """Load version from resources/version.json."""
+    version_file = os.path.join(_ROOT_DIR, "resources", "version.json")
     try:
         with open(version_file, 'r') as f:
             data = json.load(f)
@@ -176,8 +176,8 @@ APP_VERSION = _load_version()
 
 
 def get_changelog():
-    """Get the changelog content from changelog.md."""
-    changelog_file = os.path.join(_ROOT_DIR, "changelog.md")
+    """Get the changelog content from resources/changelog.md."""
+    changelog_file = os.path.join(_ROOT_DIR, "resources", "changelog.md")
     try:
         with open(changelog_file, 'r', encoding='utf-8') as f:
             return f.read()

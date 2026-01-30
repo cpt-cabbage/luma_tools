@@ -30,7 +30,7 @@ python python/core/luma_tools.py
 
 ## Deployment
 
-`install.bat` auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Current version in `version.json` (project root).
+`deploy_production.bat` runs `scripts/deploy.py` which auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Version in `resources/version.json`, changelog in `resources/changelog.md`.
 
 ## Project Structure
 
@@ -39,21 +39,25 @@ python/
 ├── core/         # luma_tools.py (main), config.py, state_manager.py, settings_manager.py, user_preferences.py
 │                 # error_handling.py, utils.py, import_utils.py, logging_utils.py, subprocess_utils.py
 ├── deadline/     # submitter.py, poller.py, parser.py, utils.py - Deadline farm job management
-├── comfyui/      # service.py (re-exports), workflow.py, editable.py, modifier.py, node_configs.py
-│                 # presets_manager.py, runner.py, server.py, client.py, metadata.py, ayon_publisher.py, utils.py
+├── comfyui/      # workflow.py, editable.py, modifier.py, node_configs.py, metadata.py
+│                 # presets_manager.py, runner.py, server.py, client.py, ayon_publisher.py, utils.py
 ├── geo/          # loader.py, threejs_viewer.py, animation_controller.py, animation_utils.py, thumbnail_service.py, thumbnail_renderer.py
 │   └── loaders/  # base.py, factory.py, open3d_loader.py, trimesh_loader.py, assimp_loader.py, usd_loader.py, smpl_loader.py
-├── ayon/         # service.py (Strategy Pattern), publisher_integration.py, validators/
+├── ayon/         # service.py (Strategy Pattern), validators/
 ├── services/     # pass_builder.py, render_service.py, mp4_maker.py, file_operations.py
 ├── ui/           # spell_checker.py, gallery_prewarm.py
-│   └── tabs/     # base_tab.py, *_tab.py, gallery_manager.py, gallery_loader.py, comfyui_polling.py (mixin)
-│       ├── gallery/  # base_manager.py, selection_manager.py, viewer_manager.py, operations_manager.py
-│       │             # refresh_controller.py, ui_manager.py, favorites_manager.py, groups_panel.py
+│   └── tabs/     # base_tab.py, *_tab.py, gallery_loader.py, comfyui_polling.py (mixin)
+│       ├── gallery/  # base_manager.py, gallery_manager.py, selection_manager.py, viewer_manager.py
+│       │             # operations_manager.py, refresh_controller.py, ui_manager.py, favorites_manager.py, groups_panel.py
 │       ├── mixins/   # render_scan_mixin.py (shared render tab functionality)
 │       └── dialogs/  # feature_request_dialog.py
-resources/ui/     # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py
-                  # file_dialogs.py, dialog_helpers.py, option_button.py
-tests/            # test_loaders.py, test_animation_controller.py, test_config.py, test_file_dialogs.py
+resources/
+├── ui/           # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py
+│                 # file_dialogs.py, dialog_helpers.py, option_button.py
+├── version.json  # App version
+└── changelog.md  # Release notes
+scripts/          # install_venv.py (venv installer), deploy.py (production deployment)
+tests/            # run_tests.py, conftest.py, test_*.py
 ```
 
 ### Import Patterns
@@ -64,7 +68,7 @@ from core.utils import ensure_directory, load_json, save_json, normalize_path
 from core.state_manager import app_state  # app_state.has_shot_context(), .has_elevated_access, .refresh_admin_status()
 from core.settings_manager import get_setting, set_setting
 from core.error_handling import safe_operation, handle_errors, log_error
-from comfyui.service import submit_comfyui_to_deadline
+from deadline.submitter import submit_comfyui_to_deadline
 from comfyui.utils import resolve_comfyui_paths
 from geo.loaders.factory import load_model
 from ayon.service import create_ayon_metadata

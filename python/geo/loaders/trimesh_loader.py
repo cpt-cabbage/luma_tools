@@ -15,14 +15,9 @@ import numpy as np
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData, Material
+from core.import_utils import safe_import
 
-# Check for Trimesh availability
-try:
-    import trimesh
-    TRIMESH_AVAILABLE = True
-except ImportError:
-    TRIMESH_AVAILABLE = False
-    trimesh = None
+trimesh, TRIMESH_AVAILABLE = safe_import("trimesh")
 
 
 class TrimeshModelLoader(BaseModelLoader):
@@ -42,12 +37,7 @@ class TrimeshModelLoader(BaseModelLoader):
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Trimesh."""
-        if not TRIMESH_AVAILABLE:
-            raise ImportError("trimesh is not available. Install with: pip install trimesh")
-
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found: {path}")
-
+        self._validate_load_preconditions(path, "trimesh")
         model = ModelData(path=path)
 
         # Load the model

@@ -12,14 +12,9 @@ import numpy as np
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData
+from core.import_utils import safe_import
 
-# Check for Open3D availability
-try:
-    import open3d as o3d
-    OPEN3D_AVAILABLE = True
-except ImportError:
-    OPEN3D_AVAILABLE = False
-    o3d = None
+o3d, OPEN3D_AVAILABLE = safe_import("open3d")
 
 
 class Open3DModelLoader(BaseModelLoader):
@@ -39,12 +34,7 @@ class Open3DModelLoader(BaseModelLoader):
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Open3D."""
-        if not OPEN3D_AVAILABLE:
-            raise ImportError("open3d is not available. Install with: pip install open3d")
-
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found: {path}")
-
+        self._validate_load_preconditions(path, "open3d")
         model = ModelData(path=path)
 
         # Read the mesh

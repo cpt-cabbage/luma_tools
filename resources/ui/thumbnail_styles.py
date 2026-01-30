@@ -134,8 +134,6 @@ class ThumbnailColors:
     BORDER_SELECTED_STACK = "#5ba3ff" # Slightly different blue for stacks
     BORDER_SELECTED_HOVER = "#7bc4ff" # Bright blue for selected + hover
 
-    # Special states (unused - new items use pulsing indicator instead)
-    # BORDER_NEW = "#10b981"          # Green for new items (deprecated)
 
 
 class ThumbnailStyler:

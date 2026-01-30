@@ -91,7 +91,7 @@ class ComfyUIWidgetManager:
             workflow_path: Path to the workflow JSON file
             node_overrides: Dict of node overrides (enabled/default_value)
         """
-        from comfyui.service import extract_editable_nodes
+        from comfyui.editable import extract_editable_nodes
 
         self.clear_widgets()
 
@@ -495,7 +495,7 @@ class ComfyUIWidgetManager:
         Returns:
             Tuple of (editable_values dict, selected_image_count)
         """
-        from comfyui.service import extract_editable_nodes
+        from comfyui.editable import extract_editable_nodes
 
         editable_values = {}
         selected_image_count = 0

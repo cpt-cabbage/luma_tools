@@ -907,8 +907,8 @@ class EmbeddedImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui.service import get_image_metadata
-            metadata = get_image_metadata(output_dir, filename)
+            from comfyui.metadata import get_item_metadata
+            metadata = get_item_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
                 clipboard.setText(metadata['prompt'], mode=clipboard.Mode.Clipboard)
@@ -930,8 +930,8 @@ class EmbeddedImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui.service import get_image_metadata
-            metadata = get_image_metadata(output_dir, filename)
+            from comfyui.metadata import get_item_metadata
+            metadata = get_item_metadata(output_dir, filename)
             if metadata:
                 self.copy_settings_requested.emit(metadata)
                 self.filename_label.setText(f"{filename} - Settings copied!")
@@ -1330,8 +1330,8 @@ class FullscreenImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui.service import get_image_metadata
-            metadata = get_image_metadata(output_dir, filename)
+            from comfyui.metadata import get_item_metadata
+            metadata = get_item_metadata(output_dir, filename)
             if metadata and metadata.get('prompt'):
                 clipboard = QApplication.clipboard()
                 clipboard.setText(metadata['prompt'], mode=clipboard.Mode.Clipboard)
@@ -1352,8 +1352,8 @@ class FullscreenImageViewer(QWidget):
         output_dir = self.output_dir or os.path.dirname(image_path)
 
         try:
-            from comfyui.service import get_image_metadata
-            metadata = get_image_metadata(output_dir, filename)
+            from comfyui.metadata import get_item_metadata
+            metadata = get_item_metadata(output_dir, filename)
             if metadata:
                 self.copy_settings_requested.emit(metadata)
                 self.filename_label.setText(f"{filename} - Settings copied!")

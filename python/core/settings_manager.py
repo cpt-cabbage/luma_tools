@@ -280,16 +280,24 @@ def load_global_settings() -> Dict[str, Any]:
 
 
 def save_global_settings(settings: Dict[str, Any]):
-    """Save global settings to file."""
+    """Save global settings to file using atomic write to prevent corruption."""
     global _global_settings_cache
     _ensure_global_settings_dir()
     settings_file = _get_global_settings_file()
+    temp_file = settings_file + ".tmp"
     try:
-        with open(settings_file, 'w') as f:
+        with open(temp_file, 'w') as f:
             json.dump(settings, f, indent=2)
+        os.replace(temp_file, settings_file)
         _global_settings_cache = settings.copy()
     except Exception as e:
         logger.error(f"Error saving global settings: {e}")
+        # Clean up temp file if it exists
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 
 # ============================================================================

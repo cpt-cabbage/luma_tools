@@ -87,7 +87,7 @@ def update_changelog(new_version: str, custom_msg: str | None = None) -> None:
     # Format: replace " -" with newline + "-"
     formatted_msg = commit_msg.replace(" -", "\n-")
 
-    changelog_path = SOURCE / "changelog.md"
+    changelog_path = SOURCE / "resources" / "changelog.md"
     content = changelog_path.read_text(encoding="utf-8")
 
     header = "# Luma Tools Changelog"
@@ -253,13 +253,13 @@ def copy_global_settings() -> None:
 
 
 def copy_version_files(new_version: str) -> None:
-    """Copy version.json and changelog.md."""
+    """Copy version.json and changelog.md from resources."""
     print("\nCopying version files...")
 
-    shutil.copy2(SOURCE / "version.json", TARGET / "version.json")
-    shutil.copy2(SOURCE / "changelog.md", TARGET / "changelog.md")
+    shutil.copy2(SOURCE / "resources" / "version.json", TARGET / "resources" / "version.json")
+    shutil.copy2(SOURCE / "resources" / "changelog.md", TARGET / "resources" / "changelog.md")
 
-    print(f"  Copied version.json and changelog.md")
+    print(f"  Copied resources/version.json and resources/changelog.md")
 
 
 def copy_venv(update: bool) -> None:
@@ -299,7 +299,7 @@ def main():
     TARGET.mkdir(parents=True, exist_ok=True)
 
     # --- Version and Changelog ---
-    version_file = SOURCE / "version.json"
+    version_file = SOURCE / "resources" / "version.json"
     with open(version_file) as f:
         current_version = json.load(f)["version"]
 

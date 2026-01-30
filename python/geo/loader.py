@@ -180,9 +180,6 @@ from .loaders.factory import (
     ASSIMP_AVAILABLE,
 )
 
-# Re-export for backwards compatibility
-load_3d_model = load_model  # Alias used in some parts of the codebase
-
 __all__ = [
     # Data classes
     'MeshData',
@@ -203,7 +200,6 @@ __all__ = [
     'interpolate_bone_animation',
     # Factory API
     'load_model',
-    'load_3d_model',
     'get_loader_availability',
     'get_format_type',
     'is_supported_format',

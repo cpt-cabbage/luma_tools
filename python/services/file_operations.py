@@ -7,7 +7,7 @@ Handles directory scanning, file discovery, and file system queries.
 import logging
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ from core.config import (
     EXR_EXTENSION,
     DENOISED_SUBDIRECTORY
 )
-from core.utils import remove_after
+from core.utils import remove_after, remove_suffix
 from core.error_handling import safe_operation
 
 
@@ -116,15 +116,12 @@ def read_comp_file(compfile, hip_file_name):
                     if any(compfile.endswith(ext) for ext in COMP_EXTENSIONS):
                         # Parse file path from comp
                         foundcomps = line
-                        foundcomps = foundcomps.removeprefix(" file ")
+                        foundcomps = foundcomps.lstrip()
+                        if foundcomps.startswith("file "):
+                            foundcomps = foundcomps[5:]  # Remove "file " prefix
                         foundcomps = foundcomps.strip()
                         foundcomps = os.path.dirname(foundcomps)
-                        try:
-                            foundcomps = foundcomps.removesuffix(r'/for_comp')
-                        except AttributeError:
-                            # removesuffix not available in Python <3.9
-                            if foundcomps.endswith(r'/for_comp'):
-                                foundcomps = foundcomps[:-len(r'/for_comp')]
+                        foundcomps = remove_suffix(foundcomps, r'/for_comp')
                         foundcomps = foundcomps.split(r"/")[-1]
                         renders_in_comp.append(foundcomps)
     except Exception as e:

@@ -14,12 +14,14 @@ from PySide6.QtCore import QTimer, Qt
 from shiboken6 import isValid
 from ui_components import ThumbnailWidget, StackedThumbnailWidget
 
+from .base_manager import BaseGalleryManager
 
-class GalleryManager:
+
+class GalleryManager(BaseGalleryManager):
     """Handles gallery UI management operations.
 
+    Inherits from BaseGalleryManager for consistent tab/state access patterns.
     This class manages the gallery state and widget lifecycle.
-    It depends on tab instance for UI access and state.
     """
 
     def __init__(self, tab):
@@ -28,7 +30,7 @@ class GalleryManager:
         Args:
             tab: The GalleryTab instance
         """
-        self.tab = tab
+        super().__init__(tab)
 
     def sort_items(self, items, sort_mode):
         """Sort items based on sort mode.

@@ -7,7 +7,6 @@ Uses strategy pattern to handle farm vs local publishing without code duplicatio
 
 import logging
 import os
-import sys
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
@@ -15,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Import our modular services
 from core.config import OIIO_PATH, FRAME_PADDING
 from core.utils import normalize_path
+from core.progress_utils import report_progress
 from services.render_service import build_oiio_command, execute_oiio_local, load_pass_config
 from ayon.service import (
     submit_oiio_to_deadline,
@@ -22,16 +22,6 @@ from ayon.service import (
     DEADLINE_AVAILABLE,
     FarmPublishStrategy,
     LocalPublishStrategy)
-
-# Import UI utilities
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
-from ui_components import report_progress
-
-# Try to import Qt for processEvents
-try:
-    from PySide6.QtWidgets import QApplication
-except ImportError:
-    QApplication = None
 
 
 class PassBuilder:
@@ -171,7 +161,6 @@ class PassBuilder:
 
                 if success and progress_callback:
                     progress_callback(95, "Jobs submitted successfully!")
-                    QApplication.processEvents()
         else:
             # Local execution
             report_progress(progress_callback, 50, "Executing OIIO locally...")
@@ -211,7 +200,6 @@ class PassBuilder:
 
                 if success and progress_callback:
                     progress_callback(100, "Local build and publish complete!")
-                    QApplication.processEvents()
             else:
                 if progress_callback:
                     progress_callback(95, "Local execution complete!")

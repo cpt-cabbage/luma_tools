@@ -1116,9 +1116,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             # Try to load metadata
             metadata = {}
             try:
-                from comfyui.service import get_image_metadata
+                from comfyui.metadata import get_item_metadata
                 filename = os.path.basename(item_path)
-                metadata = get_image_metadata(output_dir, filename) or {}
+                metadata = get_item_metadata(output_dir, filename) or {}
             except Exception as e:
                 logger.warning("Could not load metadata for stack top item: %s", e)
             

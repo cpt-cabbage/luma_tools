@@ -214,10 +214,10 @@ except Exception as e:
 # Apply stylesheet
 apply_stylesheet(app)
 
-logging.info("DEADLINE " + DEADLINE_PATH)
-logging.info("OIIO " + OIIO_PATH)
-logging.info("OIIO INFO " + OIIO_INFO_ROOT)
-logging.info("FFMPEG " + FFMPEG_PATH)
+logging.info(f"DEADLINE {DEADLINE_PATH}")
+logging.info(f"OIIO {OIIO_PATH}")
+logging.info(f"OIIO INFO {OIIO_INFO_ROOT}")
+logging.info(f"FFMPEG {FFMPEG_PATH}")
 
 
 # Global reference to main window for cross-widget access
@@ -777,7 +777,7 @@ class LumaShotTools(QtWidgets.QWidget):
             # Re-read the version.json file from disk
             from core.config import _ROOT_DIR
             import json
-            version_file = os.path.join(_ROOT_DIR, "version.json")
+            version_file = os.path.join(_ROOT_DIR, "resources", "version.json")
 
             with open(version_file, 'r') as f:
                 data = json.load(f)

@@ -12,13 +12,9 @@ import numpy as np
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData, Bone, Skeleton
+from core.import_utils import safe_import_multiple
 
-# Check for USD availability
-try:
-    from pxr import Usd, UsdGeom, UsdSkel
-    USD_AVAILABLE = True
-except ImportError:
-    USD_AVAILABLE = False
+(Usd, UsdGeom, UsdSkel), USD_AVAILABLE = safe_import_multiple("pxr", "Usd", "UsdGeom", "UsdSkel")
 
 
 class USDModelLoader(BaseModelLoader):
@@ -38,12 +34,7 @@ class USDModelLoader(BaseModelLoader):
 
     def load(self, path: str) -> ModelData:
         """Load a USD file using OpenUSD."""
-        if not USD_AVAILABLE:
-            raise ImportError("USD support requires pxr. Install with: pip install usd-core")
-
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found: {path}")
-
+        self._validate_load_preconditions(path, "pxr (usd-core)")
         model = ModelData(path=path)
         stage = Usd.Stage.Open(path)
 

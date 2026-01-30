@@ -66,7 +66,18 @@
       "Bash(powershell:*)",
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_verify.ps1\")",
       "Bash(git mv:*)",
-      "Bash(move:*)"
+      "Bash(move:*)",
+      "Bash(for f in python/services/render_service.py python/core/config.py python/comfyui/runner.py python/ui/tabs/gallery_manager.py)",
+      "Bash(do echo \"=== $f ===\")",
+      "Bash(python3:*)",
+      "Bash(done)",
+      "Bash(gh:*)",
+      "Bash(curl:*)",
+      "Bash(C:Userschristophe.leydergh-clibingh.exe --version)",
+      "Bash(pythonvenvScriptspip.exe list)",
+      "Bash(ls:*)",
+      "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ayon\\\\publisher_integration.py\")",
+      "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_check.ps1\")"
     ],
     "deny": [],
     "ask": []

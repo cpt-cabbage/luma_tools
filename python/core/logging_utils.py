@@ -23,6 +23,19 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Module-level tracking of TeeWriter instances for proper cleanup
+_active_tee_writers: list = []
+
+
+def cleanup_tee_writers():
+    """Clean up all active TeeWriter instances (close log files)."""
+    global _active_tee_writers
+    for writer in _active_tee_writers:
+        if hasattr(writer, 'close'):
+            writer.close()
+    _active_tee_writers.clear()
+
+
 # =============================================================================
 # PATH RESOLUTION
 # =============================================================================
@@ -98,11 +111,12 @@ def get_network_log_dir(subdirectory: str = "users") -> Optional[str]:
     Returns:
         Path to network log directory, or None if unavailable
     """
+    from .utils import ensure_directory
     network_path = get_network_output_path()
     if network_path:
         log_dir = os.path.join(network_path, '_logs', subdirectory)
         try:
-            os.makedirs(log_dir, exist_ok=True)
+            ensure_directory(log_dir)
             return log_dir
         except OSError:
             pass
@@ -111,8 +125,9 @@ def get_network_log_dir(subdirectory: str = "users") -> Optional[str]:
 
 def get_local_log_dir() -> str:
     """Get local fallback log directory (~/.luma_tools/logs/)."""
+    from .utils import ensure_directory
     log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    ensure_directory(log_dir)
     return log_dir
 
 
@@ -160,13 +175,17 @@ class TeeWriter:
     Stream that writes to both the original stream and a log file with timestamps.
 
     Used by runner.py for farm execution logging.
+    Manages the log file handle and closes it properly on cleanup.
     """
 
     def __init__(self, original_stream, log_file):
         self.original_stream = original_stream
         self.log_file = log_file
+        self._closed = False
 
     def write(self, message):
+        if self._closed:
+            return
         self.original_stream.write(message)
         if message.strip():
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -178,8 +197,19 @@ class TeeWriter:
         self.log_file.flush()
 
     def flush(self):
+        if self._closed:
+            return
         self.original_stream.flush()
         self.log_file.flush()
+
+    def close(self):
+        """Close the log file handle and restore original stream behavior."""
+        if not self._closed:
+            self._closed = True
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
 
 
 # =============================================================================
@@ -258,8 +288,12 @@ def setup_file_logging(
                 log_file.write(f"Log started - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 log_file.write(f"{'='*60}\n\n")
                 log_file.flush()
-                sys.stdout = TeeWriter(sys.__stdout__, log_file)
-                sys.stderr = TeeWriter(sys.__stderr__, log_file)
+                stdout_tee = TeeWriter(sys.__stdout__, log_file)
+                stderr_tee = TeeWriter(sys.__stderr__, log_file)
+                sys.stdout = stdout_tee
+                sys.stderr = stderr_tee
+                # Track for cleanup
+                _active_tee_writers.extend([stdout_tee, stderr_tee])
 
                 # Update logging StreamHandler to use the tee'd stderr
                 for handler in logging.getLogger().handlers:

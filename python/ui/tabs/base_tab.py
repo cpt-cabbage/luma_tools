@@ -9,6 +9,10 @@ import logging
 from abc import ABC, abstractmethod
 from PySide6 import QtCore, QtWidgets, QtUiTools
 
+# Import StatusColors at module level - it's just an enum with no side effects
+# This avoids repeated lazy imports in tab methods
+from ui_components import StatusColors as _StatusColors
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +33,14 @@ class BaseTab(ABC):
     2. Define its tab name
     3. Connect its signals
     4. Implement its event handlers
+
+    Class attributes:
+        StatusColors: Enum for status message colors (INFO, SUCCESS, WARNING, ERROR)
+                     Use as self.StatusColors.INFO in subclasses
     """
+
+    # Make StatusColors available to all subclasses without repeated imports
+    StatusColors = _StatusColors
 
     def __init__(self, main_window, app_state):
         """

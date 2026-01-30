@@ -116,25 +116,3 @@ def start_worker_thread(func, *args, on_result=None, on_error=None, on_progress=
 
     QThreadPool.globalInstance().start(worker)
     return worker
-
-
-def report_progress(callback, progress, message):
-    """
-    Report progress and process Qt events to keep UI responsive.
-
-    This is a utility function to consolidate the common pattern of:
-    - Checking if callback exists
-    - Calling the callback
-    - Processing Qt events to keep the UI responsive
-
-    Args:
-        callback: Progress callback function(progress, message) or None
-        progress: Progress value (0-100)
-        message: Status message string
-
-    Example:
-        report_progress(progress_callback, 50, "Halfway done...")
-    """
-    if callback:
-        callback(progress, message)
-        QApplication.processEvents()

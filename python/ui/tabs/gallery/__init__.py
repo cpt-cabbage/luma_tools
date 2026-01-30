@@ -16,6 +16,7 @@ from .viewer_manager import ViewerManager
 from .operations_manager import OperationsManager
 from .refresh_controller import RefreshController
 from .ui_manager import UIManager
+from .gallery_manager import GalleryManager
 
 __all__ = [
     'SelectionManager',
@@ -24,4 +25,5 @@ __all__ = [
     'OperationsManager',
     'RefreshController',
     'UIManager',
+    'GalleryManager',
 ]

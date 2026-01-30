@@ -66,6 +66,27 @@ class BaseModelLoader(ABC):
         ext = os.path.splitext(path)[1].lower()
         return self.is_available and ext in self.supported_extensions
 
+    def _validate_load_preconditions(self, path: str, library_name: str = None) -> None:
+        """
+        Validate preconditions before loading a model.
+
+        Call this at the start of load() to check availability and file existence.
+
+        Args:
+            path: Path to the model file
+            library_name: Name of the library for error message (uses self.name if not provided)
+
+        Raises:
+            ImportError: If required library is not available
+            FileNotFoundError: If file doesn't exist
+        """
+        import os
+        lib_name = library_name or self.name
+        if not self.is_available:
+            raise ImportError(f"{lib_name} is not available. Install the required library.")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Model file not found: {path}")
+
     def _calculate_bounds(self, model: ModelData) -> None:
         """Calculate bounding box for the model."""
         if not model.meshes:

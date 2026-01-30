@@ -24,21 +24,15 @@ from PySide6.QtCore import Qt, QTimer, QThreadPool
 
 from .base_tab import BaseTab
 from .gallery_loader import GalleryLoader
-from .gallery_manager import GalleryManager
-from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager
+from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager, GalleryManager
 from .gallery.favorites_manager import FavoritesManager
 from .gallery.groups_panel import GroupsFilterPanel
 from .gallery.job_status_bar import JobStatusBar
 
 logger = logging.getLogger(__name__)
 
-# Import event bus for cross-tab communication
-try:
-    from core.event_bus import pipeline_events
-    EVENT_BUS_AVAILABLE = True
-except ImportError:
-    EVENT_BUS_AVAILABLE = False
-    logger.warning("Event bus not available - cross-tab communication disabled")
+from core.import_utils import get_event_bus
+pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 
 
 class GalleryTab(BaseTab):

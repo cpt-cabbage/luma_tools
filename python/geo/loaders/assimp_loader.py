@@ -24,19 +24,12 @@ _LIBS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 if os.path.isdir(_LIBS_DIR):
     os.environ['PATH'] = _LIBS_DIR + os.pathsep + os.environ.get('PATH', '')
 
-# Check for Assimp availability
-ASSIMP_AVAILABLE = False
-pyassimp = None
-postprocess = None
+from core.import_utils import safe_import
 
-try:
-    import pyassimp as _pyassimp
-    from pyassimp import postprocess as _postprocess
-    pyassimp = _pyassimp
-    postprocess = _postprocess
-    ASSIMP_AVAILABLE = True
-except Exception:
-    pass
+pyassimp, ASSIMP_AVAILABLE = safe_import("pyassimp")
+postprocess = None
+if ASSIMP_AVAILABLE:
+    from pyassimp import postprocess
 
 
 class AssimpModelLoader(BaseModelLoader):
@@ -56,11 +49,7 @@ class AssimpModelLoader(BaseModelLoader):
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Assimp."""
-        if not ASSIMP_AVAILABLE:
-            raise ImportError("pyassimp is not available. Install with: pip install pyassimp")
-
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found: {path}")
+        self._validate_load_preconditions(path, "pyassimp")
 
         # Check for ASCII FBX which can be problematic
         ext = os.path.splitext(path)[1].lower()

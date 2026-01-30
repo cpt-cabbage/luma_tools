@@ -123,7 +123,7 @@ class BaseEditDialog(QDialog):
     def _load_note(self):
         """Load existing note for this item."""
         try:
-            from comfyui.service import get_model_note
+            from comfyui.metadata import get_model_note
             filename = os.path.basename(self.item_path)
             note = get_model_note(self.output_dir, filename)
             self.note_edit.setPlainText(note)
@@ -133,7 +133,7 @@ class BaseEditDialog(QDialog):
     def _save_note(self):
         """Save the note and close the dialog."""
         try:
-            from comfyui.service import set_model_note
+            from comfyui.metadata import set_model_note
             filename = os.path.basename(self.item_path)
             note = self.note_edit.toPlainText()
             if set_model_note(self.output_dir, filename, note):
@@ -163,9 +163,7 @@ class EditModelDialog(BaseEditDialog):
     placeholder_text = "Add a note or description for this model..."
 
 
-# Import GROUP_COLORS from config for backwards compatibility
 from core.config import UIColors
-GROUP_COLORS = UIColors.GROUP_COLORS
 
 
 class ColorButton(QPushButton):
@@ -216,7 +214,7 @@ class GroupEditorDialog(QDialog):
         """
         super().__init__(parent)
         self.group = group
-        self._selected_color = group.color if group else GROUP_COLORS[0]
+        self._selected_color = group.color if group else UIColors.GROUP_COLORS[0]
         self._color_buttons = []
         self._setup_ui()
 
@@ -266,7 +264,7 @@ class GroupEditorDialog(QDialog):
         self._button_group = QButtonGroup(self)
         self._button_group.setExclusive(True)
 
-        for i, color in enumerate(GROUP_COLORS):
+        for i, color in enumerate(UIColors.GROUP_COLORS):
             btn = ColorButton(color)
             btn.setChecked(color == self._selected_color)
             btn.clicked.connect(lambda checked, c=color: self._on_color_selected(c))
@@ -368,7 +366,7 @@ class QuickGroupDialog(QDialog):
         import random
         super().__init__(parent)
         self._item_count = item_count
-        self._selected_color = random.choice(GROUP_COLORS)
+        self._selected_color = random.choice(UIColors.GROUP_COLORS)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -460,11 +458,11 @@ class QuickGroupDialog(QDialog):
         """Cycle to next color in the palette."""
         import random
         # Pick a different random color
-        available = [c for c in GROUP_COLORS if c != self._selected_color]
+        available = [c for c in UIColors.GROUP_COLORS if c != self._selected_color]
         if available:
             self._selected_color = random.choice(available)
         else:
-            self._selected_color = random.choice(GROUP_COLORS)
+            self._selected_color = random.choice(UIColors.GROUP_COLORS)
         self._color_preview.setStyleSheet(f"""
             QLabel {{
                 background-color: {self._selected_color};

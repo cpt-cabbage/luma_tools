@@ -14,13 +14,8 @@ from dialog_helpers import confirm_action
 
 logger = logging.getLogger(__name__)
 
-# Import event bus for cross-tab communication
-try:
-    from core.event_bus import pipeline_events
-    EVENT_BUS_AVAILABLE = True
-except ImportError:
-    EVENT_BUS_AVAILABLE = False
-    logger.warning("Event bus not available - cross-tab communication disabled")
+from core.import_utils import get_event_bus
+pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 
 
 def play_completion_sound():
@@ -166,7 +161,7 @@ class PollingMixin:
     def _poll_iterate_job(self):
         """Poll the iterate job status."""
         from ui_components import Worker
-        from comfyui.service import poll_deadline_job_status
+        from deadline.poller import poll_deadline_job_status
 
         job_id = self.app_state.comfyui_current_job_id
         if not job_id:
@@ -340,7 +335,7 @@ class PollingMixin:
     def _on_iterate_job_completed_impl(self):
         """Implementation of iterate job completion."""
         from ui_components import StatusColors
-        from comfyui.service import get_job_output_files, cleanup_job_temp_files
+        from comfyui.metadata import get_job_output_files, cleanup_job_temp_files
 
         elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
         elapsed_str = format_elapsed_time(elapsed)
@@ -513,7 +508,7 @@ class PollingMixin:
     def _poll_batch_jobs(self):
         """Poll all pending batch jobs and collect results before updating status."""
         from ui_components import Worker
-        from comfyui.service import poll_deadline_job_status
+        from deadline.poller import poll_deadline_job_status
 
         if not self._batch_pending_jobs:
             self._stop_batch_polling()
@@ -731,7 +726,7 @@ class PollingMixin:
     def _on_batch_jobs_completed_impl(self, had_failures=False):
         """Implementation of batch jobs completion."""
         from ui_components import StatusColors
-        from comfyui.service import cleanup_job_temp_files
+        from comfyui.metadata import cleanup_job_temp_files
 
         was_recovery = getattr(self, '_batch_recovery_mode', False)
         self._batch_recovery_mode = False  # Reset recovery flag
@@ -836,7 +831,7 @@ class PollingMixin:
     def _on_cancel_jobs_clicked(self):
         """Handle cancel jobs button click."""
         from ui_components import Worker, StatusColors
-        from comfyui.service import cancel_deadline_jobs
+        from deadline.poller import cancel_deadline_jobs
 
         job_ids = []
 
@@ -997,7 +992,7 @@ class PollingMixin:
         - The app crashed without saving state
         """
         from core.user_preferences import get_comfyui_running_jobs
-        from comfyui.service import poll_deadline_job_status
+        from deadline.poller import poll_deadline_job_status
 
         # First, try to recover from persisted state
         job_state = None
@@ -1262,7 +1257,7 @@ class PollingMixin:
             job_state: The persisted job state dictionary
         """
         from ui_components import Worker
-        from comfyui.service import poll_deadline_job_status
+        from deadline.poller import poll_deadline_job_status
 
         mode = job_state.get("mode")
         if not mode:

@@ -26,7 +26,7 @@ from shiboken6 import isValid
 from dialog_helpers import get_active_window
 
 # Re-export from submodules (absolute imports since resources/ui is in path)
-from workers import Worker, WorkerSignals, report_progress
+from workers import Worker, WorkerSignals, start_worker_thread
 from styles import LoadingStyles, StatusColors
 from spinners import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner
 from effects import TabGlowEffect, TabGlowManager, UIAnimations
@@ -638,7 +638,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     @staticmethod
     def _get_tooltip_data(output_dir, path):
-        from comfyui.service import get_model_note
+        from comfyui.metadata import get_model_note
         filename = os.path.basename(path)
         note = get_model_note(output_dir, filename)
         return (filename, note)
@@ -1060,9 +1060,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _get_metadata(self):
         if self._cached_metadata is None:
             try:
-                from comfyui.service import get_image_metadata
+                from comfyui.metadata import get_item_metadata
                 filename = os.path.basename(self.path)
-                self._cached_metadata = get_image_metadata(self.output_dir, filename) or {}
+                self._cached_metadata = get_item_metadata(self.output_dir, filename) or {}
             except Exception as e:
                 logger.error(f"Error loading metadata for {self.path}: {e}")
                 self._cached_metadata = {}

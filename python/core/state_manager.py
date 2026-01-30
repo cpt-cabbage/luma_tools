@@ -148,6 +148,9 @@ class ApplicationState:
             bool: True if current user is an admin
         """
         with self._lock:
+            # Return False if user not initialized yet
+            if not self._user:
+                return False
             if self._is_admin is None:
                 from core.settings_manager import is_admin_user
                 self._is_admin = is_admin_user(self._user)
@@ -164,6 +167,9 @@ class ApplicationState:
             bool: True if current user is a supervisor
         """
         with self._lock:
+            # Return False if user not initialized yet
+            if not self._user:
+                return False
             if self._is_sup is None:
                 from core.settings_manager import is_sup_user
                 self._is_sup = is_sup_user(self._user)

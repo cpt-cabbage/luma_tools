@@ -53,3 +53,22 @@ def safe_import_multiple(module_path: str, *attrs: str) -> Tuple[Tuple[Optional[
         return values, True
     except (ImportError, AttributeError, ModuleNotFoundError):
         return tuple(None for _ in attrs), False
+
+
+def get_event_bus():
+    """
+    Get the pipeline event bus instance, if available.
+
+    Returns:
+        Tuple of (pipeline_events_instance_or_None, is_available_bool)
+
+    Example:
+        pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
+        if EVENT_BUS_AVAILABLE:
+            pipeline_events.gallery_refresh_requested.emit()
+    """
+    try:
+        from core.event_bus import pipeline_events
+        return pipeline_events, True
+    except ImportError:
+        return None, False

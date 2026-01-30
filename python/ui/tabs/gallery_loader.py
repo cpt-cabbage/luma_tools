@@ -188,7 +188,7 @@ class GalleryLoader:
             # Import metadata functions once at the top
             try:
                 from comfyui.metadata import load_gallery_metadata, _lookup_file_metadata
-                from comfyui.service import get_workflow_preset_for_files
+                from comfyui.metadata import get_workflow_preset_for_files
             except ImportError as e:
                 logger.error(f"[Loader] Failed to import metadata functions: {e}")
                 load_gallery_metadata = None

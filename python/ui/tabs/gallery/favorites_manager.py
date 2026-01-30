@@ -21,9 +21,6 @@ from core.config import UIColors
 
 logger = logging.getLogger(__name__)
 
-# Import GROUP_COLORS from config for backwards compatibility
-GROUP_COLORS = UIColors.GROUP_COLORS
-
 
 @dataclass
 class GroupDef:
@@ -44,7 +41,7 @@ class GroupDef:
         return cls(
             group_id=data.get("group_id", str(uuid.uuid4())),
             name=data.get("name", "Untitled"),
-            color=data.get("color", GROUP_COLORS[0]),
+            color=data.get("color", UIColors.GROUP_COLORS[0]),
             created=data.get("created", datetime.now().isoformat()),
             order=data.get("order", 0)
         )
@@ -212,12 +209,12 @@ class FavoritesManager(QObject):
         if color is None:
             # Pick next available color
             used_colors = {g.color for g in self._groups.values()}
-            for c in GROUP_COLORS:
+            for c in UIColors.GROUP_COLORS:
                 if c not in used_colors:
                     color = c
                     break
             if color is None:
-                color = GROUP_COLORS[len(self._groups) % len(GROUP_COLORS)]
+                color = UIColors.GROUP_COLORS[len(self._groups) % len(UIColors.GROUP_COLORS)]
 
         group_id = str(uuid.uuid4())
         order = max((g.order for g in self._groups.values()), default=-1) + 1

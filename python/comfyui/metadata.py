@@ -190,7 +190,7 @@ def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) 
         return False
 
 
-def add_image_metadata(
+def add_item_metadata(
     output_dir: str,
     output_prefix: str,
     prompt: Optional[str] = None,
@@ -201,7 +201,7 @@ def add_image_metadata(
     workflow_preset: Optional[str] = None,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> bool:
-    """Add metadata for images that will be generated with a given prefix.
+    """Add metadata for items that will be generated with a given prefix.
 
     Enhanced to store:
     - is_output: True (marks as generated output)
@@ -324,8 +324,8 @@ def add_image_metadata(
         return False
 
 
-def get_image_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
-    """Get metadata for a specific image file."""
+def get_item_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
+    """Get metadata for a specific gallery item (image, video, model, etc.)."""
     metadata = load_gallery_metadata(output_dir)
     return _lookup_file_metadata(metadata, filename)
 

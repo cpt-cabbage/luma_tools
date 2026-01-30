@@ -227,9 +227,9 @@ class PropertiesDialog(QDialog):
     def _load_metadata(self) -> Dict[str, Any]:
         """Load metadata for the item."""
         try:
-            from comfyui.service import get_image_metadata
+            from comfyui.metadata import get_item_metadata
             filename = os.path.basename(self.item_path)
-            metadata = get_image_metadata(self.output_dir, filename)
+            metadata = get_item_metadata(self.output_dir, filename)
             return metadata or {}
         except Exception as e:
             logger.error(f"Error loading metadata: {e}")
@@ -442,7 +442,7 @@ class PropertiesDialog(QDialog):
     def _add_notes_section(self):
         """Add user notes section."""
         try:
-            from comfyui.service import get_model_note
+            from comfyui.metadata import get_model_note
             filename = os.path.basename(self.item_path)
             note = get_model_note(self.output_dir, filename)
             

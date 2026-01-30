@@ -5,22 +5,16 @@ Handles pass detection, channel parsing, and render configuration.
 """
 
 import logging
-import subprocess
 import json
 import os
 import re
-import sys
-from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
-from core.utils import substring_after, remove_after, ensure_directory
+from core.utils import substring_after, remove_after, ensure_directory, replace_frame_tokens
 from core.subprocess_utils import run_command
-
-# Import UI utilities
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "ui"))
-from ui_components import report_progress
+from core.progress_utils import report_progress
 
 
 def detect_passes(render_file):
@@ -252,8 +246,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         # Replace frame token with actual frame number
         # Deadline uses <STARTFRAME%{padding}> format - need to replace with actual frame
         # Example: <STARTFRAME%4> becomes 1001 (4-digit padding)
-        import re
-        frame_args = re.sub(r'<STARTFRAME%(\d+)>', lambda m: f"{frame_num:0{m.group(1)}d}", oiio_args)
+        frame_args = replace_frame_tokens(oiio_args, frame_num)
 
         local_command = f'"{oiio_path}" -v {frame_args}'
 

@@ -362,7 +362,7 @@ def submit_comfyui_job(
     import shutil
     from comfyui.workflow import load_workflow, save_workflow
     from comfyui.modifier import modify_workflow
-    from comfyui.metadata import add_image_metadata, extract_prompts_from_editable_values
+    from comfyui.metadata import add_item_metadata, extract_prompts_from_editable_values
 
     if progress_callback:
         progress_callback(5, "Loading workflow...")
@@ -453,7 +453,7 @@ def submit_comfyui_job(
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)
         if prompt_text or current_file or current_editable_values:
-            add_image_metadata(
+            add_item_metadata(
                 output_dir=current_working_dir,
                 output_prefix=current_job_name,
                 prompt=prompt_text,

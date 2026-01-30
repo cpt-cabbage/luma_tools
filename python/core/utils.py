@@ -67,6 +67,69 @@ def normalize_path(path):
     return path.replace("\\", "/")
 
 
+def validate_file_exists(path, raise_error=True):
+    """
+    Validate that a file exists.
+
+    Args:
+        path: Path to validate
+        raise_error: If True, raise FileNotFoundError; otherwise return False
+
+    Returns:
+        bool: True if file exists
+
+    Raises:
+        FileNotFoundError: If file doesn't exist and raise_error is True
+    """
+    if not os.path.exists(path):
+        if raise_error:
+            raise FileNotFoundError(f"File not found: {path}")
+        return False
+    return True
+
+
+def validate_is_file(path, raise_error=True):
+    """
+    Validate that path is a file (not a directory).
+
+    Args:
+        path: Path to validate
+        raise_error: If True, raise ValueError; otherwise return False
+
+    Returns:
+        bool: True if path is a file
+
+    Raises:
+        ValueError: If path is not a file and raise_error is True
+    """
+    if not os.path.isfile(path):
+        if raise_error:
+            raise ValueError(f"Path is not a file: {path}")
+        return False
+    return True
+
+
+def validate_is_directory(path, raise_error=True):
+    """
+    Validate that path is a directory.
+
+    Args:
+        path: Path to validate
+        raise_error: If True, raise ValueError; otherwise return False
+
+    Returns:
+        bool: True if path is a directory
+
+    Raises:
+        ValueError: If path is not a directory and raise_error is True
+    """
+    if not os.path.isdir(path):
+        if raise_error:
+            raise ValueError(f"Path is not a directory: {path}")
+        return False
+    return True
+
+
 def ensure_directory(path):
     """
     Ensure directory exists, create if it doesn't.
@@ -75,6 +138,67 @@ def ensure_directory(path):
         path: Directory path to ensure exists
     """
     os.makedirs(path, exist_ok=True)
+
+
+def safe_remove(path, log_errors=False):
+    """
+    Safely remove a file, ignoring errors if it doesn't exist.
+
+    Args:
+        path: Path to file to remove
+        log_errors: If True, log warnings on failure
+
+    Returns:
+        bool: True if file was removed, False otherwise
+    """
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except Exception as e:
+        if log_errors:
+            logger.warning(f"Could not remove {path}: {e}")
+    return False
+
+
+def safe_rmtree(path, log_errors=False):
+    """
+    Safely remove a directory tree, ignoring errors.
+
+    Args:
+        path: Path to directory to remove
+        log_errors: If True, log warnings on failure
+
+    Returns:
+        bool: True if directory was removed, False otherwise
+    """
+    import shutil
+    try:
+        if os.path.exists(path):
+            shutil.rmtree(path)
+            return True
+    except Exception as e:
+        if log_errors:
+            logger.warning(f"Could not remove directory {path}: {e}")
+    return False
+
+
+def replace_frame_tokens(template, frame_num):
+    """
+    Replace <STARTFRAME%N> tokens with actual frame numbers.
+
+    Deadline uses <STARTFRAME%{padding}> format where N is the zero-padding width.
+    Example: <STARTFRAME%4> with frame_num=42 becomes "0042"
+
+    Args:
+        template: String with frame tokens like <STARTFRAME%4>
+        frame_num: Frame number to substitute
+
+    Returns:
+        str: String with tokens replaced by zero-padded frame numbers
+    """
+    return re.sub(r'<STARTFRAME%(\d+)>',
+                  lambda m: f"{frame_num:0{m.group(1)}d}", template)
 
 
 def remove_prefix(s, prefix):
