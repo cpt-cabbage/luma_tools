@@ -4,7 +4,10 @@ Gallery Groups Panel.
 Collapsible sidebar for filtering gallery by likes and groups.
 """
 
+import logging
 from PySide6.QtCore import Qt, Signal
+
+logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSizePolicy, QMenu, QCheckBox
@@ -387,7 +390,7 @@ class GroupsFilterPanel(QWidget):
                     item.setParent(None)
                     item.deleteLater()
                 except RuntimeError:
-                    pass  # Widget already deleted
+                    logger.debug("Stack item widget already deleted during cleanup")
             self._stack_items.clear()
 
             # Remove old separator and header if they exist

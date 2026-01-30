@@ -74,7 +74,7 @@ class OperationsManager(BaseGalleryManager):
                             stacks_to_update.add(stack_id)
 
                     # Clean up caches via tab's method
-                    self._on_item_deleted(item_path)
+                    self.on_item_deleted(item_path)
                 except FileNotFoundError:
                     self.tab.log(f"[Gallery] File not found: {item_path}")
                     failed_items.append(os.path.basename(item_path))
@@ -189,7 +189,7 @@ class OperationsManager(BaseGalleryManager):
             if hasattr(self.tab, '_section_items') and stack_id in self.tab._section_items:
                 del self.tab._section_items[stack_id]
 
-    def _on_item_deleted(self, item_path):
+    def on_item_deleted(self, item_path):
         """Handle item deletion - clean up all caches."""
         # Remove from cached items
         if self.tab._cached_items:

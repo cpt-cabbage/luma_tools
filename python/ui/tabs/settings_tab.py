@@ -397,24 +397,24 @@ class SettingsTab(BaseTab):
 
     def _load_admin_users_ui(self):
         """Load admin users list (settings access only)."""
-        from core.settings_manager import get_admin_users
+        from core.settings_manager import get_users_with_role
 
         if not hasattr(self.ui, 'AdminUsersList'):
             return
 
         self.ui.AdminUsersList.clear()
-        for user in get_admin_users():
+        for user in get_users_with_role("admin"):
             self.ui.AdminUsersList.addItem(user)
 
     def _load_sup_users_ui(self):
         """Load supervisor users list (full access)."""
-        from core.settings_manager import get_sup_users
+        from core.settings_manager import get_users_with_role
 
         if not hasattr(self.ui, 'SupUsersList'):
             return
 
         self.ui.SupUsersList.clear()
-        for user in get_sup_users():
+        for user in get_users_with_role("sup"):
             self.ui.SupUsersList.addItem(user)
 
     # Property for backward compatibility
@@ -681,7 +681,7 @@ class SettingsTab(BaseTab):
 
     def _on_add_admin_user(self):
         """Add an admin user."""
-        from core.settings_manager import add_admin_user
+        from core.settings_manager import add_user_to_role
 
         username, ok = QtWidgets.QInputDialog.getText(
             self.main_window, "Add Admin User", "Enter username:",
@@ -689,13 +689,13 @@ class SettingsTab(BaseTab):
         )
         if ok and username:
             username = username.strip().lower()
-            add_admin_user(username)
+            add_user_to_role(username, "admin")
             self._load_admin_users_ui()
             self.log(f"Added admin user: {username}")
 
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
-        from core.settings_manager import remove_admin_user
+        from core.settings_manager import remove_user_from_role
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
@@ -714,13 +714,13 @@ class SettingsTab(BaseTab):
             ):
                 return
 
-        remove_admin_user(username)
+        remove_user_from_role(username, "admin")
         self._load_admin_users_ui()
         self.show_status(f"Removed admin user: {username}", "success")
 
     def _on_add_sup_user(self):
         """Add a supervisor user."""
-        from core.settings_manager import add_sup_user
+        from core.settings_manager import add_user_to_role
 
         username, ok = QtWidgets.QInputDialog.getText(
             self.main_window, "Add Supervisor", "Enter username:",
@@ -728,13 +728,13 @@ class SettingsTab(BaseTab):
         )
         if ok and username:
             username = username.strip().lower()
-            add_sup_user(username)
+            add_user_to_role(username, "sup")
             self._load_sup_users_ui()
             self.log(f"Added supervisor user: {username}")
 
     def _on_remove_sup_user(self):
         """Remove selected supervisor user."""
-        from core.settings_manager import remove_sup_user
+        from core.settings_manager import remove_user_from_role
 
         if not hasattr(self.ui, 'SupUsersList'):
             return
@@ -756,7 +756,7 @@ class SettingsTab(BaseTab):
             ):
                 return
 
-        remove_sup_user(username)
+        remove_user_from_role(username, "sup")
         self._load_sup_users_ui()
         self.show_status(f"Removed supervisor: {username}", "success")
 

@@ -2,7 +2,7 @@
 Deadline integration package.
 
 Centralizes all Deadline-related functionality:
-- Job submission (submit_comfyui_to_deadline, submit_comfyui_to_deadline_server_mode)
+- Job submission (submit_comfyui_to_deadline, submit_comfyui_job)
 - Job polling and status monitoring (poll_deadline_job_status, get_queue_info)
 - Output parsing utilities (parse_deadline_output, extract_job_id)
 - General Deadline command utilities (run_deadline_command, submit_deadline_job)
@@ -36,10 +36,7 @@ from deadline.poller import (
 
 from deadline.submitter import (
     submit_comfyui_to_deadline,
-    submit_comfyui_to_deadline_server_mode,
     submit_comfyui_job,
-    validate_inputs,
-    validate_comfyui_path,
 )
 
 __all__ = [
@@ -65,8 +62,5 @@ __all__ = [
     'cancel_deadline_jobs',
     # Submitter
     'submit_comfyui_to_deadline',
-    'submit_comfyui_to_deadline_server_mode',
     'submit_comfyui_job',
-    'validate_inputs',
-    'validate_comfyui_path',
 ]

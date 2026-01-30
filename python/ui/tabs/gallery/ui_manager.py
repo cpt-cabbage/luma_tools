@@ -88,7 +88,7 @@ class UIManager(BaseGalleryManager):
             self.tab.show_status_message(f"Gallery sorted by {label}")
 
         # Re-sort and redisplay (use cached items, no rescan needed)
-        self._redisplay_items()
+        self.redisplay_items()
 
     # =========================================================================
     # FILTER CONTROLS
@@ -187,7 +187,7 @@ class UIManager(BaseGalleryManager):
         self._update_filters_button_text()
 
         # Re-filter and redisplay from cached items (no rescan needed)
-        self._redisplay_items()
+        self.redisplay_items()
 
     def _update_filters_button_text(self):
         """Update the Filters button text based on active filters."""
@@ -292,9 +292,9 @@ class UIManager(BaseGalleryManager):
             save_gallery_settings(view_mode=new_view_mode)
 
         # Redisplay with new stacking mode (force rebuild since view mode changed)
-        self._redisplay_items(force_rebuild=True)
+        self.redisplay_items(force_rebuild=True)
 
-    def _redisplay_items(self, force_rebuild=False):
+    def redisplay_items(self, force_rebuild=False):
         """Redisplay items with current sort/filter/view settings.
 
         Uses smart detection to avoid full rebuilds when only sort order changed.
@@ -409,11 +409,11 @@ class UIManager(BaseGalleryManager):
         base_path = self.tab._get_network_user_path(username="")
 
         # Get known users from global settings (admins and supervisors)
-        from core.settings_manager import get_admin_users, get_sup_users
+        from core.settings_manager import get_users_with_role
         known_users = set()
-        for user in get_admin_users():
+        for user in get_users_with_role("admin"):
             known_users.add(user.lower())
-        for user in get_sup_users():
+        for user in get_users_with_role("sup"):
             known_users.add(user.lower())
 
         # Always include current user

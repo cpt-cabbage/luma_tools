@@ -450,22 +450,57 @@ def is_tab_restricted(tab_name: str) -> bool:
 # Supervisors (Sups): Can see ComfyUI and Gallery tabs (not Settings)
 # ============================================================================
 
-def _get_user_list(settings_key: str) -> List[str]:
-    """Get a user list from global settings."""
-    return _global_settings.get(settings_key, [])
+# Role-based settings keys mapping
+_ROLE_SETTINGS_KEYS = {
+    "admin": "admin_users",
+    "sup": "sup_users",
+}
 
 
-def _is_user_in_list(username: str, settings_key: str) -> bool:
-    """Check if username is in a user list (case-insensitive)."""
+def _get_role_settings_key(role: str) -> str:
+    """Get the settings key for a role."""
+    if role not in _ROLE_SETTINGS_KEYS:
+        raise ValueError(f"Unknown role: {role}. Valid roles: {list(_ROLE_SETTINGS_KEYS.keys())}")
+    return _ROLE_SETTINGS_KEYS[role]
+
+
+def get_users_with_role(role: str) -> List[str]:
+    """Get the list of users with a specific role.
+
+    Args:
+        role: Role name ("admin" or "sup")
+
+    Returns:
+        List of usernames with the role
+    """
+    return _global_settings.get(_get_role_settings_key(role), [])
+
+
+def is_user_in_role(username: str, role: str) -> bool:
+    """Check if a username has a specific role (case-insensitive).
+
+    Args:
+        username: Username to check
+        role: Role name ("admin" or "sup")
+
+    Returns:
+        True if user has the role
+    """
     if not username:
         return False
-    return username.lower() in [u.lower() for u in _get_user_list(settings_key)]
+    return username.lower() in [u.lower() for u in get_users_with_role(role)]
 
 
-def _add_user_to_list(username: str, settings_key: str, role_name: str):
-    """Add a user to a user list (generic helper)."""
+def add_user_to_role(username: str, role: str):
+    """Add a user to a role.
+
+    Args:
+        username: Username to add
+        role: Role name ("admin" or "sup")
+    """
     if not username:
         return
+    settings_key = _get_role_settings_key(role)
     settings = load_global_settings()
     if settings_key not in settings:
         settings[settings_key] = []
@@ -473,11 +508,17 @@ def _add_user_to_list(username: str, settings_key: str, role_name: str):
     if username.lower() not in existing_lower:
         settings[settings_key].append(username)
         save_global_settings(settings)
-        logger.info(f"Added {role_name} user: {username}")
+        logger.info(f"Added {role} user: {username}")
 
 
-def _remove_user_from_list(username: str, settings_key: str, role_name: str):
-    """Remove a user from a user list (generic helper)."""
+def remove_user_from_role(username: str, role: str):
+    """Remove a user from a role.
+
+    Args:
+        username: Username to remove
+        role: Role name ("admin" or "sup")
+    """
+    settings_key = _get_role_settings_key(role)
     settings = load_global_settings()
     if settings_key not in settings:
         return
@@ -485,49 +526,9 @@ def _remove_user_from_list(username: str, settings_key: str, role_name: str):
     settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
     if len(settings[settings_key]) < len(original_list):
         save_global_settings(settings)
-        logger.info(f"Removed {role_name} user: {username}")
-
-
-def get_admin_users() -> List[str]:
-    """Get the list of admin users from global settings."""
-    return _get_user_list("admin_users")
-
-
-def get_sup_users() -> List[str]:
-    """Get the list of supervisor users from global settings."""
-    return _get_user_list("sup_users")
-
-
-def is_admin_user(username: str) -> bool:
-    """Check if a username is in the admin list (case-insensitive)."""
-    return _is_user_in_list(username, "admin_users")
-
-
-def is_sup_user(username: str) -> bool:
-    """Check if a username is in the supervisor list (case-insensitive)."""
-    return _is_user_in_list(username, "sup_users")
+        logger.info(f"Removed {role} user: {username}")
 
 
 def has_elevated_access(username: str) -> bool:
     """Check if a username has any elevated access (admin or sup)."""
-    return is_admin_user(username) or is_sup_user(username)
-
-
-def add_admin_user(username: str):
-    """Add a user to the admin list."""
-    _add_user_to_list(username, "admin_users", "admin")
-
-
-def remove_admin_user(username: str):
-    """Remove a user from the admin list."""
-    _remove_user_from_list(username, "admin_users", "admin")
-
-
-def add_sup_user(username: str):
-    """Add a user to the supervisor list."""
-    _add_user_to_list(username, "sup_users", "supervisor")
-
-
-def remove_sup_user(username: str):
-    """Remove a user from the supervisor list."""
-    _remove_user_from_list(username, "sup_users", "supervisor")
+    return is_user_in_role(username, "admin") or is_user_in_role(username, "sup")

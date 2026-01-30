@@ -181,7 +181,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _update_workflow_selector_visibility(self):
         """Update workflow selector visibility based on current preset."""
-        from comfyui.presets_manager import is_workflow_preset_multi, get_workflow_preset_workflows
+        from comfyui.presets_manager import is_workflow_preset_multi, get_workflow_preset_subworkflows
 
         if not self.state_manager.current_preset_name:
             self._workflow_label.setVisible(False)
@@ -194,7 +194,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         if is_multi:
             # Populate workflow options
-            workflows = get_workflow_preset_workflows(self.state_manager.current_preset_name)
+            workflows = get_workflow_preset_subworkflows(self.state_manager.current_preset_name)
             self._workflow_selector_combo.blockSignals(True)
             try:
                 self._workflow_selector_combo.clear()
@@ -214,7 +214,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
-        from comfyui.presets_manager import get_comfyui_workflow_preset_path, get_workflow_config
+        from comfyui.presets_manager import get_comfyui_workflow_preset_path, get_workflow_preset_config
 
         if not workflow_name:
             return
@@ -357,7 +357,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from comfyui.presets_manager import (
             get_comfyui_workflow_preset_path,
             is_workflow_preset_multi,
-            get_workflow_preset_workflows
+            get_workflow_preset_subworkflows
         )
 
         self.state_manager.current_preset_name = preset_name
@@ -369,7 +369,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         if is_multi:
             # For multi-workflow models, update selector and select first workflow
-            workflows = get_workflow_preset_workflows(preset_name)
+            workflows = get_workflow_preset_subworkflows(preset_name)
             if workflows:
                 # Reset selected workflow if switching presets
                 if not self.state_manager.current_selected_workflow or self.state_manager.current_selected_workflow not in workflows:
@@ -560,12 +560,12 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _refresh_editable_nodes(self):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
-        from comfyui.presets_manager import get_workflow_config
+        from comfyui.presets_manager import get_workflow_preset_config
 
         # Get node overrides from current preset (supports both single and multi-workflow)
         node_overrides = {}
         if self.state_manager.current_preset_name:
-            config = get_workflow_config(
+            config = get_workflow_preset_config(
                 self.state_manager.current_preset_name,
                 selected_workflow=self.state_manager.current_selected_workflow
             )
@@ -756,7 +756,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from ui_components import StatusColors
         from deadline.submitter import submit_comfyui_job
         from core.settings_manager import get_setting
-        from comfyui.presets_manager import get_workflow_config
+        from comfyui.presets_manager import get_workflow_preset_config
 
         # Immediately save state before submission (crash recovery)
         self._save_state()
@@ -791,7 +791,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         editable_values, selected_image_count = self.widget_manager.collect_editable_values()
 
         # Get workflow config (supports both single and multi-workflow models)
-        workflow_config = get_workflow_config(
+        workflow_config = get_workflow_preset_config(
             self.state_manager.current_preset_name,
             selected_workflow=self.state_manager.current_selected_workflow
         ) if self.state_manager.current_preset_name else None

@@ -10,32 +10,41 @@ logger = logging.getLogger(__name__)
 
 def get_trailing_number(s):
     """
-    Extract trailing number from string.
+    Extract the last number from a string.
 
     Args:
-        s: String containing a number at the end
+        s: String potentially containing numbers
 
     Returns:
-        str: The trailing number as a string
+        str: The last number found as a string, or None if no digits found
 
     Example:
         >>> get_trailing_number("render_v003")
         '003'
+        >>> get_trailing_number("no_numbers")
+        None
     """
-    query = s
-    return re.findall(r'\d+', query)[-1]
+    matches = re.findall(r'\d+', s)
+    return matches[-1] if matches else None
 
 
 def remove_after(string, suffix):
     """
-    Remove everything after (and including) the suffix.
+    Truncate string at the end of the suffix, keeping everything up to and including it.
 
     Args:
         string: Input string
-        suffix: Suffix to find
+        suffix: Substring to find and truncate after
 
     Returns:
-        str: String up to and including the suffix
+        str: String truncated after the suffix
+
+    Raises:
+        ValueError: If suffix is not found in string
+
+    Example:
+        >>> remove_after("hello_world_test", "_world")
+        'hello_world'
     """
     return string[:string.index(suffix) + len(suffix)]
 

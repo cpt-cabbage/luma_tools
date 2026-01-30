@@ -152,8 +152,8 @@ class ApplicationState:
             if not self._user:
                 return False
             if self._is_admin is None:
-                from core.settings_manager import is_admin_user
-                self._is_admin = is_admin_user(self._user)
+                from core.settings_manager import is_user_in_role
+                self._is_admin = is_user_in_role(self._user, "admin")
             return self._is_admin
 
     @property
@@ -171,8 +171,8 @@ class ApplicationState:
             if not self._user:
                 return False
             if self._is_sup is None:
-                from core.settings_manager import is_sup_user
-                self._is_sup = is_sup_user(self._user)
+                from core.settings_manager import is_user_in_role
+                self._is_sup = is_user_in_role(self._user, "sup")
             return self._is_sup
 
     @property

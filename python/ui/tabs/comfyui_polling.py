@@ -179,13 +179,13 @@ class PollingMixin:
         """Handle iterate poll result."""
         import traceback
         try:
-            self._on_iterate_poll_result_impl(result)
+            self._handle_iterate_poll_result(result)
         except Exception as e:
             logger.error(f"ERROR in _on_iterate_poll_result: {e}", exc_info=True)
             self._stop_iterate_polling()
 
-    def _on_iterate_poll_result_impl(self, result):
-        """Implementation of iterate poll result handling."""
+    def _handle_iterate_poll_result(self, result):
+        """Process iterate poll result and update UI."""
         from ui_components import StatusColors
 
         status = result.get("status", "Unknown")
@@ -326,14 +326,14 @@ class PollingMixin:
         """Handle iterate job completion - show the generated image."""
         import traceback
         try:
-            self._on_iterate_job_completed_impl()
+            self._handle_iterate_job_completed()
         except Exception as e:
             logger.error(f"ERROR in _on_iterate_job_completed: {e}", exc_info=True)
             self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
 
-    def _on_iterate_job_completed_impl(self):
-        """Implementation of iterate job completion."""
+    def _handle_iterate_job_completed(self):
+        """Handle iterate job completion and record timing."""
         from ui_components import StatusColors
         from comfyui.metadata import get_job_output_files, cleanup_job_temp_files
 
@@ -719,12 +719,12 @@ class PollingMixin:
         """Handle batch jobs completion - cleanup and refresh gallery."""
         import traceback
         try:
-            self._on_batch_jobs_completed_impl(had_failures)
+            self._handle_batch_jobs_completed(had_failures)
         except Exception as e:
             logger.error(f"ERROR in _on_batch_jobs_completed: {e}", exc_info=True)
 
-    def _on_batch_jobs_completed_impl(self, had_failures=False):
-        """Implementation of batch jobs completion."""
+    def _handle_batch_jobs_completed(self, had_failures=False):
+        """Handle batch jobs completion and cleanup."""
         from ui_components import StatusColors
         from comfyui.metadata import cleanup_job_temp_files
 

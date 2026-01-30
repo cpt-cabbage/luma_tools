@@ -1,11 +1,9 @@
 """
 Deadline Job Submission Module for ComfyUI.
 
-Handles submission of ComfyUI workflows to Deadline farm in both:
-- Server mode (persistent ComfyUI server)
-- Standard mode (start/stop ComfyUI per task)
-
-Includes validation and batch processing support.
+Handles submission of ComfyUI workflows to Deadline farm with batch processing support.
+Each frame represents a different seed/generation, with optional server persistence
+for faster model loading between jobs.
 """
 
 import os
@@ -21,7 +19,6 @@ from core.config import (
     DEADLINE_GROUP_COMPFYUI,
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
-    COMFYUI_SUPPORTED_EXTENSIONS,
 )
 from core.settings_manager import get_setting
 from core.utils import ensure_directory
@@ -41,108 +38,6 @@ def _get_comfyui_config() -> Tuple[str, str, str, str]:
     comfyui_python = get_setting("comfyui_python_path")
     python_exe, _ = resolve_comfyui_paths(comfyui_path, comfyui_mode, comfyui_python or "python")
     return comfyui_path, comfyui_mode, comfyui_python, python_exe
-
-
-def submit_comfyui_to_deadline_server_mode(
-    workflow_path: str,
-    seeds_file: str,
-    output_dir: str,
-    batch_name: str,
-    render_name: str,
-    generation_count: int,
-    server_url: str = "http://127.0.0.1:8188",
-    priority: Optional[int] = None,
-    pool: Optional[str] = None,
-    group: Optional[str] = None,
-) -> Optional[str]:
-    """
-    Submit ComfyUI job to Deadline using server mode (persistent ComfyUI).
-
-    Uses a lightweight client script that connects to an already-running
-    ComfyUI server. Much faster as models are already loaded in memory.
-
-    Requires comfyui_server.py to be running on the farm node.
-
-    Args:
-        workflow_path: Path to workflow JSON file
-        seeds_file: Path to JSON file containing seeds for each frame
-        output_dir: Output directory for generated outputs
-        batch_name: BatchName for Deadline job grouping
-        render_name: Name for the job display
-        generation_count: Number of generations (frames)
-        server_url: URL of the ComfyUI server (default: http://127.0.0.1:8188)
-        priority: Job priority (default from config)
-        pool: Deadline pool (default from config)
-        group: Deadline group (default from config)
-
-    Returns:
-        Deadline job ID or None if failed
-    """
-    if priority is None:
-        priority = DEADLINE_PRIORITY_COMFYUI
-    if pool is None:
-        pool = DEADLINE_POOL
-    if group is None:
-        group = DEADLINE_GROUP_COMPFYUI
-
-    import shutil
-
-    _, _, _, python_exe = _get_comfyui_config()
-
-    # Get the script paths - scripts are in comfyui package
-    comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
-    client_script_source = os.path.join(comfyui_package_dir, "comfyui_client.py")
-    utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
-    client_script = os.path.join(output_dir, "comfyui_client.py")
-    utils_script = os.path.join(output_dir, "comfyui_utils.py")
-
-    # Copy scripts to output directory for farm access
-    for src, dst in [(client_script_source, client_script), (utils_script_source, utils_script)]:
-        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-            shutil.copy2(src, dst)
-            logger.info(f"Copied {os.path.basename(src)} to: {dst}")
-
-    # Build arguments for the client script
-    timeout = get_setting("comfyui_timeout")
-    client_args = (
-        f'"{client_script}" '
-        f'--workflow "{workflow_path}" '
-        f'--seeds-file "{seeds_file}" '
-        f'--server-url "{server_url}" '
-        f'--server-input-dir "{output_dir}" '
-        f'--output-prefix "{render_name}" '
-        f'--frame <STARTFRAME> '
-        f'--timeout {timeout} '
-        f'--wait-for-server 30'
-    )
-
-    deadline_command = [
-        DEADLINE_PATH,
-        '-SubmitCommandLineJob',
-        '-executable', python_exe,
-        '-arguments', client_args,
-        '-frames', f'1-{generation_count}',
-        '-chunksize', '1',
-        '-pool', pool,
-        '-group', group,
-        '-priority', str(priority),
-        '-prop', f'Department={DEADLINE_DEPARTMENT}',
-        '-prop', f'BatchName={batch_name}',
-        '-prop', f'OutputDirectory0={output_dir}',
-        '-name', f'LUMA TOOLS - {render_name}',
-    ]
-
-    logger.info(f"Submitting Luma Tools job (server mode): {render_name}")
-    logger.info(f"Frames: 1-{generation_count} (each frame = different seed)")
-    logger.info(f"Server URL: {server_url}")
-
-    from deadline.utils import submit_deadline_job
-
-    job_id = submit_deadline_job(deadline_command, "[Server Mode]")
-    if job_id:
-        logger.info(f"ComfyUI Deadline Job ID (server mode): {job_id}")
-
-    return job_id
 
 
 def submit_comfyui_to_deadline(
@@ -513,36 +408,3 @@ def submit_comfyui_job(
         return all_job_ids, ""
     else:
         return [], "; ".join(errors) if errors else "Failed to submit any jobs to Deadline"
-
-
-def validate_inputs(
-    workflow_path: str,
-    input_image: str,
-    prompt: str,
-    output_path: str
-) -> Tuple[bool, str]:
-    """Validate all ComfyUI submission inputs."""
-    if not workflow_path:
-        return False, "No workflow file selected"
-    if not os.path.exists(workflow_path):
-        return False, f"Workflow file not found: {workflow_path}"
-    if not input_image:
-        return False, "No input image selected"
-    if not os.path.exists(input_image):
-        return False, f"Input image not found: {input_image}"
-
-    ext = os.path.splitext(input_image)[1].lower()
-    if ext not in COMFYUI_SUPPORTED_EXTENSIONS:
-        return False, f"Unsupported image format: {ext}"
-
-    if not output_path:
-        return False, "No output path selected"
-
-    return True, ""
-
-
-def validate_comfyui_path(path: str) -> Tuple[bool, str]:
-    """Validate that a ComfyUI path is configured."""
-    if not path:
-        return False, "ComfyUI path is not configured"
-    return True, ""

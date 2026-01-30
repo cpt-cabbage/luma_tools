@@ -8,7 +8,7 @@ from .settings_manager import (
     get_setting, set_setting,
     load_user_settings, save_user_settings,
     load_global_settings, save_global_settings,
-    get_admin_users, is_admin_user,
+    get_users_with_role, is_user_in_role, add_user_to_role, remove_user_from_role,
 )
 from .user_preferences import (
     get_window_state, save_window_state,

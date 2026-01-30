@@ -452,8 +452,8 @@ class ComfyUIWidgetManager:
                         elif hasattr(input_widget, 'set_images') and isinstance(value, list):
                             # BatchImageSelector - restore image paths
                             input_widget.set_images(value)
-            except (ValueError, AttributeError):
-                pass  # Silently skip if restoration fails
+            except (ValueError, AttributeError) as e:
+                logger.debug(f"Skipped restoration of editable value for node {node_id}: {e}")
 
         # Clear pending values after applying
         self.pending_editable_values = {}

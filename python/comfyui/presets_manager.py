@@ -189,57 +189,53 @@ def get_comfyui_workflow_preset_path(name: str, selected_workflow: Optional[str]
     return preset  # Legacy format
 
 
-def is_workflow_preset_iteratable(name: str) -> bool:
-    """Check if a workflow preset supports iterate mode."""
+def _get_workflow_preset_field(name: str, field: str, default: Any = None) -> Any:
+    """Get a field from a workflow preset.
+
+    Args:
+        name: Preset name
+        field: Field name to retrieve
+        default: Default value if field not found
+
+    Returns:
+        Field value or default
+    """
     presets = get_comfyui_workflow_presets()
     if name in presets:
         preset = presets[name]
         if isinstance(preset, dict):
-            return preset.get("iteratable", False)
-    return False
+            return preset.get(field, default)
+    return default
+
+
+def is_workflow_preset_iteratable(name: str) -> bool:
+    """Check if a workflow preset supports iterate mode."""
+    return _get_workflow_preset_field(name, "iteratable", False)
 
 
 def is_workflow_preset_full_restart(name: str) -> bool:
     """Check if a workflow preset requires full ComfyUI server restart."""
-    presets = get_comfyui_workflow_presets()
-    if name in presets:
-        preset = presets[name]
-        if isinstance(preset, dict):
-            return preset.get("full_restart", False)
-    return False
+    return _get_workflow_preset_field(name, "full_restart", False)
 
 
 def is_workflow_preset_multi(name: str) -> bool:
     """Check if a workflow preset is a multi-workflow model."""
-    presets = get_comfyui_workflow_presets()
-    if name in presets:
-        preset = presets[name]
-        if isinstance(preset, dict):
-            return preset.get("is_multi", False)
-    return False
+    return _get_workflow_preset_field(name, "is_multi", False)
 
 
-def get_workflow_preset_workflows(name: str) -> Dict[str, Any]:
+def get_workflow_preset_subworkflows(name: str) -> Dict[str, Any]:
     """Get the workflows dictionary for a multi-workflow preset."""
-    presets = get_comfyui_workflow_presets()
-    if name in presets:
-        preset = presets[name]
-        if isinstance(preset, dict) and preset.get("is_multi"):
-            return preset.get("workflows", {})
+    if is_workflow_preset_multi(name):
+        return _get_workflow_preset_field(name, "workflows", {})
     return {}
 
 
 def get_workflow_preset_note(name: str, selected_workflow: Optional[str] = None) -> str:
     """Get the note for a workflow preset."""
-    presets = get_comfyui_workflow_presets()
-    if name in presets:
-        preset = presets[name]
-        if isinstance(preset, dict):
-            return preset.get("note", "")
-    return ""
+    return _get_workflow_preset_field(name, "note", "")
 
 
-def get_workflow_config(name: str, selected_workflow: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_workflow_preset_config(name: str, selected_workflow: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get the complete workflow configuration for a preset."""
     presets = get_comfyui_workflow_presets()
     if name not in presets:

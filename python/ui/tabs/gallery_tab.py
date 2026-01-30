@@ -204,7 +204,7 @@ class GalleryTab(BaseTab):
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion (coordinates selection + operations managers)."""
-        self._operations_manager._on_item_deleted(item_path)
+        self._operations_manager.on_item_deleted(item_path)
         self._selection_manager.on_item_deleted(item_path)
 
     def _on_item_viewed(self, item_path):
@@ -237,7 +237,7 @@ class GalleryTab(BaseTab):
 
     def _redisplay_items(self):
         """Redisplay items with current settings."""
-        self._ui_manager._redisplay_items()
+        self._ui_manager.redisplay_items()
 
     # =========================================================================
     # CORE METHODS (kept in main tab)
@@ -923,7 +923,7 @@ class GalleryTab(BaseTab):
         self.show_status_message(f"Created group '{name}' with {len(paths)} items")
 
         # Refresh the display to show the new grouping
-        self._ui_manager._redisplay_items(force_rebuild=True)
+        self._ui_manager.redisplay_items(force_rebuild=True)
 
     def _on_add_to_existing_group(self, stack_id, paths):
         """Handle request to add items to an existing group.
@@ -967,6 +967,6 @@ class GalleryTab(BaseTab):
             self.show_status_message(f"Added {added_count} item(s) to '{group_name}'")
 
             # Refresh the display to show the updated grouping
-            self._ui_manager._redisplay_items(force_rebuild=True)
+            self._ui_manager.redisplay_items(force_rebuild=True)
         else:
             self.show_status_message("Items already in group")
