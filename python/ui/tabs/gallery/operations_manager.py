@@ -319,3 +319,42 @@ class OperationsManager(BaseGalleryManager):
     def on_item_viewed(self, item_path):
         """Handle item viewed - remove from new items set."""
         self.tab._new_items.discard(item_path)
+
+    def compare_selected(self):
+        """Compare two selected items side-by-side.
+
+        Shows a dialog comparing metadata and parameters between two items.
+        Requires exactly 2 items to be selected.
+        """
+        from dialog_helpers import show_warning
+
+        if len(self.tab._selected_items) != 2:
+            show_warning(
+                "Compare Items",
+                "Please select exactly 2 items to compare.\n\n"
+                f"Currently selected: {len(self.tab._selected_items)} item(s)",
+                parent=self.tab.main_window
+            )
+            return
+
+        # Get the two selected items
+        selected_list = sorted(list(self.tab._selected_items))
+        item1_path = selected_list[0]
+        item2_path = selected_list[1]
+
+        # Show comparison dialog
+        try:
+            from comparison_dialog import ComparisonDialog
+            dialog = ComparisonDialog(
+                item1_path=item1_path,
+                item2_path=item2_path,
+                parent=self.tab.main_window
+            )
+            dialog.exec()
+        except Exception as e:
+            self.tab.log(f"[Gallery] Error opening comparison dialog: {e}")
+            show_warning(
+                "Compare Error",
+                f"Could not open comparison dialog:\n{e}",
+                parent=self.tab.main_window
+            )

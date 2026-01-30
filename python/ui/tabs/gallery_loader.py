@@ -226,10 +226,11 @@ class GalleryLoader:
                 items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
                     # Try to get metadata-based detection first (new method)
+                    # Use allow_reverse_match=False to avoid matching input files to output metadata
                     file_metadata = None
                     if full_metadata and _lookup_file_metadata:
                         try:
-                            file_metadata = _lookup_file_metadata(full_metadata, filename)
+                            file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
                         except Exception as e:
                             logger.error(f"[Loader] Error looking up metadata for {filename}: {e}")
                             file_metadata = None
@@ -444,9 +445,10 @@ class GalleryLoader:
                         file_metadata = None
 
                         # Try metadata-based detection
+                        # Use allow_reverse_match=False to avoid matching input files to output metadata
                         if full_metadata:
                             try:
-                                file_metadata = _lookup_file_metadata(full_metadata, filename)
+                                file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
                             except Exception as e:
                                 logger.error(f"[Prewarm] Error looking up metadata for {filename}: {e}")
 

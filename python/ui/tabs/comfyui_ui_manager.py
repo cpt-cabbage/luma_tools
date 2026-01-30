@@ -41,6 +41,10 @@ class ComfyUIWidgetManager:
         self.pending_editable_values = {}
         self.pending_semantic_values = {}
 
+        # Parameter history for undo functionality
+        self._undo_stack: List[Dict[str, Any]] = []
+        self._max_undo_history = 20  # Maximum number of undo states to keep
+
     def clear_widgets(self):
         """Clear all dynamic widgets from the layout."""
         while self.layout.count():
@@ -82,6 +86,134 @@ class ComfyUIWidgetManager:
                     # BatchImageSelector - capture image paths
                     values[semantic_key] = input_widget.selected_files.copy()
         return values
+
+    # =========================================================================
+    # PARAMETER HISTORY / UNDO
+    # =========================================================================
+
+    def push_undo_state(self, description: str = None) -> bool:
+        """Push current parameter values onto the undo stack.
+
+        Call this before making changes to allow undo.
+
+        Args:
+            description: Optional description of what's about to change
+
+        Returns:
+            True if state was pushed, False if no widgets to capture
+        """
+        if not self.dynamic_widgets:
+            return False
+
+        # Capture current values
+        state = {
+            'values': {},
+            'description': description or 'Parameter change',
+        }
+
+        for node_id, container in self.dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if node and input_widget:
+                value = None
+                if hasattr(input_widget, 'toPlainText'):
+                    value = input_widget.toPlainText()
+                elif hasattr(input_widget, 'text'):
+                    value = input_widget.text()
+                elif hasattr(input_widget, 'isChecked'):
+                    value = input_widget.isChecked()
+                elif hasattr(input_widget, 'selected_files'):
+                    value = input_widget.selected_files.copy()
+
+                if value is not None:
+                    state['values'][str(node_id)] = {
+                        'value': value,
+                        'display_name': node.display_name,
+                        'widget_type': node.widget_type,
+                    }
+
+        if state['values']:
+            self._undo_stack.append(state)
+            # Limit stack size
+            if len(self._undo_stack) > self._max_undo_history:
+                self._undo_stack.pop(0)
+            logger.debug(f"Pushed undo state: {description}, stack size: {len(self._undo_stack)}")
+            return True
+        return False
+
+    def pop_undo_state(self) -> Optional[Dict[str, Any]]:
+        """Pop and return the most recent undo state.
+
+        Returns:
+            The popped state dict, or None if stack is empty
+        """
+        if self._undo_stack:
+            state = self._undo_stack.pop()
+            logger.debug(f"Popped undo state: {state.get('description')}, remaining: {len(self._undo_stack)}")
+            return state
+        return None
+
+    def apply_undo_state(self, state: Dict[str, Any]) -> bool:
+        """Apply a previously captured undo state.
+
+        Args:
+            state: State dict from pop_undo_state()
+
+        Returns:
+            True if state was applied successfully
+        """
+        if not state or 'values' not in state:
+            return False
+
+        values = state['values']
+        applied = 0
+
+        for node_id_str, data in values.items():
+            try:
+                node_id = int(node_id_str)
+                if node_id in self.dynamic_widgets:
+                    container = self.dynamic_widgets[node_id]
+                    input_widget = getattr(container, 'input_widget', None)
+                    if input_widget:
+                        value = data.get('value')
+                        if hasattr(input_widget, 'setPlainText') and isinstance(value, str):
+                            input_widget.setPlainText(value)
+                            applied += 1
+                        elif hasattr(input_widget, 'setText') and isinstance(value, str):
+                            input_widget.setText(value)
+                            applied += 1
+                        elif hasattr(input_widget, 'setChecked') and isinstance(value, bool):
+                            input_widget.setChecked(value)
+                            applied += 1
+                        elif hasattr(input_widget, 'set_images') and isinstance(value, list):
+                            input_widget.set_images(value)
+                            applied += 1
+            except (ValueError, AttributeError) as e:
+                logger.debug(f"Failed to restore undo value for node {node_id_str}: {e}")
+
+        logger.info(f"Applied undo state: {applied} values restored")
+        return applied > 0
+
+    def can_undo(self) -> bool:
+        """Check if undo is available.
+
+        Returns:
+            True if there are states on the undo stack
+        """
+        return len(self._undo_stack) > 0
+
+    def undo_stack_size(self) -> int:
+        """Get the number of undo states available.
+
+        Returns:
+            Number of states on the undo stack
+        """
+        return len(self._undo_stack)
+
+    def clear_undo_stack(self):
+        """Clear the undo history."""
+        self._undo_stack.clear()
+        logger.debug("Cleared undo stack")
 
     def refresh_editable_nodes(self, workflow_path: Optional[str], node_overrides: Dict[str, Any]):
         """

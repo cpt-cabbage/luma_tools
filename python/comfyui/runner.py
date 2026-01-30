@@ -565,6 +565,9 @@ def main():
             logger.info(f"Processing generation {i}/{total_frames} (frame {frame_num})")
             logger.info(f"{'='*60}")
 
+            # Track timing for per-file metadata
+            frame_start_time = time.time()
+
             prompt_id = submit_workflow(workflow, port=args.port)
             if not prompt_id:
                 logger.error(f"Failed to submit workflow for frame {frame_num}")
@@ -585,10 +588,21 @@ def main():
                     output_dir=output_dir
                 )
 
-            success = wait_for_completion(
+            completion_result = wait_for_completion(
                 prompt_id, port=args.port, timeout=args.timeout,
-                output_dir=download_dir, on_image_output=on_image_output if download_dir else None
+                output_dir=download_dir, on_image_output=on_image_output if download_dir else None,
+                track_node_timing=True
             )
+
+            # Handle both dict result (with timing) and bool result (fallback)
+            if isinstance(completion_result, dict):
+                success = completion_result.get('success', False)
+                node_execution_trace = completion_result.get('node_timing', [])
+                total_duration_ms = completion_result.get('total_duration_ms')
+            else:
+                success = completion_result
+                node_execution_trace = []
+                total_duration_ms = None
 
             if process and process.poll() is not None:
                 logger.error(f"ComfyUI crashed during generation")
@@ -596,9 +610,30 @@ def main():
                 break
 
             if success:
-                logger.info(f"Frame {frame_num} completed successfully")
+                # Calculate execution time
+                frame_end_time = time.time()
+                execution_time_ms = int((frame_end_time - frame_start_time) * 1000)
+
+                logger.info(f"Frame {frame_num} completed successfully in {execution_time_ms}ms")
                 successful += 1
 
+                # Get the actual seed used for this frame
+                actual_seed = None
+                try:
+                    # Extract seed from workflow - check common node types
+                    for node_id, node_data in workflow.items():
+                        if isinstance(node_data, dict):
+                            inputs = node_data.get('inputs', {})
+                            if 'seed' in inputs:
+                                actual_seed = inputs['seed']
+                                break
+                            if 'noise_seed' in inputs:
+                                actual_seed = inputs['noise_seed']
+                                break
+                except Exception as e:
+                    logger.debug(f"Could not extract seed from workflow: {e}")
+
+                moved = []
                 if args.comfyui_output_dir:
                     logger.info(f"[Runner] Checking for output files to move")
                     moved = move_output_files(
@@ -609,6 +644,34 @@ def main():
                     )
                     if moved:
                         logger.info(f"Moved {len(moved)} output file(s)")
+
+                # Store per-file metadata for each output file
+                try:
+                    from comfyui.metadata import add_per_file_metadata
+                except ImportError:
+                    # Farm execution - try local import
+                    add_per_file_metadata = None
+
+                if add_per_file_metadata and moved:
+                    for dest_path in moved:
+                        try:
+                            filename = os.path.basename(dest_path)
+                            # Use server-reported total_duration_ms if available, else our measured time
+                            file_execution_time = total_duration_ms if total_duration_ms else execution_time_ms
+                            add_per_file_metadata(
+                                output_dir=args.output_directory,
+                                filename=filename,
+                                frame_index=frame_num,
+                                actual_seed=actual_seed,
+                                execution_time_ms=file_execution_time,
+                                node_execution_trace=node_execution_trace
+                            )
+                            if node_execution_trace:
+                                logger.info(f"Stored per-file metadata for {filename} with {len(node_execution_trace)} node trace(s)")
+                            else:
+                                logger.info(f"Stored per-file metadata for {filename}")
+                        except Exception as e:
+                            logger.warning(f"Could not store per-file metadata for {filename}: {e}")
             else:
                 logger.error(f"Frame {frame_num} failed or timed out")
                 failed += 1
@@ -616,6 +679,17 @@ def main():
         logger.info(f"\n{'='*60}")
         logger.info(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed")
         logger.info(f"{'='*60}")
+
+        # Auto-establish lineage relationships based on source images
+        try:
+            from comfyui.metadata import auto_establish_lineage_from_job_metadata
+            lineage_count = auto_establish_lineage_from_job_metadata(args.output_directory)
+            if lineage_count > 0:
+                logger.info(f"Established {lineage_count} lineage relationship(s)")
+        except ImportError:
+            logger.debug("Could not import lineage function (running on farm)")
+        except Exception as e:
+            logger.warning(f"Could not establish lineage: {e}")
 
         exit_code = 0 if failed == 0 else 1
         cleanup(exit_code=exit_code)

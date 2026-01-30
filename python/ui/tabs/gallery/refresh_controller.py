@@ -119,7 +119,18 @@ class RefreshController(BaseGalleryManager):
 
         # Scan in background thread
         def scan():
-            return self.tab._loader.scan_directory(current_path)
+            items = self.tab._loader.scan_directory(current_path)
+
+            # Auto-establish lineage relationships in the background
+            try:
+                from comfyui.metadata import auto_establish_lineage_from_job_metadata
+                lineage_count = auto_establish_lineage_from_job_metadata(current_path)
+                if lineage_count > 0:
+                    logger.info(f"[Gallery] Established {lineage_count} lineage relationship(s)")
+            except Exception as e:
+                logger.debug(f"[Gallery] Could not establish lineage: {e}")
+
+            return items
 
         self._scan_worker = Worker(scan)
         self._scan_worker.signals.result.connect(self._on_scan_complete)
@@ -260,7 +271,9 @@ class RefreshController(BaseGalleryManager):
 
                 if full_metadata and _lookup_file_metadata:
                     try:
-                        file_metadata = _lookup_file_metadata(full_metadata, filename)
+                        # Use allow_reverse_match=False for input/output detection
+                        # to avoid matching input files to output job metadata
+                        file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
                         if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
                             has_metadata = True
                             is_output = file_metadata.get('is_output', True)

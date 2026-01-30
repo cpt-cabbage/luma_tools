@@ -335,12 +335,25 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
         tqdm_matches = list(re.finditer(pattern_tqdm, log_content))
         if tqdm_matches:
             last_tqdm = tqdm_matches[-1]
+            # Try to extract node name for tqdm format as well
+            current_node_name = None
+            node_name_patterns = [
+                r'Executing node \d+[,:]?\s*(?:title:?\s*)?([^\n\r]+?)(?:\s*\(|$|\n)',
+                r'Running node:\s*([^\n\r]+)',
+            ]
+            for pattern in node_name_patterns:
+                name_matches = list(re.finditer(pattern, log_content, re.IGNORECASE))
+                if name_matches:
+                    current_node_name = name_matches[-1].group(1).strip().rstrip('.')
+                    break
+
             return {
                 'progress_pct': int(last_tqdm.group(1)),
                 'current_node': int(last_tqdm.group(2)),
                 'total_nodes': int(last_tqdm.group(3)),
                 'elapsed_seconds': None,
-                'is_loading_model': is_loading_model and int(last_tqdm.group(2)) == 0
+                'is_loading_model': is_loading_model and int(last_tqdm.group(2)) == 0,
+                'current_node_name': current_node_name
             }
 
     if not matches:
@@ -363,12 +376,30 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     # Once we have actual progress (current_node > 0), models are loaded
     current_node = int(last_match.group(2))
 
+    # Try to extract current node name from ComfyUI logs
+    # Pattern: "Executing node 5: KSampler" or "Executing node 5, title: KSampler"
+    current_node_name = None
+    node_name_patterns = [
+        r'Executing node \d+[,:]?\s*(?:title:?\s*)?([^\n\r]+?)(?:\s*\(|$|\n)',
+        r'Running node:\s*([^\n\r]+)',
+        r'\[ComfyUI\]\s*Executing:\s*([^\n\r]+)',
+    ]
+    for pattern in node_name_patterns:
+        name_matches = list(re.finditer(pattern, log_content, re.IGNORECASE))
+        if name_matches:
+            current_node_name = name_matches[-1].group(1).strip()
+            # Clean up common suffixes
+            if current_node_name:
+                current_node_name = current_node_name.rstrip('.')
+                break
+
     return {
         'progress_pct': int(last_match.group(1)),
         'current_node': current_node,
         'total_nodes': int(last_match.group(3)),
         'elapsed_seconds': int(last_match.group(4)) if last_match.group(4) else None,
-        'is_loading_model': is_loading_model and current_node == 0
+        'is_loading_model': is_loading_model and current_node == 0,
+        'current_node_name': current_node_name
     }
 
 

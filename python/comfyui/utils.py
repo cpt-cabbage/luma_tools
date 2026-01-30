@@ -527,32 +527,55 @@ def wait_for_completion(
     port: int = None,
     timeout: int = 3600,
     output_dir: str = None,
-    on_image_output: callable = None
-) -> bool:
-    """Wait for workflow execution to complete using WebSocket or HTTP polling."""
+    on_image_output: callable = None,
+    track_node_timing: bool = False
+):
+    """Wait for workflow execution to complete using WebSocket or HTTP polling.
+
+    Args:
+        prompt_id: The prompt ID to wait for
+        server_url: Server URL
+        port: Server port
+        timeout: Timeout in seconds
+        output_dir: Directory for output files
+        on_image_output: Callback for image outputs
+        track_node_timing: If True, track node execution timing
+
+    Returns:
+        bool if track_node_timing=False
+        dict with 'success', 'node_timing', 'total_duration_ms' if track_node_timing=True
+    """
     if WEBSOCKET_AVAILABLE:
         logger.info("Using WebSocket for real-time progress monitoring")
         try:
             return wait_for_completion_websocket(
                 prompt_id, server_url=server_url, port=port,
-                timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
+                timeout=timeout, output_dir=output_dir, on_image_output=on_image_output,
+                track_node_timing=track_node_timing
             )
         except Exception as e:
             logger.warning(f"WebSocket failed, falling back to HTTP polling: {e}")
-            return wait_for_completion_http(
+            # HTTP polling doesn't support node timing, return basic result
+            result = wait_for_completion_http(
                 prompt_id, server_url=server_url, port=port,
                 timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
             )
+            if track_node_timing:
+                return {'success': result, 'node_timing': [], 'total_duration_ms': None}
+            return result
     else:
         logger.info("=" * 60)
         logger.info("NOTE: Using HTTP polling (limited progress info)")
         logger.info("For node-level progress, install websocket-client:")
         logger.info(f"  {sys.executable} -m pip install websocket-client")
         logger.info("=" * 60)
-        return wait_for_completion_http(
+        result = wait_for_completion_http(
             prompt_id, server_url=server_url, port=port,
             timeout=timeout, output_dir=output_dir, on_image_output=on_image_output
         )
+        if track_node_timing:
+            return {'success': result, 'node_timing': [], 'total_duration_ms': None}
+        return result
 
 
 # =============================================================================

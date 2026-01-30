@@ -85,6 +85,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Create workflow selector dropdown (will be added to UI dynamically)
         self._setup_workflow_selector()
         self._setup_note_display()
+        self._setup_style_preset_controls()
 
         # Initialize polling state from mixin
         self._init_polling_state()
@@ -379,6 +380,224 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._note_display_widget.setVisible(False)
 
     # =========================================================================
+    # STYLE PRESETS (Parameter Snapshots)
+    # =========================================================================
+
+    def _setup_style_preset_controls(self):
+        """Set up preset controls for saving/loading parameter combinations.
+
+        Adds controls directly to the existing button row (comfyuiPresetButtonsLayout).
+        """
+        if not hasattr(self.ui, 'comfyuiPresetButtonsLayout'):
+            return
+
+        # Preset label
+        self._preset_label = QLabel("Preset:")
+        self._preset_label.setStyleSheet("color: #aaaaaa;")
+        self._preset_label.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._preset_label, 0)
+
+        # Combo box for preset selection
+        self._style_preset_combo = QtWidgets.QComboBox()
+        self._style_preset_combo.setMinimumWidth(120)
+        self._style_preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._style_preset_combo.currentTextChanged.connect(self._on_style_preset_selected)
+        self._style_preset_combo.addItem("(None)")
+        self._style_preset_combo.setToolTip("Load a saved parameter preset")
+        self._style_preset_combo.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._style_preset_combo, 1)
+
+        # Save preset button
+        self._style_save_btn = QPushButton("Save Preset")
+        self._style_save_btn.setToolTip("Save current parameters as a preset")
+        self._style_save_btn.clicked.connect(self._on_save_style_preset)
+        self._style_save_btn.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._style_save_btn, 0)
+
+        # Undo button
+        self._undo_btn = QPushButton("Undo")
+        self._undo_btn.setToolTip("Undo last parameter change")
+        self._undo_btn.clicked.connect(self._on_undo_clicked)
+        self._undo_btn.setEnabled(False)
+        self._undo_btn.setVisible(False)
+        self.ui.comfyuiPresetButtonsLayout.addWidget(self._undo_btn, 0)
+
+        # Track visibility state
+        self._preset_controls_visible = False
+
+    def _update_style_preset_list(self):
+        """Update the preset combo box with available presets."""
+        from comfyui.presets_manager import get_style_preset_names
+
+        current_workflow = self.state_manager.current_preset_name
+
+        # Show/hide preset controls based on workflow state
+        has_workflow = bool(current_workflow)
+        if hasattr(self, '_preset_label'):
+            self._preset_label.setVisible(has_workflow)
+        if hasattr(self, '_style_preset_combo'):
+            self._style_preset_combo.setVisible(has_workflow)
+        if hasattr(self, '_style_save_btn'):
+            self._style_save_btn.setVisible(has_workflow)
+        if hasattr(self, '_undo_btn'):
+            self._undo_btn.setVisible(has_workflow)
+
+        if not current_workflow:
+            return
+
+        # Get presets for current workflow
+        presets = get_style_preset_names(current_workflow)
+
+        # Update combo box
+        self._style_preset_combo.blockSignals(True)
+        try:
+            current_text = self._style_preset_combo.currentText()
+            self._style_preset_combo.clear()
+            self._style_preset_combo.addItem("(None)")
+
+            for name in presets:
+                self._style_preset_combo.addItem(name)
+
+            # Restore selection if still valid
+            if current_text and current_text in presets:
+                self._style_preset_combo.setCurrentText(current_text)
+        finally:
+            self._style_preset_combo.blockSignals(False)
+
+    def _on_style_preset_selected(self, preset_name: str):
+        """Handle preset selection."""
+        from comfyui.presets_manager import load_style_preset
+
+        if preset_name == "(None)" or not preset_name:
+            return
+
+        preset = load_style_preset(preset_name)
+        if not preset:
+            self.log(f"[ComfyUI] Style preset not found: {preset_name}")
+            return
+
+        # Apply editable values to widgets
+        editable_values = preset.get('editable_values', {})
+        if editable_values:
+            # Push current state for undo before applying preset
+            self._push_undo_before_change(f"Load preset: {preset_name}")
+
+            self.widget_manager.pending_editable_values = editable_values
+            self.widget_manager._apply_pending_editable_values()
+            self.show_status(f"Loaded style preset: {preset_name}", "success")
+            self.log(f"[ComfyUI] Loaded style preset: {preset_name}")
+
+    def _on_save_style_preset(self):
+        """Save current parameters as a style preset."""
+        from comfyui.presets_manager import save_style_preset
+        from dialog_helpers import show_warning
+
+        current_workflow = self.state_manager.current_preset_name
+        if not current_workflow:
+            show_warning(
+                "Save Style Preset",
+                "Please select a workflow preset first.",
+                parent=self.main_window
+            )
+            return
+
+        # Get current editable values
+        editable_values, _ = self.widget_manager.collect_editable_values()
+        if not editable_values:
+            show_warning(
+                "Save Style Preset",
+                "No editable parameters to save.\n\n"
+                "Load a workflow first to configure parameters.",
+                parent=self.main_window
+            )
+            return
+
+        # Ask for preset name
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self.main_window,
+            "Save Style Preset",
+            "Enter a name for this style preset:",
+            text=""
+        )
+
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+
+        # Save the preset
+        success = save_style_preset(
+            name=name,
+            editable_values=editable_values,
+            workflow_preset=current_workflow
+        )
+
+        if success:
+            self._update_style_preset_list()
+            self._style_preset_combo.setCurrentText(name)
+            self.show_status(f"Saved style preset: {name}", "success")
+        else:
+            show_warning(
+                "Save Failed",
+                "Could not save the style preset. Check the logs for details.",
+                parent=self.main_window
+            )
+
+    def _on_delete_style_preset(self):
+        """Delete the selected style preset."""
+        from comfyui.presets_manager import delete_style_preset
+        from dialog_helpers import confirm_action
+
+        preset_name = self._style_preset_combo.currentText()
+        if preset_name == "(None)":
+            return
+
+        if confirm_action(
+            "Delete Style Preset",
+            f"Delete style preset '{preset_name}'?\n\n"
+            "This cannot be undone.",
+            parent=self.main_window
+        ):
+            if delete_style_preset(preset_name):
+                self._update_style_preset_list()
+                self.show_status(f"Deleted style preset: {preset_name}", "info")
+            else:
+                self.log(f"[ComfyUI] Failed to delete style preset: {preset_name}")
+
+    def _on_undo_clicked(self):
+        """Handle undo button click - restore previous parameter state."""
+        if not self.widget_manager.can_undo():
+            return
+
+        # Pop and apply the previous state
+        state = self.widget_manager.pop_undo_state()
+        if state:
+            self.widget_manager.apply_undo_state(state)
+            description = state.get('description', 'parameter change')
+            self.show_status(f"Undone: {description}", "info")
+            self._update_undo_button_state()
+
+    def _update_undo_button_state(self):
+        """Update the undo button enabled state."""
+        if hasattr(self, '_undo_btn'):
+            can_undo = self.widget_manager.can_undo()
+            self._undo_btn.setEnabled(can_undo)
+            count = self.widget_manager.undo_stack_size()
+            if count > 0:
+                self._undo_btn.setToolTip(f"Undo last parameter change ({count} available)")
+            else:
+                self._undo_btn.setToolTip("No undo history")
+
+    def _push_undo_before_change(self, description: str = None):
+        """Push current state to undo stack before making a change.
+
+        Call this before applying style presets or other batch changes.
+        """
+        self.widget_manager.push_undo_state(description)
+        self._update_undo_button_state()
+
+    # =========================================================================
     # GENERATION SETTINGS
     # =========================================================================
 
@@ -512,6 +731,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
+            self._update_style_preset_list()
             self._save_state()
         else:
             self.ui.ComfyUIChoosePreset.setText(f"{display_name} (missing)")
@@ -520,6 +740,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
+            self._update_style_preset_list()
             # Guard for animator not being initialized yet during tab initialization
             self.show_status(f"Workflow file not found: {workflow_path}", "error")
 

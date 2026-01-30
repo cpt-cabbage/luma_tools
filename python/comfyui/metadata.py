@@ -354,13 +354,29 @@ def add_item_metadata(
         return False
 
 
-def get_item_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
-    """Get metadata for a specific gallery item (image, video, model, etc.)."""
+def get_item_metadata(output_dir: str, filename: str, allow_reverse_match: bool = True) -> Optional[Dict[str, Any]]:
+    """Get metadata for a specific gallery item (image, video, model, etc.).
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: Filename to look up
+        allow_reverse_match: If True (default), also match when job prefix ends with
+            the filename. This is useful for display/recreate purposes. Set to False
+            when determining input/output status to avoid matching input files to
+            output job metadata.
+
+    Returns:
+        Metadata dict for the file, or None if not found
+    """
     metadata = load_gallery_metadata(output_dir)
-    return _lookup_file_metadata(metadata, filename)
+    return _lookup_file_metadata(metadata, filename, allow_reverse_match=allow_reverse_match)
 
 
-def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) -> Optional[Dict[str, Any]]:
+def _lookup_file_metadata(
+    metadata: Dict[str, Dict[str, Any]],
+    filename: str,
+    allow_reverse_match: bool = False
+) -> Optional[Dict[str, Any]]:
     """Internal helper to look up metadata for a filename.
 
     Looks up by exact filename first, then by prefix match.
@@ -368,6 +384,9 @@ def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) ->
     Args:
         metadata: Gallery metadata dict
         filename: Filename to look up
+        allow_reverse_match: If True, also match when prefix ends with basename.
+            This is useful for recreate settings but should be False for
+            input/output detection to avoid matching input files to output metadata.
 
     Returns:
         Metadata dict for the file, or None if not found
@@ -398,15 +417,19 @@ def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) ->
                 continue
 
             prefix = key[8:]  # Remove "_prefix_" prefix
-            # Check if basename starts with prefix (normal case)
+            # Check if basename starts with prefix (normal case for outputs)
             if basename.startswith(prefix):
                 if isinstance(value, dict):
                     return value
-            # Also check if prefix ends with basename (job name prefix case)
+
+            # Reverse match: prefix ends with basename (for recreate settings only)
             # e.g., prefix="luma_tools_job_filename" matches basename="filename"
-            if prefix.endswith(basename) or prefix.endswith(f"_{basename}"):
-                if isinstance(value, dict):
-                    return value
+            # IMPORTANT: Only use this when explicitly requested, otherwise input
+            # files may incorrectly match output job metadata
+            if allow_reverse_match:
+                if prefix.endswith(basename) or prefix.endswith(f"_{basename}"):
+                    if isinstance(value, dict):
+                        return value
     except Exception as e:
         logger.error(f"[Metadata] Error during prefix lookup for {filename}: {e}")
 

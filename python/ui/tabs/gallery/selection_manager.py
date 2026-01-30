@@ -156,6 +156,12 @@ class SelectionManager(BaseGalleryManager):
                 self._add_to_group_by_index(group_index)
             return True
 
+        # C: Compare two selected items
+        if event.key() == Qt.Key_C and not event.modifiers():
+            if len(self.tab._selected_items) == 2:
+                self.tab._operations_manager.compare_selected()
+                return True
+
         return False
 
     def _toggle_like_selected(self):
