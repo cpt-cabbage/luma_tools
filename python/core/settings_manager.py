@@ -35,8 +35,12 @@ class SettingDef:
     validator: Optional[Callable[[Any], Any]] = None
 
 # Validators
+def _validate_enum(value: Any, allowed: tuple, default: Any) -> Any:
+    """Validate value is in allowed set, return default if not."""
+    return value if value in allowed else default
+
 def _validate_comfyui_mode(v):
-    return v if v in ("embedded", "portable", "standalone") else "embedded"
+    return _validate_enum(v, ("embedded", "portable", "standalone"), "embedded")
 
 def _validate_timeout(v, min_val=60, max_val=86400):
     return max(min_val, min(max_val, int(v)))
@@ -45,10 +49,10 @@ def _validate_server_wait_timeout(v):
     return max(30, min(3600, int(v)))
 
 def _validate_server_behavior(v):
-    return v if v in ("fail", "wait") else "fail"
+    return _validate_enum(v, ("fail", "wait"), "fail")
 
 def _validate_stacking_mode(v):
-    return v if v in ("job", "groups", "both", "grid") else "job"
+    return _validate_enum(v, ("job", "groups", "both", "grid"), "job")
 
 # Registry of all simple settings (get/set only, no complex logic)
 SETTINGS_REGISTRY: Dict[str, SettingDef] = {
@@ -189,25 +193,13 @@ def load_user_settings() -> Dict[str, Any]:
 
 def save_user_settings(settings: Dict[str, Any]):
     """Save user settings to file using atomic write to prevent corruption."""
+    from .utils import save_json
     global _user_settings_cache
     ensure_settings_dir()
-    try:
-        # Write to temp file first, then atomic rename
-        temp_file = USER_SETTINGS_FILE + ".tmp"
-        with open(temp_file, 'w') as f:
-            json.dump(settings, f, indent=2)
-        # Atomic rename (replaces existing file)
-        os.replace(temp_file, USER_SETTINGS_FILE)
+    if save_json(USER_SETTINGS_FILE, settings):
         _user_settings_cache = settings.copy()
-    except Exception as e:
-        logger.error(f"Error saving user settings: {e}")
-        # Clean up temp file if it exists
-        temp_file = USER_SETTINGS_FILE + ".tmp"
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
+    else:
+        logger.error("Failed to save user settings")
 
 
 def get_global_settings_path() -> str:
@@ -281,23 +273,14 @@ def load_global_settings() -> Dict[str, Any]:
 
 def save_global_settings(settings: Dict[str, Any]):
     """Save global settings to file using atomic write to prevent corruption."""
+    from .utils import save_json
     global _global_settings_cache
     _ensure_global_settings_dir()
     settings_file = _get_global_settings_file()
-    temp_file = settings_file + ".tmp"
-    try:
-        with open(temp_file, 'w') as f:
-            json.dump(settings, f, indent=2)
-        os.replace(temp_file, settings_file)
+    if save_json(settings_file, settings):
         _global_settings_cache = settings.copy()
-    except Exception as e:
-        logger.error(f"Error saving global settings: {e}")
-        # Clean up temp file if it exists
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
+    else:
+        logger.error("Failed to save global settings")
 
 
 # ============================================================================

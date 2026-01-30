@@ -51,11 +51,6 @@ class AssimpModelLoader(BaseModelLoader):
         """Load a 3D model using Assimp."""
         self._validate_load_preconditions(path, "pyassimp")
 
-        # Check for ASCII FBX which can be problematic
-        ext = os.path.splitext(path)[1].lower()
-        if ext == '.fbx' and self._is_ascii_fbx(path):
-            pass  # Try loading anyway
-
         # Load with post-processing flags
         context = self._load_with_flags(path)
 
@@ -101,34 +96,38 @@ class AssimpModelLoader(BaseModelLoader):
         return False
 
     def _load_with_flags(self, path: str):
-        """Load model with appropriate post-processing flags."""
-        flags = (
-            postprocess.aiProcess_Triangulate |
-            postprocess.aiProcess_GenNormals |
-            postprocess.aiProcess_CalcTangentSpace |
-            postprocess.aiProcess_JoinIdenticalVertices |
-            postprocess.aiProcess_SortByPType |
-            postprocess.aiProcess_FlipUVs
-        )
+        """Load model with appropriate post-processing flags.
 
-        try:
-            return pyassimp.load(path, processing=flags)
-        except Exception as e:
-            error_msg = str(e)
-            if "NULL" in error_msg.upper() or "null" in error_msg.lower():
-                # Try with minimal flags
-                try:
-                    return pyassimp.load(path, processing=postprocess.aiProcess_Triangulate)
-                except Exception:
-                    # Last resort: no post-processing
-                    try:
-                        return pyassimp.load(path, processing=0)
-                    except Exception:
-                        raise ValueError(
-                            f"Assimp failed to parse FBX (NULL pointer error). "
-                            f"The file may use an unsupported format or be corrupted."
-                        )
-            raise
+        Tries progressively simpler flag combinations if NULL errors occur.
+        """
+        # Flag priority: full processing -> minimal -> none
+        flag_options = [
+            (
+                postprocess.aiProcess_Triangulate |
+                postprocess.aiProcess_GenNormals |
+                postprocess.aiProcess_CalcTangentSpace |
+                postprocess.aiProcess_JoinIdenticalVertices |
+                postprocess.aiProcess_SortByPType |
+                postprocess.aiProcess_FlipUVs
+            ),
+            postprocess.aiProcess_Triangulate,
+            0,  # No post-processing
+        ]
+
+        for flags in flag_options:
+            try:
+                return pyassimp.load(path, processing=flags)
+            except Exception as e:
+                error_msg = str(e)
+                is_null_error = "NULL" in error_msg.upper() or "null" in error_msg.lower()
+                if not is_null_error:
+                    raise  # Non-NULL errors don't benefit from fallback
+                logger.debug(f"Assimp NULL error with flags {flags}, trying fallback")
+
+        raise ValueError(
+            "Assimp failed to parse file (NULL pointer error). "
+            "The file may use an unsupported format or be corrupted."
+        )
 
     def _extract_materials(self, scene, base_dir: str) -> List[Material]:
         """Extract materials from Assimp scene."""

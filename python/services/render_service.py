@@ -234,10 +234,6 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     logger.info(f"Executing OIIO locally for frames {start_frame}-{end_frame} ({total_frames} frames)")
     logger.info(f"OIIO args template: {oiio_args}")
 
-    # Import Qt for event processing
-    from PySide6.QtWidgets import QApplication
-
-
     for frame_num in range(start_frame, end_frame + 1):
         # Calculate progress (50-90% range for OIIO execution)
         frame_index = frame_num - start_frame

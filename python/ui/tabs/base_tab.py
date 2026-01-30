@@ -7,6 +7,8 @@ Provides a common interface for tab initialization, UI loading, and signal conne
 import os
 import logging
 from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, Optional
+
 from PySide6 import QtCore, QtWidgets, QtUiTools
 
 # Import StatusColors at module level - it's just an enum with no side effects
@@ -193,13 +195,13 @@ class BaseTab(ABC):
 
     def start_worker(
         self,
-        func,
-        *args,
-        on_result=None,
-        on_error=None,
-        on_progress=None,
-        worker_kwargs=None
-    ):
+        func: Callable[..., Any],
+        *args: Any,
+        on_result: Optional[Callable[[Any], None]] = None,
+        on_error: Optional[Callable[[tuple], None]] = None,
+        on_progress: Optional[Callable[[int, str], None]] = None,
+        worker_kwargs: Optional[Dict[str, Any]] = None
+    ) -> None:
         """
         Start a worker thread with standard signal connections.
 
@@ -210,7 +212,7 @@ class BaseTab(ABC):
             func: The function to run in the worker thread
             *args: Arguments to pass to the function
             on_result: Optional callback for successful completion (receives result)
-            on_error: Optional callback for errors (receives (msg, traceback) tuple)
+            on_error: Optional callback for errors (receives (exc_type, exc_value, traceback) tuple)
             on_progress: Optional callback for progress updates (receives int, str)
             worker_kwargs: Optional dict of keyword arguments to pass to the function
 

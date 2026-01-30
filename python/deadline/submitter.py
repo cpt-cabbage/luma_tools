@@ -30,21 +30,17 @@ from comfyui.utils import resolve_comfyui_paths
 logger = logging.getLogger(__name__)
 
 
-def _get_comfyui_python_exe() -> str:
-    """Get ComfyUI Python executable path from settings."""
+def _get_comfyui_config() -> Tuple[str, str, str, str]:
+    """Get all ComfyUI configuration from settings.
+
+    Returns:
+        Tuple of (comfyui_path, comfyui_mode, comfyui_python, python_exe)
+    """
     comfyui_path = get_setting("comfyui_path")
     comfyui_mode = get_setting("comfyui_mode")
     comfyui_python = get_setting("comfyui_python_path")
     python_exe, _ = resolve_comfyui_paths(comfyui_path, comfyui_mode, comfyui_python or "python")
-    return python_exe
-
-
-def _get_comfyui_settings() -> Tuple[str, str, str]:
-    """Get ComfyUI settings: path, mode, and python path."""
-    comfyui_path = get_setting("comfyui_path")
-    comfyui_mode = get_setting("comfyui_mode")
-    comfyui_python = get_setting("comfyui_python_path")
-    return comfyui_path, comfyui_mode, comfyui_python
+    return comfyui_path, comfyui_mode, comfyui_python, python_exe
 
 
 def submit_comfyui_to_deadline_server_mode(
@@ -91,7 +87,7 @@ def submit_comfyui_to_deadline_server_mode(
 
     import shutil
 
-    python_exe = _get_comfyui_python_exe()
+    _, _, _, python_exe = _get_comfyui_config()
 
     # Get the script paths - scripts are in comfyui package
     comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
@@ -195,8 +191,7 @@ def submit_comfyui_to_deadline(
     import shutil
 
     # Get settings needed for this function
-    comfyui_path, comfyui_mode, comfyui_python = _get_comfyui_settings()
-    python_exe = _get_comfyui_python_exe()
+    comfyui_path, comfyui_mode, comfyui_python, python_exe = _get_comfyui_config()
 
     # Scripts are in comfyui package
     comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
