@@ -9,9 +9,12 @@ Handles gallery content refresh mechanisms:
 """
 
 import os
+import logging
 from PySide6.QtCore import QTimer, QThreadPool, QFileSystemWatcher
 
 from .base_manager import BaseGalleryManager
+
+logger = logging.getLogger(__name__)
 
 
 class RefreshController(BaseGalleryManager):
@@ -236,7 +239,8 @@ class RefreshController(BaseGalleryManager):
                     full_metadata = load_gallery_metadata(dir_path)
                     if not isinstance(full_metadata, dict):
                         full_metadata = {}
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Could not load metadata for {dir_path}: {e}")
                     full_metadata = {}
 
             for item in dir_items:
@@ -262,8 +266,8 @@ class RefreshController(BaseGalleryManager):
                             source_images = file_metadata.get('source_images', [])
                             if not isinstance(source_images, list):
                                 source_images = []
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Could not lookup metadata for {filename}: {e}")
 
                 # Fall back to filename pattern detection
                 if is_output is None or job_prefix is None:
@@ -271,7 +275,8 @@ class RefreshController(BaseGalleryManager):
                         # Pass file_type so models/video/audio default to output correctly
                         file_type = item.get('type', 'image')
                         job_prefix, is_output = extract_job_prefix(filename, file_type)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Could not extract job prefix from {filename}: {e}")
                         job_prefix = None
                         # Models/video/audio default to output, images to input
                         file_type = item.get('type', 'image')

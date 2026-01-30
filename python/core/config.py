@@ -8,7 +8,6 @@ Supports standalone mode when AYON environment is not available.
 import os
 import glob
 import shutil
-import json
 
 # ============================================================================
 # BASE PATHS
@@ -164,13 +163,10 @@ APP_TITLE = "Luma Tools"
 # Load version from resources/version.json
 def _load_version():
     """Load version from resources/version.json."""
+    from .utils import load_json
     version_file = os.path.join(_ROOT_DIR, "resources", "version.json")
-    try:
-        with open(version_file, 'r') as f:
-            data = json.load(f)
-            return data.get("version", "unknown")
-    except Exception:
-        return "unknown"
+    data = load_json(version_file, {"version": "unknown"})
+    return data.get("version", "unknown")
 
 APP_VERSION = _load_version()
 

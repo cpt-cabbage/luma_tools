@@ -179,7 +179,6 @@ class PollingMixin:
 
     def _on_iterate_poll_result(self, result):
         """Handle iterate poll result."""
-        import traceback
         try:
             self._handle_iterate_poll_result(result)
         except Exception as e:
@@ -326,7 +325,6 @@ class PollingMixin:
 
     def _on_iterate_job_completed(self):
         """Handle iterate job completion - show the generated image."""
-        import traceback
         try:
             self._handle_iterate_job_completed()
         except Exception as e:
@@ -719,7 +717,6 @@ class PollingMixin:
 
     def _on_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion - cleanup and refresh gallery."""
-        import traceback
         try:
             self._handle_batch_jobs_completed(had_failures)
         except Exception as e:
@@ -1012,7 +1009,7 @@ class PollingMixin:
         # This catches jobs that may not be in persisted state
         # Use QTimer.singleShot to defer until after window is fully initialized
         # (animator and other components may not exist yet during tab init)
-        QTimer.singleShot(100, lambda: self._check_deadline_for_user_jobs(job_state))
+        QTimer.singleShot(100, lambda js=job_state: self._check_deadline_for_user_jobs(js))
 
     def _check_deadline_for_user_jobs(self, persisted_state):
         """Check Deadline directly for any running jobs from the current user.

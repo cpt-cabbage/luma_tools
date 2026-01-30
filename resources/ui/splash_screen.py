@@ -182,14 +182,14 @@ class SplashScreen(QWidget):
             logger.error(traceback_str)
             self.close()
 
-        # Create worker for initialization
-        worker = Worker(init_callback)
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(on_error)
-        worker.signals.progress.connect(progress_update)
+        # Create worker for initialization (stored on self to prevent GC before timer fires)
+        self._init_worker = Worker(init_callback)
+        self._init_worker.signals.result.connect(on_result)
+        self._init_worker.signals.error.connect(on_error)
+        self._init_worker.signals.progress.connect(progress_update)
 
         # Start worker after a short delay to ensure splash is visible
-        QTimer.singleShot(100, lambda: QThreadPool.globalInstance().start(worker))
+        QTimer.singleShot(100, lambda: QThreadPool.globalInstance().start(self._init_worker))
 
     def _finish_initialization(self, window):
         """Finish initialization and show the main window."""

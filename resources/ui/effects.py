@@ -922,23 +922,21 @@ class UIAnimations:
             return
 
         original_geometry = button.geometry()
-
-        shrink = QPropertyAnimation(button, b"geometry")
-        shrink.setDuration(80)
-        shrink.setStartValue(original_geometry)
-        shrink.setEndValue(QRect(
+        shrunk_geometry = QRect(
             original_geometry.x() + 2,
             original_geometry.y() + 2,
             original_geometry.width() - 4,
             original_geometry.height() - 4
-        ))
-        shrink.setEasingCurve(QEasingCurve.InOutQuad)
+        )
 
-        expand = QPropertyAnimation(button, b"geometry")
-        expand.setDuration(80)
-        expand.setStartValue(shrink.endValue())
-        expand.setEndValue(original_geometry)
-        expand.setEasingCurve(QEasingCurve.InOutQuad)
+        shrink = create_property_animation(
+            button, b"geometry", original_geometry, shrunk_geometry,
+            duration=80, easing=QEasingCurve.InOutQuad
+        )
+        expand = create_property_animation(
+            button, b"geometry", shrunk_geometry, original_geometry,
+            duration=80, easing=QEasingCurve.InOutQuad
+        )
 
         sequence = QSequentialAnimationGroup()
         sequence.addAnimation(shrink)
@@ -1011,11 +1009,10 @@ class UIAnimations:
 
         # Only animate if context changed (different task/source)
         if context_changed:
-            fade_anim = QPropertyAnimation(self.status_opacity, b"opacity")
-            fade_anim.setDuration(300)
-            fade_anim.setStartValue(0.3)
-            fade_anim.setEndValue(1.0)
-            fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            fade_anim = create_property_animation(
+                self.status_opacity, b"opacity", 0.3, 1.0,
+                duration=300, easing=QEasingCurve.InOutCubic
+            )
             fade_anim.start()
 
             self._animations.append(fade_anim)
@@ -1072,14 +1069,7 @@ class UIAnimations:
 
     def fade_in_widget(self, widget, duration=300):
         """Fade in a widget."""
-        opacity_effect = QGraphicsOpacityEffect(widget)
-        widget.setGraphicsEffect(opacity_effect)
-
-        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
-        fade_anim.setDuration(duration)
-        fade_anim.setStartValue(0.0)
-        fade_anim.setEndValue(1.0)
-        fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        fade_anim = create_fade_animation(widget, fade_in=True, duration=duration, easing=QEasingCurve.InOutCubic)
         fade_anim.start()
 
         self._animations.append(fade_anim)
@@ -1087,14 +1077,7 @@ class UIAnimations:
 
     def fade_out_widget(self, widget, duration=300):
         """Fade out a widget."""
-        opacity_effect = QGraphicsOpacityEffect(widget)
-        widget.setGraphicsEffect(opacity_effect)
-
-        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
-        fade_anim.setDuration(duration)
-        fade_anim.setStartValue(1.0)
-        fade_anim.setEndValue(0.0)
-        fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        fade_anim = create_fade_animation(widget, fade_in=False, duration=duration, easing=QEasingCurve.InOutCubic)
         fade_anim.start()
 
         self._animations.append(fade_anim)

@@ -37,7 +37,7 @@ class UIManager(BaseGalleryManager):
             ("Workflow", "workflow"),
         ]
 
-    def setup_ui(self):
+    def _setup_ui(self):
         """Set up additional UI elements."""
         self._create_filter_button()
         self._create_view_mode_button()
@@ -346,8 +346,9 @@ class UIManager(BaseGalleryManager):
         Args:
             sorted_items: Sorted list of items to display
         """
-        from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+        from PySide6.QtCore import QEasingCurve, QTimer
         from PySide6.QtWidgets import QGraphicsOpacityEffect
+        from effects import create_property_animation
 
         container = self.tab.ui.galleryThumbnailContainer
 
@@ -367,11 +368,10 @@ class UIManager(BaseGalleryManager):
         self.tab._manager.display_items(sorted_items, self.tab._view_mode)
 
         # Fade back to full opacity
-        self._transition_anim = QPropertyAnimation(effect, b"opacity")
-        self._transition_anim.setDuration(200)
-        self._transition_anim.setStartValue(0.6)
-        self._transition_anim.setEndValue(1.0)
-        self._transition_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._transition_anim = create_property_animation(
+            effect, b"opacity", 0.6, 1.0,
+            duration=200, easing=QEasingCurve.OutCubic
+        )
         self._transition_anim.start()
 
         # Remove effect after animation to avoid rendering overhead

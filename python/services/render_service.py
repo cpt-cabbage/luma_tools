@@ -5,14 +5,13 @@ Handles pass detection, channel parsing, and render configuration.
 """
 
 import logging
-import json
 import os
 import re
 
 logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
-from core.utils import substring_after, truncate_at_suffix, ensure_directory, replace_frame_tokens
+from core.utils import substring_after, truncate_at_suffix, ensure_directory, replace_frame_tokens, load_json, save_json
 from core.subprocess_utils import run_command
 from core.progress_utils import report_progress
 
@@ -73,9 +72,7 @@ def load_pass_config(pass_file):
     logger.info(f"Reading passes from file: {pass_file}")
     if os.path.isfile(pass_file):
         logger.info("Passes file found")
-        with open(pass_file) as json_file:
-            passes = json.load(json_file)
-        return passes
+        return load_json(pass_file, {})
     else:
         logger.info("Passes file not found")
         return {}
@@ -92,8 +89,7 @@ def save_pass_config(pass_file, passes_dict):
     # Ensure directory exists
     ensure_directory(os.path.dirname(pass_file))
 
-    with open(pass_file, 'w') as fp:
-        json.dump(passes_dict, fp, indent=2)
+    save_json(pass_file, passes_dict)
 
     logger.info(f"Pass configuration saved to: {pass_file}")
 

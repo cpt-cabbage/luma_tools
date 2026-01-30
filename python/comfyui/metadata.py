@@ -68,8 +68,8 @@ def cleanup_job_temp_files(output_dir: str) -> int:
             try:
                 os.remove(file_path)
                 deleted_count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not delete temp file {file_path}: {e}")
 
     return deleted_count
 
@@ -95,8 +95,8 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
                     'size': stat.st_size,
                     'extension': ext,
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not stat file {path}: {e}")
 
     output_files.sort(key=lambda x: x['created'], reverse=True)
     return output_files
@@ -366,7 +366,8 @@ def _lookup_file_metadata(metadata: Dict[str, Dict[str, Any]], filename: str) ->
     # Try prefix matching
     try:
         basename = os.path.splitext(filename)[0]
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not extract basename from {filename}: {e}")
         return None
 
     # Look for matching prefix entries

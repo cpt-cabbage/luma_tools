@@ -29,7 +29,6 @@ parent_dir = os.path.dirname(script_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-import json
 import time
 import signal
 import argparse
@@ -42,6 +41,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
 from core.subprocess_utils import run_command, start_process
+from core.utils import load_json, ensure_directory
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +144,12 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
         network_path = global_settings.get('comfyui_network_output_path', '')
         if network_path and os.path.isdir(network_path):
             log_dir = os.path.join(network_path, '_logs', 'server')
-            os.makedirs(log_dir, exist_ok=True)
+            ensure_directory(log_dir)
 
     # Last resort: local user directory
     if not log_dir:
         log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-        os.makedirs(log_dir, exist_ok=True)
+        ensure_directory(log_dir)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_filename = f"comfyui_server_{hostname}_{timestamp}.log"
@@ -658,12 +658,11 @@ def load_global_settings() -> dict:
                     with open(path, 'r') as f:
                         settings_dir = f.read().strip()
                         settings_file = os.path.join(settings_dir, 'global_settings.json')
-                        if os.path.exists(settings_file):
-                            with open(settings_file, 'r') as sf:
-                                return json.load(sf)
+                        result = load_json(settings_file)
+                        if result:
+                            return result
             elif os.path.exists(path):
-                with open(path, 'r') as f:
-                    return json.load(f)
+                return load_json(path, {})
 
         logger.warning("Could not find global_settings.json, using defaults")
         return {}

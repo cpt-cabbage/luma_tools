@@ -6,12 +6,11 @@ and API format used by ComfyUI's API.
 """
 
 import os
-import json
 import logging
 from typing import Dict, Any, List, Optional
 
 from comfyui.node_configs import WIDGET_MAPPINGS, SKIP_NODE_TYPES
-from core.utils import ensure_directory
+from core.utils import ensure_directory, load_json, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +25,7 @@ def load_workflow(workflow_path: str) -> Dict[str, Any]:
     Returns:
         Workflow dictionary
     """
-    with open(workflow_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    return load_json(workflow_path, {})
 
 
 def save_workflow(
@@ -62,8 +60,7 @@ def save_workflow(
     workflow_filename = f"comfyui_workflow_{job_id}.json"
     workflow_path = os.path.join(output_dir, workflow_filename)
 
-    with open(workflow_path, 'w', encoding='utf-8') as f:
-        json.dump(workflow, f, indent=2)
+    save_json(workflow_path, workflow)
 
     logger.info(f"Saved modified workflow to: {workflow_path}")
     return workflow_path

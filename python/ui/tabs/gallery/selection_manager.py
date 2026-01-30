@@ -307,7 +307,7 @@ class SelectionManager(BaseGalleryManager):
         if show_status and had_selection and hasattr(self.tab, 'show_status_message'):
             self.tab.show_status_message("Selection cleared")
 
-    def on_selection_changed(self, image_path, is_selected):
+    def _on_selection_changed(self, image_path, is_selected):
         """Handle thumbnail selection state change."""
         if is_selected:
             self.tab._selected_items.add(image_path)
@@ -318,7 +318,7 @@ class SelectionManager(BaseGalleryManager):
         self._update_toolbar()
         self._update_checkmark_visibility()
 
-    def on_shift_click(self, clicked_path):
+    def _on_shift_click(self, clicked_path):
         """Handle shift+click for range selection.
 
         Builds visual order from the actual flow layout to properly handle:
@@ -555,7 +555,7 @@ class SelectionManager(BaseGalleryManager):
         """
         return self.tab._selected_items
 
-    def on_item_deleted(self, item_path):
+    def _on_item_deleted(self, item_path):
         """Handle item deletion from selection perspective."""
         if item_path in self.tab._selected_items:
             self.tab._selected_items.discard(item_path)

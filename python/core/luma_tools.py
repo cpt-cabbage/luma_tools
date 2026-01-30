@@ -776,12 +776,11 @@ class LumaShotTools(QtWidgets.QWidget):
         try:
             # Re-read the version.json file from disk
             from core.config import _ROOT_DIR
-            import json
+            from core.utils import load_json
             version_file = os.path.join(_ROOT_DIR, "resources", "version.json")
 
-            with open(version_file, 'r') as f:
-                data = json.load(f)
-                deployed_version = data.get("version", "unknown")
+            data = load_json(version_file, {"version": "unknown"})
+            deployed_version = data.get("version", "unknown")
 
             # Compare with the version we started with
             if deployed_version != APP_VERSION and deployed_version != "unknown":

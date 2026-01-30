@@ -7,7 +7,6 @@ for faster model loading between jobs.
 """
 
 import os
-import json
 import copy
 import random
 import logging
@@ -21,7 +20,7 @@ from core.config import (
     DEADLINE_DEPARTMENT,
 )
 from core.settings_manager import get_setting
-from core.utils import ensure_directory
+from core.utils import ensure_directory, save_json
 from comfyui.utils import resolve_comfyui_paths
 
 logger = logging.getLogger(__name__)
@@ -367,8 +366,7 @@ def submit_comfyui_job(
         seeds_data = {"seeds": seeds, "count": generation_count}
 
         seeds_file = os.path.join(current_working_dir, "comfyui_seeds.json")
-        with open(seeds_file, 'w', encoding='utf-8') as f:
-            json.dump(seeds_data, f, indent=2)
+        save_json(seeds_file, seeds_data)
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)
         if prompt_text or current_file or current_editable_values:

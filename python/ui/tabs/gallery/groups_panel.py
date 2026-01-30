@@ -508,8 +508,7 @@ class GroupsFilterPanel(QWidget):
             self.content.updateGeometry()
             self.content_layout.update()
         except Exception as e:
-            import logging
-            logging.error(f"Error rebuilding stacks section: {e}")
+            logger.error(f"Error rebuilding stacks section: {e}")
 
     def _toggle_stacks_collapsed(self):
         """Toggle the collapsed state of the stacks section."""
@@ -782,23 +781,21 @@ class GroupsFilterPanel(QWidget):
 
     def _animate_width(self, target_max, target_min, duration=200):
         """Animate panel width to target max/min values."""
-        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        from PySide6.QtCore import QEasingCurve
+        from effects import create_property_animation
 
         # Cancel any running animation
         for anim in getattr(self, '_collapse_anims', []):
             anim.stop()
 
-        max_anim = QPropertyAnimation(self, b"maximumWidth")
-        max_anim.setDuration(duration)
-        max_anim.setStartValue(self.maximumWidth())
-        max_anim.setEndValue(target_max)
-        max_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
-        min_anim = QPropertyAnimation(self, b"minimumWidth")
-        min_anim.setDuration(duration)
-        min_anim.setStartValue(self.minimumWidth())
-        min_anim.setEndValue(target_min)
-        min_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        max_anim = create_property_animation(
+            self, b"maximumWidth", self.maximumWidth(), target_max,
+            duration=duration, easing=QEasingCurve.InOutCubic
+        )
+        min_anim = create_property_animation(
+            self, b"minimumWidth", self.minimumWidth(), target_min,
+            duration=duration, easing=QEasingCurve.InOutCubic
+        )
 
         max_anim.start()
         min_anim.start()

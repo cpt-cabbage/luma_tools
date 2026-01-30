@@ -7,12 +7,12 @@ Includes publish strategy pattern for farm vs local publishing.
 
 import os
 import subprocess
-import json
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Callable
 
-from core.utils import normalize_path, ensure_directory
+from core.utils import normalize_path, ensure_directory, save_json
+from core.subprocess_utils import start_process
 
 logger = logging.getLogger(__name__)
 from core.config import (
@@ -522,34 +522,23 @@ def write_metadata_file(metadata_dict, output_path):
         output_path = os.path.join(os.getcwd(), output_path)
 
     # Write metadata
-    try:
-        with open(output_path, "w") as f:
-            json.dump(metadata_dict, f, indent=4, sort_keys=False)
-
-        if logger:
-            logger.info(f"Successfully wrote metadata to: {output_path}")
-
-            # Verify required fields
-            root_keys = list(metadata_dict.keys())
-            required_fields = ["user", "comment", "job", "instances", "version", "folderPath"]
-            missing_fields = [f for f in required_fields if f not in root_keys]
-
-            if missing_fields:
-                logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
-            else:
-                logger.info(f"All required fields present: {required_fields}")
-        else:
-            logger.info(f"Successfully wrote metadata to: {output_path}")
-
-        return output_path
-
-    except Exception as e:
-        error_msg = f"Failed to write metadata file: {e}"
-        if logger:
-            logger.error(error_msg)
-        else:
-            logger.error(error_msg)
+    if not save_json(output_path, metadata_dict):
+        logger.error(f"Failed to write metadata file: {output_path}")
         return None
+
+    logger.info(f"Successfully wrote metadata to: {output_path}")
+
+    # Verify required fields
+    root_keys = list(metadata_dict.keys())
+    required_fields = ["user", "comment", "job", "instances", "version", "folderPath"]
+    missing_fields = [f for f in required_fields if f not in root_keys]
+
+    if missing_fields:
+        logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
+    else:
+        logger.info(f"All required fields present: {required_fields}")
+
+    return output_path
 
 
 def publish_to_ayon_local(
@@ -620,14 +609,11 @@ def publish_to_ayon_local(
 
     try:
         # Use Popen for real-time output streaming
-        process = subprocess.Popen(
+        process = start_process(
             cmd,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,  # Line buffered
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
         # Use threads to read stdout and stderr concurrently to avoid deadlocks

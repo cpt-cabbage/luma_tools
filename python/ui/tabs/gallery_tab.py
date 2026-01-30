@@ -132,7 +132,7 @@ class GalleryTab(BaseTab):
         self._setup_job_status_bar()
 
         # Setup UI elements
-        self._ui_manager.setup_ui()
+        self._ui_manager._setup_ui()
 
         # Initialize user selector
         self._ui_manager.populate_user_selector()
@@ -173,8 +173,13 @@ class GalleryTab(BaseTab):
 
     def _on_selection_changed(self, image_path, is_selected):
         """Handle thumbnail selection state change."""
-        self._selection_manager.on_selection_changed(image_path, is_selected)
+        self._selection_manager._on_selection_changed(image_path, is_selected)
         # Emit selection to event bus
+        self._emit_selection_changed()
+
+    def _on_shift_click_selection(self, clicked_path):
+        """Handle shift+click for range selection."""
+        self._selection_manager._on_shift_click(clicked_path)
         self._emit_selection_changed()
 
     def _on_view_selected(self):
@@ -204,8 +209,8 @@ class GalleryTab(BaseTab):
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion (coordinates selection + operations managers)."""
-        self._operations_manager.on_item_deleted(item_path)
-        self._selection_manager.on_item_deleted(item_path)
+        self._operations_manager._on_item_deleted(item_path)
+        self._selection_manager._on_item_deleted(item_path)
 
     def _on_item_viewed(self, item_path):
         """Handle item viewed."""

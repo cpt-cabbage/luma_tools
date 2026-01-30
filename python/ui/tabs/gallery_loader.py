@@ -168,7 +168,8 @@ class GalleryLoader:
                         full_path = os.path.normpath(os.path.join(root, filename))
                         try:
                             mtime = os.path.getmtime(full_path)
-                        except OSError:
+                        except OSError as e:
+                            logger.debug(f"Could not get mtime for {full_path}: {e}")
                             continue
                         # Determine file type based on extension
                         if ext in model_extensions:

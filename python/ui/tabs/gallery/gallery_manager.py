@@ -741,8 +741,6 @@ class GalleryManager(BaseGalleryManager):
 
     def _cleanup_new_item_animations(self):
         """Clean up new item animation references and remove opacity effects."""
-
-
         for anim in getattr(self, '_new_item_animations', []):
             target = anim.targetObject()
             if target:

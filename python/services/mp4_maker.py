@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config
 from core.utils import normalize_path, ensure_directory
-from core.subprocess_utils import run_command
+from core.subprocess_utils import run_command, start_process
 from core.progress_utils import report_progress
 
 
@@ -258,12 +258,10 @@ def generate_mp4(
         logger.info("=" * 60)
 
         # Execute FFmpeg
-        process = subprocess.Popen(
+        process = start_process(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=1
         )
 
         # Monitor progress

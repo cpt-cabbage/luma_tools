@@ -17,7 +17,8 @@ from typing import List, Callable, Optional
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QGraphicsOpacityEffect
 )
-from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, Signal, QEasingCurve
+from effects import create_property_animation
 from PySide6.QtGui import QCursor
 
 logger = logging.getLogger(__name__)
@@ -206,11 +207,10 @@ class QuickActionsBar(QFrame):
         self._opacity_effect.setOpacity(0.0)
         self.show()
 
-        self._fade_animation = QPropertyAnimation(self._opacity_effect, b"opacity")
-        self._fade_animation.setDuration(150)
-        self._fade_animation.setStartValue(0.0)
-        self._fade_animation.setEndValue(1.0)
-        self._fade_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._fade_animation = create_property_animation(
+            self._opacity_effect, b"opacity", 0.0, 1.0,
+            duration=150, easing=QEasingCurve.OutCubic
+        )
         self._fade_animation.start()
 
     def _hide_with_fade(self):
@@ -220,11 +220,10 @@ class QuickActionsBar(QFrame):
 
         self._is_visible = False
 
-        self._fade_animation = QPropertyAnimation(self._opacity_effect, b"opacity")
-        self._fade_animation.setDuration(200)
-        self._fade_animation.setStartValue(1.0)
-        self._fade_animation.setEndValue(0.0)
-        self._fade_animation.setEasingCurve(QEasingCurve.InCubic)
+        self._fade_animation = create_property_animation(
+            self._opacity_effect, b"opacity", 1.0, 0.0,
+            duration=200, easing=QEasingCurve.InCubic
+        )
         self._fade_animation.finished.connect(self.hide)
         self._fade_animation.start()
 

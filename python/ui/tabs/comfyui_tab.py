@@ -1085,10 +1085,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         logger.debug("ComfyUI tab subscribed to event bus")
 
-    def _on_gallery_selection_changed(self, selected_paths: list, selected_count: int):
-        """Handle gallery selection change signal (currently unused)."""
-        pass
-
     def _on_use_images_from_gallery(self, paths: list):
         """Handle request to use gallery images as inputs."""
         if not paths:

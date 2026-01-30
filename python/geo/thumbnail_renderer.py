@@ -14,6 +14,8 @@ import sys
 import os
 import logging
 
+from core.utils import ensure_directory
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +23,7 @@ def _ensure_output_dir(path):
     """Ensure the output directory exists."""
     dir_path = os.path.dirname(path)
     if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
+        ensure_directory(dir_path)
 
 
 def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool:

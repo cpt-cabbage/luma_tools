@@ -6,7 +6,6 @@ Uses a registry pattern to minimize boilerplate for simple settings.
 """
 
 import os
-import json
 import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, Callable, List
@@ -174,6 +173,7 @@ def ensure_settings_dir():
 
 def load_user_settings() -> Dict[str, Any]:
     """Load user settings from file."""
+    from .utils import load_json
     global _user_settings_cache
     if _user_settings_cache is not None:
         return _user_settings_cache.copy()
@@ -184,17 +184,11 @@ def load_user_settings() -> Dict[str, Any]:
         _user_settings_cache = default_settings
         return default_settings.copy()
 
-    try:
-        with open(USER_SETTINGS_FILE, 'r') as f:
-            settings = json.load(f)
-            if "default_passes" not in settings:
-                settings["default_passes"] = DEFAULT_PASSES.copy()
-            _user_settings_cache = settings
-            return settings.copy()
-    except Exception as e:
-        logger.error(f"Error loading user settings: {e}")
-        _user_settings_cache = default_settings
-        return default_settings.copy()
+    settings = load_json(USER_SETTINGS_FILE, default_settings)
+    if "default_passes" not in settings:
+        settings["default_passes"] = DEFAULT_PASSES.copy()
+    _user_settings_cache = settings
+    return settings.copy()
 
 
 def save_user_settings(settings: Dict[str, Any]):
@@ -251,6 +245,7 @@ def _ensure_global_settings_dir():
 
 def load_global_settings() -> Dict[str, Any]:
     """Load global settings from file."""
+    from .utils import load_json
     global _global_settings_cache
     if _global_settings_cache is not None:
         return _global_settings_cache.copy()
@@ -266,15 +261,9 @@ def load_global_settings() -> Dict[str, Any]:
         _global_settings_cache = default_settings
         return default_settings.copy()
 
-    try:
-        with open(settings_file, 'r') as f:
-            settings = json.load(f)
-            _global_settings_cache = settings
-            return settings.copy()
-    except Exception as e:
-        logger.error(f"Error loading global settings: {e}")
-        _global_settings_cache = default_settings
-        return default_settings.copy()
+    settings = load_json(settings_file, default_settings)
+    _global_settings_cache = settings
+    return settings.copy()
 
 
 def save_global_settings(settings: Dict[str, Any]):
