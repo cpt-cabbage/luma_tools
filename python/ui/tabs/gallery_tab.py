@@ -680,9 +680,14 @@ class GalleryTab(BaseTab):
     def show_loading_overlay(self, message="Loading..."):
         """Show the loading overlay with a message."""
         if hasattr(self, '_loading_overlay'):
+            from PySide6.QtWidgets import QApplication
+
             # Ensure correct size before showing
             self._loading_overlay.setGeometry(self.ui.galleryScrollArea.rect())
             self._loading_overlay.show_loading(message)
+
+            # Force immediate repaint so overlay is visible before blocking work
+            QApplication.processEvents()
 
     def hide_loading_overlay(self):
         """Hide the loading overlay."""

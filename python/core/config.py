@@ -181,6 +181,31 @@ def get_changelog():
         return "No changelog available."
 
 
+def get_latest_changelog():
+    """Get only the latest version entry from the changelog.
+
+    Returns the title and first version section (up to but not including the next ## Version).
+    """
+    full_changelog = get_changelog()
+    if full_changelog == "No changelog available.":
+        return full_changelog
+
+    lines = full_changelog.split('\n')
+    result_lines = []
+    found_first_version = False
+
+    for line in lines:
+        # Check if this is a version header (## Version X.X.X)
+        if line.startswith('## Version '):
+            if found_first_version:
+                # We've hit the second version, stop here
+                break
+            found_first_version = True
+        result_lines.append(line)
+
+    return '\n'.join(result_lines).strip()
+
+
 # Frame padding
 FRAME_PADDING = 4
 

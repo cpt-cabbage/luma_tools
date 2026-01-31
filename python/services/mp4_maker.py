@@ -339,6 +339,116 @@ def get_output_filename(render_name: str, shot: str) -> str:
     return f"{shot}_{render_name}.mp4"
 
 
+def get_quality_description(quality_index: int) -> str:
+    """Get human-readable quality description from index."""
+    descriptions = {
+        0: "High (CRF 18)",
+        1: "Medium (CRF 23)",
+        2: "Low (CRF 28)",
+    }
+    return descriptions.get(quality_index, "Medium (CRF 23)")
+
+
+def copy_mp4_to_gallery(
+    mp4_path: str,
+    user: str,
+    shot: str,
+    source_path: str,
+    frame_range: tuple,
+    quality_index: int,
+    burn_in_timecode: bool,
+) -> tuple:
+    """
+    Copy generated MP4 to the gallery folder and add metadata.
+
+    Args:
+        mp4_path: Full path to the generated MP4 file
+        user: Username for gallery subfolder
+        shot: Shot name or empty string for standalone mode
+        source_path: Full path to source EXR sequence pattern
+        frame_range: Tuple of (start_frame, end_frame)
+        quality_index: Quality setting index (0=high, 1=medium, 2=low)
+        burn_in_timecode: Whether timecode was burned in
+
+    Returns:
+        Tuple of (success: bool, path_or_error: str)
+        - On success: (True, gallery_path)
+        - On failure: (False, error_message)
+    """
+    from core.settings_manager import get_setting
+    from comfyui.metadata import add_mp4_maker_metadata
+
+    try:
+        # Get gallery output path from settings
+        try:
+            gallery_base = get_setting("comfyui_network_output_path")
+        except KeyError:
+            gallery_base = None
+
+        if not gallery_base:
+            return (False, "Gallery path not configured in settings")
+
+        # Construct user subfolder
+        gallery_user_dir = os.path.join(gallery_base, user or "standalone")
+
+        # Ensure directory exists
+        ensure_directory(gallery_user_dir)
+
+        # Get MP4 filename
+        mp4_filename = os.path.basename(mp4_path)
+
+        # Destination path
+        gallery_mp4_path = os.path.join(gallery_user_dir, mp4_filename)
+
+        # Check if source file exists
+        if not os.path.exists(mp4_path):
+            return (False, f"Source MP4 not found: {mp4_path}")
+
+        # Copy file (preserves metadata like timestamps)
+        logger.info(f"Copying MP4 to gallery: {gallery_mp4_path}")
+        shutil.copy2(mp4_path, gallery_mp4_path)
+
+        # Verify copy succeeded
+        if not os.path.exists(gallery_mp4_path):
+            return (False, "Failed to copy MP4 to gallery")
+
+        # Extract render name from source path for metadata
+        source_basename = os.path.basename(source_path)
+        # Remove frame pattern and extension: "render.%04d.exr" -> "render"
+        # Or "render.0001.exr" -> "render"
+        parts = source_basename.split(".")
+        source_render = parts[0] if parts else "unknown"
+
+        # Add metadata
+        quality_desc = get_quality_description(quality_index)
+        metadata_success = add_mp4_maker_metadata(
+            output_dir=gallery_user_dir,
+            filename=mp4_filename,
+            shot=shot or "standalone",
+            source_render=source_render,
+            source_path=source_path,
+            frame_range=frame_range,
+            quality_setting=quality_desc,
+            burn_in_timecode=burn_in_timecode,
+        )
+
+        if not metadata_success:
+            logger.warning("MP4 copied but metadata save failed")
+
+        logger.info(f"MP4 successfully added to gallery: {gallery_mp4_path}")
+        return (True, gallery_mp4_path)
+
+    except PermissionError as e:
+        logger.error(f"Permission denied copying to gallery: {e}")
+        return (False, f"Permission denied: {e}")
+    except OSError as e:
+        logger.error(f"OS error copying to gallery: {e}")
+        return (False, f"File system error: {e}")
+    except Exception as e:
+        logger.error(f"Error copying MP4 to gallery: {e}")
+        return (False, str(e))
+
+
 logger.info("=" * 60)
 logger.info("LOADING: mp4_maker.py")
 logger.info("=" * 60)

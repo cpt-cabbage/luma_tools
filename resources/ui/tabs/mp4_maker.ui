@@ -245,6 +245,19 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="MP4AddToGallery">
+          <property name="text">
+           <string>Add to Gallery</string>
+          </property>
+          <property name="toolTip">
+           <string>Copy the generated MP4 to your gallery folder for easy browsing</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="mp4OptionsSpacer2">
           <property name="orientation">
            <enum>Qt::Vertical</enum>

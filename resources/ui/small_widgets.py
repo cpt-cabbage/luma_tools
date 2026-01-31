@@ -284,19 +284,19 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                             border: 2px solid {border_color};
                             border-radius: 8px;
                         }}
-                """)
-            else:
-                # Background cards - derive darker shades
-                alpha = max(180, 255 - i * 30)
-                darker_bg = darken_color(bg_color, 0.15 * i)
-                darker_border = darken_color(border_color, 0.1 * i)
-                label.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {darker_bg};
-                        border: 1px solid {color_with_alpha(darker_border, alpha)};
-                        border-radius: 8px;
-                    }}
-                """)
+                    """)
+                else:
+                    # Background cards - derive darker shades
+                    alpha = max(180, 255 - i * 30)
+                    darker_bg = darken_color(bg_color, 0.15 * i)
+                    darker_border = darken_color(border_color, 0.1 * i)
+                    label.setStyleSheet(f"""
+                        QLabel {{
+                            background-color: {darker_bg};
+                            border: 1px solid {color_with_alpha(darker_border, alpha)};
+                            border-radius: 8px;
+                        }}
+                    """)
 
             # Also update the styler for hover/selection states
             self._styler.group_color = custom_color

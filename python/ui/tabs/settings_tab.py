@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 from .base_tab import BaseTab
 from dialog_helpers import confirm_action, show_warning, show_error, show_info
 from core.utils import ensure_directory
-from core.config import APP_VERSION, get_changelog
+from core.config import APP_VERSION, get_changelog, get_latest_changelog
 
 logger = logging.getLogger(__name__)
 
@@ -241,12 +241,15 @@ class SettingsTab(BaseTab):
             logger.error(f"Error checking user notifications: {e}")
 
     def _on_show_version_history(self):
-        """Show version history dialog."""
+        """Show version history dialog with latest changelog and Full Changelog button."""
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+
         # Hide notification badge when clicked
         if hasattr(self, '_version_badge'):
             self._version_badge.hide_badge()
 
-        changelog = get_changelog()
+        # Start with latest changelog only
+        latest_changelog = get_latest_changelog()
 
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle("Luma Tools - Version History")
@@ -256,12 +259,30 @@ class SettingsTab(BaseTab):
 
         text_edit = QTextEdit()
         text_edit.setReadOnly(True)
-        text_edit.setMarkdown(changelog)
+        text_edit.setMarkdown(latest_changelog)
         layout.addWidget(text_edit)
+
+        # Button row with Full Changelog and OK
+        button_layout = QHBoxLayout()
+
+        full_changelog_btn = QPushButton("Full Changelog")
+        full_changelog_btn.setToolTip("Show all version history")
+
+        def show_full_changelog():
+            text_edit.setMarkdown(get_changelog())
+            full_changelog_btn.setEnabled(False)
+            full_changelog_btn.setText("Showing Full Changelog")
+
+        full_changelog_btn.clicked.connect(show_full_changelog)
+        button_layout.addWidget(full_changelog_btn)
+
+        button_layout.addStretch()
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok)
         button_box.accepted.connect(dialog.accept)
-        layout.addWidget(button_box)
+        button_layout.addWidget(button_box)
+
+        layout.addLayout(button_layout)
 
         dialog.exec()
 

@@ -52,10 +52,13 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.ui.MP4RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.MP4BrowseOutput.clicked.connect(self._on_browse_output)
         self.ui.MP4Generate.clicked.connect(self._on_generate_clicked)
+        # Add to Gallery checkbox state persistence
+        self.ui.MP4AddToGallery.stateChanged.connect(self._on_add_to_gallery_changed)
 
     def initialize(self):
         """Initialize MP4 maker tab."""
         from option_button import IndexedOptionButtonManager
+        from core.settings_manager import get_setting
 
         self.ui.MP4Generate.setEnabled(False)
 
@@ -74,6 +77,10 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             on_changed=lambda idx: None,  # No additional action needed
             parent_window=self.main_window
         )
+
+        # Load "Add to Gallery" checkbox state from user settings
+        add_to_gallery = get_setting("mp4_maker_add_to_gallery")
+        self.ui.MP4AddToGallery.setChecked(add_to_gallery)
 
     @property
     def _quality_index(self):
@@ -213,12 +220,21 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         def on_result(success):
             """Called when MP4 generation completes."""
             if success:
-                self.update_status_with_spinner(
-                    f"MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
-                    StatusColors.SUCCESS,
-                    start=False
-                )
-                self.show_status("MP4 generation complete!", "success")
+                # Check if we should copy to gallery
+                if self.ui.MP4AddToGallery.isChecked():
+                    self.update_status_with_spinner(
+                        f"MP4 generated. Copying to gallery...",
+                        StatusColors.INFO,
+                        start=True
+                    )
+                    self._copy_to_gallery(input_pattern)
+                else:
+                    self.update_status_with_spinner(
+                        f"MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
+                        StatusColors.SUCCESS,
+                        start=False
+                    )
+                    self.show_status("MP4 generation complete!", "success")
             else:
                 self.update_status_with_spinner(
                     "MP4 generation failed",
@@ -248,4 +264,58 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             on_result=on_result,
             on_error=on_error,
             on_progress=on_progress
+        )
+
+    def _on_add_to_gallery_changed(self, state):
+        """Save Add to Gallery checkbox state to user settings."""
+        from core.settings_manager import set_setting
+        from PySide6.QtCore import Qt
+        set_setting("mp4_maker_add_to_gallery", state == Qt.Checked, verbose=False)
+
+    def _copy_to_gallery(self, source_path: str):
+        """Copy the generated MP4 to the gallery folder with metadata."""
+        from ui_components import StatusColors
+        from services.mp4_maker import copy_mp4_to_gallery
+
+        def on_gallery_result(result):
+            """Handle gallery copy completion."""
+            success, path_or_error = result
+            if success:
+                self.update_status_with_spinner(
+                    f"MP4 generated and added to gallery",
+                    StatusColors.SUCCESS,
+                    start=False
+                )
+                self.show_status("MP4 generation complete! Added to gallery.", "success")
+            else:
+                self.update_status_with_spinner(
+                    f"MP4 generated (gallery copy failed: {path_or_error})",
+                    StatusColors.WARNING,
+                    start=False
+                )
+                self.show_status(f"MP4 generated but gallery copy failed: {path_or_error}", "warning")
+
+        def on_gallery_error(error_msg, traceback_str):
+            """Handle gallery copy error."""
+            self.update_status_with_spinner(
+                f"MP4 generated (gallery error: {error_msg})",
+                StatusColors.WARNING,
+                start=False
+            )
+            self.log(f"Gallery copy error: {error_msg}")
+
+        # Run gallery copy on worker thread
+        self.start_worker(
+            copy_mp4_to_gallery,
+            worker_kwargs={
+                "mp4_path": self.app_state.mp4_output_path,
+                "user": self.app_state.user,
+                "shot": self.app_state.shot,
+                "source_path": source_path,
+                "frame_range": (self.app_state.mp4_startframe, self.app_state.mp4_endframe),
+                "quality_index": self._quality_index,
+                "burn_in_timecode": self.ui.MP4BurnInTimecode.isChecked(),
+            },
+            on_result=on_gallery_result,
+            on_error=on_gallery_error
         )

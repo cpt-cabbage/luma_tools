@@ -118,6 +118,8 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "gallery_stacks_collapsed": SettingDef("gallery_stacks_collapsed", False, "user"),
     # UI display settings
     "show_statusbar_log": SettingDef("show_statusbar_log", False, "user"),
+    # MP4 Maker settings
+    "mp4_maker_add_to_gallery": SettingDef("mp4_maker_add_to_gallery", True, "user"),
     # ComfyUI-Gallery integration settings
     "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
     "comfyui_show_recent_outputs": SettingDef("comfyui_show_recent_outputs", True, "user"),
