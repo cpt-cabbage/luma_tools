@@ -50,13 +50,7 @@
      <item>
       <widget class="QPushButton" name="GalleryUserButton">
        <property name="text">
-        <string>👤 You</string>
-       </property>
-       <property name="minimumSize">
-        <size>
-         <width>120</width>
-         <height>0</height>
-        </size>
+        <string>You</string>
        </property>
        <property name="toolTip">
         <string>Click to select user gallery to view</string>
@@ -66,16 +60,10 @@
      <item>
       <widget class="QPushButton" name="GallerySortButton">
        <property name="text">
-        <string>Newest First</string>
-       </property>
-       <property name="minimumSize">
-        <size>
-         <width>160</width>
-         <height>0</height>
-        </size>
+        <string>Date</string>
        </property>
        <property name="toolTip">
-        <string>Click to change sort order</string>
+        <string>Click to change sort field</string>
        </property>
       </widget>
      </item>

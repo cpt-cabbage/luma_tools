@@ -28,40 +28,126 @@ class UIManager(BaseGalleryManager):
         """
         super().__init__(tab)
 
-        # Sort options
+        # Sort options (field only, direction handled separately)
         self._sort_options = [
-            ("Date (Newest)", "date_desc"),
-            ("Date (Oldest)", "date_asc"),
-            ("Name (A-Z)", "name_asc"),
-            ("Name (Z-A)", "name_desc"),
+            ("Date", "date"),
+            ("Name", "name"),
             ("Workflow", "workflow"),
         ]
+        # Track current sort field and direction separately
+        self._sort_field = "date"  # date, name, workflow
+        self._sort_ascending = False  # False = descending (newest first for date)
 
     def _setup_ui(self):
         """Set up additional UI elements."""
+        self._create_sort_direction_toggle()
         self._create_filter_button()
         self._create_view_mode_button()
+        self._sync_sort_state_from_mode()
         self.update_sort_button_text()
 
     # =========================================================================
     # SORT CONTROLS
     # =========================================================================
 
+    def _create_sort_direction_toggle(self):
+        """Create the sort direction toggle button (arrow) next to sort button."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QPushButton, QWidget, QHBoxLayout
+
+        # Create container to group sort button and direction toggle together
+        self._sort_container = QWidget()
+        self._sort_container.setObjectName("sortContainer")
+        container_layout = QHBoxLayout(self._sort_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(2)  # Tight spacing between sort and arrow
+
+        # Create direction toggle button
+        self._sort_direction_btn = QPushButton("▼")
+        self._sort_direction_btn.setObjectName("sortDirectionButton")
+        self._sort_direction_btn.setFixedWidth(24)  # Narrow but same height as other buttons
+        self._sort_direction_btn.setCursor(Qt.ArrowCursor)
+        self._sort_direction_btn.setToolTip("Toggle sort direction")
+        self._sort_direction_btn.clicked.connect(self._on_sort_direction_clicked)
+        self._sort_direction_btn.setStyleSheet("padding: 2px 0px;")
+
+        # Move sort button into container, add direction toggle
+        header_layout = self._find_header_layout()
+        if header_layout:
+            sort_index = header_layout.indexOf(self.tab.ui.GallerySortButton)
+            # Remove sort button from header, add to container
+            header_layout.removeWidget(self.tab.ui.GallerySortButton)
+            container_layout.addWidget(self.tab.ui.GallerySortButton)
+            container_layout.addWidget(self._sort_direction_btn)
+            # Insert container at original sort button position
+            header_layout.insertWidget(sort_index, self._sort_container)
+
+    def _sync_sort_state_from_mode(self):
+        """Sync internal sort state from tab's sort_mode (for backward compat)."""
+        mode = self.tab._sort_mode
+        if mode == "date_desc":
+            self._sort_field = "date"
+            self._sort_ascending = False
+        elif mode == "date_asc":
+            self._sort_field = "date"
+            self._sort_ascending = True
+        elif mode == "name_asc":
+            self._sort_field = "name"
+            self._sort_ascending = True
+        elif mode == "name_desc":
+            self._sort_field = "name"
+            self._sort_ascending = False
+        elif mode == "workflow":
+            self._sort_field = "workflow"
+            self._sort_ascending = True
+        else:
+            self._sort_field = "date"
+            self._sort_ascending = False
+
+    def _get_sort_mode(self):
+        """Get the combined sort mode string from field and direction."""
+        if self._sort_field == "workflow":
+            return "workflow"
+        direction = "asc" if self._sort_ascending else "desc"
+        return f"{self._sort_field}_{direction}"
+
+    def _on_sort_direction_clicked(self):
+        """Toggle sort direction."""
+        self._sort_ascending = not self._sort_ascending
+        self._update_sort_direction_button()
+        self._apply_current_sort()
+
+    def _update_sort_direction_button(self):
+        """Update the direction button arrow and tooltip."""
+        if self._sort_ascending:
+            self._sort_direction_btn.setText("▲")
+            if self._sort_field == "date":
+                self._sort_direction_btn.setToolTip("Oldest first (click for newest)")
+            else:
+                self._sort_direction_btn.setToolTip("A-Z (click for Z-A)")
+        else:
+            self._sort_direction_btn.setText("▼")
+            if self._sort_field == "date":
+                self._sort_direction_btn.setToolTip("Newest first (click for oldest)")
+            else:
+                self._sort_direction_btn.setToolTip("Z-A (click for A-Z)")
+
     def update_sort_button_text(self):
-        """Update the sort button text to show current mode."""
-        mode_map = {mode: label for label, mode in self._sort_options}
-        current_label = mode_map.get(self.tab._sort_mode, "Sort")
+        """Update the sort button text to show current field."""
+        field_map = {field: label for label, field in self._sort_options}
+        current_label = field_map.get(self._sort_field, "Sort")
         self.tab.ui.GallerySortButton.setText(current_label)
+        self._update_sort_direction_button()
 
     def on_sort_button_clicked(self):
-        """Show sort options menu."""
+        """Show sort field options menu."""
         menu = QMenu(self.tab.ui.GallerySortButton)
 
-        for label, mode in self._sort_options:
+        for label, field in self._sort_options:
             action = menu.addAction(label)
             action.setCheckable(True)
-            action.setChecked(mode == self.tab._sort_mode)
-            action.triggered.connect(lambda checked, m=mode: self._select_sort_mode(m))
+            action.setChecked(field == self._sort_field)
+            action.triggered.connect(lambda checked, f=field: self._select_sort_field(f))
 
         # Position menu below button
         pos = self.tab.ui.GallerySortButton.mapToGlobal(
@@ -69,23 +155,34 @@ class UIManager(BaseGalleryManager):
         )
         menu.exec_(pos)
 
-    def _select_sort_mode(self, mode):
-        """Apply selected sort mode."""
+    def _select_sort_field(self, field):
+        """Apply selected sort field."""
+        if field == self._sort_field:
+            return
+
+        self._sort_field = field
+        self.update_sort_button_text()
+        self._apply_current_sort()
+
+    def _apply_current_sort(self):
+        """Apply current sort settings (field + direction)."""
+        mode = self._get_sort_mode()
+
         if mode == self.tab._sort_mode:
             return
 
         self.tab._sort_mode = mode
-        self.update_sort_button_text()
 
         # Save to settings
         from core.user_preferences import save_gallery_settings
         save_gallery_settings(sort_mode=mode)
 
         # Show status feedback
-        mode_labels = {m: label for label, m in self._sort_options}
-        label = mode_labels.get(mode, mode)
+        field_labels = {f: label for label, f in self._sort_options}
+        field_label = field_labels.get(self._sort_field, self._sort_field)
+        direction = "ascending" if self._sort_ascending else "descending"
         if hasattr(self.tab, 'show_status_message'):
-            self.tab.show_status_message(f"Gallery sorted by {label}")
+            self.tab.show_status_message(f"Gallery sorted by {field_label} ({direction})")
 
         # Re-sort and redisplay (use cached items, no rescan needed)
         self.redisplay_items()
@@ -113,14 +210,18 @@ class UIManager(BaseGalleryManager):
         self._load_filter_settings()
         self._update_filters_button_text()
 
-        # Insert after sort button in the header layout
+        # Insert after sort container in the header layout
         header_layout = self._find_header_layout()
         if header_layout:
-            sort_index = header_layout.indexOf(self.tab.ui.GallerySortButton)
+            sort_index = header_layout.indexOf(self._sort_container)
             header_layout.insertWidget(sort_index + 1, self._filters_btn)
 
     def _find_header_layout(self):
-        """Find the header layout that contains the sort button."""
+        """Find the header layout (cached after first call)."""
+        # Return cached layout if available
+        if hasattr(self, '_header_layout') and self._header_layout:
+            return self._header_layout
+
         # self.tab.ui is the root widget loaded from the .ui file
         # Get the main layout (galleryMainLayout) from the root widget
         main_layout = self.tab.ui.layout()
@@ -130,9 +231,10 @@ class UIManager(BaseGalleryManager):
             for i in range(main_layout.count()):
                 item = main_layout.itemAt(i)
                 if item.layout():
-                    # Check if this layout contains the sort button
+                    # Check if this layout contains the sort button (before we move it)
                     nested_layout = item.layout()
                     if nested_layout.indexOf(self.tab.ui.GallerySortButton) >= 0:
+                        self._header_layout = nested_layout
                         return nested_layout
         return None
 
@@ -202,64 +304,75 @@ class UIManager(BaseGalleryManager):
     # =========================================================================
 
     def _create_view_mode_button(self):
-        """Create the view mode checkboxes (Generations and Groups)."""
+        """Create the Stacks button with floating dialog (like Filters)."""
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
+        from PySide6.QtWidgets import QPushButton
+        from .stacks_dialog import StacksDialog
 
         # Get current stacking mode from settings
         from core.settings_manager import safe_get_setting
         current_mode = safe_get_setting("gallery_stacking_mode", "job")
 
         # Decode mode to checkbox states
-        # "grid" = neither, "job" = generations only, "groups" = groups only, "both" = both
-        stacks_on = current_mode in ("job", "both")
+        generations_on = current_mode in ("job", "both")
         groups_on = current_mode in ("groups", "both")
 
-        # Create container widget
-        self._view_mode_container = QWidget()
-        self._view_mode_container.setObjectName("viewModeContainer")
-        layout = QHBoxLayout(self._view_mode_container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        # Create button
+        self._stacks_btn = QPushButton("Stacks")
+        self._stacks_btn.setObjectName("stacksButton")
+        self._stacks_btn.setCursor(Qt.ArrowCursor)
+        self._stacks_btn.setToolTip("Group items by generations or user groups")
+        self._stacks_btn.clicked.connect(self._on_stacks_button_clicked)
 
-        # Create checkboxes
-        self._stacks_checkbox = QCheckBox("Generations")
-        self._stacks_checkbox.setObjectName("stacksCheckbox")
-        self._stacks_checkbox.setToolTip("Group items by generation/job prefix")
-        self._stacks_checkbox.setChecked(stacks_on)
-        self._stacks_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
+        # Create the stacks dialog (hidden initially)
+        self._stacks_dialog = StacksDialog(self.tab)
+        self._stacks_dialog.set_generations(generations_on)
+        self._stacks_dialog.set_groups(groups_on)
+        self._stacks_dialog.stacks_changed.connect(self._on_stacks_changed)
+        self._stacks_dialog.closed.connect(self._on_stacks_dialog_closed)
 
-        self._groups_checkbox = QCheckBox("Groups")
-        self._groups_checkbox.setObjectName("groupsCheckbox")
-        self._groups_checkbox.setToolTip("Group items by user-defined groups")
-        self._groups_checkbox.setChecked(groups_on)
-        self._groups_checkbox.stateChanged.connect(self._on_view_mode_checkbox_changed)
-
-        layout.addWidget(self._stacks_checkbox)
-        layout.addWidget(self._groups_checkbox)
+        self._update_stacks_button_text()
 
         # Insert after filters button in the header layout
         header_layout = self._find_header_layout()
         if header_layout:
             filter_index = header_layout.indexOf(self._filters_btn)
-            header_layout.insertWidget(filter_index + 1, self._view_mode_container)
+            header_layout.insertWidget(filter_index + 1, self._stacks_btn)
 
-    def _on_view_mode_checkbox_changed(self):
-        """Handle view mode checkbox state changes."""
-        stacks_on = self._stacks_checkbox.isChecked()
-        groups_on = self._groups_checkbox.isChecked()
+    def _update_stacks_button_text(self):
+        """Update the Stacks button text."""
+        self._stacks_btn.setText("Stacks")
 
-        # Map checkbox states to stacking mode
-        # neither = grid, stacks only = job, groups only = groups, both = both
-        if stacks_on and groups_on:
+    def _on_stacks_button_clicked(self):
+        """Toggle the stacks dialog visibility."""
+        if self._stacks_dialog.isVisible():
+            self._stacks_dialog.close()
+        else:
+            self._stacks_dialog.show_below(self._stacks_btn)
+
+    def _on_stacks_dialog_closed(self):
+        """Handle stacks dialog close."""
+        self._update_stacks_button_text()
+
+    def _on_stacks_changed(self):
+        """Handle stacking settings change from dialog."""
+        generations_on = self._stacks_dialog.get_generations()
+        groups_on = self._stacks_dialog.get_groups()
+
+        # Map to stacking mode
+        if generations_on and groups_on:
             mode = "both"
-        elif stacks_on:
+        elif generations_on:
             mode = "job"
         elif groups_on:
             mode = "groups"
         else:
             mode = "grid"
 
+        # Update button text
+        self._update_stacks_button_text()
+
+        # Apply the mode
         self._apply_stacking_mode(mode)
 
     def _apply_stacking_mode(self, mode):
@@ -441,9 +554,9 @@ class UIManager(BaseGalleryManager):
     def update_user_button_text(self):
         """Update user selector button text."""
         if self.tab._selected_user == self.tab.app_state.user:
-            self.tab.ui.GalleryUserButton.setText(f"👤 {self.tab._selected_user} (You)")
+            self.tab.ui.GalleryUserButton.setText(f"{self.tab._selected_user} (You)")
         else:
-            self.tab.ui.GalleryUserButton.setText(f"👤 {self.tab._selected_user}")
+            self.tab.ui.GalleryUserButton.setText(self.tab._selected_user)
 
     def _update_user_button_visibility(self):
         """Show/hide user button based on available users."""
@@ -457,7 +570,7 @@ class UIManager(BaseGalleryManager):
 
         # Add current user at top
         current_user = self.tab.app_state.user
-        action = menu.addAction(f"👤 {current_user} (You)")
+        action = menu.addAction(f"{current_user} (You)")
         action.setCheckable(True)
         action.setChecked(self.tab._selected_user == current_user)
         action.triggered.connect(lambda: self._select_user(current_user))
@@ -468,7 +581,7 @@ class UIManager(BaseGalleryManager):
             # Add other users
             for user in self.tab._available_users:
                 if user != current_user:
-                    action = menu.addAction(f"👤 {user}")
+                    action = menu.addAction(user)
                     action.setCheckable(True)
                     action.setChecked(self.tab._selected_user == user)
                     action.triggered.connect(lambda checked, u=user: self._select_user(u))
