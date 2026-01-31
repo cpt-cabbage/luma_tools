@@ -40,10 +40,12 @@ class UIManager(BaseGalleryManager):
 
     def _setup_ui(self):
         """Set up additional UI elements."""
+        # Sync internal sort state FIRST before creating any UI
+        self._sync_sort_state_from_mode()
+
         self._create_sort_direction_toggle()
         self._create_filter_button()
         self._create_view_mode_button()
-        self._sync_sort_state_from_mode()
         self.update_sort_button_text()
 
     # =========================================================================
@@ -62,8 +64,9 @@ class UIManager(BaseGalleryManager):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(2)  # Tight spacing between sort and arrow
 
-        # Create direction toggle button
-        self._sort_direction_btn = QPushButton("▼")
+        # Create direction toggle button with correct initial arrow
+        initial_arrow = "▲" if self._sort_ascending else "▼"
+        self._sort_direction_btn = QPushButton(initial_arrow)
         self._sort_direction_btn.setObjectName("sortDirectionButton")
         self._sort_direction_btn.setFixedWidth(24)  # Narrow but same height as other buttons
         self._sort_direction_btn.setCursor(Qt.ArrowCursor)
@@ -602,18 +605,17 @@ class UIManager(BaseGalleryManager):
         # Clear selection when switching users (previous items no longer valid)
         self.tab._selection_manager.clear_selection(show_status=False)
 
+        # Show loading overlay for user feedback during switch
+        if new_user == self.tab.app_state.user:
+            self.tab.show_loading_overlay("Loading your gallery...")
+        else:
+            self.tab.show_loading_overlay(f"Loading {new_user}'s gallery...")
+
         # Update gallery path
         self.tab._update_gallery_path(reset_tracking=True)
 
         # Show/hide "View Only" indicator
         self._update_view_only_indicator()
-
-        # Show status feedback
-        if hasattr(self.tab, 'show_status_message'):
-            if new_user == self.tab.app_state.user:
-                self.tab.show_status_message("Viewing your gallery")
-            else:
-                self.tab.show_status_message(f"Viewing {new_user}'s gallery")
 
         # Refresh gallery
         self.tab._refresh_controller.on_refresh(force=True)

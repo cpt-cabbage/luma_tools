@@ -156,6 +156,9 @@ class RefreshController(BaseGalleryManager):
         self._scan_in_progress = False
         self.tab.log(f"[Gallery] Scan error: {msg}")
 
+        # Hide loading overlay on error
+        self.tab.hide_loading_overlay()
+
         # Show error status only if we showed start status
         show_status = getattr(self, '_current_scan_show_status', True)
         if show_status:
@@ -285,7 +288,8 @@ class RefreshController(BaseGalleryManager):
                         logger.debug(f"Could not lookup metadata for {filename}: {e}")
 
                 # Fall back to filename pattern detection
-                if is_output is None or job_prefix is None:
+                # Note: is_output=False with job_prefix=None is valid for input files
+                if is_output is None or (is_output and job_prefix is None):
                     try:
                         # Pass file_type so models/video/audio default to output correctly
                         file_type = item.get('type', 'image')
@@ -296,6 +300,18 @@ class RefreshController(BaseGalleryManager):
                         # Models/video/audio default to output, images to input
                         file_type = item.get('type', 'image')
                         is_output = file_type in ('model', 'video', 'audio')
+
+                    # Double-check: if pattern says output but file is a known source image,
+                    # override to mark as input (handles files with misleading names like _001)
+                    if is_output and item.get('type', 'image') == 'image':
+                        try:
+                            from comfyui.metadata import is_known_input_file
+                            output_dir = os.path.dirname(item.get('path', ''))
+                            if output_dir and is_known_input_file(output_dir, filename):
+                                is_output = False
+                                logger.debug(f"[Refresh] {filename} -> INPUT (known source image)")
+                        except ImportError:
+                            pass
 
                 # Add enriched fields
                 item['workflow'] = ''

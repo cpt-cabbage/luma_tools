@@ -28,7 +28,7 @@ from dialog_helpers import get_active_window
 # Re-export from submodules (absolute imports since resources/ui is in path)
 from workers import Worker, WorkerSignals, start_worker_thread
 from styles import LoadingStyles, StatusColors
-from spinners import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner
+from loading_widgets import SpinnerWidget, InlineSpinner, PulsingDotsWidget, BaseSpinner, LoadingOverlay
 from effects import TabGlowEffect, TabGlowManager, UIAnimations
 from thumbnail_styles import ThumbnailStyler
 from layouts import FlowLayout

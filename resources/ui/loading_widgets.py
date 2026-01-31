@@ -4,7 +4,7 @@ Spinner and loading animation widgets.
 Provides various loading indicators for background operations.
 """
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtGui import QPainter, QColor, QPen
 
 from styles import LoadingStyles
@@ -208,3 +208,74 @@ class PulsingDotsWidget(QWidget):
             painter.drawEllipse(
                 QRectF(x - radius, center_y - radius, radius * 2, radius * 2)
             )
+
+
+class LoadingOverlay(QWidget):
+    """
+    Semi-transparent overlay with centered spinner and message.
+
+    Use to indicate loading state over a content area.
+    Shows a spinner with optional status message.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Make overlay cover parent and be on top
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAutoFillBackground(False)
+
+        # Layout for spinner and message
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(16)
+
+        # Spinner
+        self._spinner = SpinnerWidget(self)
+        self._spinner.setFixedSize(48, 48)
+        # Configure larger spinner
+        self._spinner.line_count = 12
+        self._spinner.line_length = 14
+        self._spinner.line_width = 3
+        self._spinner.inner_radius = 8
+        layout.addWidget(self._spinner, alignment=Qt.AlignCenter)
+
+        # Message label
+        self._message = QLabel("Loading...")
+        self._message.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 500;
+                background: transparent;
+            }
+        """)
+        self._message.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self._message, alignment=Qt.AlignCenter)
+
+        # Start hidden
+        self.hide()
+
+    def paintEvent(self, event):
+        """Paint semi-transparent background."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Semi-transparent dark background
+        painter.fillRect(self.rect(), QColor(30, 30, 30, 200))
+
+    def show_loading(self, message="Loading..."):
+        """Show the overlay with a message."""
+        self._message.setText(message)
+        self._spinner.start()
+        self.show()
+        self.raise_()
+
+    def hide_loading(self):
+        """Hide the overlay."""
+        self._spinner.stop()
+        self.hide()
+
+    def update_message(self, message):
+        """Update the loading message."""
+        self._message.setText(message)

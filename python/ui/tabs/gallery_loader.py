@@ -258,7 +258,8 @@ class GalleryLoader:
                             has_metadata = False
 
                     # Fall back to filename pattern detection if metadata missing or invalid
-                    if is_output is None or job_prefix is None:
+                    # Note: is_output=False with job_prefix=None is valid for input files
+                    if is_output is None or (is_output and job_prefix is None):
                         try:
                             job_prefix, is_output = extract_job_prefix(filename, file_type)
                         except Exception as e:
@@ -266,6 +267,17 @@ class GalleryLoader:
                             job_prefix = None
                             # 3D models/video/audio default to output, images to input
                             is_output = file_type in ('model', 'video', 'audio')
+
+                        # Double-check: if pattern says output but file is a known source image,
+                        # override to mark as input (handles files with misleading names like _001)
+                        if is_output and file_type == 'image':
+                            try:
+                                from comfyui.metadata import is_known_input_file
+                                if is_known_input_file(output_dir, filename):
+                                    is_output = False
+                                    logger.debug(f"[Detection] {filename} -> INPUT (known source image)")
+                            except ImportError:
+                                pass
 
                     # Determine metadata completeness level
                     # 'full' = per-file metadata, 'partial' = job-level only, 'none' = no metadata

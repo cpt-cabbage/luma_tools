@@ -1287,7 +1287,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 pass
 
     def _start_expand_animation(self):
-        """Slide expanded widgets from the stack position to their layout positions."""
+        """Slide expanded widgets horizontally from the stack position to their layout positions."""
         from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, QPoint
         from PySide6.QtWidgets import QGraphicsOpacityEffect
         from shiboken6 import isValid
@@ -1314,18 +1314,19 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         max_animated = 20
         self._expand_animations = []
 
-        # Animate expanded widgets: slide from stack position to final position + fade in
+        # Animate expanded widgets: slide horizontally from stack X to final X + fade in
         for idx, widget in enumerate(self._expanded_widgets[:max_animated]):
             final_pos = post_positions.get(widget, widget.pos())
 
-            # Set initial state: at stack position, invisible
+            # Set initial state: at stack X but final Y (horizontal-only animation)
             opacity_effect = QGraphicsOpacityEffect(widget)
             opacity_effect.setOpacity(0.0)
             widget.setGraphicsEffect(opacity_effect)
-            widget.move(stack_pos)
+            start_pos = QPoint(stack_pos.x(), final_pos.y())
+            widget.move(start_pos)
 
-            # Position animation
-            pos_anim = create_property_animation(widget, b"pos", stack_pos, final_pos, duration)
+            # Position animation (horizontal only - Y stays constant)
+            pos_anim = create_property_animation(widget, b"pos", start_pos, final_pos, duration)
 
             # Opacity animation
             fade_anim = create_property_animation(opacity_effect, b"opacity", 0.0, 1.0, duration)
@@ -1336,17 +1337,24 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             QTimer.singleShot(delay, pos_anim.start)
             QTimer.singleShot(delay, fade_anim.start)
 
-        # Animate existing widgets that shifted position
+        # Animate existing widgets that shifted position (horizontal only)
         pre_positions = getattr(self, '_pre_expand_positions', {})
         for widget, old_pos in pre_positions.items():
             if widget in self._expanded_widgets or widget is self:
                 continue
             new_pos = post_positions.get(widget)
             if new_pos and old_pos != new_pos:
-                widget.move(old_pos)
-                pos_anim = create_property_animation(widget, b"pos", old_pos, new_pos, duration)
-                pos_anim.start()
-                self._expand_animations.append(pos_anim)
+                # Only animate if X position changed (same row)
+                if old_pos.x() != new_pos.x():
+                    # Keep Y constant, only animate X
+                    start_pos = QPoint(old_pos.x(), new_pos.y())
+                    widget.move(start_pos)
+                    pos_anim = create_property_animation(widget, b"pos", start_pos, new_pos, duration)
+                    pos_anim.start()
+                    self._expand_animations.append(pos_anim)
+                else:
+                    # Y changed but X didn't - just snap to new position
+                    widget.move(new_pos)
 
         # Schedule cleanup after all animations complete
         total_time = min(len(self._expanded_widgets), max_animated) * stagger + duration + 50
@@ -1570,7 +1578,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         self._animate_collapse_slide()
 
     def _animate_collapse_slide(self):
-        """Animate expanded widgets sliding back to the stack and other widgets reflowing."""
+        """Animate expanded widgets sliding horizontally back to the stack and other widgets reflowing."""
         from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, QPoint
         from PySide6.QtWidgets import QGraphicsOpacityEffect
         from shiboken6 import isValid
@@ -1618,7 +1626,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         duration = 250
         self._collapse_animations = []
 
-        # Animate expanded widgets: slide to stack position + fade out
+        # Animate expanded widgets: slide horizontally to stack X + fade out
         for widget in self._expanded_widgets:
             if not isValid(widget):
                 continue
@@ -1627,9 +1635,12 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             widget.move(current_pos)
             widget.raise_()
 
-            # Position animation (use InCubic for collapse)
+            # Target position: stack X but keep current Y (horizontal-only animation)
+            target_pos = QPoint(stack_pos.x(), current_pos.y())
+
+            # Position animation (horizontal only, use InCubic for collapse)
             pos_anim = create_property_animation(
-                widget, b"pos", current_pos, stack_pos, duration, QEasingCurve.InCubic
+                widget, b"pos", current_pos, target_pos, duration, QEasingCurve.InCubic
             )
 
             # Opacity animation
@@ -1645,14 +1656,22 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             fade_anim.start()
             self._collapse_animations.extend([pos_anim, fade_anim])
 
-        # Animate remaining widgets: slide from old to new positions
+        # Animate remaining widgets: slide horizontally from old to new positions
         for w in post_positions:
             old_pos = pre_positions.get(w)
             new_pos = post_positions[w]
             if old_pos and old_pos != new_pos:
-                pos_anim = create_property_animation(w, b"pos", old_pos, new_pos, duration)
-                pos_anim.start()
-                self._collapse_animations.append(pos_anim)
+                # Only animate if X position changed
+                if old_pos.x() != new_pos.x():
+                    # Keep Y constant, only animate X
+                    start_pos = QPoint(old_pos.x(), new_pos.y())
+                    w.move(start_pos)
+                    pos_anim = create_property_animation(w, b"pos", start_pos, new_pos, duration)
+                    pos_anim.start()
+                    self._collapse_animations.append(pos_anim)
+                else:
+                    # Y changed but X didn't - just snap to new position
+                    w.move(new_pos)
 
         # Clean up after animation completes
         QTimer.singleShot(duration + 30, self._finish_collapse)

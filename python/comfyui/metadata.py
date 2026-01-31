@@ -348,6 +348,33 @@ def add_item_metadata(
         }
 
         metadata[f"_prefix_{prefix_key}"] = entry
+
+        # Also mark source images as inputs explicitly
+        # This ensures input files are correctly identified even if they have
+        # filenames that look like outputs (e.g., with _001 suffix)
+        if source_images:
+            for source_image in source_images:
+                input_key = f"_input_{source_image}"
+                if input_key not in metadata:
+                    metadata[input_key] = {
+                        "is_output": False,
+                        "is_input": True,
+                        "used_by_job": prefix_key,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+
+        # Same for source models
+        if source_models:
+            for source_model in source_models:
+                input_key = f"_input_{source_model}"
+                if input_key not in metadata:
+                    metadata[input_key] = {
+                        "is_output": False,
+                        "is_input": True,
+                        "used_by_job": prefix_key,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+
         return save_gallery_metadata(output_dir, metadata)
     except Exception as e:
         logger.error(f"[Metadata] Error saving metadata: {e}")
@@ -403,6 +430,14 @@ def _lookup_file_metadata(
         if isinstance(result, dict):
             return result
 
+    # Check for explicit input file entry (highest priority for input detection)
+    # These are created when source images are used in jobs
+    input_key = f"_input_{filename}"
+    if input_key in metadata:
+        result = metadata[input_key]
+        if isinstance(result, dict):
+            return result
+
     # Try prefix matching
     try:
         basename = os.path.splitext(filename)[0]
@@ -410,7 +445,7 @@ def _lookup_file_metadata(
         logger.debug(f"Could not extract basename from {filename}: {e}")
         return None
 
-    # Look for matching prefix entries
+    # Look for matching prefix entries (for output files)
     try:
         for key, value in metadata.items():
             if not isinstance(key, str) or not key.startswith("_prefix_"):
@@ -449,6 +484,73 @@ def get_workflow_preset_for_files(output_dir: str, filenames: List[str]) -> Dict
             results[filename] = ''
 
     return results
+
+
+def is_known_input_file(output_dir: str, filename: str) -> bool:
+    """Check if a file is known to be an input file (used as source in any job).
+
+    This is a reliable way to identify input files even if they have filenames
+    that look like outputs (e.g., with sequence numbers).
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: Filename to check
+
+    Returns:
+        True if the file is listed as a source_image or source_model in any job
+    """
+    metadata = load_gallery_metadata(output_dir)
+
+    # Check for explicit input entry first
+    input_key = f"_input_{filename}"
+    if input_key in metadata:
+        return True
+
+    # Check if file appears in any job's source lists
+    for key, value in metadata.items():
+        if not key.startswith("_prefix_"):
+            continue
+        if not isinstance(value, dict):
+            continue
+
+        source_images = value.get('source_images') or []
+        source_models = value.get('source_models') or []
+
+        if filename in source_images or filename in source_models:
+            # Mark it for future lookups (lazy migration)
+            mark_as_input_file(output_dir, filename, value.get('job_prefix', key[8:]))
+            return True
+
+    return False
+
+
+def mark_as_input_file(output_dir: str, filename: str, used_by_job: str = None) -> bool:
+    """Explicitly mark a file as an input file.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename: Filename to mark as input
+        used_by_job: Optional job prefix that used this file
+
+    Returns:
+        True if successfully marked
+    """
+    try:
+        metadata = load_gallery_metadata(output_dir)
+        input_key = f"_input_{filename}"
+
+        if input_key not in metadata:
+            metadata[input_key] = {
+                "is_output": False,
+                "is_input": True,
+                "used_by_job": used_by_job,
+                "timestamp": datetime.now().isoformat(),
+            }
+            return save_gallery_metadata(output_dir, metadata)
+        return True  # Already marked
+    except Exception as e:
+        logger.error(f"[Metadata] Error marking {filename} as input: {e}")
+        return False
 
 
 def extract_prompts_from_editable_values(

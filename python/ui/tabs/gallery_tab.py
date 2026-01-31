@@ -131,6 +131,9 @@ class GalleryTab(BaseTab):
         # Setup job status bar (shows when ComfyUI jobs are running)
         self._setup_job_status_bar()
 
+        # Setup loading overlay for gallery switching
+        self._setup_loading_overlay()
+
         # Setup UI elements
         self._ui_manager._setup_ui()
 
@@ -327,6 +330,9 @@ class GalleryTab(BaseTab):
             self.log("[Gallery] First scan after prewarm, using incremental sync")
         incremental = self._initial_scan_done
         self._manager.display_items(sorted_items, self._view_mode, incremental=incremental)
+
+        # Hide loading overlay after display completes
+        self.hide_loading_overlay()
 
         # Update tracking state for smart redisplay
         self._last_displayed_paths = set(item['path'] for item in sorted_items)
@@ -662,6 +668,26 @@ class GalleryTab(BaseTab):
         collapsed = get_setting("gallery_sidebar_collapsed")
         if collapsed:
             self._groups_panel._toggle_collapse()
+
+    def _setup_loading_overlay(self):
+        """Set up a loading overlay for gallery switching feedback."""
+        from loading_widgets import LoadingOverlay
+
+        # Create overlay as child of scroll area so it covers the gallery content
+        self._loading_overlay = LoadingOverlay(self.ui.galleryScrollArea)
+        self._loading_overlay.hide()
+
+    def show_loading_overlay(self, message="Loading..."):
+        """Show the loading overlay with a message."""
+        if hasattr(self, '_loading_overlay'):
+            # Ensure correct size before showing
+            self._loading_overlay.setGeometry(self.ui.galleryScrollArea.rect())
+            self._loading_overlay.show_loading(message)
+
+    def hide_loading_overlay(self):
+        """Hide the loading overlay."""
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.hide_loading()
 
     def _on_sidebar_collapsed(self, is_collapsed):
         """Save sidebar collapsed state to settings."""
