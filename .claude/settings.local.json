@@ -82,7 +82,11 @@
       "Bash(pythonvenvScriptspython.exe _test_debug_filter.py)",
       "Bash(git log:*)"
     ],
-    "deny": [],
+    "deny": [
+      "Read(./python/venv/**)",
+      "Read(./**/__pycache__/**)",
+      "Read(./.git/**)"
+    ],
     "ask": []
   }
 }

@@ -32,12 +32,61 @@ def fast_scandir(dirname):
         dirname: Root directory to scan
 
     Returns:
-        list: List of all subdirectory paths
+        list: List of all subdirectory paths (strings)
     """
     subfolders = [f.path for f in os.scandir(dirname) if f.is_dir()]
     for dirname in list(subfolders):
         subfolders.extend(fast_scandir(dirname))
     return subfolders
+
+
+def scan_directories(root: str, recursive: bool = True) -> List[Path]:
+    """
+    Scan directory and return subdirectories using pathlib.
+
+    Args:
+        root: Root directory to scan
+        recursive: If True, scan recursively; if False, only immediate children
+
+    Returns:
+        List of Path objects for all subdirectories
+    """
+    if not root or not os.path.isdir(root):
+        return []
+
+    root_path = Path(root)
+    if recursive:
+        return [p for p in root_path.rglob("*") if p.is_dir()]
+    else:
+        return [p for p in root_path.iterdir() if p.is_dir()]
+
+
+def scan_files_by_extension(
+    root: str,
+    extensions: set,
+    recursive: bool = True
+) -> List[Path]:
+    """
+    Scan directory for files with specific extensions.
+
+    Args:
+        root: Root directory to scan
+        extensions: Set of extensions to match (lowercase, with dot, e.g., {'.png', '.jpg'})
+        recursive: If True, scan recursively
+
+    Returns:
+        List of Path objects for matching files
+    """
+    if not root or not os.path.isdir(root):
+        return []
+
+    root_path = Path(root)
+    pattern = "**/*" if recursive else "*"
+
+    return [
+        p for p in root_path.glob(pattern)
+        if p.is_file() and p.suffix.lower() in extensions
+    ]
 
 
 def find_renders(render_path):

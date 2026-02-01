@@ -50,8 +50,8 @@ class CanvasSyncManager(QObject):
         self._last_local_save = 0.0
         self._is_dirty = False
 
-        # Lock for thread-safe file operations
-        self._file_lock = threading.Lock()
+        # Lock for thread-safe file operations (RLock for reentrant safety)
+        self._file_lock = threading.RLock()
 
         # Setup state sync timer
         self._state_timer = QTimer(self)

@@ -404,6 +404,55 @@ for i in range(5):
 - **ComfyUI Workflows:** 2 formats (UI/nodes vs API), use `is_api_format()` to detect
 - **Imports:** Lazy import UI components inside functions (avoid module-level `from resources.ui...`)
 
+## Pattern Guidelines
+
+### Signal Naming Convention
+When creating Qt signals, follow these conventions:
+- **Completion events:** Use past tense - `job_completed`, `file_saved`, `scan_finished`
+- **Request events:** Use "requested" suffix - `refresh_requested`, `navigate_requested`
+- **State changes:** Use "changed" suffix - `settings_changed`, `selection_changed`
+- **Format:** `{entity}_{action}` - e.g., `gallery_refresh_requested`, `job_progress`
+
+### Error Handling Guide
+Three patterns are available, use the appropriate one:
+- **`@safe_operation(name, default)`** - Decorator for entire functions that may fail
+- **`with handle_errors(name)`** - Context manager for specific code blocks
+- **`log_error(op, error, var)`** - Manual logging after catch
+
+```python
+# Decorator for whole function
+@safe_operation("load_settings", return_on_error={})
+def load_settings():
+    ...
+
+# Context manager for blocks
+def process():
+    with handle_errors("parse_data"):
+        data = parse(raw_data)
+    with handle_errors("transform"):
+        result = transform(data)
+```
+
+### Caching Guide
+Use the caching utilities from `core/caching.py`:
+- **`@cached_with_ttl(seconds)`** - Decorator for time-based cache invalidation
+- **`ThreadSafeCache`** - Thread-safe dictionary cache for mutable shared state
+- **`functools.lru_cache`** - For pure functions with immutable results
+
+```python
+from core.caching import cached_with_ttl, ThreadSafeCache
+
+@cached_with_ttl(seconds=300)
+def get_user_data(user_id):
+    return db.fetch(user_id)
+
+cache = ThreadSafeCache(max_size=100)
+cache.set("key", value, ttl=60)
+```
+
+### Thread Safety
+Always use `threading.RLock()` (not `Lock()`) for thread-safe access. RLock allows the same thread to acquire the lock multiple times without deadlock.
+
 ## Utilities
 
 **core/utils.py:** Common helpers:
@@ -418,6 +467,21 @@ for i in range(5):
 - `with handle_errors(name, reraise=False)` - context manager for error blocks
 - `log_error(operation, error, variable)` - consistent error logging format
 - `format_error(operation, error, variable, include_traceback)` - format error message string
+
+**core/validators.py:** Path and data validation utilities:
+- `is_valid_file(path)`, `is_valid_directory(path)` - boolean checks
+- `validate_file(path)`, `validate_directory(path)` - raise ValidationError on failure
+- `validate_file_for_operation(path, operation)` - returns bool, logs errors
+- `safe_list_dir(path, pattern)` - list directory with error handling
+
+**core/caching.py:** Reusable caching patterns:
+- `@cached_with_ttl(seconds)` - decorator for time-based cache invalidation
+- `ThreadSafeCache(max_size)` - thread-safe dictionary cache with optional size limit
+- `CachedProperty(ttl)` - property descriptor with optional expiration
+
+**core/metadata_file.py:** Thread-safe JSON metadata file handling:
+- `MetadataFile(directory, filename)` - class for JSON files with mtime-based caching
+- `get_metadata_file(directory, filename)` - factory for reusing MetadataFile instances
 
 **core/config.py:** `UIColors` (background, text, accent, status colors, `GROUP_COLORS` for gallery groups), `UIStyles` (reusable stylesheet snippets)
 
@@ -481,12 +545,38 @@ from deadline.parser import parse_deadline_output, extract_job_id
 
 **geo/animation_controller.py:** `AnimationController` (playback state, timing), `AnimationTransportBar` (play/pause/loop UI)
 
+**services/scanners.py:** File scanner strategy pattern:
+- `RenderScanner`, `HIPScanner`, `CompScanner`, `ImageScanner`, `VideoScanner`, `ModelScanner`, `USDScanner`
+- `get_scanner(scanner_type)` - factory function for scanner instances
+- `scan_files(directory, scanner_type)` - convenience function for one-line scanning
+
+```python
+from services.scanners import RenderScanner, get_scanner
+scanner = RenderScanner()
+files = scanner.scan("/path/to/renders")
+# Or use factory:
+files = get_scanner("render").scan("/path/to/renders")
+```
+
 **ui/tabs/base_tab.py Helpers:**
+- `TAB_CONFIG` class attribute - define tab metadata using `TabConfig(ui_file, tab_name, tab_id)` dataclass
 - `self.start_worker(func, *args, on_result=..., on_error=..., on_progress=..., worker_kwargs={})` - simplified worker thread management (use `worker_kwargs` for keyword arguments to function)
+- `self.spinner_context(message, success_msg)` - context manager for spinner lifecycle
 - `self.show_status(message, level)` - status bar updates (info/success/warning/error)
 - `self.update_status_with_spinner(message, color, start=True)` - status bar with spinner control
 - `self.pulse_button(widget)` - safe button animation
 - `self.on_worker_success()` / `self.on_worker_error()` - standard completion handlers
+
+```python
+from ui.tabs.base_tab import BaseTab, TabConfig
+
+class MyTab(BaseTab):
+    TAB_CONFIG = TabConfig(ui_file="my_tab.ui", tab_name="My Tab")
+
+    def do_work(self):
+        with self.spinner_context("Processing...", success_msg="Done!"):
+            heavy_computation()
+```
 
 **ui/tabs/gallery/base_manager.py:** Base class for gallery manager components with same helpers as BaseTab
 

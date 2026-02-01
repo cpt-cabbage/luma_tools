@@ -7,6 +7,8 @@ Provides a common interface for tab initialization, UI loading, and signal conne
 import os
 import logging
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from PySide6 import QtCore, QtWidgets, QtUiTools
@@ -16,6 +18,37 @@ from PySide6 import QtCore, QtWidgets, QtUiTools
 from ui_components import StatusColors as _StatusColors
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TabConfig:
+    """
+    Configuration dataclass for tab metadata.
+
+    Use this to define tab properties instead of individual property overrides:
+
+        class MyTab(BaseTab):
+            TAB_CONFIG = TabConfig(
+                ui_file="my_tab.ui",
+                tab_name="My Tab",
+                tab_id="mytab"
+            )
+
+    Args:
+        ui_file: UI filename relative to resources/ui/tabs/
+        tab_name: Display name for this tab
+        tab_id: Unique identifier for settings/state (defaults to tab_name.lower().replace(' ', '_'))
+        icon: Optional icon name for tab (default: "")
+    """
+    ui_file: str
+    tab_name: str
+    tab_id: str = ""
+    icon: str = ""
+
+    def __post_init__(self):
+        # Auto-generate tab_id from tab_name if not provided
+        if not self.tab_id:
+            self.tab_id = self.tab_name.lower().replace(' ', '_')
 
 
 class TabSignals(QtCore.QObject):
@@ -30,19 +63,38 @@ class BaseTab(ABC):
     """
     Base class for all tab modules.
 
-    Each tab module should:
-    1. Define its UI file path
-    2. Define its tab name
-    3. Connect its signals
+    Each tab module should either:
+    1. Define TAB_CONFIG class attribute with a TabConfig instance (preferred), OR
+    2. Override ui_file and tab_name properties (legacy)
+
+    Plus:
+    3. Connect its signals via connect_signals()
     4. Implement its event handlers
 
     Class attributes:
         StatusColors: Enum for status message colors (INFO, SUCCESS, WARNING, ERROR)
                      Use as self.StatusColors.INFO in subclasses
+        TAB_CONFIG: Optional TabConfig instance for tab metadata
+
+    Example with TAB_CONFIG (preferred):
+        class MyTab(BaseTab):
+            TAB_CONFIG = TabConfig(ui_file="my_tab.ui", tab_name="My Tab")
+
+    Example with properties (legacy):
+        class MyTab(BaseTab):
+            @property
+            def ui_file(self) -> str:
+                return "my_tab.ui"
+            @property
+            def tab_name(self) -> str:
+                return "My Tab"
     """
 
     # Make StatusColors available to all subclasses without repeated imports
     StatusColors = _StatusColors
+
+    # Optional: Define TAB_CONFIG in subclass to avoid property boilerplate
+    TAB_CONFIG: Optional[TabConfig] = None
 
     def __init__(self, main_window, app_state):
         """
@@ -63,20 +115,37 @@ class BaseTab(ABC):
         self.project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
 
     @property
-    @abstractmethod
     def ui_file(self) -> str:
-        """Return the UI filename (relative to resources/ui/tabs/)."""
-        pass
+        """Return the UI filename (relative to resources/ui/tabs/).
+
+        Can be provided via TAB_CONFIG or by overriding this property.
+        """
+        if self.TAB_CONFIG:
+            return self.TAB_CONFIG.ui_file
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must either define TAB_CONFIG or override ui_file property"
+        )
 
     @property
-    @abstractmethod
     def tab_name(self) -> str:
-        """Return the display name for this tab."""
-        pass
+        """Return the display name for this tab.
+
+        Can be provided via TAB_CONFIG or by overriding this property.
+        """
+        if self.TAB_CONFIG:
+            return self.TAB_CONFIG.tab_name
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must either define TAB_CONFIG or override tab_name property"
+        )
 
     @property
     def tab_id(self) -> str:
-        """Return a unique identifier for this tab (used for settings, etc.)."""
+        """Return a unique identifier for this tab (used for settings, etc.).
+
+        Can be provided via TAB_CONFIG or by overriding this property.
+        """
+        if self.TAB_CONFIG:
+            return self.TAB_CONFIG.tab_id
         return self.tab_name.lower().replace(' ', '_')
 
     @property
@@ -265,6 +334,46 @@ class BaseTab(ABC):
 
         if self.animator:
             self.animator.update_status_animated(message, color)
+
+    @contextmanager
+    def spinner_context(self, message: str, success_msg: str = None, error_msg: str = None):
+        """
+        Context manager for spinner lifecycle.
+
+        Automatically starts spinner on enter and stops on exit. Shows appropriate
+        status message based on success or exception.
+
+        Args:
+            message: Message to display while operation is running
+            success_msg: Optional message to show on successful completion
+            error_msg: Optional message prefix to show on error (default: "Error")
+
+        Example:
+            with self.spinner_context("Processing...", success_msg="Done!"):
+                do_something()
+                do_something_else()
+                # Spinner stops automatically, shows "Done!" on success
+                # Shows "Error: ..." if exception occurs
+
+            # Without success message (just stops spinner):
+            with self.spinner_context("Saving..."):
+                save_data()
+        """
+        from ui_components import StatusColors
+
+        self.update_status_with_spinner(message, StatusColors.INFO)
+        try:
+            yield
+            # Success path
+            if success_msg:
+                self.update_status_with_spinner(success_msg, StatusColors.SUCCESS, start=False)
+            else:
+                self.main_window.stop_status_spinner()
+        except Exception as e:
+            # Error path
+            prefix = error_msg or "Error"
+            self.update_status_with_spinner(f"{prefix}: {e}", StatusColors.ERROR, start=False)
+            raise
 
     def on_worker_success(self, message: str, status_message: str = None, log_message: str = None):
         """

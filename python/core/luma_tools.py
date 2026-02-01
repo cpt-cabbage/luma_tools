@@ -1231,6 +1231,8 @@ def main():
             def run(self):
                 scan_gallery_worker()
 
+        # NOTE: Worker reference is kept alive by the while loop below - the local
+        # variable remains in scope until the loop completes, preventing GC.
         worker = ScanWorker()
         QThreadPool.globalInstance().start(worker)
 
@@ -1273,10 +1275,6 @@ def main():
         global _main_window
         window = LumaShotTools()
         _main_window = window  # Store reference for cross-widget access
-
-        # NOTE: 3D viewer initialization moved to AFTER splash closes
-        # to prevent blocking the splash screen during WebEngine initialization
-        _threejs_prewarm_viewer = None
 
         splash.update_progress(95, "Loading", "Finalizing...")
         app.processEvents()

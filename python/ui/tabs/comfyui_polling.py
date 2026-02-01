@@ -7,9 +7,7 @@ Emits events through the PipelineEventBus for cross-tab communication.
 import os
 import time
 import logging
-from PySide6.QtCore import QTimer, QThreadPool
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, QThreadPool, Qt
 from dialog_helpers import confirm_action
 
 logger = logging.getLogger(__name__)
@@ -373,6 +371,8 @@ class PollingMixin:
             self._iterate_poll_timer.stop()
         self.main_window.stop_status_spinner()
         self._update_cancel_button_visibility()
+        # Clear worker reference to allow garbage collection
+        self._iterate_poll_worker = None
         # Clear persisted job state since polling stopped
         self._clear_running_job_state()
 
@@ -796,6 +796,8 @@ class PollingMixin:
             self._batch_poll_timer.stop()
         self.main_window.stop_status_spinner()
         self._update_cancel_button_visibility()
+        # Clear worker references to allow garbage collection
+        self._batch_poll_workers.clear()
         # Clear persisted job state since polling stopped
         self._clear_running_job_state()
 

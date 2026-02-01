@@ -129,7 +129,8 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
 
 GALLERY_METADATA_FILE = "comfyui_gallery_metadata.json"
 _gallery_metadata_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
-_gallery_metadata_cache_lock = threading.Lock()
+# Use RLock for reentrant safety (same thread can acquire multiple times)
+_gallery_metadata_cache_lock = threading.RLock()
 
 
 def _get_metadata_path(output_dir: str) -> str:
