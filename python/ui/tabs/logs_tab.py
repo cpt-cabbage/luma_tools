@@ -60,7 +60,10 @@ class LogsTab(BaseTab):
         """Connect log tab signals."""
         self.ui.ClearLogButton.clicked.connect(self._on_clear_log_clicked)
         self.ui.PauseLogButton.clicked.connect(self._on_pause_log_clicked)
-        self.ui.VerboseLogsCheckbox.toggled.connect(self._on_verbose_logs_toggled)
+        # Use stateChanged instead of toggled - stateChanged is more reliable
+        # toggled only fires on checkState changes from user interaction,
+        # stateChanged fires for any checkbox state change
+        self.ui.VerboseLogsCheckbox.stateChanged.connect(self._on_verbose_checkbox_state_changed)
 
     def initialize(self):
         """Initialize the logs tab with saved settings."""
@@ -73,8 +76,13 @@ class LogsTab(BaseTab):
         self.ui.LogOutput.setContextMenuPolicy(Qt.CustomContextMenu)
         self.ui.LogOutput.customContextMenuRequested.connect(self._show_log_context_menu)
 
-    def _on_verbose_logs_toggled(self, checked: bool):
-        """Handle debug logs checkbox toggle (view filter only)."""
+    def _on_verbose_checkbox_state_changed(self, state: int):
+        """Handle debug logs checkbox state change (view filter only).
+
+        Args:
+            state: Qt.CheckState value (0=Unchecked, 2=Checked)
+        """
+        checked = state == 2  # Qt.Checked
         self._show_debug = checked
         set_setting("show_verbose_logs", checked, verbose=False)
         self._rerender_log()
@@ -181,19 +189,28 @@ class LogsTab(BaseTab):
     def _is_debug_message(self, message: str) -> bool:
         """Check if a message is a debug-level message (filtered from view by default).
 
-        Handles both direct messages like '[Detection] ...' and logging-formatted
-        messages like '[INFO] [Detection] ...' where a log level prefix is prepended.
+        A message is considered debug if:
+        1. It starts with [DEBUG] log level prefix, OR
+        2. It starts with one of DEBUG_LOG_PREFIXES directly, OR
+        3. It has a log level prefix followed by one of DEBUG_LOG_PREFIXES
         """
         stripped = message.lstrip()
-        # Check direct prefix match
+
+        # Filter ALL messages at DEBUG log level
+        if stripped.startswith("[DEBUG] "):
+            return True
+
+        # Check direct prefix match (e.g. "[Detection] ..." from tab.log() calls)
         if stripped.startswith(DEBUG_LOG_PREFIXES):
             return True
+
         # Check after logging level prefix (e.g. "[INFO] [Detection]...")
-        for prefix in ("[INFO] ", "[DEBUG] ", "[WARNING] "):
+        for prefix in ("[INFO] ", "[WARNING] "):
             if stripped.startswith(prefix):
                 remainder = stripped[len(prefix):]
                 if remainder.startswith(DEBUG_LOG_PREFIXES):
                     return True
+
         return False
 
     def append_log(self, message: str):

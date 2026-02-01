@@ -114,6 +114,50 @@ class PollingMixin:
         self._recovery_persisted_state = None
 
     # =========================================================================
+    # AUTO-ADD TO CANVAS
+    # =========================================================================
+
+    def _auto_add_to_canvas(self, output_files: list):
+        """
+        Add output files to canvas if auto-add is enabled.
+
+        Uses event bus for cross-tab communication.
+
+        Args:
+            output_files: List of output file paths
+        """
+        # Check if auto-add checkbox exists and is checked
+        if not hasattr(self.ui, 'ComfyUIAutoAddToCanvas'):
+            return
+
+        if not self.ui.ComfyUIAutoAddToCanvas.isChecked():
+            return
+
+        if not output_files:
+            return
+
+        # Add each output file to the canvas via event bus
+        added_count = 0
+        for path in output_files:
+            if os.path.exists(path) and path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                if EVENT_BUS_AVAILABLE:
+                    pipeline_events.add_to_canvas.emit(path)
+                    added_count += 1
+                else:
+                    # Fallback to direct tab access
+                    canvas_tab = self.main_window.get_tab("canvas")
+                    if canvas_tab and hasattr(canvas_tab, 'add_image_to_canvas'):
+                        try:
+                            canvas_tab.add_image_to_canvas(path)
+                            added_count += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to add {path} to canvas: {e}")
+
+        if added_count > 0:
+            self.log(f"[Canvas] Auto-added {added_count} image(s) to canvas")
+            self.show_status(f"Added {added_count} image(s) to Canvas", "success")
+
+    # =========================================================================
     # ITERATE MODE POLLING
     # =========================================================================
 
@@ -338,8 +382,9 @@ class PollingMixin:
             self._handle_iterate_job_completed()
         except Exception as e:
             logger.error(f"ERROR in _on_iterate_job_completed: {e}", exc_info=True)
-            self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
-            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+            if hasattr(self.ui, 'ComfyUIIterateStatus') and self.ui.ComfyUIIterateStatus:
+                self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
+                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
 
     def _handle_iterate_job_completed(self):
         """Handle iterate job completion and record timing."""
@@ -437,6 +482,9 @@ class PollingMixin:
             if gallery_tab:
                 self.log("[Iterate] Triggering gallery refresh...")
                 gallery_tab._on_refresh(show_status=False)
+
+            # Auto-add to canvas if enabled
+            self._auto_add_to_canvas(output_files)
         else:
             self.log("[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
@@ -858,6 +906,17 @@ class PollingMixin:
         if gallery_tab:
             self.log("[Batch] Triggering gallery refresh...")
             gallery_tab._on_refresh(show_status=False)
+
+        # Auto-add to canvas if enabled
+        # For batch mode, we look for files created during the batch
+        if network_dir:
+            from comfyui.metadata import get_job_output_files
+            output_files = get_job_output_files(
+                network_dir,
+                min_mtime=self._batch_start_time
+            )
+            if output_files:
+                self._auto_add_to_canvas(output_files)
 
     # =========================================================================
     # CANCEL JOBS

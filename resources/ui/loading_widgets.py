@@ -4,7 +4,7 @@ Spinner and loading animation widgets.
 Provides various loading indicators for background operations.
 """
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
 from PySide6.QtGui import QPainter, QColor, QPen
 
 from styles import LoadingStyles
@@ -210,7 +210,7 @@ class PulsingDotsWidget(QWidget):
             )
 
 
-class LoadingOverlay(QWidget):
+class LoadingOverlay(QFrame):
     """
     Semi-transparent overlay with centered spinner and message.
 
@@ -221,9 +221,14 @@ class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Make overlay cover parent and be on top
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAutoFillBackground(False)
+        # Use QFrame styling for reliable background
+        self.setObjectName("LoadingOverlay")
+        self.setFrameStyle(QFrame.NoFrame)
+        self.setStyleSheet("""
+            QFrame#LoadingOverlay {
+                background-color: rgba(30, 30, 30, 220);
+            }
+        """)
 
         # Layout for spinner and message
         layout = QVBoxLayout(self)
@@ -256,20 +261,13 @@ class LoadingOverlay(QWidget):
         # Start hidden
         self.hide()
 
-    def paintEvent(self, event):
-        """Paint semi-transparent background."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # Semi-transparent dark background
-        painter.fillRect(self.rect(), QColor(30, 30, 30, 200))
-
     def show_loading(self, message="Loading..."):
         """Show the overlay with a message."""
         self._message.setText(message)
         self._spinner.start()
         self.show()
         self.raise_()
+        self.update()  # Force repaint
 
     def hide_loading(self):
         """Hide the overlay."""

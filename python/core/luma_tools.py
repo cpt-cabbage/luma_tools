@@ -900,6 +900,7 @@ class LumaShotTools(QtWidgets.QWidget):
             'logs': 'terminal',
             'comfyui': 'sparkles',
             'gallery': 'image',
+            'canvas': 'grid',
             'settings': 'settings',
         }
 

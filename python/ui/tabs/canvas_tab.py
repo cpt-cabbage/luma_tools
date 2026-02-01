@@ -1,0 +1,927 @@
+"""
+Canvas tab module for Luma Tools.
+
+Provides a collaborative infinite canvas workspace where generations live spatially,
+synchronized across team members via the shared network drive.
+
+Features:
+- Infinite pan/zoom canvas with image nodes
+- Bezier curve connections showing iteration lineage
+- Sticky notes and group regions for organization
+- Real-time collaboration via network file sync
+- Minimap for navigation
+- Collapsible toolbar
+- Drawing tools with pen tablet support
+- Grid and snapping
+- Non-destructive image manipulation
+- Undo/redo
+- Export/import as .luma files
+"""
+
+import os
+import logging
+from pathlib import Path
+
+from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QMenu
+
+from .base_tab import BaseTab
+
+logger = logging.getLogger(__name__)
+
+
+class CanvasTab(BaseTab):
+    """Tab for collaborative infinite canvas workspace."""
+
+    @property
+    def ui_file(self) -> str:
+        return "canvas.ui"
+
+    @property
+    def tab_name(self) -> str:
+        return "Canvas"
+
+    @property
+    def tab_id(self) -> str:
+        return "canvas"
+
+    def connect_signals(self):
+        """Connect canvas tab signals."""
+        # Directory controls
+        self.ui.CanvasSourceToggle.clicked.connect(self._on_source_toggle)
+        self.ui.CanvasOpenExplorer.clicked.connect(self._on_open_explorer)
+
+        # Toolbar buttons - Basic tools
+        self.ui.CanvasToolSelect.clicked.connect(lambda: self._set_tool("select"))
+        self.ui.CanvasToolPan.clicked.connect(lambda: self._set_tool("pan"))
+        self.ui.CanvasToolConnect.clicked.connect(lambda: self._set_tool("connect"))
+        self.ui.CanvasToolAnnotate.clicked.connect(lambda: self._set_tool("annotate"))
+        self.ui.CanvasToolGroup.clicked.connect(lambda: self._set_tool("group"))
+        self.ui.CanvasToolCrop.clicked.connect(lambda: self._set_tool("crop"))
+
+        # Drawing tools toggle (opens floating panel)
+        self.ui.CanvasToolDraw.clicked.connect(self._on_draw_toggle)
+
+        # Grid and snapping
+        self.ui.CanvasToggleGrid.clicked.connect(self._on_toggle_grid)
+        self.ui.CanvasToggleSnap.clicked.connect(self._on_toggle_snap)
+
+        # Undo/Redo
+        self.ui.CanvasUndo.clicked.connect(self._on_undo)
+        self.ui.CanvasRedo.clicked.connect(self._on_redo)
+
+        # View and File menus
+        self.ui.CanvasViewMenu.clicked.connect(self._show_view_menu)
+        self.ui.CanvasFileMenu.clicked.connect(self._show_file_menu)
+
+        # View controls
+        self.ui.CanvasFitAll.clicked.connect(self._on_fit_all)
+        self.ui.CanvasFitSelection.clicked.connect(self._on_fit_selection)
+        self.ui.CanvasZoomSlider.valueChanged.connect(self._on_zoom_changed)
+        self.ui.CanvasResetZoom.clicked.connect(self._on_reset_zoom)
+        self.ui.CanvasGoOrigin.clicked.connect(self._on_go_origin)
+
+        # Color sampler
+        self.ui.CanvasColorSampler.clicked.connect(self._on_color_sampler)
+
+        # Toolbar collapse
+        self.ui.CanvasToolbarToggle.clicked.connect(self._toggle_toolbar)
+
+        # Timeline collapse
+        self.ui.CanvasTimelineToggle.clicked.connect(self._toggle_timeline)
+
+    def initialize(self):
+        """Initialize the canvas tab."""
+        from ui.canvas import CollaborativeCanvas, CanvasSyncManager, CursorPresenceManager, UndoStack
+
+        # Source mode: "network" or "custom"
+        self._source_mode = "network"
+        self._custom_path = ""
+        self._current_path = ""
+
+        # Tool state
+        self._current_tool = "select"
+        self._toolbar_collapsed = False
+        self._timeline_collapsed = True  # Default collapsed per plan
+
+        # Create the canvas widget
+        self._canvas = CollaborativeCanvas()
+        self._canvas.set_tab(self)  # Set tab reference for gallery integration
+
+        # Setup undo stack
+        self._undo_stack = UndoStack(self._canvas)
+        self._canvas.set_undo_stack(self._undo_stack)
+        self._undo_stack.can_undo_changed.connect(self._on_undo_state_changed)
+        self._undo_stack.can_redo_changed.connect(self._on_redo_state_changed)
+
+        # Insert canvas into the placeholder container
+        canvas_layout = QtWidgets.QVBoxLayout(self.ui.CanvasContainer)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.addWidget(self._canvas)
+
+        # Connect canvas signals
+        self._canvas.canvas_modified.connect(self._on_canvas_modified)
+        self._canvas.selection_changed.connect(self._on_selection_changed)
+        self._canvas.item_added.connect(self._on_item_added)
+        self._canvas.cursor_moved.connect(self._on_cursor_moved)
+        self._canvas.cursor_moved.connect(self._update_coordinates)
+        self._canvas.zoom_changed.connect(self._on_zoom_from_canvas)
+
+        # Setup sync manager for collaboration (use canvas as parent since it's a QObject)
+        self._sync_manager = CanvasSyncManager(self._canvas)
+        self._sync_manager.state_changed.connect(self._on_remote_state_changed)
+        self._sync_manager.sync_error.connect(self._on_sync_error)
+
+        # Setup cursor presence manager
+        self._presence_manager = CursorPresenceManager(self._canvas)
+        self._presence_manager.cursors_updated.connect(self._on_cursors_updated)
+        self._presence_manager.user_joined.connect(self._on_user_joined)
+        self._presence_manager.user_left.connect(self._on_user_left)
+
+        # Setup minimap
+        self._setup_minimap()
+
+        # Setup floating drawing tools panel
+        self._setup_drawing_panel()
+
+        # Setup timeline (collapsed by default)
+        self._setup_timeline()
+        self.ui.CanvasTimelineContainer.setVisible(False)
+
+        # Load initial directory
+        self._update_canvas_path()
+
+        # Update toolbar button states
+        self._update_tool_buttons()
+
+        # Setup event bus subscriptions for cross-tab communication
+        self._setup_event_bus_subscriptions()
+
+        logger.info("Canvas tab initialized")
+
+    def _setup_event_bus_subscriptions(self):
+        """Subscribe to event bus signals for cross-tab awareness."""
+        try:
+            from core.event_bus import pipeline_events
+            pipeline_events.add_to_canvas.connect(self._on_add_to_canvas_requested)
+            logger.debug("Canvas tab subscribed to event bus")
+        except ImportError:
+            logger.debug("Event bus not available for canvas tab")
+
+    def _on_add_to_canvas_requested(self, image_path: str):
+        """Handle request to add an image to the canvas.
+
+        Called when ComfyUI or Gallery wants to add an image to the canvas.
+
+        Args:
+            image_path: Path to the image to add
+        """
+        if hasattr(self, 'add_image_to_canvas'):
+            self.add_image_to_canvas(image_path)
+
+    def _setup_minimap(self):
+        """Setup the canvas minimap widget."""
+        from ui.canvas import CanvasMinimap
+
+        if not hasattr(self.ui, 'CanvasMinimapContainer'):
+            return
+
+        # Create minimap widget
+        self._minimap = CanvasMinimap()
+        self._minimap.set_canvas(self._canvas)
+
+        # Use existing layout or create one if needed
+        minimap_layout = self.ui.CanvasMinimapContainer.layout()
+        if minimap_layout is None:
+            minimap_layout = QtWidgets.QVBoxLayout(self.ui.CanvasMinimapContainer)
+            minimap_layout.setContentsMargins(2, 2, 2, 2)
+
+        # Clear any placeholder widgets and add minimap
+        while minimap_layout.count():
+            item = minimap_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        minimap_layout.addWidget(self._minimap)
+
+        # Make container visible
+        self.ui.CanvasMinimapContainer.setVisible(True)
+
+    def _setup_timeline(self):
+        """Setup the generation timeline widget."""
+        # Timeline will be implemented in Phase 5
+        # For now, container exists but is collapsed
+        pass
+
+    def _setup_drawing_panel(self):
+        """Setup the floating drawing tools panel."""
+        from ui.panels import DrawingToolsPanel
+
+        # Create floating panel as child of the canvas container
+        self._drawing_panel = DrawingToolsPanel(self.ui.CanvasContainer)
+
+        # Connect panel signals
+        self._drawing_panel.tool_changed.connect(self._on_drawing_tool_changed)
+        self._drawing_panel.brush_size_changed.connect(self._on_brush_size_changed)
+        self._drawing_panel.color_changed.connect(self._on_drawing_color_changed)
+        self._drawing_panel.panel_closed.connect(self._on_drawing_panel_closed)
+
+        # Initially hidden
+        self._drawing_panel.hide()
+
+    def _on_draw_toggle(self):
+        """Handle Draw toggle button click."""
+        is_checked = self.ui.CanvasToolDraw.isChecked()
+
+        if is_checked:
+            # Show the floating drawing tools panel
+            self._show_drawing_panel()
+            # Set to pen tool by default when entering drawing mode
+            current_tool = self._drawing_panel.get_tool()
+            self._set_tool(current_tool)
+        else:
+            # Hide the panel and switch back to select tool
+            self._drawing_panel.hide()
+            self._set_tool("select")
+
+    def _show_drawing_panel(self):
+        """Show the drawing tools panel at a good position."""
+        if not hasattr(self, '_drawing_panel'):
+            return
+
+        # Position panel in top-left of canvas area with some padding
+        panel_x = 10
+        panel_y = 10
+        self._drawing_panel.show_at(panel_x, panel_y)
+
+    def _on_drawing_tool_changed(self, tool: str):
+        """Handle tool change from drawing panel."""
+        self._set_tool(tool)
+
+    def _on_brush_size_changed(self, size: int):
+        """Handle brush size change from drawing panel."""
+        self._canvas.set_brush_size(size)
+        logger.debug(f"Brush size set to: {size}")
+
+    def _on_drawing_color_changed(self, color):
+        """Handle drawing color change from drawing panel."""
+        self._canvas.set_drawing_color(color)
+        logger.debug(f"Drawing color set to: {color.name()}")
+
+    def _on_drawing_panel_closed(self):
+        """Handle drawing panel being closed."""
+        # Uncheck the Draw button and switch to select tool
+        self.ui.CanvasToolDraw.setChecked(False)
+        self._set_tool("select")
+
+    def _configure_sync_managers(self):
+        """Configure sync managers for the current directory."""
+        if not self._current_path:
+            return
+
+        jobname = self.app_state.jobname or "default"
+        username = self.app_state.user or "unknown"
+
+        # Configure both managers
+        self._sync_manager.configure(self._current_path, jobname, username)
+        self._presence_manager.configure(self._current_path, jobname, username)
+
+    def _start_sync(self):
+        """Start synchronization polling."""
+        if not self._current_path:
+            return
+
+        self._sync_manager.start()
+        self._presence_manager.start()
+        logger.info("Canvas sync started")
+
+    def _stop_sync(self):
+        """Stop synchronization polling."""
+        self._sync_manager.stop()
+        self._presence_manager.stop()
+        logger.info("Canvas sync stopped")
+
+    def _update_canvas_path(self):
+        """Update the canvas to the current directory."""
+        from core.settings_manager import safe_get_setting
+
+        if self._source_mode == "network":
+            network_path = safe_get_setting("comfyui_network_output_path", "")
+            if network_path and self.app_state.user:
+                self._current_path = os.path.join(network_path, self.app_state.user)
+            else:
+                self._current_path = ""
+        else:
+            self._current_path = self._custom_path
+
+        # Update button text
+        if self._source_mode == "network":
+            self.ui.CanvasSourceToggle.setText("Network Folder")
+        else:
+            dir_name = os.path.basename(self._current_path) if self._current_path else "Custom"
+            self.ui.CanvasSourceToggle.setText(f"Custom: {dir_name}")
+
+        # Stop existing sync before path change
+        if hasattr(self, '_sync_manager'):
+            self._stop_sync()
+
+        # Load canvas state for this directory
+        self._load_canvas_state()
+
+        # Configure and start sync for new path
+        if hasattr(self, '_sync_manager'):
+            self._configure_sync_managers()
+            self._start_sync()
+
+        logger.info(f"Canvas path updated: {self._current_path}")
+
+    def _load_canvas_state(self):
+        """Load canvas state from the current directory."""
+        if not self._current_path:
+            return
+
+        canvas_dir = os.path.join(self._current_path, "_canvas")
+
+        # Determine canvas filename based on jobname
+        jobname = self.app_state.jobname or "default"
+        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
+
+        if os.path.exists(canvas_file):
+            try:
+                from core.utils import load_json
+                state = load_json(canvas_file, {})
+                self._canvas.load_state(state)
+                # Sync all nodes with gallery data (likes, groups, colors)
+                self._canvas.sync_all_from_gallery()
+                logger.info(f"Loaded canvas state from {canvas_file}")
+            except Exception as e:
+                logger.error(f"Failed to load canvas state: {e}")
+        else:
+            # Clear canvas for new state
+            self._canvas.clear()
+            logger.info(f"No existing canvas state, starting fresh")
+
+    def _save_canvas_state(self):
+        """Save canvas state to the current directory."""
+        if not self._current_path:
+            return
+
+        # Use sync manager if available (updates its timestamp to prevent self-reload)
+        if hasattr(self, '_sync_manager') and self._sync_manager:
+            state = self._canvas.get_state()
+            state["modified_by"] = self.app_state.user or "unknown"
+            if self._sync_manager.save_state(state):
+                logger.debug("Saved canvas state via sync manager")
+            return
+
+        # Fallback: direct file save
+        from core.utils import ensure_directory, save_json
+
+        canvas_dir = os.path.join(self._current_path, "_canvas")
+        ensure_directory(canvas_dir)
+
+        # Determine canvas filename based on jobname
+        jobname = self.app_state.jobname or "default"
+        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
+
+        try:
+            state = self._canvas.get_state()
+            state["modified_by"] = self.app_state.user or "unknown"
+            save_json(canvas_file, state)
+            logger.info(f"Saved canvas state to {canvas_file}")
+        except Exception as e:
+            logger.error(f"Failed to save canvas state: {e}")
+
+    def _on_source_toggle(self):
+        """Handle source toggle button click."""
+        from file_dialogs import browse_directory_with_memory
+
+        if self._source_mode == "network":
+            # Switch to custom mode - prompt for directory
+            selected = browse_directory_with_memory(
+                parent=self.main_window,
+                title="Select Canvas Directory",
+                context="canvas_custom_dir"
+            )
+            if selected:
+                self._source_mode = "custom"
+                self._custom_path = selected
+                self._update_canvas_path()
+        else:
+            # Switch back to network mode
+            self._source_mode = "network"
+            self._update_canvas_path()
+
+    def _on_open_explorer(self):
+        """Open current directory in file explorer."""
+        if self._current_path and os.path.exists(self._current_path):
+            import subprocess
+            subprocess.Popen(f'explorer "{self._current_path}"')
+
+    def _set_tool(self, tool: str):
+        """Set the current canvas tool."""
+        self._current_tool = tool
+        self._canvas.set_tool(tool)
+        self._update_tool_buttons()
+        self._update_tool_hint()
+        logger.debug(f"Canvas tool set to: {tool}")
+
+    def _update_tool_buttons(self):
+        """Update toolbar button checked states."""
+        # Main toolbar tools
+        tools = {
+            "select": self.ui.CanvasToolSelect,
+            "pan": self.ui.CanvasToolPan,
+            "connect": self.ui.CanvasToolConnect,
+            "annotate": self.ui.CanvasToolAnnotate,
+            "group": self.ui.CanvasToolGroup,
+            "crop": self.ui.CanvasToolCrop,
+        }
+        # Drawing tools are in the floating panel
+        drawing_tools = {"pen", "rect", "ellipse", "line"}
+        is_drawing_tool = self._current_tool in drawing_tools
+
+        for tool_name, button in tools.items():
+            button.setChecked(tool_name == self._current_tool)
+
+        # Update Draw toggle button state
+        self.ui.CanvasToolDraw.setChecked(is_drawing_tool)
+
+        # Update drawing panel tool if visible
+        if hasattr(self, '_drawing_panel') and self._drawing_panel.isVisible():
+            self._drawing_panel.set_tool(self._current_tool)
+
+    # =========================================================================
+    # Grid and Snapping
+    # =========================================================================
+
+    def _on_toggle_grid(self):
+        """Toggle grid visibility."""
+        is_checked = self.ui.CanvasToggleGrid.isChecked()
+        self._canvas.toggle_grid(is_checked)
+        logger.debug(f"Grid toggled: {is_checked}")
+
+    def _on_toggle_snap(self):
+        """Toggle snapping (both grid and neighbor)."""
+        is_checked = self.ui.CanvasToggleSnap.isChecked()
+        self._canvas.toggle_snap_to_grid(is_checked)
+        self._canvas.toggle_snap_to_neighbors(is_checked)
+        logger.debug(f"Snapping toggled: {is_checked}")
+
+    # =========================================================================
+    # Undo/Redo
+    # =========================================================================
+
+    def _on_undo(self):
+        """Perform undo."""
+        if hasattr(self, '_undo_stack'):
+            self._undo_stack.undo()
+
+    def _on_redo(self):
+        """Perform redo."""
+        if hasattr(self, '_undo_stack'):
+            self._undo_stack.redo()
+
+    def _on_undo_state_changed(self, can_undo: bool):
+        """Update undo button state."""
+        self.ui.CanvasUndo.setEnabled(can_undo)
+        if can_undo and hasattr(self, '_undo_stack'):
+            self.ui.CanvasUndo.setToolTip(self._undo_stack.get_undo_text())
+        else:
+            self.ui.CanvasUndo.setToolTip("Undo (Ctrl+Z)")
+
+    def _on_redo_state_changed(self, can_redo: bool):
+        """Update redo button state."""
+        self.ui.CanvasRedo.setEnabled(can_redo)
+        if can_redo and hasattr(self, '_undo_stack'):
+            self.ui.CanvasRedo.setToolTip(self._undo_stack.get_redo_text())
+        else:
+            self.ui.CanvasRedo.setToolTip("Redo (Ctrl+Y)")
+
+    # =========================================================================
+    # View Menu (Alignment, Arrange, Z-Order)
+    # =========================================================================
+
+    def _show_view_menu(self):
+        """Show the View dropdown menu."""
+        menu = QMenu(self.main_window)
+
+        # Alignment submenu
+        align_menu = menu.addMenu("Align Selection")
+        align_menu.addAction("Align Left", lambda: self._canvas.align_selection("left"))
+        align_menu.addAction("Align Right", lambda: self._canvas.align_selection("right"))
+        align_menu.addAction("Align Top", lambda: self._canvas.align_selection("top"))
+        align_menu.addAction("Align Bottom", lambda: self._canvas.align_selection("bottom"))
+        align_menu.addSeparator()
+        align_menu.addAction("Center Horizontally", lambda: self._canvas.align_selection("center_h"))
+        align_menu.addAction("Center Vertically", lambda: self._canvas.align_selection("center_v"))
+
+        # Distribute submenu
+        dist_menu = menu.addMenu("Distribute Selection")
+        dist_menu.addAction("Distribute Horizontally", lambda: self._canvas.distribute_selection("horizontal"))
+        dist_menu.addAction("Distribute Vertically", lambda: self._canvas.distribute_selection("vertical"))
+
+        # Arrange submenu
+        arrange_menu = menu.addMenu("Arrange Selection")
+        arrange_menu.addAction("Grid", lambda: self._canvas.arrange_selection("grid"))
+        arrange_menu.addAction("Horizontal Row", lambda: self._canvas.arrange_selection("horizontal"))
+        arrange_menu.addAction("Vertical Column", lambda: self._canvas.arrange_selection("vertical"))
+        arrange_menu.addAction("Bin Pack", lambda: self._canvas.arrange_selection("pack"))
+
+        # Scale submenu
+        scale_menu = menu.addMenu("Scale Selection")
+        scale_menu.addAction("Match Width", lambda: self._show_scale_dialog("width"))
+        scale_menu.addAction("Match Height", lambda: self._show_scale_dialog("height"))
+        scale_menu.addAction("Match Area", lambda: self._show_scale_dialog("area"))
+
+        menu.addSeparator()
+
+        # Z-Order submenu
+        zorder_menu = menu.addMenu("Z-Order")
+        zorder_menu.addAction("Bring to Front (Ctrl+Shift+])", self._canvas.bring_to_front)
+        zorder_menu.addAction("Bring Forward (Ctrl+])", self._canvas.bring_forward)
+        zorder_menu.addAction("Send Backward (Ctrl+[)", self._canvas.send_backward)
+        zorder_menu.addAction("Send to Back (Ctrl+Shift+[)", self._canvas.send_to_back)
+
+        menu.addSeparator()
+
+        # View options
+        menu.addAction("Fit All (Ctrl+Space)", self._on_fit_all)
+        menu.addAction("Fit Selection", self._on_fit_selection)
+        menu.addAction("Reset Zoom (Ctrl+0)", lambda: self._canvas.set_zoom(1.0))
+        menu.addAction("Go to Origin (Home)", self._canvas.center_on_origin)
+
+        menu.addSeparator()
+
+        # Color sampler
+        menu.addAction("Show Color History", self._canvas.show_color_history_panel)
+
+        # Show menu below the button
+        button_pos = self.ui.CanvasViewMenu.mapToGlobal(
+            self.ui.CanvasViewMenu.rect().bottomLeft()
+        )
+        menu.exec_(button_pos)
+
+    def _show_scale_dialog(self, mode: str):
+        """Show dialog for uniform scaling."""
+        from PySide6.QtWidgets import QInputDialog
+
+        label = {"width": "Target Width:", "height": "Target Height:", "area": "Target Area:"}[mode]
+        default = {"width": 256, "height": 256, "area": 65536}[mode]
+
+        value, ok = QInputDialog.getInt(
+            self, f"Scale to {mode.title()}", label, default, 1, 10000
+        )
+        if ok:
+            self._canvas.scale_selection_uniform(mode, value)
+
+    # =========================================================================
+    # File Menu (Export/Import)
+    # =========================================================================
+
+    def _show_file_menu(self):
+        """Show the File dropdown menu."""
+        menu = QMenu(self.main_window)
+
+        menu.addAction("Export Canvas as .luma...", self._export_canvas)
+        menu.addAction("Export Canvas (link images)...", lambda: self._export_canvas(embed=False))
+        menu.addSeparator()
+        menu.addAction("Import .luma File...", self._import_canvas)
+        menu.addSeparator()
+        menu.addAction("Clear Canvas", self._clear_canvas)
+
+        # Show menu below the button
+        button_pos = self.ui.CanvasFileMenu.mapToGlobal(
+            self.ui.CanvasFileMenu.rect().bottomLeft()
+        )
+        menu.exec_(button_pos)
+
+    def _export_canvas(self, embed: bool = True):
+        """Export canvas to .luma file."""
+        from file_dialogs import save_file_with_memory
+        from ui.canvas import export_to_luma
+
+        output_path = save_file_with_memory(
+            parent=self.main_window,
+            title="Export Canvas",
+            filter="Luma Canvas Files (*.luma)",
+            context="canvas_export"
+        )
+
+        if not output_path:
+            return
+
+        state = self._canvas.get_state()
+        success = export_to_luma(state, output_path, embed_images=embed, base_path=self._current_path)
+
+        if success:
+            self.show_status(f"Exported canvas to {os.path.basename(output_path)}", "success")
+        else:
+            self.show_status("Failed to export canvas", "error")
+
+    def _import_canvas(self):
+        """Import canvas from .luma file."""
+        from file_dialogs import browse_file_with_memory
+        from ui.canvas import import_from_luma
+
+        input_path = browse_file_with_memory(
+            parent=self.main_window,
+            title="Import Canvas",
+            filter="Luma Canvas Files (*.luma);;All Files (*.*)",
+            context="canvas_import"
+        )
+
+        if not input_path:
+            return
+
+        # Ask where to extract embedded images
+        extract_path = self._current_path or os.path.dirname(input_path)
+
+        state = import_from_luma(input_path, extract_path)
+        if state:
+            self._canvas.load_state(state)
+            self.show_status(f"Imported canvas from {os.path.basename(input_path)}", "success")
+        else:
+            self.show_status("Failed to import canvas", "error")
+
+    def _clear_canvas(self):
+        """Clear the canvas after confirmation."""
+        from dialog_helpers import confirm_action
+
+        if confirm_action(
+            "Clear Canvas",
+            "Are you sure you want to clear all items from the canvas?",
+            parent=self.main_window
+        ):
+            self._canvas.clear()
+            if hasattr(self, '_undo_stack'):
+                self._undo_stack.clear()
+            self.show_status("Canvas cleared", "info")
+
+    def _on_fit_all(self):
+        """Fit all items in view."""
+        self._canvas.fit_all()
+
+    def _on_fit_selection(self):
+        """Fit selected items in view."""
+        self._canvas.fit_selection()
+
+    def _on_zoom_changed(self, value: int):
+        """Handle zoom slider change."""
+        # Slider is 5-320, representing 5%-320% zoom
+        zoom = value / 100.0
+        # Block signals to prevent feedback loop
+        self.ui.CanvasZoomSlider.blockSignals(True)
+        self._canvas.set_zoom(zoom)
+        self.ui.CanvasZoomSlider.blockSignals(False)
+        # Update percent label
+        self.ui.CanvasZoomPercent.setText(f"{value}%")
+
+    def _sync_zoom_slider(self):
+        """Sync the zoom slider with the current canvas zoom level."""
+        zoom = self._canvas.get_zoom_level()
+        slider_value = int(zoom * 100)
+        slider_value = max(5, min(320, slider_value))  # Clamp to slider range
+        self.ui.CanvasZoomSlider.blockSignals(True)
+        self.ui.CanvasZoomSlider.setValue(slider_value)
+        self.ui.CanvasZoomSlider.blockSignals(False)
+        # Update percent label
+        self.ui.CanvasZoomPercent.setText(f"{slider_value}%")
+
+    def _on_zoom_from_canvas(self, zoom: float):
+        """Handle zoom changes from the canvas (wheel, fit, etc.)."""
+        self._sync_zoom_slider()
+
+    def _toggle_toolbar(self):
+        """Toggle secondary toolbar collapsed state."""
+        self._toolbar_collapsed = not self._toolbar_collapsed
+        self.ui.CanvasToolbarContent.setVisible(not self._toolbar_collapsed)
+
+        # Update toggle button icon/text
+        if self._toolbar_collapsed:
+            self.ui.CanvasToolbarToggle.setText("+")
+            self.ui.CanvasToolbarToggle.setToolTip("Expand secondary toolbar")
+        else:
+            self.ui.CanvasToolbarToggle.setText("-")
+            self.ui.CanvasToolbarToggle.setToolTip("Collapse secondary toolbar")
+
+    def _toggle_timeline(self):
+        """Toggle timeline collapsed state."""
+        self._timeline_collapsed = not self.ui.CanvasTimelineToggle.isChecked()
+        self.ui.CanvasTimelineContainer.setVisible(not self._timeline_collapsed)
+
+    # =========================================================================
+    # Zoom Controls
+    # =========================================================================
+
+    def _on_reset_zoom(self):
+        """Reset zoom to 100%."""
+        self._canvas.set_zoom(1.0)
+
+    def _on_go_origin(self):
+        """Center view on origin."""
+        self._canvas.center_on_origin()
+
+    def _on_color_sampler(self):
+        """Show color history panel."""
+        self._canvas.show_color_history_panel()
+
+    # =========================================================================
+    # Status Bar Updates
+    # =========================================================================
+
+    def _update_coordinates(self, x: float, y: float):
+        """Update coordinate display in status bar."""
+        self.ui.CanvasCoordinates.setText(f"X: {int(x)}  Y: {int(y)}")
+
+    def _update_tool_hint(self):
+        """Update tool hint in status bar based on current tool."""
+        hints = {
+            "select": "Select: Click items, Shift+click for multi-select, drag to move",
+            "pan": "Pan: Drag to pan, or use Space+Drag in any tool",
+            "connect": "Connect: Click source image, then click target to create connection",
+            "annotate": "Note: Click to place a sticky note",
+            "group": "Region: Drag to create a colored region",
+            "crop": "Crop: Drag corners to crop, Esc to cancel. Non-destructive.",
+            "pen": "Pen: Draw freehand strokes. Pressure-sensitive with tablet.",
+            "rect": "Rectangle: Drag to draw. Hold Shift for square.",
+            "ellipse": "Ellipse: Drag to draw. Hold Shift for circle.",
+            "line": "Line: Click start, click end. Shift+L for arrow.",
+        }
+        hint = hints.get(self._current_tool, "")
+        self.ui.CanvasToolHint.setText(hint)
+
+    def _update_selection_info(self, selected_items: list):
+        """Update selection info in status bar."""
+        count = len(selected_items)
+        if count == 0:
+            self.ui.CanvasSelectionInfo.setText("")
+        elif count == 1:
+            self.ui.CanvasSelectionInfo.setText("1 item selected")
+        else:
+            self.ui.CanvasSelectionInfo.setText(f"{count} items selected")
+
+    def _on_canvas_modified(self):
+        """Handle canvas modification - debounced save state."""
+        # Debounce saves to avoid excessive disk writes
+        if not hasattr(self, '_save_timer'):
+            self._save_timer = QTimer()
+            self._save_timer.setSingleShot(True)
+            self._save_timer.timeout.connect(self._do_save_canvas_state)
+
+        # Reset timer on each modification (debounce 500ms)
+        self._save_timer.start(500)
+
+    def _do_save_canvas_state(self):
+        """Actually perform the save (called after debounce)."""
+        self._save_canvas_state()
+
+    def _on_selection_changed(self, selected_items: list):
+        """Handle selection change on canvas."""
+        # Update fit selection button state
+        self.ui.CanvasFitSelection.setEnabled(len(selected_items) > 0)
+        # Update status bar
+        self._update_selection_info(selected_items)
+
+    def _on_item_added(self, item_id: str):
+        """Handle new item added to canvas."""
+        logger.debug(f"Item added to canvas: {item_id}")
+
+    def _on_remote_state_changed(self, state: dict):
+        """Handle remote canvas state change from sync manager."""
+        logger.info(f"Remote canvas state changed by {state.get('modified_by', 'unknown')}")
+        # Reload canvas state - last-write-wins
+        self._canvas.load_state(state)
+
+    def _on_sync_error(self, error_msg: str):
+        """Handle sync error."""
+        logger.warning(f"Canvas sync error: {error_msg}")
+        self.show_status(f"Sync: {error_msg}", "warning")
+
+    def _on_cursor_moved(self, x: float, y: float):
+        """Handle local cursor movement - update presence."""
+        if hasattr(self, '_presence_manager'):
+            self._presence_manager.update_cursor(x, y)
+
+    def _on_cursors_updated(self, cursors: dict):
+        """Handle cursor updates from other users."""
+        self._canvas.update_remote_cursors(cursors)
+
+    def _on_user_joined(self, username: str):
+        """Handle user joining the canvas."""
+        logger.info(f"User joined canvas: {username}")
+        self.show_status(f"{username} joined", "info")
+
+    def _on_user_left(self, username: str):
+        """Handle user leaving the canvas."""
+        logger.info(f"User left canvas: {username}")
+        self.show_status(f"{username} left", "info")
+
+    def add_image_to_canvas(self, image_path: str, position: tuple = None):
+        """
+        Add an image to the canvas.
+
+        Called from Gallery context menu or auto-add from ComfyUI.
+
+        Args:
+            image_path: Path to the image file
+            position: Optional (x, y) position, or None for auto-placement
+        """
+        if position is None:
+            # Auto-place near center of current view
+            center = self._canvas.mapToScene(
+                self._canvas.viewport().rect().center()
+            )
+            position = (center.x(), center.y())
+
+        node = self._canvas.add_image(image_path, position[0], position[1])
+
+        # Sync node with gallery data (likes, groups, colors)
+        self._canvas.sync_node_from_gallery(image_path)
+
+        # Check metadata for lineage and auto-connect
+        self._auto_connect_from_metadata(node, image_path)
+
+        return node
+
+    def _auto_connect_from_metadata(self, node, image_path: str):
+        """Auto-create connections from metadata lineage."""
+        try:
+            from comfyui.metadata import get_job_metadata
+
+            # Get parent info from metadata
+            metadata = get_job_metadata(os.path.dirname(image_path))
+            if not metadata:
+                return
+
+            filename = os.path.basename(image_path)
+            file_meta = metadata.get("files", {}).get(filename, {})
+            parent_id = file_meta.get("parent_id")
+
+            if parent_id:
+                # Find parent node on canvas
+                parent_node = self._canvas.find_node_by_file_id(parent_id)
+                if parent_node:
+                    self._canvas.add_connection(
+                        parent_node.node_id,
+                        node.node_id,
+                        connection_type="auto"
+                    )
+                    logger.debug(f"Auto-connected {filename} to parent {parent_id}")
+        except Exception as e:
+            logger.debug(f"Could not auto-connect from metadata: {e}")
+
+    def on_tab_activated(self):
+        """Called when canvas tab becomes visible."""
+        # Refresh sync if enabled
+        if hasattr(self, '_sync_timer') and self._sync_timer.isActive():
+            self._on_sync_poll()
+
+        # Connect to gallery favorites signals if not already connected
+        self._connect_gallery_signals()
+
+        # Sync all nodes with current gallery state
+        self._canvas.sync_all_from_gallery()
+
+        logger.debug("Canvas tab activated")
+
+    def _connect_gallery_signals(self):
+        """Connect to gallery FavoritesManager signals for live updates."""
+        if hasattr(self, '_gallery_signals_connected') and self._gallery_signals_connected:
+            return  # Already connected
+
+        favorites_manager = self._canvas._get_favorites_manager()
+        if not favorites_manager:
+            return
+
+        try:
+            # Connect to like changes
+            favorites_manager.like_changed.connect(self._on_gallery_like_changed)
+            # Connect to group changes
+            favorites_manager.item_groups_changed.connect(self._on_gallery_groups_changed)
+            favorites_manager.group_updated.connect(self._on_gallery_group_updated)
+
+            self._gallery_signals_connected = True
+            logger.debug("Connected to gallery favorites signals")
+        except Exception as e:
+            logger.warning(f"Could not connect to gallery signals: {e}")
+
+    def _on_gallery_like_changed(self, path: str, is_liked: bool):
+        """Handle like change from gallery."""
+        self._canvas.sync_node_from_gallery(path)
+
+    def _on_gallery_groups_changed(self, path: str):
+        """Handle group membership change from gallery."""
+        self._canvas.sync_node_from_gallery(path)
+
+    def _on_gallery_group_updated(self, group_id: str):
+        """Handle group property change from gallery (color change, etc.)."""
+        # Need to refresh all nodes since group color may have changed
+        self._canvas.sync_all_from_gallery()
+
+    def on_tab_deactivated(self):
+        """Called when switching away from canvas tab."""
+        # Save state before leaving
+        self._save_canvas_state()
+        logger.debug("Canvas tab deactivated")

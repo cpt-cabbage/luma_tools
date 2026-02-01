@@ -1,5 +1,87 @@
 # Luma Tools Changelog
 
+## Version 0.6
+
+### Major Reorganization
+- Relocate `python/tabs/` → `python/ui/tabs/` for cleaner UI separation
+- Relocate `python/models/` → `python/geo/` to better reflect 3D geometry purpose
+- Extract `python/comfyui/deadline_*.py` → `python/deadline/` as dedicated package with submitter.py, poller.py, parser.py, utils.py modules
+- Rename comfyui_gallery → gallery throughout codebase
+- Move changelog.md and version.json to resources/
+- Move install.bat/install.py to scripts/ with new deploy_production.bat
+
+### New Core Utilities
+- Add `core/event_bus.py`: Qt signal-based pipeline event bus for decoupled cross-tab communication
+- Add `core/logging_utils.py`: Centralized logging with TeeStream, file setup, network path resolution
+- Add `core/subprocess_utils.py`: Windows-compatible subprocess handling with hidden console windows
+- Add `core/progress_utils.py`: Progress callback handling utilities
+- Add `resources/ui/drag_drop.py`: DraggableMixin and utilities for drag-and-drop
+- Add `resources/ui/empty_states.py`: Consistent empty state displays
+- Add `resources/ui/loading_widgets.py`: Consolidated loading overlay widget (replaces spinners.py)
+
+### Gallery Enhancements
+- Add drag-to-group functionality - create groups by dragging items onto thumbnails
+- Add sort direction toggle button to switch between ascending/descending
+- Convert stacking mode controls from checkboxes to floating StacksDialog
+- Add staggered fade-in animation for new gallery items
+- Add slide and fade animations for stack expand/collapse
+- Add panel collapse/expand with smooth width animation
+- Add loading overlay for user feedback during gallery switching
+- Add file type filter dialog with persistence
+- Replace GallerySectionHeader with cleaner StackedThumbnailWidget
+- Optimize widget creation and thumbnail loading
+
+### Metadata System
+- Add explicit input tracking with `_input_` prefixed entries for source images
+- Implement `is_known_input_file()` and `mark_as_input_file()` functions
+- Add per-file metadata with file_id and parent_id for lineage tracking
+- Add `establish_lineage()` for iteration parent-child relationships
+- Add `get_metadata_level()` to detect full/partial/none metadata coverage
+- Add conditional reverse matching to prevent input files from incorrectly matching output job metadata
+- Store detailed per-file metadata including node execution timing and seed values
+
+### ComfyUI Improvements
+- Add comparison dialog for comparing two selected gallery items
+- Add style preset controls with save/load/undo functionality
+- Add MetadataDiffDialog for side-by-side parameter comparison
+- Add session resume banner and contextual tooltips
+- Add node configs for SHARP 3D, Hunyuan Video 1.5, SaveVideo, Any Switch
+- Update Trellis2 configs for v2 HQ nodes with additional parameters
+- Show task-level counts and step progress (Step 3/12) in batch status
+
+### Cross-Tab Integration
+- Extend state_manager.py with job tracking properties
+- Add drag-and-drop from gallery thumbnails to ComfyUI inputs
+- Add hover-to-switch-tab during drag (500ms delay)
+- Add settings for cross-tab integration (completion sound, job status, quick actions)
+- Add window title progress updates via event bus subscription
+
+### Thread Safety (Critical)
+- Add threading locks to image thumbnail cache (ui_components.py)
+- Add threading locks to placeholder cache (thumbnail_base.py)
+- Add RLock to _active_jobs dictionary (event_bus.py)
+- Add threading locks to gallery metadata cache (metadata.py)
+- Implement atomic JSON writes in feature_requests.py
+
+### Bug Fixes
+- Fix Worker GC risk in splash_screen.py (store on self)
+- Fix lambda closure bug in comfyui_polling.py (capture by value)
+- Fix IndexError in get_trailing_number() when string has no digits
+- Fix pattern matching logic to correctly identify input files that look like outputs
+- Fix QEvent enum usage in effects.py
+- Stabilize drag-and-drop operations with widget validity checks
+- Suppress QtWebEngineProcess sandbox warnings
+- Fix mouse move event coordinates in main() function
+
+### Code Quality
+- Add logger to all modules, convert print() → logger
+- Centralized network logging for debugging
+- Add --tab and --auto-close CLI flags for automated testing
+- Consolidate user role functions from 12 to 4 parameterized functions
+- Add safe_get_setting() and safe_set_setting() for exception-free settings access
+- Add type hints to base_tab.start_worker() method
+- Remove dead code and unused imports throughout codebase
+
 ## Version 0.5.4.1
 - Morning coffee bugfixes and UI updates
 

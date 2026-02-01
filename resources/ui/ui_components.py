@@ -1233,6 +1233,11 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             open_folder_action = menu.addAction("Open Containing Folder")
             open_folder_action.triggered.connect(self._open_folder)
 
+            # Add to Canvas option (images only)
+            if self.item_type == 'image':
+                add_to_canvas_action = menu.addAction("Add to Canvas")
+                add_to_canvas_action.triggered.connect(self._add_to_canvas)
+
             # View Input option (for outputs that have source images)
             if self.item_type == 'image':
                 metadata = self._get_metadata()
@@ -1328,6 +1333,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
         view_action = menu.addAction("View Selected")
         view_action.triggered.connect(self._gallery_tab._on_view_selected)
+
+        add_to_canvas_action = menu.addAction("Add Selected to Canvas")
+        add_to_canvas_action.triggered.connect(self._batch_add_to_canvas)
 
         menu.addSeparator()
         publish_action = menu.addAction("Publish to AYON")
@@ -1486,6 +1494,70 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         except Exception as e:
             logger.error(f"Error showing properties: {e}")
 
+    def _add_to_canvas(self):
+        """Add this image to the canvas tab."""
+        try:
+            # Get canvas tab from gallery tab's main window
+            if not self._gallery_tab:
+                return
+
+            main_window = self._gallery_tab.main_window
+            if not main_window:
+                return
+
+            canvas_tab = main_window.get_tab("canvas")
+            if not canvas_tab:
+                logger.warning("Canvas tab not available")
+                if hasattr(self._gallery_tab, 'show_status'):
+                    self._gallery_tab.show_status("Canvas tab not available", "warning")
+                return
+
+            # Add image to canvas
+            canvas_tab.add_image_to_canvas(self.path)
+
+            if hasattr(self._gallery_tab, 'show_status'):
+                self._gallery_tab.show_status("Added to Canvas", "success")
+
+            # Request attention on canvas tab
+            if hasattr(canvas_tab, 'signals') and hasattr(canvas_tab.signals, 'request_attention'):
+                canvas_tab.signals.request_attention.emit()
+        except Exception as e:
+            logger.error(f"Error adding to canvas: {e}")
+
+    def _batch_add_to_canvas(self):
+        """Add all selected items to the canvas tab."""
+        if not self._gallery_tab:
+            return
+
+        main_window = self._gallery_tab.main_window
+        if not main_window:
+            return
+
+        canvas_tab = main_window.get_tab("canvas")
+        if not canvas_tab:
+            logger.warning("Canvas tab not available")
+            if hasattr(self._gallery_tab, 'show_status'):
+                self._gallery_tab.show_status("Canvas tab not available", "warning")
+            return
+
+        # Add all selected image paths to canvas
+        paths = list(self._gallery_tab._selected_items)
+        added_count = 0
+        for path in paths:
+            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                try:
+                    canvas_tab.add_image_to_canvas(path)
+                    added_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to add {path} to canvas: {e}")
+
+        if hasattr(self._gallery_tab, 'show_status'):
+            self._gallery_tab.show_status(f"Added {added_count} image(s) to Canvas", "success")
+
+        # Request attention on canvas tab
+        if added_count > 0:
+            if hasattr(canvas_tab, 'signals') and hasattr(canvas_tab.signals, 'request_attention'):
+                canvas_tab.signals.request_attention.emit()
 
 
 # ============================================================================

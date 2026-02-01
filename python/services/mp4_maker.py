@@ -264,8 +264,10 @@ def generate_mp4(
             stderr=subprocess.PIPE,
         )
 
-        # Monitor progress
+        # Monitor progress and capture stderr
+        stderr_lines = []
         for line in process.stderr:
+            stderr_lines.append(line)
             logger.info(line.strip())
 
             # Parse frame progress from FFmpeg output
@@ -289,7 +291,7 @@ def generate_mp4(
         return_code = process.wait()
 
         if return_code != 0:
-            stderr_output = process.stderr.read() if process.stderr else ""
+            stderr_output = "".join(stderr_lines)
             logger.error(f"FFmpeg failed with return code {return_code}")
             logger.error(f"Error output: {stderr_output}")
             if progress_callback:

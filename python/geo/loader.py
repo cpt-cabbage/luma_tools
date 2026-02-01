@@ -84,17 +84,6 @@ class Skeleton:
     bones: List[Bone] = field(default_factory=list)
     bone_name_to_index: Dict[str, int] = field(default_factory=dict)
 
-    def get_bone(self, name: str) -> Optional[Bone]:
-        """Get bone by name."""
-        idx = self.bone_name_to_index.get(name)
-        if idx is not None and idx < len(self.bones):
-            return self.bones[idx]
-        return None
-
-    def get_root_bones(self) -> List[Bone]:
-        """Get all root bones (bones with no parent)."""
-        return [b for b in self.bones if b.parent_index < 0]
-
 
 # Import animation types from animation_utils
 from .animation_utils import (

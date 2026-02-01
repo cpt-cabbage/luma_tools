@@ -78,7 +78,9 @@
       "Bash(ls:*)",
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ayon\\\\publisher_integration.py\")",
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_check.ps1\")",
-      "Bash(pythonvenvScriptspython.exe -m pytest:*)"
+      "Bash(pythonvenvScriptspython.exe -m pytest:*)",
+      "Bash(pythonvenvScriptspython.exe _test_debug_filter.py)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []

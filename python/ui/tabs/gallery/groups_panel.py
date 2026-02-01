@@ -14,6 +14,17 @@ from PySide6.QtWidgets import (
 )
 
 
+class ClickableHeader(QWidget):
+    """A clickable header widget that emits a signal when clicked."""
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        """Emit clicked signal on mouse press."""
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class GroupFilterItem(QWidget):
     """A clickable filter item (All, Liked, or a group).
 
@@ -368,7 +379,7 @@ class GroupsFilterPanel(QWidget):
 
         # "All Items" option
         all_item = GroupFilterItem("all", "All Items", icon="📁", count=0)
-        all_item.clicked.connect(lambda fid: self._on_filter_clicked("all", None))
+        all_item.clicked.connect(lambda: self._on_filter_clicked("all", None))
         self.content_layout.addWidget(all_item)
         self._filter_items["all"] = all_item
 
@@ -380,7 +391,7 @@ class GroupsFilterPanel(QWidget):
             color=self._liked_color,
             count=liked_count
         )
-        liked_item.clicked.connect(lambda fid: self._on_filter_clicked("liked", None))
+        liked_item.clicked.connect(lambda: self._on_filter_clicked("liked", None))
         # Right-click for color change
         liked_item.setContextMenuPolicy(Qt.CustomContextMenu)
         liked_item.customContextMenuRequested.connect(self._show_liked_context_menu)
@@ -389,7 +400,7 @@ class GroupsFilterPanel(QWidget):
 
         # "Inputs" filter (source images)
         inputs_item = GroupFilterItem("inputs", "Inputs", icon="📥", count=0)
-        inputs_item.clicked.connect(lambda fid: self._on_filter_clicked("inputs", None))
+        inputs_item.clicked.connect(lambda: self._on_filter_clicked("inputs", None))
         self.content_layout.addWidget(inputs_item)
         self._filter_items["inputs"] = inputs_item
 
@@ -425,7 +436,7 @@ class GroupsFilterPanel(QWidget):
 
         # "Ungrouped" filter
         ungrouped_item = GroupFilterItem("ungrouped", "Ungrouped", icon="○", count=0)
-        ungrouped_item.clicked.connect(lambda fid: self._on_filter_clicked("ungrouped", None))
+        ungrouped_item.clicked.connect(lambda: self._on_filter_clicked("ungrouped", None))
         self.content_layout.addWidget(ungrouped_item)
         self._filter_items["ungrouped"] = ungrouped_item
 
@@ -541,9 +552,10 @@ class GroupsFilterPanel(QWidget):
             insert_idx += 1
 
             # Stacks header (clickable to collapse/expand)
-            stacks_header = QWidget()
+            stacks_header = ClickableHeader()
             stacks_header.setFixedHeight(28)
             stacks_header.setCursor(Qt.PointingHandCursor)
+            stacks_header.clicked.connect(self._toggle_stacks_collapsed)
             header_layout = QHBoxLayout(stacks_header)
             header_layout.setContentsMargins(8, 4, 8, 4)
             header_layout.setSpacing(4)
@@ -559,9 +571,6 @@ class GroupsFilterPanel(QWidget):
             header_text.setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;")
             header_layout.addWidget(header_text)
             header_layout.addStretch()
-
-            # Make header clickable
-            stacks_header.mousePressEvent = lambda e: self._toggle_stacks_collapsed()
 
             self.content_layout.insertWidget(insert_idx, stacks_header)
             self._stacks_header = stacks_header

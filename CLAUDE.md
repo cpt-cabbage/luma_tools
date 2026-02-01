@@ -9,6 +9,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Deferring to a new task on task list so compact threshold can be hit.
 **Do not silently drop items, cut corners, or produce partial implementations. Every todo item created must be completed or explicitly handed off. "Good enough" is not acceptable when the full scope was requested.**
 
+## Skills
+
+This project has skills in `.claude/skills/`.
+
+| Skill | When to Apply |
+|-------|---------------|
+| **check-code** | **After writing any code** - verify threading, imports, settings patterns before presenting |
+| **trace-flow** | **Before modifying features** - trace "how does X work?" to understand before changing |
+| **new-tab** | When scaffolding a new tab - follow the question checklist before generating code |
+| **new-node** | When adding ComfyUI node support - follow the question checklist before modifying node_configs.py |
+
+Skills are loaded into context automatically. Read them and follow their instructions.
+
 ## Project Overview
 
 Luma Tools is a PySide6 suite of tools for an animation studio, tools are separated by tabs. The goal is to aid Animation and VFX pipeline by providing a single interface to handle denoiser render pass combiner, AYON publishing, Deadline farm jobs, Tools for MP4 making, ComfyUI AI workflows, and shot cleanup.

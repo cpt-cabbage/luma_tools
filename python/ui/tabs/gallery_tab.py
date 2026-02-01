@@ -122,6 +122,10 @@ class GalleryTab(BaseTab):
         # Initialize favorites manager for likes and groups
         self._favorites_manager = FavoritesManager(self)
 
+        # Forward favorites changes to event bus for cross-tab sync (e.g., canvas)
+        self._favorites_manager.like_changed.connect(self._on_favorites_changed)
+        self._favorites_manager.item_groups_changed.connect(self._on_favorites_changed)
+
         # Current filter state: ("all", None), ("liked", None), ("group", group_id), ("ungrouped", None)
         self._current_filter = ("all", None)
 
@@ -673,8 +677,9 @@ class GalleryTab(BaseTab):
         """Set up a loading overlay for gallery switching feedback."""
         from loading_widgets import LoadingOverlay
 
-        # Create overlay as child of scroll area so it covers the gallery content
-        self._loading_overlay = LoadingOverlay(self.ui.galleryScrollArea)
+        # Create overlay as child of scroll area's viewport to float above content
+        viewport = self.ui.galleryScrollArea.viewport()
+        self._loading_overlay = LoadingOverlay(viewport)
         self._loading_overlay.hide()
 
     def show_loading_overlay(self, message="Loading..."):
@@ -682,8 +687,9 @@ class GalleryTab(BaseTab):
         if hasattr(self, '_loading_overlay'):
             from PySide6.QtWidgets import QApplication
 
-            # Ensure correct size before showing
-            self._loading_overlay.setGeometry(self.ui.galleryScrollArea.rect())
+            # Size overlay to cover the entire viewport
+            viewport = self.ui.galleryScrollArea.viewport()
+            self._loading_overlay.setGeometry(viewport.rect())
             self._loading_overlay.show_loading(message)
 
             # Force immediate repaint so overlay is visible before blocking work
@@ -841,6 +847,12 @@ class GalleryTab(BaseTab):
         # Subscribe to "use as input" from ourselves (for consistency)
         pipeline_events.use_as_input.connect(self._on_use_as_input_requested)
 
+        # Subscribe to refresh requests from other tabs (e.g., settings)
+        pipeline_events.gallery_refresh_requested.connect(self._on_refresh_requested)
+
+        # Subscribe to navigation requests from other tabs (e.g., canvas)
+        pipeline_events.gallery_navigate_to.connect(self._on_navigate_to_requested)
+
         logger.debug("Gallery tab subscribed to event bus")
 
     def _on_job_submitted(self, job_id: str, expected_count: int, job_prefix: str):
@@ -902,6 +914,53 @@ class GalleryTab(BaseTab):
         from core.state_manager import app_state
         app_state.gallery_selected_paths = list(selected)
         pipeline_events.selection_changed.emit(list(selected), len(selected))
+
+    def _on_refresh_requested(self, force: bool = False):
+        """Handle refresh request from event bus.
+
+        Called when another tab (e.g., settings) requests a gallery refresh.
+
+        Args:
+            force: If True, clears widget cache before refresh
+        """
+        if force:
+            # Clear widget cache to force thumbnail reload
+            if hasattr(self, '_widget_cache'):
+                self._widget_cache = {}
+        self._on_refresh(force=force)
+
+    def _on_navigate_to_requested(self, image_path: str):
+        """Handle navigation request from event bus.
+
+        Called when another tab (e.g., canvas) wants to show an image in the gallery.
+
+        Args:
+            image_path: Path of the image to navigate to
+        """
+        # Switch to this tab
+        if hasattr(self.main_window, 'select_tab_by_name'):
+            self.main_window.select_tab_by_name('gallery')
+        elif hasattr(self.main_window, 'tab_widget'):
+            tab_widget = self.main_window.tab_widget
+            for i in range(tab_widget.count()):
+                if tab_widget.widget(i) == self:
+                    tab_widget.setCurrentIndex(i)
+                    break
+
+        # Navigate to the image
+        if hasattr(self, 'select_and_scroll_to_item'):
+            self.select_and_scroll_to_item(image_path)
+        elif hasattr(self, '_selection_manager'):
+            self._selection_manager.select_item_by_path(image_path)
+
+    def _on_favorites_changed(self, *args):
+        """Forward favorites changes to event bus for cross-tab sync.
+
+        Called when likes or group assignments change. Emits favorites_changed
+        signal on the event bus so other tabs (e.g., canvas) can sync.
+        """
+        if EVENT_BUS_AVAILABLE:
+            pipeline_events.favorites_changed.emit()
 
     # =========================================================================
     # DRAG-TO-GROUP HANDLERS
@@ -990,3 +1049,88 @@ class GalleryTab(BaseTab):
             self._ui_manager.redisplay_items(force_rebuild=True)
         else:
             self.show_status_message("Items already in group")
+
+    # =========================================================================
+    # EXTERNAL NAVIGATION
+    # =========================================================================
+
+    def select_and_scroll_to_item(self, image_path: str):
+        """
+        Select an item and scroll it into view.
+
+        Called from external sources like Canvas tab's "Show in Gallery" action.
+
+        Args:
+            image_path: Path to the image to select and show
+        """
+        import os
+
+        # Normalize path for consistent lookup
+        image_path = os.path.normpath(image_path)
+
+        # Find the widget for this path
+        widget = self._gallery_manager.find_widget_by_path(image_path)
+
+        if not widget:
+            # Item not visible in current view - may need to change filters or load
+            logger.info(f"[Gallery] Item not in current view: {image_path}")
+
+            # Try to clear filters and reload
+            self._clear_all_filters()
+            self._gallery_manager.refresh(force=True)
+
+            # Try again after refresh (use a timer to let refresh complete)
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(500, lambda: self._select_and_scroll_deferred(image_path))
+            return
+
+        # Clear current selection and select this item
+        self._selection_manager.clear_selection()
+        self._selection_manager.select_single(widget)
+
+        # Scroll the widget into view
+        self._scroll_widget_into_view(widget)
+
+        logger.info(f"[Gallery] Selected and scrolled to: {image_path}")
+
+    def _select_and_scroll_deferred(self, image_path: str):
+        """Deferred select and scroll after refresh."""
+        import os
+        image_path = os.path.normpath(image_path)
+
+        widget = self._gallery_manager.find_widget_by_path(image_path)
+        if widget:
+            self._selection_manager.clear_selection()
+            self._selection_manager.select_single(widget)
+            self._scroll_widget_into_view(widget)
+            logger.info(f"[Gallery] Deferred select completed: {image_path}")
+        else:
+            self.show_status_message(f"Item not found in gallery")
+
+    def _scroll_widget_into_view(self, widget):
+        """Scroll the scroll area to bring a widget into view."""
+        scroll_area = self.ui.galleryScrollArea
+
+        # Get widget position relative to scroll content
+        widget_pos = widget.mapTo(self.ui.galleryThumbnailContainer, widget.rect().topLeft())
+        widget_center_y = widget_pos.y() + widget.height() // 2
+
+        # Get viewport dimensions
+        viewport_height = scroll_area.viewport().height()
+
+        # Calculate scroll position to center the widget
+        target_scroll = widget_center_y - viewport_height // 2
+
+        # Clamp to valid range
+        max_scroll = scroll_area.verticalScrollBar().maximum()
+        target_scroll = max(0, min(target_scroll, max_scroll))
+
+        # Animate the scroll
+        scroll_area.verticalScrollBar().setValue(target_scroll)
+
+    def _clear_all_filters(self):
+        """Clear all active filters to show all items."""
+        if hasattr(self, '_ui_manager'):
+            # Reset filter buttons
+            self.ui.GalleryShowAllButton.setChecked(True)
+            self._ui_manager._current_filter = 'all'

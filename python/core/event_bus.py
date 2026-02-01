@@ -106,24 +106,32 @@ class PipelineEventBus(QObject):
     selection_changed = Signal(list, int)
 
     # =========================================================================
-    # Bidirectional / Context Events
+    # Gallery Events
     # =========================================================================
 
-    # Emitted when either tab's context changes significantly
-    # Args: source (str: "comfyui" or "gallery"), context_data (dict)
-    context_changed = Signal(str, dict)
+    # Emitted to request gallery refresh (e.g., after settings change)
+    # Args: force (bool) - if True, forces full refresh ignoring cache
+    gallery_refresh_requested = Signal(bool)
 
-    # Emitted to show a user hint/suggestion
-    # Args: hint_type (str), message (str), action_data (dict or None)
-    show_hint = Signal(str, str, object)
+    # =========================================================================
+    # Canvas Events
+    # =========================================================================
 
-    # Emitted when user reaches a milestone
-    # Args: milestone_type (str), count (int)
-    milestone_reached = Signal(str, int)
+    # Emitted to request adding an image to the canvas
+    # Args: image_path (str)
+    add_to_canvas = Signal(str)
 
-    # Emitted to request tab switch
-    # Args: tab_name (str), context (dict or None)
-    request_tab_switch = Signal(str, object)
+    # Emitted when an image was successfully added to canvas
+    # Args: image_path (str)
+    canvas_image_added = Signal(str)
+
+    # Emitted to navigate to and select an image in the gallery
+    # Args: image_path (str)
+    gallery_navigate_to = Signal(str)
+
+    # Emitted when favorites data changes (likes, groups)
+    # Args: None - listeners should re-query their items
+    favorites_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -340,14 +348,6 @@ class PipelineEventBus(QObject):
         for key, value in kwargs.items():
             if hasattr(self._gallery_context, key):
                 setattr(self._gallery_context, key, value)
-
-        self.context_changed.emit("gallery", {
-            "selected_paths": self._gallery_context.selected_paths,
-            "selected_count": self._gallery_context.selected_count,
-            "active_filter": self._gallery_context.active_filter,
-            "current_user": self._gallery_context.current_user,
-            "visible": self._gallery_context.visible
-        })
 
     def get_gallery_context(self) -> GalleryContext:
         """Get current gallery context."""

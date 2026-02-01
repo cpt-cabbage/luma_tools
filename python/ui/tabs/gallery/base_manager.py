@@ -125,6 +125,39 @@ class BaseGalleryManager:
         )
 
     # =========================================================================
+    # Settings Helpers
+    # =========================================================================
+
+    def get_setting(self, key: str, default=None):
+        """
+        Get a setting value.
+
+        Args:
+            key: Setting key
+            default: Default value if setting not found
+
+        Returns:
+            Setting value or default
+        """
+        from core.settings_manager import safe_get_setting
+        return safe_get_setting(key, default)
+
+    def set_setting(self, key: str, value, verbose: bool = False):
+        """
+        Set a setting value.
+
+        Args:
+            key: Setting key
+            value: Value to set
+            verbose: If True, log the setting change
+
+        Returns:
+            bool: True if successful
+        """
+        from core.settings_manager import set_setting
+        return set_setting(key, value, verbose=verbose)
+
+    # =========================================================================
     # Utility Methods
     # =========================================================================
 

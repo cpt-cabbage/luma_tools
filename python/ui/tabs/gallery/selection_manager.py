@@ -281,6 +281,21 @@ class SelectionManager(BaseGalleryManager):
         if hasattr(self.tab, 'show_status_message'):
             self.tab.show_status_message(f"Selected all {count} items")
 
+    def select_single(self, widget):
+        """
+        Select a single widget, clearing any previous selection.
+
+        Args:
+            widget: The widget to select
+        """
+        # Clear existing selection first
+        self.clear_selection(show_status=False)
+
+        # Select the new widget
+        if hasattr(widget, 'set_selected'):
+            widget.set_selected(True)
+            # The selection state is tracked via widget callbacks
+
     def clear_selection(self, show_status=True):
         """Clear all selected items.
 

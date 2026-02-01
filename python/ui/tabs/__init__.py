@@ -12,6 +12,7 @@ from .republish_tab import RePublishTab
 from .shot_cleaner_tab import ShotCleanerTab
 from .comfyui_tab import ComfyUITab
 from .gallery_tab import GalleryTab
+from .canvas_tab import CanvasTab
 from .settings_tab import SettingsTab
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     'ShotCleanerTab',
     'ComfyUITab',
     'GalleryTab',
+    'CanvasTab',
     'SettingsTab',
 ]
 
@@ -37,5 +39,6 @@ TAB_CONFIG = [
     {'class': LogsTab, 'restrict_key': 'logs'},
     {'class': ComfyUITab, 'restrict_key': 'comfyui'},
     {'class': GalleryTab, 'restrict_key': 'gallery'},
+    {'class': CanvasTab, 'restrict_key': 'canvas'},
     {'class': SettingsTab, 'restrict_key': 'settings'},
 ]

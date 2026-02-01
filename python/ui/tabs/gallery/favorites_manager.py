@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, asdict
 from PySide6.QtCore import QObject, Signal
 
 from core.config import UIColors
+from .base_manager import BaseGalleryManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,12 @@ class GroupDef:
         )
 
 
-class FavoritesManager(QObject):
+class FavoritesManager(BaseGalleryManager, QObject):
     """
     Manages likes and groups for gallery items.
+
+    Inherits from BaseGalleryManager for convenience properties and from
+    QObject for signal support.
 
     Signals:
         like_changed(path, is_liked): Emitted when an item's like status changes
@@ -72,8 +76,8 @@ class FavoritesManager(QObject):
         Args:
             tab: Reference to the GalleryTab
         """
-        super().__init__()
-        self.tab = tab
+        BaseGalleryManager.__init__(self, tab)
+        QObject.__init__(self)
         self._liked_items: Set[str] = set()
         self._groups: Dict[str, GroupDef] = {}
         self._item_groups: Dict[str, Set[str]] = {}  # path -> set of group_ids

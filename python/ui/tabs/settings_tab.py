@@ -593,13 +593,9 @@ class SettingsTab(BaseTab):
                             pass
                     self.log(f"Cleared {count} cached thumbnail files")
 
-                # Notify gallery tab to refresh
-                gallery_tab = self.main_window.get_tab("gallery")
-                if gallery_tab:
-                    # Clear widget cache to force thumbnail reload
-                    if hasattr(gallery_tab, '_widget_cache'):
-                        gallery_tab._widget_cache = {}
-                    gallery_tab._on_refresh(force=True)
+                # Notify gallery tab to refresh via event bus
+                from core.event_bus import pipeline_events
+                pipeline_events.gallery_refresh_requested.emit(True)  # force=True
 
                 self.show_status("Thumbnail cache cleared", "success")
 

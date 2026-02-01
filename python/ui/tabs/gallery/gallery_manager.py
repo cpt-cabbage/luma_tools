@@ -1244,3 +1244,23 @@ class GalleryManager(BaseGalleryManager):
         """Handle click on 'Browse Folder' button in empty state."""
         if hasattr(self.tab, '_browse_custom_folder'):
             self.tab._browse_custom_folder()
+
+    # =========================================================================
+    # EXTERNAL LOOKUPS
+    # =========================================================================
+
+    def find_widget_by_path(self, image_path: str):
+        """
+        Find a widget by its image path.
+
+        Args:
+            image_path: Path to the image
+
+        Returns:
+            The thumbnail widget if found, None otherwise
+        """
+        import os
+        image_path = os.path.normpath(image_path)
+
+        if hasattr(self.tab, '_widget_cache'):
+            return self.tab._widget_cache.get(image_path)

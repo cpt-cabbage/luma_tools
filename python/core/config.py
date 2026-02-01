@@ -432,5 +432,38 @@ class UIStyles:
     """
 
 
+# ============================================================================
+# SETTINGS ACCESSOR FUNCTIONS
+# ============================================================================
+# Typed accessor functions for commonly-used settings.
+# Use these instead of repeated get_setting() calls to reduce boilerplate.
 
+def get_network_output_path() -> str:
+    """Get the ComfyUI network output path.
+
+    Returns:
+        Network path string, or empty string if not configured.
+    """
+    from core.settings_manager import safe_get_setting
+    return safe_get_setting("comfyui_network_output_path", "")
+
+
+def is_mp4_add_to_gallery_enabled() -> bool:
+    """Check if MP4 Maker should add outputs to gallery.
+
+    Returns:
+        True if enabled, False otherwise.
+    """
+    from core.settings_manager import safe_get_setting
+    return safe_get_setting("mp4_maker_add_to_gallery", False)
+
+
+def get_completion_sound() -> str:
+    """Get the ComfyUI completion sound setting.
+
+    Returns:
+        Sound setting: 'none', 'chime', 'success', etc.
+    """
+    from core.settings_manager import safe_get_setting
+    return safe_get_setting("comfyui_completion_sound", "none")
 

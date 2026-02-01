@@ -13,6 +13,13 @@ from typing import Dict, Any
 
 from .base_manager import BaseGalleryManager
 
+# Try to import event bus for cross-tab communication
+try:
+    from core.event_bus import pipeline_events
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+
 
 class OperationsManager(BaseGalleryManager):
     """Manages operations on gallery items."""
@@ -307,14 +314,20 @@ class OperationsManager(BaseGalleryManager):
         """
         Copy settings from an image's metadata to the ComfyUI tab.
 
+        Uses the event bus for cross-tab communication.
+
         Args:
             metadata: Image metadata dictionary
         """
-        comfyui_tab = self.tab.main_window.get_tab("comfyui")
-        if comfyui_tab:
-            comfyui_tab.apply_settings_from_metadata(metadata)
+        if EVENT_BUS_AVAILABLE:
+            pipeline_events.copy_settings.emit(metadata)
         else:
-            self.tab.log("Could not find ComfyUI tab to apply settings")
+            # Fallback to direct tab access
+            comfyui_tab = self.tab.main_window.get_tab("comfyui")
+            if comfyui_tab and hasattr(comfyui_tab, 'apply_settings_from_metadata'):
+                comfyui_tab.apply_settings_from_metadata(metadata)
+            else:
+                self.tab.log("Could not find ComfyUI tab to apply settings")
 
     def on_item_viewed(self, item_path):
         """Handle item viewed - remove from new items set."""
