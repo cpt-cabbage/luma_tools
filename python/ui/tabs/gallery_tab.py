@@ -18,6 +18,7 @@ Cross-tab communication:
 
 import os
 import logging
+import threading
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QTimer, QThreadPool
@@ -111,6 +112,9 @@ class GalleryTab(BaseTab):
         self._available_users = []
         self._user_cache = {}
         self._precache_in_progress = set()
+
+        # Thread-safe lock for cache access (protects _widget_cache, _section_items, _user_cache)
+        self._cache_lock = threading.RLock()
 
         # Initialize managers
         self._selection_manager = SelectionManager(self)
@@ -259,6 +263,48 @@ class GalleryTab(BaseTab):
     # =========================================================================
     # CORE METHODS (kept in main tab)
     # =========================================================================
+
+    # -- Thread-safe cache access helpers --
+
+    def get_cached_widget(self, path: str):
+        """Thread-safe access to get a widget from cache."""
+        with self._cache_lock:
+            return self._widget_cache.get(path)
+
+    def set_cached_widget(self, path: str, widget):
+        """Thread-safe access to set a widget in cache."""
+        with self._cache_lock:
+            self._widget_cache[path] = widget
+
+    def remove_cached_widget(self, path: str):
+        """Thread-safe access to remove a widget from cache."""
+        with self._cache_lock:
+            return self._widget_cache.pop(path, None)
+
+    def clear_widget_cache(self):
+        """Thread-safe access to clear all widgets from cache."""
+        with self._cache_lock:
+            self._widget_cache.clear()
+
+    def get_widget_cache_copy(self) -> dict:
+        """Thread-safe access to get a copy of the widget cache for iteration."""
+        with self._cache_lock:
+            return dict(self._widget_cache)
+
+    def get_section_items_copy(self) -> dict:
+        """Thread-safe access to get a copy of section items for iteration."""
+        with self._cache_lock:
+            return dict(self._section_items)
+
+    def set_section_items(self, section_id: str, items: list):
+        """Thread-safe access to set section items."""
+        with self._cache_lock:
+            self._section_items[section_id] = items
+
+    def clear_section_items(self):
+        """Thread-safe access to clear section items."""
+        with self._cache_lock:
+            self._section_items.clear()
 
     def on_tab_activated(self):
         """Called when tab becomes visible."""
@@ -846,7 +892,7 @@ class GalleryTab(BaseTab):
         if not hasattr(self, '_widget_cache'):
             return
 
-        widget = self._widget_cache.get(path)
+        widget = self.get_cached_widget(path)
         if widget and isValid(widget) and hasattr(widget, 'update_favorites_state'):
             widget.update_favorites_state()
 
@@ -864,7 +910,7 @@ class GalleryTab(BaseTab):
             return
 
         for path in paths:
-            widget = self._widget_cache.get(path)
+            widget = self.get_cached_widget(path)
             if widget and isValid(widget) and hasattr(widget, 'update_favorites_state'):
                 widget.update_favorites_state()
 
@@ -879,7 +925,8 @@ class GalleryTab(BaseTab):
         if not hasattr(self, '_widget_cache'):
             return
 
-        for path, widget in self._widget_cache.items():
+        # Get a thread-safe copy to iterate over
+        for path, widget in self.get_widget_cache_copy().items():
             if isValid(widget) and hasattr(widget, 'update_favorites_state'):
                 widget.update_favorites_state()
 
@@ -989,9 +1036,9 @@ class GalleryTab(BaseTab):
             force: If True, clears widget cache before refresh
         """
         if force:
-            # Clear widget cache to force thumbnail reload
+            # Clear widget cache to force thumbnail reload (thread-safe)
             if hasattr(self, '_widget_cache'):
-                self._widget_cache = {}
+                self.clear_widget_cache()
         self._on_refresh(force=force)
 
     def _on_navigate_to_requested(self, image_path: str):

@@ -61,6 +61,43 @@
        <number>4</number>
       </property>
 
+      <!-- CANVAS DROPDOWN -->
+      <item>
+       <widget class="QToolButton" name="CanvasDropdown">
+        <property name="text">
+         <string>Canvas: (none)</string>
+        </property>
+        <property name="toolTip">
+         <string>Switch canvas or create new</string>
+        </property>
+        <property name="popupMode">
+         <enum>QToolButton::InstantPopup</enum>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonTextOnly</enum>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>26</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string>QToolButton { color: #4a9eff; font-weight: bold; padding: 4px 8px; }
+QToolButton::menu-indicator { image: none; width: 0px; }</string>
+        </property>
+       </widget>
+      </item>
+
+      <!-- SEPARATOR -->
+      <item>
+       <widget class="QFrame" name="sepCanvas">
+        <property name="frameShape"><enum>QFrame::VLine</enum></property>
+        <property name="frameShadow"><enum>QFrame::Sunken</enum></property>
+        <property name="styleSheet"><string>color: #444;</string></property>
+       </widget>
+      </item>
+
       <!-- FILE GROUP -->
       <item>
        <widget class="QLabel" name="labelFile">

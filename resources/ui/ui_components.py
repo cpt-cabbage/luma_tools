@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPainter, QColor, QPen, QPixmap
 from shiboken6 import isValid
-from dialog_helpers import get_active_window
+from dialog_helpers import get_active_window, confirm_action, show_error
 
 # Re-export from submodules (absolute imports since resources/ui is in path)
 from workers import Worker, WorkerSignals, start_worker_thread
@@ -1477,15 +1477,13 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             logger.error(f"Error opening input image: {e}")
 
     def _delete_item(self):
-        from PySide6.QtWidgets import QMessageBox
         filename = os.path.basename(self.path)
         parent_window = get_active_window()
-        reply = QMessageBox.question(
-            parent_window, "Delete Item",
+        if confirm_action(
+            "Delete Item",
             f"Are you sure you want to delete '{filename}'?\n\nThis will permanently delete the file from disk.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
+            parent_window
+        ):
             try:
                 os.remove(self.path)
                 logger.info(f"Deleted file: {self.path}")
@@ -1510,7 +1508,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                     self.deleteLater()
             except Exception as e:
                 logger.error(f"Error deleting file: {e}")
-                QMessageBox.critical(parent_window, "Delete Error", f"Could not delete file:\n{e}")
+                show_error("Delete Error", f"Could not delete file:\n{e}", parent_window)
 
     def _edit_item(self):
         try:

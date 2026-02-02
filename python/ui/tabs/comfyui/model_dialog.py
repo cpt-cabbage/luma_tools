@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.state_manager import app_state
+from core.utils import ensure_directory
 from comfyui.ratings import (
     get_model_rating, set_model_thumbnail, set_model_tags,
     clear_model_ratings, get_predefined_tags
@@ -389,7 +390,7 @@ class ModelDialog(QDialog):
             network_path = get_setting("comfyui_network_output_path")
             if network_path:
                 thumb_dir = os.path.join(network_path, "_model_thumbnails")
-                os.makedirs(thumb_dir, exist_ok=True)
+                ensure_directory(thumb_dir)
 
                 # Generate unique filename
                 ext = os.path.splitext(file_path)[1]

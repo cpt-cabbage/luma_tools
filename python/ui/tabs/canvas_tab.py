@@ -90,10 +90,18 @@ class CanvasTab(BaseTab):
 
     def initialize(self):
         """Initialize the canvas tab."""
-        from ui.canvas import CollaborativeCanvas, CanvasSyncManager, CursorPresenceManager, UndoStack
+        from ui.canvas import (
+            CollaborativeCanvas, CanvasSyncManager, CursorPresenceManager, UndoStack,
+            CanvasMetadataManager, CanvasScope
+        )
 
         # Path state
         self._current_path = ""
+
+        # Multi-canvas state
+        self._metadata_manager = None
+        self._current_canvas_id = None
+        self._current_canvas_name = None
 
         # Tool state
         self._current_tool = "select"
@@ -140,6 +148,9 @@ class CanvasTab(BaseTab):
 
         # Setup floating drawing tools panel
         self._setup_drawing_panel()
+
+        # Setup canvas dropdown menu
+        self._setup_canvas_dropdown()
 
         # Load initial directory
         self._update_canvas_path()
@@ -303,20 +314,27 @@ class CanvasTab(BaseTab):
                 self._drawing_panel.hide()
 
     def _configure_sync_managers(self):
-        """Configure sync managers for the current directory."""
-        if not self._current_path:
+        """Configure sync managers for the current canvas."""
+        if not self._metadata_manager or not self._current_canvas_id:
             return
 
-        jobname = self.app_state.jobname or "default"
         username = self.app_state.user or "unknown"
 
-        # Configure both managers
-        self._sync_manager.configure(self._current_path, jobname, username)
-        self._presence_manager.configure(self._current_path, jobname, username)
+        # Get paths from metadata manager
+        canvas_file_path = self._metadata_manager.get_canvas_path(self._current_canvas_id)
+        presence_dir = self._metadata_manager.get_presence_dir(self._current_canvas_id)
+
+        if not canvas_file_path:
+            logger.warning("No canvas file path for sync configuration")
+            return
+
+        # Configure both managers with direct paths
+        self._sync_manager.configure(canvas_file_path, username)
+        self._presence_manager.configure(presence_dir, username)
 
     def _start_sync(self):
         """Start synchronization polling."""
-        if not self._current_path:
+        if not self._current_canvas_id:
             return
 
         self._sync_manager.start()
@@ -330,33 +348,280 @@ class CanvasTab(BaseTab):
         logger.info("Canvas sync stopped")
 
     def _update_canvas_path(self):
-        """Update the canvas to the current directory."""
+        """Update the canvas to the current directory and handle canvas selection."""
         from core.settings_manager import safe_get_setting
+        from ui.canvas import CanvasMetadataManager
 
-        # Always use network path with user subfolder
+        # Get network path (shared location, not per-user)
         network_path = safe_get_setting("comfyui_network_output_path", "")
-        if network_path and self.app_state.user:
-            self._current_path = os.path.join(network_path, self.app_state.user)
-        else:
+        if not network_path:
+            logger.warning("No network output path configured for canvas")
             self._current_path = ""
+            return
+
+        self._current_path = network_path
 
         # Stop existing sync before path change
         if hasattr(self, '_sync_manager'):
             self._stop_sync()
 
-        # Load canvas state asynchronously (sync managers started after load completes)
-        self._load_canvas_state_async()
+        # Create metadata manager for current project/shot
+        jobname = self.app_state.jobname or "default"
+        shot = self.app_state.shot or ""
+        username = self.app_state.user or "unknown"
 
-    def _load_canvas_state_async(self):
-        """Load canvas state asynchronously to avoid blocking UI."""
-        from ui_components import StatusColors
+        self._metadata_manager = CanvasMetadataManager(
+            base_dir=network_path,
+            jobname=jobname,
+            shot=shot,
+            username=username
+        )
 
-        if not self._current_path:
+        # Open last canvas or show selector
+        self._open_canvas_or_prompt_name()
+
+    def _get_last_opened_key(self) -> str:
+        """Get the key for last opened canvas in user settings."""
+        jobname = self.app_state.jobname or "default"
+        shot = self.app_state.shot or ""
+        if shot:
+            return f"{jobname}_{shot}"
+        return jobname
+
+    def _get_last_opened_canvas_id(self) -> str:
+        """Get the last opened canvas ID for current project/shot."""
+        from core.settings_manager import safe_get_setting
+        last_opened_dict = safe_get_setting("canvas_last_opened", {})
+        key = self._get_last_opened_key()
+        return last_opened_dict.get(key, "")
+
+    def _set_last_opened_canvas_id(self, canvas_id: str):
+        """Set the last opened canvas ID for current project/shot."""
+        from core.settings_manager import safe_get_setting, safe_set_setting
+        last_opened_dict = safe_get_setting("canvas_last_opened", {})
+        key = self._get_last_opened_key()
+        last_opened_dict[key] = canvas_id
+        safe_set_setting("canvas_last_opened", last_opened_dict)
+
+    def _open_canvas_or_prompt_name(self):
+        """Open last canvas or prompt user for new canvas name."""
+        if not self._metadata_manager:
             return
 
-        canvas_dir = os.path.join(self._current_path, "_canvas")
-        jobname = self.app_state.jobname or "default"
-        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
+        # Try to open last opened canvas
+        last_id = self._get_last_opened_canvas_id()
+        if last_id and self._metadata_manager.get_canvas(last_id):
+            self._open_canvas(last_id)
+            return
+
+        # Check for existing canvases
+        canvases = self._metadata_manager.list_canvases()
+        if canvases:
+            # Open the first/most recent canvas
+            self._open_canvas(canvases[0].id)
+        else:
+            # No canvases - prompt user for name
+            self._prompt_new_canvas_name()
+
+    def _prompt_new_canvas_name(self):
+        """Prompt user to create a new canvas."""
+        from ui.canvas import NewCanvasDialog, CanvasScope
+
+        has_shot = bool(self.app_state.shot)
+        dialog = NewCanvasDialog(
+            has_shot_context=has_shot,
+            default_name="Main",
+            parent=self.main_window
+        )
+
+        if dialog.exec():
+            name = dialog.canvas_name
+            scope = dialog.canvas_scope
+
+            canvas = self._metadata_manager.create_canvas(name, scope)
+            if canvas:
+                self._open_canvas(canvas.id)
+            else:
+                logger.error("Failed to create canvas")
+                # Show empty canvas
+                self._canvas.clear()
+                self._on_canvas_loaded()
+        else:
+            # User cancelled - show empty canvas
+            self._canvas.clear()
+            self._on_canvas_loaded()
+
+    def _open_canvas(self, canvas_id: str):
+        """Open a specific canvas by ID."""
+        if not self._metadata_manager:
+            return
+
+        canvas_def = self._metadata_manager.get_canvas(canvas_id)
+        if not canvas_def:
+            logger.error(f"Canvas not found: {canvas_id}")
+            self._prompt_new_canvas_name()
+            return
+
+        self._current_canvas_id = canvas_id
+        self._current_canvas_name = canvas_def.name
+
+        # Update dropdown text
+        self._update_canvas_dropdown_text()
+
+        # Get canvas file path
+        canvas_file = self._metadata_manager.get_canvas_path(canvas_id)
+
+        # Save as last opened
+        self._set_last_opened_canvas_id(canvas_id)
+
+        # Load the canvas
+        self._load_canvas_state_async(canvas_file)
+
+        logger.info(f"Opening canvas: {canvas_def.name} ({canvas_id})")
+
+    def _setup_canvas_dropdown(self):
+        """Setup the canvas dropdown menu."""
+        if not hasattr(self.ui, 'CanvasDropdown'):
+            return
+
+        # Create menu for dropdown
+        self._canvas_menu = QMenu(self.main_window)
+        self._canvas_menu.setStyleSheet("""
+            QMenu {
+                background-color: #2c313a;
+                color: #e0e0e0;
+                border: 1px solid #3c414b;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #4a9eff;
+            }
+            QMenu::item:disabled {
+                color: #888;
+                background-color: transparent;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #3c414b;
+                margin: 4px 8px;
+            }
+        """)
+
+        self.ui.CanvasDropdown.setMenu(self._canvas_menu)
+        self._canvas_menu.aboutToShow.connect(self._populate_canvas_menu)
+
+    def _populate_canvas_menu(self):
+        """Populate the canvas dropdown menu with available canvases."""
+        from ui.canvas import CanvasScope
+
+        self._canvas_menu.clear()
+
+        if not self._metadata_manager:
+            self._canvas_menu.addAction("No canvases available").setEnabled(False)
+            return
+
+        # Get canvases
+        job_canvases = self._metadata_manager.list_canvases(CanvasScope.JOB)
+        has_shot = bool(self.app_state.shot)
+        shot_canvases = self._metadata_manager.list_canvases(CanvasScope.SHOT) if has_shot else []
+
+        # Job canvases section
+        if job_canvases:
+            header = self._canvas_menu.addAction("── Job Canvases ──")
+            header.setEnabled(False)
+
+            for canvas in job_canvases:
+                action = self._canvas_menu.addAction(f"  {canvas.name}")
+                action.setData(canvas.id)
+                action.setCheckable(True)
+                action.setChecked(canvas.id == self._current_canvas_id)
+                action.triggered.connect(lambda checked, cid=canvas.id: self._on_canvas_menu_item_clicked(cid))
+
+        # Shot canvases section
+        if shot_canvases:
+            header = self._canvas_menu.addAction("── Shot Canvases ──")
+            header.setEnabled(False)
+
+            for canvas in shot_canvases:
+                action = self._canvas_menu.addAction(f"  {canvas.name}")
+                action.setData(canvas.id)
+                action.setCheckable(True)
+                action.setChecked(canvas.id == self._current_canvas_id)
+                action.triggered.connect(lambda checked, cid=canvas.id: self._on_canvas_menu_item_clicked(cid))
+
+        self._canvas_menu.addSeparator()
+
+        # Management actions
+        new_action = self._canvas_menu.addAction("New Canvas...")
+        new_action.triggered.connect(self._on_new_canvas_action)
+
+        manage_action = self._canvas_menu.addAction("Manage Canvases...")
+        manage_action.triggered.connect(self._on_manage_canvases_action)
+
+    def _on_canvas_menu_item_clicked(self, canvas_id: str):
+        """Handle click on canvas menu item."""
+        if canvas_id != self._current_canvas_id:
+            self._open_canvas(canvas_id)
+
+    def _on_new_canvas_action(self):
+        """Handle New Canvas action from menu."""
+        from ui.canvas import NewCanvasDialog, CanvasScope
+
+        has_shot = bool(self.app_state.shot)
+        dialog = NewCanvasDialog(
+            has_shot_context=has_shot,
+            parent=self.main_window
+        )
+
+        if dialog.exec():
+            name = dialog.canvas_name
+            scope = dialog.canvas_scope
+
+            canvas = self._metadata_manager.create_canvas(name, scope)
+            if canvas:
+                self._open_canvas(canvas.id)
+
+    def _on_manage_canvases_action(self):
+        """Handle Manage Canvases action from menu."""
+        from ui.canvas import CanvasSelectorDialog
+
+        has_shot = bool(self.app_state.shot)
+        dialog = CanvasSelectorDialog(
+            metadata_manager=self._metadata_manager,
+            has_shot_context=has_shot,
+            parent=self.main_window
+        )
+
+        dialog.canvas_selected.connect(self._open_canvas)
+        dialog.canvas_created.connect(self._open_canvas)
+        dialog.exec()
+
+    def _update_canvas_dropdown_text(self):
+        """Update the dropdown button text with current canvas name."""
+        if hasattr(self.ui, 'CanvasDropdown'):
+            name = self._current_canvas_name or "(none)"
+            self.ui.CanvasDropdown.setText(f"Canvas: {name}")
+
+    def _load_canvas_state_async(self, canvas_file: str = None):
+        """Load canvas state asynchronously to avoid blocking UI.
+
+        Args:
+            canvas_file: Full path to the canvas JSON file. If None, uses current canvas.
+        """
+        from ui_components import StatusColors
+
+        # Use provided path or get from current canvas
+        if not canvas_file and self._current_canvas_id and self._metadata_manager:
+            canvas_file = self._metadata_manager.get_canvas_path(self._current_canvas_id)
+
+        if not canvas_file:
+            logger.warning("No canvas file specified for loading")
+            self._canvas.clear()
+            self._on_canvas_loaded()
+            return
 
         if not os.path.exists(canvas_file):
             # No existing state - clear and proceed
@@ -450,41 +715,63 @@ class CanvasTab(BaseTab):
 
     def _on_canvas_loaded(self):
         """Finalize after canvas loading completes (success or failure)."""
-        # Configure and start sync for new path
-        if hasattr(self, '_sync_manager'):
+        # Configure and start sync for current canvas
+        if hasattr(self, '_sync_manager') and self._current_canvas_id:
             self._configure_sync_managers()
             self._start_sync()
 
-        logger.info(f"Canvas path updated: {self._current_path}")
+        canvas_name = self._current_canvas_name or "(none)"
+        logger.info(f"Canvas loaded: {canvas_name}")
 
     def _save_canvas_state(self):
-        """Save canvas state to the current directory."""
-        if not self._current_path:
+        """Save canvas state to the current canvas file."""
+        if not self._current_canvas_id or not self._metadata_manager:
             return
+
+        username = self.app_state.user or "unknown"
+        state = self._canvas.get_state()
+        state["modified_by"] = username
+
+        # Count items for metadata
+        item_count = len(state.get('nodes', {})) + len(state.get('annotations', []))
 
         # Use sync manager if available (updates its timestamp to prevent self-reload)
         if hasattr(self, '_sync_manager') and self._sync_manager:
-            state = self._canvas.get_state()
-            state["modified_by"] = self.app_state.user or "unknown"
             if self._sync_manager.save_state(state):
                 logger.debug("Saved canvas state via sync manager")
+                # Update metadata
+                self._metadata_manager.update_canvas_metadata(
+                    self._current_canvas_id,
+                    modified=state.get("last_modified", ""),
+                    modified_by=username,
+                    item_count=item_count
+                )
             return
 
         # Fallback: direct file save
         from core.utils import ensure_directory, save_json
+        from datetime import datetime
 
-        canvas_dir = os.path.join(self._current_path, "_canvas")
-        ensure_directory(canvas_dir)
+        canvas_file = self._metadata_manager.get_canvas_path(self._current_canvas_id)
+        if not canvas_file:
+            logger.error("No canvas file path for save")
+            return
 
-        # Determine canvas filename based on jobname
-        jobname = self.app_state.jobname or "default"
-        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
+        ensure_directory(os.path.dirname(canvas_file))
 
         try:
-            state = self._canvas.get_state()
-            state["modified_by"] = self.app_state.user or "unknown"
+            now = datetime.now().isoformat()
+            state["last_modified"] = now
             save_json(canvas_file, state)
             logger.info(f"Saved canvas state to {canvas_file}")
+
+            # Update metadata
+            self._metadata_manager.update_canvas_metadata(
+                self._current_canvas_id,
+                modified=now,
+                modified_by=username,
+                item_count=item_count
+            )
         except Exception as e:
             logger.error(f"Failed to save canvas state: {e}")
 

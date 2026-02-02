@@ -279,7 +279,8 @@ class SelectionManager(BaseGalleryManager):
         if not hasattr(self.tab, '_widget_cache'):
             return
 
-        for path, widget in self.tab._widget_cache.items():
+        # Use thread-safe copy for iteration
+        for path, widget in self.get_widget_cache_copy().items():
             if hasattr(widget, 'set_selected'):
                 widget.set_selected(True)
 
@@ -311,10 +312,10 @@ class SelectionManager(BaseGalleryManager):
         """
         had_selection = len(self.tab._selected_items) > 0
 
-        # Update all selected widgets in widget cache
+        # Update all selected widgets in widget cache (thread-safe access)
         for path in list(self.tab._selected_items):
-            if path in self.tab._widget_cache:
-                widget = self.tab._widget_cache[path]
+            widget = self.get_cached_widget(path)
+            if widget:
                 widget.set_selected(False)
 
         # Also clear stack selections and their expanded widgets
@@ -474,8 +475,8 @@ class SelectionManager(BaseGalleryManager):
             )
         )
 
-        # Check each widget for intersection
-        for path, widget in self.tab._widget_cache.items():
+        # Check each widget for intersection (thread-safe copy)
+        for path, widget in self.get_widget_cache_copy().items():
             if widget.geometry().intersects(container_rect):
                 if hasattr(widget, 'set_selected'):
                     widget.set_selected(True)

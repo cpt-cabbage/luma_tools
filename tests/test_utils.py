@@ -118,52 +118,6 @@ class TestEnsureDirectory:
             assert os.path.isdir(tmpdir)
 
 
-class TestRemovePrefix:
-    """Tests for remove_prefix function."""
-
-    def test_prefix_exists(self):
-        """Test removing existing prefix."""
-        from core.utils import remove_prefix
-
-        assert remove_prefix("hello_world", "hello_") == "world"
-        assert remove_prefix("test_string", "test_") == "string"
-
-    def test_prefix_not_exists(self):
-        """Test when prefix doesn't exist."""
-        from core.utils import remove_prefix
-
-        assert remove_prefix("hello_world", "foo_") == "hello_world"
-
-    def test_empty_prefix(self):
-        """Test with empty prefix."""
-        from core.utils import remove_prefix
-
-        assert remove_prefix("hello", "") == "hello"
-
-
-class TestRemoveSuffix:
-    """Tests for remove_suffix function."""
-
-    def test_suffix_exists(self):
-        """Test removing existing suffix."""
-        from core.utils import remove_suffix
-
-        assert remove_suffix("hello_world", "_world") == "hello"
-        assert remove_suffix("test.exr", ".exr") == "test"
-
-    def test_suffix_not_exists(self):
-        """Test when suffix doesn't exist."""
-        from core.utils import remove_suffix
-
-        assert remove_suffix("hello_world", "_foo") == "hello_world"
-
-    def test_empty_suffix(self):
-        """Test with empty suffix."""
-        from core.utils import remove_suffix
-
-        assert remove_suffix("hello", "") == "hello"
-
-
 class TestLoadJson:
     """Tests for load_json function."""
 

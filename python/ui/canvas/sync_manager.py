@@ -18,6 +18,8 @@ from typing import Dict, Optional, Callable, Any
 
 from PySide6.QtCore import QObject, Signal, QTimer
 
+from core.utils import ensure_directory
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,8 +44,7 @@ class CanvasSyncManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._canvas_dir = ""
-        self._jobname = "default"
+        self._canvas_file_path = ""
         self._username = "unknown"
 
         self._last_state_mtime = 0.0
@@ -61,42 +62,37 @@ class CanvasSyncManager(QObject):
         # Track active users (from presence files)
         self._active_users = []
 
-    def configure(self, canvas_dir: str, jobname: str, username: str):
+    def configure(self, canvas_file_path: str, username: str):
         """
         Configure the sync manager for a specific canvas.
 
         Args:
-            canvas_dir: Base directory for canvas state (e.g., user's output folder)
-            jobname: Project/shot name for canvas file naming
+            canvas_file_path: Full path to the canvas state JSON file
             username: Current user's name
         """
-        self._canvas_dir = canvas_dir
-        self._jobname = jobname
+        self._canvas_file_path = canvas_file_path
         self._username = username
         self._last_state_mtime = 0.0
 
-        logger.info(f"Sync manager configured: {canvas_dir}, job={jobname}, user={username}")
+        logger.info(f"Sync manager configured: {canvas_file_path}, user={username}")
 
     @property
     def state_file_path(self) -> str:
         """Get the full path to the canvas state file."""
-        if not self._canvas_dir:
-            return ""
-        canvas_subdir = os.path.join(self._canvas_dir, "_canvas")
-        return os.path.join(canvas_subdir, f"canvas_{self._jobname}.json")
+        return self._canvas_file_path
 
     @property
     def lock_file_path(self) -> str:
         """Get the full path to the lock file."""
-        if not self._canvas_dir:
+        if not self._canvas_file_path:
             return ""
-        canvas_subdir = os.path.join(self._canvas_dir, "_canvas")
-        return os.path.join(canvas_subdir, f"canvas_{self._jobname}.lock")
+        # Lock file is same path with .lock extension instead of .json
+        return self._canvas_file_path.replace(".json", ".lock")
 
     def start(self):
         """Start synchronization polling."""
-        if not self._canvas_dir:
-            logger.warning("Cannot start sync: no canvas directory configured")
+        if not self._canvas_file_path:
+            logger.warning("Cannot start sync: no canvas file configured")
             return
 
         self._state_timer.start()
@@ -112,13 +108,13 @@ class CanvasSyncManager(QObject):
         return self._state_timer.isActive()
 
     def _ensure_canvas_dir(self):
-        """Ensure the canvas subdirectory exists."""
-        if not self._canvas_dir:
+        """Ensure the canvas file's parent directory exists."""
+        if not self._canvas_file_path:
             return False
 
-        canvas_subdir = os.path.join(self._canvas_dir, "_canvas")
+        canvas_dir = os.path.dirname(self._canvas_file_path)
         try:
-            os.makedirs(canvas_subdir, exist_ok=True)
+            ensure_directory(canvas_dir)
             return True
         except Exception as e:
             logger.error(f"Failed to create canvas directory: {e}")
@@ -326,8 +322,7 @@ class CursorPresenceManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._canvas_dir = ""
-        self._jobname = "default"
+        self._presence_dir = ""
         self._username = "unknown"
         self._user_color = self.USER_COLORS[0]
 
@@ -344,48 +339,44 @@ class CursorPresenceManager(QObject):
         self._write_timer.setInterval(self.CURSOR_WRITE_INTERVAL)
         self._write_timer.timeout.connect(self._write_cursor)
 
-    def configure(self, canvas_dir: str, jobname: str, username: str):
+    def configure(self, presence_dir: str, username: str):
         """
         Configure presence manager for a specific canvas.
 
         Args:
-            canvas_dir: Base directory for presence files
-            jobname: Project/shot name
+            presence_dir: Directory for presence files
             username: Current user's name
         """
-        self._canvas_dir = canvas_dir
-        self._jobname = jobname
+        self._presence_dir = presence_dir
         self._username = username
 
         # Assign color based on username hash
         color_index = hash(username) % len(self.USER_COLORS)
         self._user_color = self.USER_COLORS[color_index]
 
-        logger.info(f"Cursor presence configured: user={username}, color={self._user_color}")
+        logger.info(f"Cursor presence configured: dir={presence_dir}, user={username}, color={self._user_color}")
 
     @property
     def presence_dir(self) -> str:
         """Get directory for presence files."""
-        if not self._canvas_dir:
-            return ""
-        return os.path.join(self._canvas_dir, "_canvas", "presence")
+        return self._presence_dir
 
     @property
     def my_presence_file(self) -> str:
         """Get path to this user's presence file."""
-        if not self.presence_dir:
+        if not self._presence_dir:
             return ""
-        return os.path.join(self.presence_dir, f"{self._jobname}_{self._username}.json")
+        return os.path.join(self._presence_dir, f"{self._username}.json")
 
     def start(self):
         """Start cursor presence updates."""
-        if not self._canvas_dir:
-            logger.warning("Cannot start presence: no canvas directory configured")
+        if not self._presence_dir:
+            logger.warning("Cannot start presence: no presence directory configured")
             return
 
         # Ensure presence directory exists
         try:
-            os.makedirs(self.presence_dir, exist_ok=True)
+            ensure_directory(self._presence_dir)
         except Exception as e:
             logger.error(f"Failed to create presence directory: {e}")
             return

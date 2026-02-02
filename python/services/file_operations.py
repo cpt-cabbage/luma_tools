@@ -20,7 +20,7 @@ from core.config import (
     EXR_EXTENSION,
     DENOISED_SUBDIRECTORY
 )
-from core.utils import truncate_at_suffix, remove_suffix
+from core.utils import truncate_at_suffix
 from core.error_handling import safe_operation
 
 
@@ -170,7 +170,7 @@ def read_comp_file(compfile, hip_file_name):
                             foundcomps = foundcomps[5:]  # Remove "file " prefix
                         foundcomps = foundcomps.strip()
                         foundcomps = os.path.dirname(foundcomps)
-                        foundcomps = remove_suffix(foundcomps, r'/for_comp')
+                        foundcomps = foundcomps.removesuffix(r'/for_comp')
                         foundcomps = foundcomps.split(r"/")[-1]
                         renders_in_comp.append(foundcomps)
     except Exception as e:

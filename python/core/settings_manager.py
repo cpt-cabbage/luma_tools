@@ -128,6 +128,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_model_filter": SettingDef("comfyui_model_filter", "all", "user"),
     "gallery_show_job_status": SettingDef("gallery_show_job_status", True, "user"),
     "gallery_show_quick_actions": SettingDef("gallery_show_quick_actions", True, "user"),
+    # Canvas settings
+    # Dict mapping "{jobname}" or "{jobname}_{shot}" to last opened canvas_id
+    "canvas_last_opened": SettingDef("canvas_last_opened", {}, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }

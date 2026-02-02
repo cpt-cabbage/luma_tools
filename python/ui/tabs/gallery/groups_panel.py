@@ -370,9 +370,9 @@ class GroupsFilterPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
 
-        # Clear tracking dictionaries
-        self._filter_items.clear()
-        self._stack_items.clear()
+        # Replace tracking dictionaries atomically (avoids race conditions with iteration)
+        self._filter_items = {}
+        self._stack_items = {}
         self._stacks_separator = None
         self._stacks_header = None
         self._stacks_toggle = None
@@ -487,14 +487,15 @@ class GroupsFilterPanel(QWidget):
     def _rebuild_stacks(self):
         """Rebuild just the stacks section."""
         try:
-            # Remove old stack widgets
-            for item in list(self._stack_items.values()):
+            # Remove old stack widgets (keep reference for cleanup)
+            old_items = self._stack_items
+            self._stack_items = {}  # Atomic replacement before deletion
+            for item in old_items.values():
                 try:
                     item.setParent(None)
                     item.deleteLater()
                 except RuntimeError:
                     logger.debug("Stack item widget already deleted during cleanup")
-            self._stack_items.clear()
 
             # Remove old separator and header if they exist
             if self._stacks_separator:

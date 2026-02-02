@@ -52,8 +52,48 @@ class BaseGalleryManager:
 
     @property
     def widget_cache(self) -> Dict[str, Any]:
-        """Get the widget cache dictionary."""
+        """Get the widget cache dictionary.
+
+        WARNING: For iteration, use get_widget_cache_copy() to avoid race conditions.
+        For single-item access, prefer get_cached_widget() / set_cached_widget().
+        """
         return self.tab._widget_cache
+
+    # =========================================================================
+    # Thread-Safe Cache Access (delegates to tab)
+    # =========================================================================
+
+    def get_cached_widget(self, path: str):
+        """Thread-safe access to get a widget from cache."""
+        return self.tab.get_cached_widget(path)
+
+    def set_cached_widget(self, path: str, widget):
+        """Thread-safe access to set a widget in cache."""
+        self.tab.set_cached_widget(path, widget)
+
+    def remove_cached_widget(self, path: str):
+        """Thread-safe access to remove a widget from cache."""
+        return self.tab.remove_cached_widget(path)
+
+    def clear_widget_cache(self):
+        """Thread-safe access to clear all widgets from cache."""
+        self.tab.clear_widget_cache()
+
+    def get_widget_cache_copy(self) -> Dict[str, Any]:
+        """Thread-safe access to get a copy of the widget cache for iteration."""
+        return self.tab.get_widget_cache_copy()
+
+    def get_section_items_copy(self) -> Dict[str, Any]:
+        """Thread-safe access to get a copy of section items for iteration."""
+        return self.tab.get_section_items_copy()
+
+    def set_section_items(self, section_id: str, items: list):
+        """Thread-safe access to set section items."""
+        self.tab.set_section_items(section_id, items)
+
+    def clear_section_items(self):
+        """Thread-safe access to clear section items."""
+        self.tab.clear_section_items()
 
     @property
     def cached_items(self):

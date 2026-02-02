@@ -265,9 +265,10 @@ class ThreadSafeCache:
 
 class CachedProperty:
     """
-    Property descriptor with optional TTL.
+    Thread-safe property descriptor with optional TTL.
 
     Like @property but caches the result. Optionally expires after TTL.
+    Uses double-checked locking for thread safety.
 
     Example:
         class MyClass:
@@ -293,34 +294,59 @@ class CachedProperty:
         self.func = func
         self.ttl = ttl
         self.attr_name = None
+        self.lock_attr = None
         self.__doc__ = func.__doc__ if func else None
 
     def __set_name__(self, owner, name):
         self.attr_name = f"_cached_{name}"
+        self.lock_attr = f"_cached_{name}_lock"
+
+    def _get_lock(self, obj) -> threading.RLock:
+        """Get or create the lock for this property on the instance."""
+        lock = getattr(obj, self.lock_attr, None)
+        if lock is None:
+            # Create lock atomically using object's __dict__ to avoid recursion
+            lock = threading.RLock()
+            # Use object.__setattr__ to avoid any custom __setattr__ that might cause issues
+            object.__setattr__(obj, self.lock_attr, lock)
+        return lock
 
     def __get__(self, obj, objtype=None):
         if obj is None:
             return self
 
         cache_attr = self.attr_name
-        cached = getattr(obj, cache_attr, None)
 
+        # Fast path: check cache without lock (read is atomic for simple objects)
+        cached = getattr(obj, cache_attr, None)
         if cached is not None:
             value, timestamp = cached
             if self.ttl is None or time.time() - timestamp < self.ttl:
                 return value
 
-        # Compute and cache
-        value = self.func(obj)
-        setattr(obj, cache_attr, (value, time.time()))
-        return value
+        # Slow path: acquire lock for computation
+        lock = self._get_lock(obj)
+        with lock:
+            # Double-check after acquiring lock (another thread may have computed)
+            cached = getattr(obj, cache_attr, None)
+            if cached is not None:
+                value, timestamp = cached
+                if self.ttl is None or time.time() - timestamp < self.ttl:
+                    return value
+
+            # Compute and cache
+            value = self.func(obj)
+            setattr(obj, cache_attr, (value, time.time()))
+            return value
 
     def __delete__(self, obj):
-        """Clear the cached value."""
-        try:
-            delattr(obj, self.attr_name)
-        except AttributeError:
-            pass
+        """Clear the cached value (thread-safe)."""
+        lock = self._get_lock(obj)
+        with lock:
+            try:
+                delattr(obj, self.attr_name)
+            except AttributeError:
+                pass
 
     def clear(self, obj) -> None:
         """Clear the cached value (alternative to del)."""

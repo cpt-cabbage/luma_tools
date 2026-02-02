@@ -13,6 +13,8 @@ import zlib
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from core.utils import ensure_directory
+
 logger = logging.getLogger(__name__)
 
 # File extension
@@ -301,7 +303,7 @@ def _extract_embedded_image(cursor, node_id: str, extract_path: str) -> Optional
         # Save to extract path
         filename = f"{node_id}{ext}"
         output_path = os.path.join(extract_path, filename)
-        os.makedirs(extract_path, exist_ok=True)
+        ensure_directory(extract_path)
 
         with open(output_path, 'wb') as f:
             f.write(data)

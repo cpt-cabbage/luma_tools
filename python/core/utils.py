@@ -210,38 +210,6 @@ def replace_frame_tokens(template, frame_num):
                   lambda m: f"{frame_num:0{m.group(1)}d}", template)
 
 
-def remove_prefix(s, prefix):
-    """
-    Remove prefix from string (Python <3.9 compatible).
-
-    Args:
-        s: Input string
-        prefix: Prefix to remove
-
-    Returns:
-        str: String with prefix removed if present
-    """
-    if hasattr(s, 'removeprefix'):
-        return s.removeprefix(prefix)
-    return s[len(prefix):] if s.startswith(prefix) else s
-
-
-def remove_suffix(s, suffix):
-    """
-    Remove suffix from string (Python <3.9 compatible).
-
-    Args:
-        s: Input string
-        suffix: Suffix to remove
-
-    Returns:
-        str: String with suffix removed if present
-    """
-    if hasattr(s, 'removesuffix'):
-        return s.removesuffix(suffix)
-    return s[:-len(suffix)] if suffix and s.endswith(suffix) else s
-
-
 def load_json(path, default=None):
     """
     Load JSON file with error handling.

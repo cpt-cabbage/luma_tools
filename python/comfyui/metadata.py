@@ -155,7 +155,8 @@ def clear_gallery_metadata_cache(output_dir: str = None) -> None:
 def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
     """Load gallery metadata from the output directory.
 
-    Thread-safe: Uses lock for cache access.
+    Thread-safe: Uses lock for cache access. Handles TOCTOU race by
+    re-checking mtime after file read before caching.
 
     Returns:
         Dict with metadata, or empty dict if file missing/corrupted
@@ -175,7 +176,8 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
         return {}
 
     try:
-        current_mtime = os.path.getmtime(metadata_path)
+        # Get initial mtime for cache check
+        initial_mtime = os.path.getmtime(metadata_path)
 
         # Check cache (thread-safe)
         if use_cache:
@@ -183,7 +185,7 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
                 if output_dir in _gallery_metadata_cache:
                     try:
                         cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
-                        if cached_mtime == current_mtime and isinstance(cached_data, dict):
+                        if cached_mtime == initial_mtime and isinstance(cached_data, dict):
                             return cached_data
                     except Exception as e:
                         logger.error(f"[Metadata] Error reading cache: {e}")
@@ -192,15 +194,23 @@ def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, 
         with open(metadata_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-            # Validate data is a dict
-            if not isinstance(data, dict):
-                logger.warning(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
-                return {}
+        # Validate data is a dict
+        if not isinstance(data, dict):
+            logger.warning(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
+            return {}
 
-            # Update cache (thread-safe)
+        # TOCTOU fix: Re-check mtime after reading to detect file changes during read
+        # Only cache if file hasn't changed since we started reading
+        final_mtime = os.path.getmtime(metadata_path)
+
+        # Update cache (thread-safe) only if mtime is stable
+        if final_mtime == initial_mtime:
             with _gallery_metadata_cache_lock:
-                _gallery_metadata_cache[output_dir] = (current_mtime, data)
-            return data
+                _gallery_metadata_cache[output_dir] = (final_mtime, data)
+        else:
+            logger.debug(f"[Metadata] File changed during read, not caching: {metadata_path}")
+
+        return data
 
     except json.JSONDecodeError as e:
         logger.error(f"[Metadata] Corrupted JSON in {metadata_path}: {e}")

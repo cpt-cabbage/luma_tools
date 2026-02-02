@@ -25,6 +25,8 @@ from .canvas_undo import (
 from .canvas_export import export_to_luma, import_from_luma, get_luma_info, LUMA_EXTENSION
 from .sync_manager import CanvasSyncManager, CursorPresenceManager
 from .minimap import CanvasMinimap
+from .canvas_metadata import CanvasMetadataManager, CanvasDef, CanvasScope
+from .canvas_selector_dialog import CanvasSelectorDialog, NewCanvasDialog
 
 __all__ = [
     'CollaborativeCanvas',
@@ -53,4 +55,9 @@ __all__ = [
     'import_from_luma',
     'get_luma_info',
     'LUMA_EXTENSION',
+    'CanvasMetadataManager',
+    'CanvasDef',
+    'CanvasScope',
+    'CanvasSelectorDialog',
+    'NewCanvasDialog',
 ]

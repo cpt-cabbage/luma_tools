@@ -14,7 +14,7 @@ from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
 from workers import Worker
-from dialog_helpers import get_active_window
+from dialog_helpers import get_active_window, show_error, show_warning, confirm_action
 
 logger = logging.getLogger(__name__)
 
@@ -958,8 +958,7 @@ class EmbeddedImageViewer(QWidget):
                 logger.info(f"Successfully published image to AYON: {image_path}")
         except Exception as e:
             logger.error(f"Failed to publish image to AYON: {e}", exc_info=True)
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(parent_window, "Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}")
+            show_error("Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}", parent_window)
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -1045,16 +1044,7 @@ class EmbeddedImageViewer(QWidget):
         image_path = self.image_paths[self.current_index]
         filename = os.path.basename(image_path)
 
-        from PySide6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self,
-            "Delete File",
-            f"Are you sure you want to delete:\n{filename}?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+        if confirm_action("Delete File", f"Are you sure you want to delete:\n{filename}?", self):
             try:
                 os.remove(image_path)
                 deleted_path = image_path
@@ -1074,7 +1064,7 @@ class EmbeddedImageViewer(QWidget):
                 QTimer.singleShot(1500, self._update_info)
 
             except Exception as e:
-                QMessageBox.warning(self, "Delete Error", f"Failed to delete file:\n{str(e)}")
+                show_warning("Delete Error", f"Failed to delete file:\n{str(e)}", self)
 
     def _show_context_menu(self, pos):
         if not self.image_paths:
@@ -1398,16 +1388,7 @@ class FullscreenImageViewer(QWidget):
         image_path = self.image_paths[self.current_index]
         filename = os.path.basename(image_path)
 
-        from PySide6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self,
-            "Delete File",
-            f"Are you sure you want to delete:\n{filename}?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+        if confirm_action("Delete File", f"Are you sure you want to delete:\n{filename}?", self):
             try:
                 os.remove(image_path)
                 deleted_path = image_path
@@ -1427,7 +1408,7 @@ class FullscreenImageViewer(QWidget):
                 QTimer.singleShot(1500, self._update_info)
 
             except Exception as e:
-                QMessageBox.warning(self, "Delete Error", f"Failed to delete file:\n{str(e)}")
+                show_warning("Delete Error", f"Failed to delete file:\n{str(e)}", self)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

@@ -894,21 +894,22 @@ class GalleryManager(BaseGalleryManager):
 
 
         for path in stale_paths:
-            widget = self.tab._widget_cache.pop(path, None)
+            widget = self.remove_cached_widget(path)
             if widget and isValid(widget):
                 self.tab._flow_layout.removeWidget(widget)
                 widget.deleteLater()
 
-        # Also clean up section_items references
-        if hasattr(self.tab, '_section_items'):
-            for section_id in list(self.tab._section_items.keys()):
-                paths = self.tab._section_items[section_id]
-                self.tab._section_items[section_id] = [
-                    p for p in paths if p not in stale_paths
-                ]
-                # Remove empty sections
-                if not self.tab._section_items[section_id]:
-                    del self.tab._section_items[section_id]
+        # Also clean up section_items references (thread-safe)
+        if hasattr(self.tab, '_section_items') and hasattr(self.tab, '_cache_lock'):
+            with self.tab._cache_lock:
+                for section_id in list(self.tab._section_items.keys()):
+                    paths = self.tab._section_items[section_id]
+                    self.tab._section_items[section_id] = [
+                        p for p in paths if p not in stale_paths
+                    ]
+                    # Remove empty sections
+                    if not self.tab._section_items[section_id]:
+                        del self.tab._section_items[section_id]
 
     def _insert_new_items_incrementally(self, sorted_items, new_items):
         """Insert new items at their correct positions without rebuilding the layout.
@@ -1126,8 +1127,9 @@ class GalleryManager(BaseGalleryManager):
         visible_right += buffer
 
         # Collect widgets that need loading (not already loaded)
+        # Use thread-safe copy for iteration
         widgets_to_load = []
-        for widget in self.tab._widget_cache.values():
+        for widget in self.get_widget_cache_copy().values():
             # Check widget validity (may have been deleted during refresh)
             if not widget or not isValid(widget) or not hasattr(widget, 'load_thumbnail_if_needed'):
                 continue

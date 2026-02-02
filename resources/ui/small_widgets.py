@@ -16,7 +16,7 @@ from thumbnail_styles import (
     ThumbnailStyler, darken_color, lighten_color, color_with_alpha,
     derive_background_from_color, derive_border_from_color,
 )
-from dialog_helpers import get_active_window
+from dialog_helpers import get_active_window, confirm_action
 from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
 from effects import create_property_animation
 
@@ -995,8 +995,6 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     def _delete_all_items(self):
         """Delete all items in the stack."""
-        from PySide6.QtWidgets import QMessageBox
-
         if not self._gallery_tab or not self._items:
             return
 
@@ -1007,15 +1005,13 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         # Confirm deletion
         parent_window = get_active_window()
 
-        reply = QMessageBox.question(
-            parent_window, "Delete Stack",
+        if not confirm_action(
+            "Delete Stack",
             f"Are you sure you want to delete all {count} items in this stack?\n\n"
             f"Stack: {self.stack_id}\n\n"
             "This will permanently delete the files from disk.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
+            parent_window
+        ):
             return
 
         # Use gallery tab's delete handler if available

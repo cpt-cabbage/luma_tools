@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - listing remaining steps clearly for the user to continue later OR
 - Deferring to a new task on task list so compact threshold can be hit.
 **Do not silently drop items, cut corners, or produce partial implementations. Every todo item created must be completed or explicitly handed off. "Good enough" is not acceptable when the full scope was requested.**
+**When adding new features or doing any larger changes, always ask clarifying questions to the user to create absolute certianty in task planning**
 
 ## Skills
 
@@ -274,7 +275,7 @@ python -m pytest tests/ -k "test_name"    # Run specific test by name
 `tests/conftest.py` auto-configures PYTHONPATH and skips `test_animation_controller` and `test_loaders` if numpy is broken (common in some venv states). Manual testing also required (both launcher modes, with/without AYON env).
 
 ### Windows PowerShell (for Claude Code)
-Always use PowerShell for Python scripts (Bash compatibility layer has path issues):
+Always use PowerShell in bash (Bash compatibility layer has path issues):
 ```powershell
 # Syntax check a file
 powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\ui\tabs\file.py"
@@ -587,5 +588,5 @@ class MyTab(BaseTab):
 - `thumbnail_styles.py` - `ThumbnailStyler` for consistent thumbnail appearance (borders, badges, colors)
 - `splash_screen.py` - Application splash screen with async loading progress
 - `spinners.py` - Loading spinner widgets for async operations
-- `batch_selector.py` - Batch/range selection widget for frame ranges
+- `batch_selector.py` - Batch/range selection widget 
 - `effects.py` - UI animation effects (pulse, glow, fade)
