@@ -231,6 +231,25 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     like_toggled = Signal(str, bool)  # path, is_liked
     group_items_requested = Signal(list)  # [paths] - create new group with these items
 
+    # Class-level caches for settings (avoid get_setting() on every widget update)
+    _cached_liked_color = None
+    _cached_stack_colors = None
+    _settings_cache_initialized = False
+
+    @classmethod
+    def _ensure_settings_cache(cls):
+        """Initialize or refresh settings cache (call once, not per widget)."""
+        if not cls._settings_cache_initialized:
+            from core.settings_manager import get_setting
+            cls._cached_liked_color = get_setting("gallery_liked_color") or "#55ff9c"
+            cls._cached_stack_colors = get_setting("gallery_stack_colors") or {}
+            cls._settings_cache_initialized = True
+
+    @classmethod
+    def invalidate_settings_cache(cls):
+        """Call this when settings change to refresh the cache."""
+        cls._settings_cache_initialized = False
+
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,
                  job_prefix=None, metadata_level=None):
@@ -271,6 +290,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         self._is_liked = False
         self._group_colors = []  # List of group colors this item belongs to
         self._favorites_manager = None  # Set by gallery tab after creation
+        self._glow_effect = None  # Reusable glow effect for like indicator
+        self._dot_widgets = []  # Pool of dot widgets for group colors (reusable)
+        self._last_dot_colors = []  # Track last colors to avoid redundant updates
 
         # Initialize drag support
         self._init_drag_state()
@@ -469,13 +491,18 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         self._update_group_border()
 
     def _update_like_indicator_style(self):
-        """Update the like indicator appearance based on liked state - uses color from settings."""
-        from core.settings_manager import get_setting
+        """Update the like indicator appearance based on liked state.
+
+        Performance optimizations:
+        - Uses class-level cached liked color instead of get_setting() every call
+        - Reuses existing QGraphicsDropShadowEffect instead of creating new one
+        """
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
         from PySide6.QtGui import QColor
 
-        # Get liked color from settings (default mint green if not set)
-        liked_color = get_setting("gallery_liked_color") or "#55ff9c"
+        # Use cached liked color (avoid get_setting() on every update)
+        self._ensure_settings_cache()
+        liked_color = self._cached_liked_color
         hex_color = liked_color.lstrip('#')
         r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
 
@@ -489,12 +516,14 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                     font-size: 15px;
                 }}
             """)
-            # Add subtle glow effect
-            glow = QGraphicsDropShadowEffect(self.like_indicator)
-            glow.setBlurRadius(20)
-            glow.setColor(QColor(r, g, b, 200))
-            glow.setOffset(0, 0)
-            self.like_indicator.setGraphicsEffect(glow)
+            # Reuse glow effect instead of creating new one every time
+            if self._glow_effect is None:
+                self._glow_effect = QGraphicsDropShadowEffect(self.like_indicator)
+                self._glow_effect.setBlurRadius(20)
+                self._glow_effect.setOffset(0, 0)
+            self._glow_effect.setColor(QColor(r, g, b, 200))
+            if self.like_indicator.graphicsEffect() != self._glow_effect:
+                self.like_indicator.setGraphicsEffect(self._glow_effect)
         else:
             self.like_indicator.setStyleSheet(f"""
                 QLabel {{
@@ -510,34 +539,53 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                     border: 2px solid rgba({r}, {g}, {b}, 0.7);
                 }}
             """)
-            # Remove glow effect
-            self.like_indicator.setGraphicsEffect(None)
+            # Remove glow effect (but keep reference for reuse)
+            if self.like_indicator.graphicsEffect() is not None:
+                self.like_indicator.setGraphicsEffect(None)
 
     def _update_group_dots(self):
-        """Update the group dots display based on group membership."""
-        # Clear existing dots
-        while self._group_dots_layout.count() > 1:  # Keep the stretch
-            item = self._group_dots_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        """Update the group dots display based on group membership.
 
-        if not self._group_colors:
+        Performance optimizations:
+        - Pools dot widgets instead of creating/destroying on every update
+        - Only updates stylesheet if color actually changed
+        """
+        colors = self._group_colors[:3]  # Max 3 colors
+
+        # Quick check: if colors haven't changed, skip update entirely
+        if colors == self._last_dot_colors:
+            return
+        self._last_dot_colors = colors[:]  # Store copy
+
+        if not colors:
             self.group_dots_container.hide()
+            # Hide any existing dots
+            for dot in self._dot_widgets:
+                dot.hide()
             return
 
-        # Add colored dots (max 3) - outline style
-        for color in self._group_colors[:3]:
+        # Ensure we have enough dot widgets in the pool
+        while len(self._dot_widgets) < len(colors):
             dot = QLabel()
             dot.setFixedSize(10, 10)
-            dot.setStyleSheet(f"""
-                QLabel {{
-                    background-color: rgba(0, 0, 0, 0.4);
-                    border-radius: 5px;
-                    border: 2px solid {color};
-                }}
-            """)
             dot.setAttribute(Qt.WA_TransparentForMouseEvents)
             self._group_dots_layout.insertWidget(self._group_dots_layout.count() - 1, dot)
+            self._dot_widgets.append(dot)
+
+        # Update dots: show needed ones with correct colors, hide extras
+        for i, dot in enumerate(self._dot_widgets):
+            if i < len(colors):
+                color = colors[i]
+                dot.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: rgba(0, 0, 0, 0.4);
+                        border-radius: 5px;
+                        border: 2px solid {color};
+                    }}
+                """)
+                dot.show()
+            else:
+                dot.hide()
 
         self.group_dots_container.show()
 
@@ -545,9 +593,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         """Update thumbnail border color based on group membership.
 
         Liked state is shown only via the heart icon, not the border.
-        """
-        from core.settings_manager import get_setting
 
+        Performance optimization: Uses class-level cached stack colors.
+        """
         # Priority 1: Group color (from user-defined groups)
         if self._group_colors:
             self._styler.group_color = self._group_colors[0]
@@ -556,8 +604,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
         # Priority 2: Stack color (if has job_prefix and custom stack color)
         if self._job_prefix:
-            stack_colors = get_setting("gallery_stack_colors") or {}
-            stack_color = stack_colors.get(self._job_prefix)
+            # Use cached stack colors instead of get_setting() every call
+            self._ensure_settings_cache()
+            stack_color = self._cached_stack_colors.get(self._job_prefix)
             if stack_color:
                 self._styler.group_color = stack_color
                 self._apply_thumbnail_style()

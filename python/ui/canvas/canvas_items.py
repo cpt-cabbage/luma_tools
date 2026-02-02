@@ -76,6 +76,7 @@ class ImageNode(QGraphicsItem):
 
     def __init__(self, image_path: str, x: float = 0, y: float = 0,
                  width: float = None, height: float = None,
+                 qimage: Optional[QImage] = None,
                  parent: QGraphicsItem = None):
         """
         Create an image node.
@@ -84,6 +85,7 @@ class ImageNode(QGraphicsItem):
             image_path: Path to the image file
             x, y: Position on canvas
             width, height: Size (None = use original image resolution)
+            qimage: Optional pre-loaded QImage (for async loading - avoids disk I/O)
             parent: Parent graphics item
         """
         super().__init__(parent)
@@ -128,11 +130,30 @@ class ImageNode(QGraphicsItem):
         # Position
         self.setPos(x, y)
 
-        # Load image
-        self._load_image()
+        # Load image (use pre-loaded QImage if provided)
+        self._load_image(qimage)
 
-    def _load_image(self):
-        """Load the image from disk."""
+    def _load_image(self, qimage: Optional[QImage] = None):
+        """Load the image from disk or pre-loaded QImage.
+
+        Args:
+            qimage: Optional pre-loaded QImage (from worker thread).
+                    If provided, converts to QPixmap without disk I/O.
+                    If None, loads from disk (original behavior).
+        """
+        # Use pre-loaded QImage if provided (async loading path)
+        if qimage is not None and not qimage.isNull():
+            self._pixmap = QPixmap.fromImage(qimage)
+            self._missing = False
+            # Clear LOD cache when loading new image
+            self._lod_cache.clear()
+            # Store original aspect ratio for constrained resize
+            self._original_aspect = self._pixmap.width() / max(1, self._pixmap.height())
+            # Use original image dimensions if no size was specified
+            self._apply_dimensions_from_pixmap()
+            return
+
+        # Fallback: load from disk (sync loading path)
         if os.path.exists(self.image_path):
             self._pixmap = QPixmap(self.image_path)
             if self._pixmap.isNull():
@@ -145,26 +166,33 @@ class ImageNode(QGraphicsItem):
                 # Store original aspect ratio for constrained resize
                 self._original_aspect = self._pixmap.width() / max(1, self._pixmap.height())
                 # Use original image dimensions if no size was specified
-                if self._requested_width is None and self._requested_height is None:
-                    self._width = float(self._pixmap.width())
-                    self._height = float(self._pixmap.height())
-                elif self._requested_width is not None and self._requested_height is None:
-                    # Width specified, calculate height from aspect ratio
-                    aspect = self._pixmap.width() / max(1, self._pixmap.height())
-                    self._width = self._requested_width
-                    self._height = self._width / aspect
-                elif self._requested_height is not None and self._requested_width is None:
-                    # Height specified, calculate width from aspect ratio
-                    aspect = self._pixmap.width() / max(1, self._pixmap.height())
-                    self._height = self._requested_height
-                    self._width = self._height * aspect
-                else:
-                    # Both specified, use as-is
-                    self._width = self._requested_width
-                    self._height = self._requested_height
+                self._apply_dimensions_from_pixmap()
         else:
             self._missing = True
             self._pixmap = None
+
+    def _apply_dimensions_from_pixmap(self):
+        """Apply dimensions based on loaded pixmap and requested size."""
+        if not self._pixmap:
+            return
+
+        if self._requested_width is None and self._requested_height is None:
+            self._width = float(self._pixmap.width())
+            self._height = float(self._pixmap.height())
+        elif self._requested_width is not None and self._requested_height is None:
+            # Width specified, calculate height from aspect ratio
+            aspect = self._pixmap.width() / max(1, self._pixmap.height())
+            self._width = self._requested_width
+            self._height = self._width / aspect
+        elif self._requested_height is not None and self._requested_width is None:
+            # Height specified, calculate width from aspect ratio
+            aspect = self._pixmap.width() / max(1, self._pixmap.height())
+            self._height = self._requested_height
+            self._width = self._height * aspect
+        else:
+            # Both specified, use as-is
+            self._width = self._requested_width
+            self._height = self._requested_height
 
     def _get_lod_pixmap(self, lod: float) -> QPixmap:
         """

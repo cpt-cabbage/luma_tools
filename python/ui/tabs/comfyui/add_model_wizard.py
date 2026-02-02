@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWizard, QWizardPage, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QCheckBox,
-    QGridLayout, QFrame, QFileDialog
+    QGridLayout, QFrame, QFileDialog, QComboBox
 )
 
 from comfyui.presets_manager import save_comfyui_workflow_preset, get_comfyui_workflow_presets
@@ -113,6 +113,22 @@ class DetailsPage(QWizardPage):
 
         layout.addLayout(form)
 
+        # Output type
+        output_layout = QHBoxLayout()
+        output_label = QLabel("Output Type:")
+        output_label.setFixedWidth(80)
+        self._output_type_combo = QComboBox()
+        self._output_type_combo.addItems(["Image", "Video", "3D", "Audio", "Other"])
+        self._output_type_combo.setToolTip(
+            "Specify what type of content this model generates.\n\n"
+            "• Image/Video: Auto-add to Canvas option will be available\n"
+            "• 3D/Audio/Other: Canvas integration is disabled"
+        )
+        output_layout.addWidget(output_label)
+        output_layout.addWidget(self._output_type_combo)
+        output_layout.addStretch()
+        layout.addLayout(output_layout)
+
         # Options
         self._iteratable_check = QCheckBox("Enable Iterate Mode")
         self._iteratable_check.setToolTip(
@@ -130,6 +146,9 @@ class DetailsPage(QWizardPage):
         layout.addWidget(info)
 
         layout.addStretch()
+
+        # Map display names to internal values
+        self._output_type_map = {"Image": "image", "Video": "video", "3D": "3d", "Audio": "audio", "Other": "other"}
 
         # Register fields
         self.registerField("model_name*", self._name_edit)
@@ -177,6 +196,11 @@ class DetailsPage(QWizardPage):
             return False
 
         return True
+
+    def get_output_type(self) -> str:
+        """Get the selected output type."""
+        display = self._output_type_combo.currentText()
+        return self._output_type_map.get(display, "image")
 
 
 class TagsPage(QWizardPage):
@@ -271,20 +295,22 @@ class AddModelWizard(QWizard):
             description = self.field("model_description")
             iteratable = self.field("iteratable")
             tags = self._tags_page.get_selected_tags()
+            output_type = self._details_page.get_output_type()
 
             # Save the preset
             save_comfyui_workflow_preset(
                 model_name,
                 workflow_path,
                 iteratable=iteratable,
-                note=description
+                note=description,
+                output_type=output_type
             )
 
             # Save tags
             if tags:
                 set_model_tags(model_name, tags)
 
-            logger.info(f"Created new model: {model_name}")
+            logger.info(f"Created new model: {model_name} (output_type={output_type})")
             super().accept()
 
         except Exception as e:

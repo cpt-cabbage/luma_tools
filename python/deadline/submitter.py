@@ -251,6 +251,7 @@ def submit_comfyui_job(
     use_server_mode: bool = True,
     workflow_preset: Optional[str] = None,
     full_restart: bool = False,
+    output_type: Optional[str] = None,
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch input file processing.
@@ -273,6 +274,7 @@ def submit_comfyui_job(
         use_server_mode: Deprecated - server mode is always enabled
         workflow_preset: Full preset name for metadata
         full_restart: If True, restart ComfyUI server before processing
+        output_type: Type of output (image, video, 3d, audio, other)
 
     Returns:
         Tuple of (job_ids, error_message)
@@ -380,6 +382,7 @@ def submit_comfyui_job(
                 base_seed=base_seed,
                 workflow_preset=workflow_preset,
                 editable_values=current_editable_values,
+                output_type=output_type,
             )
 
         # Copy input file to working directory for farm access

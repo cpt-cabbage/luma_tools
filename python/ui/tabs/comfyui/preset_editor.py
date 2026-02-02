@@ -50,6 +50,7 @@ class PresetEditorDialog(QDialog):
         self.current_node_overrides = preset_data.get("node_overrides", {})
         self.current_is_multi = preset_data.get("is_multi", False)
         self.current_workflows = preset_data.get("workflows", {})
+        self.current_output_type = preset_data.get("output_type", "image")
 
         # Storage for widgets
         self.node_override_widgets = {}
@@ -77,6 +78,27 @@ class PresetEditorDialog(QDialog):
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
         layout.addLayout(name_layout)
+
+        # Output type dropdown
+        output_type_layout = QHBoxLayout()
+        output_type_label = QLabel("Output Type:")
+        self.output_type_combo = QtWidgets.QComboBox()
+        self.output_type_combo.addItems(["Image", "Video", "3D", "Audio", "Other"])
+        # Map display names to internal values
+        self._output_type_map = {"Image": "image", "Video": "video", "3D": "3d", "Audio": "audio", "Other": "other"}
+        self._output_type_reverse = {v: k for k, v in self._output_type_map.items()}
+        # Set current value
+        current_display = self._output_type_reverse.get(self.current_output_type, "Image")
+        self.output_type_combo.setCurrentText(current_display)
+        self.output_type_combo.setToolTip(
+            "Specify what type of content this model generates.\n\n"
+            "• Image/Video: Auto-add to Canvas option will be available\n"
+            "• 3D/Audio/Other: Canvas integration is disabled"
+        )
+        output_type_layout.addWidget(output_type_label)
+        output_type_layout.addWidget(self.output_type_combo)
+        output_type_layout.addStretch()
+        layout.addLayout(output_type_layout)
 
         # Multi-workflow checkbox
         self.is_multi_check = QtWidgets.QCheckBox("Multi-Workflow Model (allows multiple workflows per model)")
@@ -655,6 +677,10 @@ class PresetEditorDialog(QDialog):
                 self.main_window.animator.show_error("Workflow path cannot be empty")
                 return
 
+        # Get output type from combo box
+        output_type_display = self.output_type_combo.currentText()
+        new_output_type = self._output_type_map.get(output_type_display, "image")
+
         # Store result
         self.result_accepted = True
         self.result_data = {
@@ -665,7 +691,8 @@ class PresetEditorDialog(QDialog):
             "full_restart": new_full_restart,
             "node_overrides": new_node_overrides,
             "is_multi": new_is_multi,
-            "workflows": new_workflows
+            "workflows": new_workflows,
+            "output_type": new_output_type
         }
 
         self.accept()

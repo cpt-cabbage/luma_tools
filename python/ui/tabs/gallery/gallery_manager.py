@@ -16,6 +16,9 @@ from ui_components import ThumbnailWidget, StackedThumbnailWidget
 
 from .base_manager import BaseGalleryManager
 
+# Animation threshold - skip animations when gallery has more items than this
+ANIMATION_THRESHOLD = 100
+
 
 class GalleryManager(BaseGalleryManager):
     """Handles gallery UI management operations.
@@ -627,7 +630,7 @@ class GalleryManager(BaseGalleryManager):
 
             # Reorder all widgets to match the sorted item order
             if added_prefixes or removed_prefixes:
-                self._reorder_stacks(items)
+                self._reorder_stacks(new_groups)
 
         finally:
             container.setUpdatesEnabled(True)
@@ -639,25 +642,15 @@ class GalleryManager(BaseGalleryManager):
         # Load thumbnails for new items
         QTimer.singleShot(150, self._load_visible_stack_thumbnails)
 
-    def _reorder_stacks(self, items):
+    def _reorder_stacks(self, groups):
         """Reorder all stack/single widgets to match the sorted item order.
 
         After incremental additions/removals, widgets may be out of order.
         This repositions them to match the expected sort order.
 
         Args:
-            items: List of item dicts in sorted order
+            groups: Dict of prefix -> list of items (already computed by caller)
         """
-        # Use the same grouping logic as _update_stacked_items_incrementally
-        from core.settings_manager import get_setting
-        stacking_mode = get_setting("gallery_stacking_mode")
-
-        if stacking_mode == "groups":
-            groups = self.group_items_by_groups(items, fallback_to_job=False)
-        elif stacking_mode == "both":
-            groups = self.group_items_by_groups(items, fallback_to_job=True)
-        else:
-            groups = self.group_items_by_prefix(items)
         seen_prefixes = list(groups.keys())
 
         # Reposition widgets in the layout according to sorted prefix order
@@ -719,6 +712,9 @@ class GalleryManager(BaseGalleryManager):
     def _animate_new_items(self, widgets):
         """Fade in newly inserted gallery items with staggered animation.
 
+        Performance optimization: Skips animations for large galleries to avoid
+        performance impact. Uses shorter durations and fewer animated items.
+
         Args:
             widgets: List of newly created widgets to animate
         """
@@ -728,13 +724,19 @@ class GalleryManager(BaseGalleryManager):
         if not widgets:
             return
 
+        # Skip animations for large galleries to avoid performance impact
+        cache_size = len(getattr(self.tab, '_widget_cache', {}))
+        if cache_size > ANIMATION_THRESHOLD:
+            return
+
         # Store references to prevent GC
         if not hasattr(self, '_new_item_animations'):
             self._new_item_animations = []
 
-        duration = 250
-        stagger = 30
-        max_animated = 20
+        # Reduced animation parameters for better performance
+        duration = 150  # Reduced from 250
+        stagger = 15    # Reduced from 30
+        max_animated = 10  # Reduced from 20
 
         for idx, widget in enumerate(widgets[:max_animated]):
             opacity_effect = QGraphicsOpacityEffect(widget)

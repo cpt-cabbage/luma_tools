@@ -223,16 +223,20 @@ class SettingsTab(BaseTab):
             notifications = get_user_notifications(self.app_state.user)
 
             if notifications:
-                # Show notification dialog
-                message = f"You have {len(notifications)} completed request(s):\n\n"
-                for notif in notifications[:5]:  # Show max 5
-                    message += f"• [{notif['request_category']}] {notif['request_description']}\n"
-                    message += f"  Completed by {notif['completed_by']} on {notif['completed_at']}\n\n"
+                # Show system tray notification instead of dialog
+                count = len(notifications)
+                if count == 1:
+                    notif = notifications[0]
+                    message = f"[{notif['request_category']}] {notif['request_description']}"
+                else:
+                    message = f"{count} feature requests have been completed"
 
-                if len(notifications) > 5:
-                    message += f"... and {len(notifications) - 5} more"
-
-                show_info("Feature Requests Completed", message, self.main_window)
+                if hasattr(self.main_window, 'show_system_notification'):
+                    self.main_window.show_system_notification(
+                        "Feature Requests Completed",
+                        message,
+                        "success"
+                    )
 
                 # Mark as read
                 mark_notifications_read(self.app_state.user)

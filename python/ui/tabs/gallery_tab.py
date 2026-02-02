@@ -123,8 +123,13 @@ class GalleryTab(BaseTab):
         self._favorites_manager = FavoritesManager(self)
 
         # Forward favorites changes to event bus for cross-tab sync (e.g., canvas)
+        # Single-item signals (for toggle_like, add_to_group, remove_from_group single operations)
         self._favorites_manager.like_changed.connect(self._on_favorites_changed)
         self._favorites_manager.item_groups_changed.connect(self._on_favorites_changed)
+        # Batch signals (for like_items, unlike_items, add_items_to_group, remove_items_from_group)
+        self._favorites_manager.items_liked_batch.connect(self._on_favorites_batch_changed)
+        self._favorites_manager.items_unliked_batch.connect(self._on_favorites_batch_changed)
+        self._favorites_manager.items_groups_changed_batch.connect(self._on_favorites_batch_changed)
 
         # Current filter state: ("all", None), ("liked", None), ("group", group_id), ("ungrouped", None)
         self._current_filter = ("all", None)
@@ -779,6 +784,9 @@ class GalleryTab(BaseTab):
     def _update_filter_counts(self, items):
         """Update the counts shown in the groups panel.
 
+        Performance optimization: Uses set intersections with reverse index
+        for O(1) group counts instead of O(n) filtering per group.
+
         Args:
             items: List of all items (before likes/groups filtering)
         """
@@ -794,18 +802,24 @@ class GalleryTab(BaseTab):
 
         all_count = len(items)
 
-        # Count liked items
-        liked_count = len(self._favorites_manager.filter_liked(items))
+        # Build path set once for efficient lookups
+        item_paths = {item['path'] for item in items}
 
-        # Count items per group
+        # Count liked items using set intersection (O(min(n,m)) instead of O(n*m))
+        self._favorites_manager._ensure_loaded()
+        liked_count = len(item_paths & self._favorites_manager._liked_items)
+
+        # Count items per group using reverse index (O(1) per group instead of O(n))
         group_counts = {}
         for group in self._favorites_manager.get_groups():
-            group_counts[group.group_id] = len(
-                self._favorites_manager.filter_by_group(items, group.group_id)
-            )
+            group_items = self._favorites_manager._group_items.get(group.group_id, set())
+            group_counts[group.group_id] = len(item_paths & group_items)
 
-        # Count ungrouped items
-        ungrouped_count = len(self._favorites_manager.filter_ungrouped(items))
+        # Count ungrouped items - items not in any group
+        all_grouped_paths = set()
+        for paths in self._favorites_manager._group_items.values():
+            all_grouped_paths.update(paths)
+        ungrouped_count = len(item_paths - all_grouped_paths)
 
         # Count items per stack (job_prefix)
         stack_counts = {}
@@ -819,8 +833,47 @@ class GalleryTab(BaseTab):
         if hasattr(self._groups_panel, 'set_stacks_data'):
             self._groups_panel.set_stacks_data(stack_counts)
 
+    def _refresh_favorites_state_for_path(self, path: str):
+        """Refresh favorites state for a single widget.
+
+        Performance optimization: Only updates the specific widget instead of all.
+
+        Args:
+            path: Path of the item to update
+        """
+        from shiboken6 import isValid
+
+        if not hasattr(self, '_widget_cache'):
+            return
+
+        widget = self._widget_cache.get(path)
+        if widget and isValid(widget) and hasattr(widget, 'update_favorites_state'):
+            widget.update_favorites_state()
+
+    def _refresh_favorites_state_for_paths(self, paths):
+        """Refresh favorites state for specific widgets.
+
+        Performance optimization: Only updates the specified widgets instead of all.
+
+        Args:
+            paths: List or set of paths to update
+        """
+        from shiboken6 import isValid
+
+        if not hasattr(self, '_widget_cache'):
+            return
+
+        for path in paths:
+            widget = self._widget_cache.get(path)
+            if widget and isValid(widget) and hasattr(widget, 'update_favorites_state'):
+                widget.update_favorites_state()
+
     def _refresh_favorites_state(self):
-        """Refresh the favorites state on all visible thumbnails."""
+        """Refresh the favorites state on all visible thumbnails.
+
+        Note: Prefer using _refresh_favorites_state_for_paths() when you know
+        which items changed, as this method iterates ALL widgets.
+        """
         from shiboken6 import isValid
 
         if not hasattr(self, '_widget_cache'):
@@ -971,6 +1024,23 @@ class GalleryTab(BaseTab):
         Called when likes or group assignments change. Emits favorites_changed
         signal on the event bus so other tabs (e.g., canvas) can sync.
         """
+        if EVENT_BUS_AVAILABLE:
+            pipeline_events.favorites_changed.emit()
+
+    def _on_favorites_batch_changed(self, paths: list):
+        """Handle batch favorites changes with targeted widget updates.
+
+        Called when batch operations (like_items, unlike_items, add_items_to_group,
+        remove_items_from_group) complete. Updates only affected widgets instead of
+        refreshing all widgets for better performance.
+
+        Args:
+            paths: List of paths that were affected by the batch operation
+        """
+        # Update only affected widgets
+        self._refresh_favorites_state_for_paths(paths)
+
+        # Forward to event bus for cross-tab sync
         if EVENT_BUS_AVAILABLE:
             pipeline_events.favorites_changed.emit()
 

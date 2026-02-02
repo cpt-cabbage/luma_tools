@@ -101,6 +101,10 @@ def get_comfyui_workflow_presets() -> Dict[str, Any]:
     return load_global_settings().get("comfyui_workflow_presets", {})
 
 
+# Valid output types for workflow presets
+OUTPUT_TYPES = ("image", "video", "3d", "audio", "other")
+
+
 def save_comfyui_workflow_preset(
     name: str,
     workflow_path: str,
@@ -110,12 +114,30 @@ def save_comfyui_workflow_preset(
     full_restart: bool = False,
     node_overrides: Optional[Dict] = None,
     is_multi: bool = False,
-    workflows: Optional[Dict] = None
+    workflows: Optional[Dict] = None,
+    output_type: str = "image"
 ):
-    """Save a ComfyUI workflow preset to global settings."""
+    """Save a ComfyUI workflow preset to global settings.
+
+    Args:
+        name: Preset name
+        workflow_path: Path to workflow JSON file
+        description: Optional description
+        iteratable: Whether preset supports iterate mode
+        note: User note/description
+        full_restart: Whether to restart ComfyUI server before running
+        node_overrides: Dict of node overrides
+        is_multi: Whether this is a multi-workflow preset
+        workflows: Dict of workflows for multi-workflow presets
+        output_type: Type of output (image, video, 3d, audio, other)
+    """
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
         settings["comfyui_workflow_presets"] = {}
+
+    # Validate output_type
+    if output_type not in OUTPUT_TYPES:
+        output_type = "image"
 
     preset_data = {
         "path": workflow_path,
@@ -125,6 +147,7 @@ def save_comfyui_workflow_preset(
         "full_restart": full_restart,
         "node_overrides": node_overrides or {},
         "is_multi": is_multi,
+        "output_type": output_type,
     }
     if is_multi and workflows:
         preset_data["workflows"] = workflows
@@ -148,13 +171,17 @@ def update_comfyui_workflow_preset(name: str, **kwargs) -> bool:
     # Handle legacy format
     if isinstance(preset, str):
         preset = {"path": preset, "description": "", "iteratable": False, "note": "",
-                  "full_restart": False, "node_overrides": {}, "is_multi": False}
+                  "full_restart": False, "node_overrides": {}, "is_multi": False,
+                  "output_type": "image"}
 
     # Update only provided fields
     for key in ["workflow_path", "description", "iteratable", "note", "full_restart",
-                "node_overrides", "is_multi", "workflows"]:
+                "node_overrides", "is_multi", "workflows", "output_type"]:
         if key in kwargs and kwargs[key] is not None:
             preset_key = "path" if key == "workflow_path" else key
+            # Validate output_type
+            if key == "output_type" and kwargs[key] not in OUTPUT_TYPES:
+                continue
             preset[preset_key] = kwargs[key]
 
     presets[name] = preset
@@ -216,6 +243,21 @@ def is_workflow_preset_iteratable(name: str) -> bool:
 def is_workflow_preset_full_restart(name: str) -> bool:
     """Check if a workflow preset requires full ComfyUI server restart."""
     return _get_workflow_preset_field(name, "full_restart", False)
+
+
+def get_workflow_preset_output_type(name: str) -> str:
+    """Get the output type for a workflow preset.
+
+    Args:
+        name: Preset name
+
+    Returns:
+        Output type string (image, video, 3d, audio, other). Defaults to "image".
+    """
+    output_type = _get_workflow_preset_field(name, "output_type", "image")
+    if output_type not in OUTPUT_TYPES:
+        return "image"
+    return output_type
 
 
 # ============================================================================
@@ -364,7 +406,13 @@ def get_workflow_preset_config(name: str, selected_workflow: Optional[str] = Non
 
     preset = presets[name]
     if isinstance(preset, str):
-        return {"path": preset, "iteratable": False, "full_restart": False, "note": "", "node_overrides": {}}
+        return {"path": preset, "iteratable": False, "full_restart": False, "note": "",
+                "node_overrides": {}, "output_type": "image"}
+
+    # Get output_type from preset (model-level setting, not per-workflow)
+    output_type = preset.get("output_type", "image")
+    if output_type not in OUTPUT_TYPES:
+        output_type = "image"
 
     if preset.get("is_multi") and selected_workflow:
         workflows = preset.get("workflows", {})
@@ -376,6 +424,7 @@ def get_workflow_preset_config(name: str, selected_workflow: Optional[str] = Non
                 "full_restart": wf.get("full_restart", False),
                 "note": wf.get("note", ""),
                 "node_overrides": wf.get("node_overrides", {}),
+                "output_type": output_type,
             }
 
     return {
@@ -384,6 +433,7 @@ def get_workflow_preset_config(name: str, selected_workflow: Optional[str] = Non
         "full_restart": preset.get("full_restart", False),
         "note": preset.get("note", ""),
         "node_overrides": preset.get("node_overrides", {}),
+        "output_type": output_type,
     }
 
 

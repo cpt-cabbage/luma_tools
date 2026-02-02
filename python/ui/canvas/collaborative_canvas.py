@@ -529,7 +529,8 @@ class CollaborativeCanvas(QGraphicsView):
 
     def add_image(self, image_path: str, x: float = None, y: float = None,
                   width: float = None, height: float = None,
-                  liked: bool = False, node_id: str = None) -> ImageNode:
+                  liked: bool = False, node_id: str = None,
+                  qimage: Optional[QImage] = None) -> ImageNode:
         """
         Add an image node to the canvas.
 
@@ -539,6 +540,7 @@ class CollaborativeCanvas(QGraphicsView):
             width, height: Size (None = use original image resolution)
             liked: Initial liked state
             node_id: Optional ID for sync (defaults to filename)
+            qimage: Optional pre-loaded QImage (for async loading - avoids disk I/O)
 
         Returns:
             The created ImageNode
@@ -550,7 +552,8 @@ class CollaborativeCanvas(QGraphicsView):
             y = y if y is not None else center.y()
 
         # Create node - width/height can be None to use original resolution
-        node = ImageNode(image_path, x, y, width, height)
+        # Pass qimage to avoid disk I/O if pre-loaded
+        node = ImageNode(image_path, x, y, width, height, qimage=qimage)
         node.set_liked(liked)
 
         # Add to scene
@@ -2557,6 +2560,92 @@ class CollaborativeCanvas(QGraphicsView):
                     group._toggle_collapse()
 
             # Restore viewport
+            viewport = state.get('viewport', {})
+            if 'zoom' in viewport:
+                self.resetTransform()
+                self.scale(viewport['zoom'], viewport['zoom'])
+                self._current_zoom = viewport['zoom']
+            if 'x' in viewport:
+                self.horizontalScrollBar().setValue(viewport['x'])
+            if 'y' in viewport:
+                self.verticalScrollBar().setValue(viewport['y'])
+
+        finally:
+            # Re-enable canvas_modified signals
+            self._loading_state = False
+
+    def load_state_with_preloaded_images(
+        self,
+        state: Dict[str, Any],
+        preloaded_images: Dict[str, QImage]
+    ):
+        """
+        Load canvas state using pre-loaded QImage objects.
+
+        This method is called on the main thread after images have been
+        pre-loaded in a worker thread as QImage objects (thread-safe).
+        QPixmap objects are created here on the main thread as required by Qt.
+
+        Args:
+            state: Canvas state dict (nodes, connections, annotations, groups, viewport)
+            preloaded_images: Dict mapping node_id to QImage (from worker thread)
+        """
+        # Suppress canvas_modified signals during load to prevent save loops
+        self._loading_state = True
+
+        try:
+            # Clear current state
+            self.clear()
+
+            # Load nodes with pre-loaded images
+            nodes_data = state.get('nodes', {})
+            for node_id, node_data in nodes_data.items():
+                qimage = preloaded_images.get(node_id)
+                self.add_image(
+                    node_data.get('path', ''),
+                    x=node_data.get('x', 0),
+                    y=node_data.get('y', 0),
+                    width=node_data.get('width'),
+                    height=node_data.get('height'),
+                    liked=node_data.get('liked', False),
+                    node_id=node_id,
+                    qimage=qimage  # Use pre-loaded QImage to avoid disk I/O
+                )
+
+            # Load connections (same as load_state)
+            for conn_data in state.get('connections', []):
+                self.add_connection(
+                    conn_data.get('from', ''),
+                    conn_data.get('to', ''),
+                    connection_type=conn_data.get('type', 'manual'),
+                    label=conn_data.get('label', ''),
+                    connection_id=conn_data.get('id')
+                )
+
+            # Load annotations (same as load_state)
+            for ann_data in state.get('annotations', []):
+                if ann_data.get('type') == 'sticky':
+                    self.add_sticky_note(
+                        ann_data.get('x', 0),
+                        ann_data.get('y', 0),
+                        text=ann_data.get('text', ''),
+                        color=ann_data.get('color', 'yellow'),
+                        note_id=ann_data.get('id')
+                    )
+
+            # Load groups (same as load_state)
+            for group_data in state.get('groups', []):
+                bounds = group_data.get('bounds', [0, 0, 200, 150])
+                group = self.add_group(
+                    bounds[0], bounds[1], bounds[2], bounds[3],
+                    name=group_data.get('name', 'Group'),
+                    color=group_data.get('color', '#ff6b6b'),
+                    group_id=group_data.get('id')
+                )
+                if group_data.get('collapsed', False):
+                    group._toggle_collapse()
+
+            # Restore viewport (same as load_state)
             viewport = state.get('viewport', {})
             if 'zoom' in viewport:
                 self.resetTransform()

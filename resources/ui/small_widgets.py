@@ -80,6 +80,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         self._favorites_manager = None  # Will be set via set_favorites_manager
         self._is_all_liked = False  # Track if all items in stack are liked
         self._common_group_color = None  # Color if all items share a group
+        self._animating = False  # True during expand/collapse animation to avoid QPainter errors
         # Check if items in this stack have metadata (source_images populated)
         self._has_metadata = self._check_items_have_metadata(items)
         # Check if top item is a 3D model (uses grey border, not blue)
@@ -718,14 +719,11 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
     def _apply_thumbnail_style(self):
         """Apply the appropriate style based on current state using unified styler."""
         try:
-            logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style START")
             from shiboken6 import isValid
             if not isValid(self):
-                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style widget invalid, returning")
                 return
             if self.thumbnail_label and not self._is_expanded:
                 if not isValid(self.thumbnail_label):
-                    logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style thumbnail_label invalid, returning")
                     return
                 drop_hover = getattr(self, '_drop_highlight_active', False)
                 style = self._styler.get_style(
@@ -733,25 +731,23 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                     hover=self._is_hovered,
                     drop_hover=drop_hover
                 )
-                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style setting stylesheet")
                 self.thumbnail_label.setStyleSheet(style)
-                logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style stylesheet set")
 
-                # Update shadow based on hover state
-                effect = self.thumbnail_label.graphicsEffect()
-                if effect:
-                    from PySide6.QtGui import QColor
-                    if self._is_hovered:
-                        effect.setBlurRadius(16)
-                        # Use dominant color for shadow if available
-                        dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
-                        hex_color = dominant.lstrip('#')
-                        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-                        effect.setColor(QColor(r, g, b, 60))
-                    else:
-                        effect.setBlurRadius(12)
-                        effect.setColor(QColor(0, 0, 0, 80))
-            logger.debug(f"[StackedThumbnailWidget] _apply_thumbnail_style COMPLETE")
+                # Update shadow based on hover state (skip during animations to avoid QPainter errors)
+                if not getattr(self, '_animating', False):
+                    effect = self.thumbnail_label.graphicsEffect()
+                    if effect:
+                        from PySide6.QtGui import QColor
+                        if self._is_hovered:
+                            effect.setBlurRadius(16)
+                            # Use dominant color for shadow if available
+                            dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
+                            hex_color = dominant.lstrip('#')
+                            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+                            effect.setColor(QColor(r, g, b, 60))
+                        else:
+                            effect.setBlurRadius(12)
+                            effect.setColor(QColor(0, 0, 0, 80))
         except Exception as e:
             logger.error(f"[StackedThumbnailWidget] _apply_thumbnail_style error: {e}", exc_info=True)
 
@@ -1295,6 +1291,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         if not isValid(self) or not self._is_expanded or not self._expanded_widgets:
             return
 
+        # Set animating flag to prevent QPainter errors from graphics effect updates
+        self._animating = True
+
         flow_layout = self._gallery_tab._flow_layout
 
         # Record post-layout positions of all widgets
@@ -1309,9 +1308,10 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         flow_layout.begin_animation()
 
         stack_pos = self.pos()
-        duration = 300
-        stagger = 40
-        max_animated = 20
+        # Reduced animation parameters for better performance
+        duration = 200  # Reduced from 300
+        stagger = 20    # Reduced from 40
+        max_animated = 10  # Reduced from 20
         self._expand_animations = []
 
         # Animate expanded widgets: slide horizontally from stack X to final X + fade in
@@ -1378,6 +1378,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         # Release layout guard and replay any missed layout
         if self._gallery_tab and hasattr(self._gallery_tab, '_flow_layout'):
             self._gallery_tab._flow_layout.end_animation()
+
+        # Clear animating flag now that animations are complete
+        self._animating = False
 
         # Create backgrounds now that widgets are at their final positions
         if isValid(self) and self._is_expanded:
@@ -1583,6 +1586,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         from PySide6.QtWidgets import QGraphicsOpacityEffect
         from shiboken6 import isValid
 
+        # Set animating flag to prevent QPainter errors from graphics effect updates
+        self._animating = True
+
         flow_layout = self._gallery_tab._flow_layout
         container = self._gallery_tab.ui.galleryThumbnailContainer
 
@@ -1623,7 +1629,8 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 w.move(pre_positions[w])
 
         stack_pos = self.pos()
-        duration = 250
+        # Reduced animation duration for better performance
+        duration = 150  # Reduced from 250
         self._collapse_animations = []
 
         # Animate expanded widgets: slide horizontally to stack X + fade out
@@ -1699,6 +1706,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             flow_layout.end_animation()
             flow_layout.invalidate()
             container.updateGeometry()
+
+        # Clear animating flag now that collapse is complete
+        self._animating = False
 
     def _on_item_deleted_in_stack(self, path):
         """Handle deletion of an item within the expanded stack.

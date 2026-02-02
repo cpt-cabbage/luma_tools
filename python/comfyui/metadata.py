@@ -235,6 +235,7 @@ def add_item_metadata(
     base_seed: Optional[int] = None,
     workflow_preset: Optional[str] = None,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
+    output_type: Optional[str] = None,
 ) -> bool:
     """Add metadata for items that will be generated with a given prefix.
 
@@ -243,6 +244,19 @@ def add_item_metadata(
     - job_prefix: Grouping key for gallery stacking
     - source_images: All input images used in generation
     - source_models: All 3D models used as inputs
+    - output_type: Type of output (image, video, 3d, audio, other)
+
+    Args:
+        output_dir: Directory where outputs are saved
+        output_prefix: Prefix used for output filenames
+        prompt: Text prompt used for generation
+        workflow_name: Name of the workflow file
+        input_image: Primary input image (deprecated, use editable_values)
+        generation_count: Number of generations in this job
+        base_seed: Base seed used for generation
+        workflow_preset: Name of the workflow preset used
+        editable_values: Dict of editable node values
+        output_type: Type of output (image, video, 3d, audio, other)
 
     Returns:
         bool: True if metadata saved successfully, False otherwise
@@ -350,6 +364,7 @@ def add_item_metadata(
             "job_prefix": prefix_key,  # Store grouping key
             "source_images": source_images if source_images else None,  # All input images
             "source_models": source_models if source_models else None,  # All 3D model inputs
+            "output_type": output_type,  # Type of output (image, video, 3d, audio, other)
         }
 
         metadata[f"_prefix_{prefix_key}"] = entry

@@ -111,6 +111,9 @@ class SelectionManager(BaseGalleryManager):
         self._rubber_band_origin = None
         self._rubber_band_active = False
 
+        # Track which widgets currently have checkmarks visible (for targeted updates)
+        self._widgets_with_checkmarks_shown = set()
+
         # Create and install event filter
         self._box_filter = BoxSelectionEventFilter(self)
         self.tab.ui.galleryScrollArea.viewport().installEventFilter(self._box_filter)
@@ -181,7 +184,8 @@ class SelectionManager(BaseGalleryManager):
             favorites_manager.like_items(paths)
             msg = f"Liked {len(paths)} items"
 
-        self.tab._refresh_favorites_state()
+        # Only refresh the affected widgets, not all widgets
+        self.tab._refresh_favorites_state_for_paths(paths)
         if hasattr(self.tab, 'show_status_message'):
             self.tab.show_status_message(msg)
 
@@ -225,7 +229,8 @@ class SelectionManager(BaseGalleryManager):
                 if self.tab._selected_items:
                     paths = list(self.tab._selected_items)
                     favorites_manager.add_items_to_group(paths, group_id)
-                    self.tab._refresh_favorites_state()
+                    # Only refresh the affected widgets, not all widgets
+                    self.tab._refresh_favorites_state_for_paths(paths)
                     if hasattr(self.tab, 'show_status_message'):
                         self.tab.show_status_message(f"Created '{name}' with {len(paths)} items")
 
@@ -238,7 +243,8 @@ class SelectionManager(BaseGalleryManager):
         paths = list(self.tab._selected_items)
         favorites_manager.add_items_to_group(paths, group_id)
         group = favorites_manager.get_group(group_id)
-        self.tab._refresh_favorites_state()
+        # Only refresh the affected widgets, not all widgets
+        self.tab._refresh_favorites_state_for_paths(paths)
         if group and hasattr(self.tab, 'show_status_message'):
             self.tab.show_status_message(f"Added {len(paths)} items to {group.name}")
 
@@ -263,7 +269,8 @@ class SelectionManager(BaseGalleryManager):
             group = groups[index]
             paths = list(self.tab._selected_items)
             favorites_manager.remove_items_from_group(paths, group.group_id)
-            self.tab._refresh_favorites_state()
+            # Only refresh the affected widgets, not all widgets
+            self.tab._refresh_favorites_state_for_paths(paths)
             if hasattr(self.tab, 'show_status_message'):
                 self.tab.show_status_message(f"Removed {len(paths)} items from {group.name}")
 
@@ -558,15 +565,40 @@ class SelectionManager(BaseGalleryManager):
                 self.tab._selection_toolbar.hide()
 
     def _update_checkmark_visibility(self):
-        """Update checkmark visibility for all widgets based on selection state."""
+        """Update checkmark visibility only for affected widgets (not all widgets).
+
+        Performance optimization: Instead of iterating ALL widgets on every selection
+        change, we track which widgets have checkmarks visible and only update those
+        that need to change.
+        """
         show_checkmarks = len(self.tab._selected_items) > 1
-        # Iterate over ALL widgets, not just selected ones, to hide checkmarks on deselected items
-        for path, widget in self.tab._widget_cache.items():
-            if hasattr(widget, 'selection_indicator'):
-                if show_checkmarks and path in self.tab._selected_items:
-                    widget.selection_indicator.show()
-                else:
+        current_selected = self.tab._selected_items
+
+        if not show_checkmarks:
+            # Hide all currently visible checkmarks
+            for path in list(self._widgets_with_checkmarks_shown):
+                widget = self.tab._widget_cache.get(path)
+                if widget and hasattr(widget, 'selection_indicator'):
                     widget.selection_indicator.hide()
+            self._widgets_with_checkmarks_shown.clear()
+        else:
+            # Only update widgets that changed state
+            # Hide checkmarks on items that were showing but are no longer selected
+            to_hide = self._widgets_with_checkmarks_shown - current_selected
+            for path in to_hide:
+                widget = self.tab._widget_cache.get(path)
+                if widget and hasattr(widget, 'selection_indicator'):
+                    widget.selection_indicator.hide()
+
+            # Show checkmarks on newly selected items
+            to_show = current_selected - self._widgets_with_checkmarks_shown
+            for path in to_show:
+                widget = self.tab._widget_cache.get(path)
+                if widget and hasattr(widget, 'selection_indicator'):
+                    widget.selection_indicator.show()
+
+            # Update tracking set
+            self._widgets_with_checkmarks_shown = current_selected.copy()
 
     def get_selected(self) -> set:
         """Get the set of currently selected item paths.

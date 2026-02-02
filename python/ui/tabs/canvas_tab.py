@@ -344,41 +344,118 @@ class CanvasTab(BaseTab):
         if hasattr(self, '_sync_manager'):
             self._stop_sync()
 
-        # Load canvas state for this directory
-        self._load_canvas_state()
+        # Load canvas state asynchronously (sync managers started after load completes)
+        self._load_canvas_state_async()
 
+    def _load_canvas_state_async(self):
+        """Load canvas state asynchronously to avoid blocking UI."""
+        from ui_components import StatusColors
+
+        if not self._current_path:
+            return
+
+        canvas_dir = os.path.join(self._current_path, "_canvas")
+        jobname = self.app_state.jobname or "default"
+        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
+
+        if not os.path.exists(canvas_file):
+            # No existing state - clear and proceed
+            self._canvas.clear()
+            self._on_canvas_loaded()
+            logger.info("No existing canvas state, starting fresh")
+            return
+
+        # Show spinner in status bar
+        self.update_status_with_spinner("Loading canvas...", StatusColors.INFO)
+
+        # Start worker to load JSON and pre-load images
+        self.start_worker(
+            self._load_canvas_data_worker,
+            canvas_file,
+            on_result=self._on_canvas_data_loaded,
+            on_error=self._on_canvas_load_error
+        )
+
+    @staticmethod
+    def _load_canvas_data_worker(canvas_file: str) -> dict:
+        """Worker thread: Load JSON and pre-load images as QImage.
+
+        QImage is thread-safe, unlike QPixmap which must be created on main thread.
+
+        Args:
+            canvas_file: Path to the canvas state JSON file
+
+        Returns:
+            Dict with 'state' (canvas state) and 'preloaded_images' (node_id -> QImage)
+        """
+        from core.utils import load_json
+        from PySide6.QtGui import QImage
+
+        state = load_json(canvas_file, {})
+        preloaded_images = {}
+
+        # Pre-load images as QImage (thread-safe)
+        for node_id, node_data in state.get('nodes', {}).items():
+            image_path = node_data.get('path', '')
+            if image_path and os.path.exists(image_path):
+                qimage = QImage(image_path)
+                if not qimage.isNull():
+                    preloaded_images[node_id] = qimage
+
+        return {'state': state, 'preloaded_images': preloaded_images}
+
+    def _on_canvas_data_loaded(self, result: dict):
+        """Main thread callback: Create QPixmaps and nodes."""
+        from ui_components import StatusColors
+
+        state = result.get('state', {})
+        preloaded_images = result.get('preloaded_images', {})
+
+        # Load state with pre-loaded images (creates QPixmaps on main thread)
+        self._canvas.load_state_with_preloaded_images(state, preloaded_images)
+
+        # Sync all nodes with gallery data (likes, groups, colors)
+        self._canvas.sync_all_from_gallery()
+
+        # Finalize loading
+        self._on_canvas_loaded()
+
+        # Update status bar
+        count = len(state.get('nodes', {}))
+        self.update_status_with_spinner(
+            f"Canvas loaded ({count} images)",
+            StatusColors.SUCCESS,
+            start=False
+        )
+        logger.info(f"Loaded canvas state with {count} images")
+
+    def _on_canvas_load_error(self, error_msg: str, traceback_str: str):
+        """Handle canvas load error. Signature matches Signal(str, str)."""
+        from ui_components import StatusColors
+
+        logger.error(f"Failed to load canvas: {error_msg}")
+        if traceback_str:
+            logger.error(traceback_str)
+
+        # Clear canvas and proceed
+        self._canvas.clear()
+        self._on_canvas_loaded()
+
+        # Update status bar
+        self.update_status_with_spinner(
+            "Canvas load failed",
+            StatusColors.ERROR,
+            start=False
+        )
+
+    def _on_canvas_loaded(self):
+        """Finalize after canvas loading completes (success or failure)."""
         # Configure and start sync for new path
         if hasattr(self, '_sync_manager'):
             self._configure_sync_managers()
             self._start_sync()
 
         logger.info(f"Canvas path updated: {self._current_path}")
-
-    def _load_canvas_state(self):
-        """Load canvas state from the current directory."""
-        if not self._current_path:
-            return
-
-        canvas_dir = os.path.join(self._current_path, "_canvas")
-
-        # Determine canvas filename based on jobname
-        jobname = self.app_state.jobname or "default"
-        canvas_file = os.path.join(canvas_dir, f"canvas_{jobname}.json")
-
-        if os.path.exists(canvas_file):
-            try:
-                from core.utils import load_json
-                state = load_json(canvas_file, {})
-                self._canvas.load_state(state)
-                # Sync all nodes with gallery data (likes, groups, colors)
-                self._canvas.sync_all_from_gallery()
-                logger.info(f"Loaded canvas state from {canvas_file}")
-            except Exception as e:
-                logger.error(f"Failed to load canvas state: {e}")
-        else:
-            # Clear canvas for new state
-            self._canvas.clear()
-            logger.info(f"No existing canvas state, starting fresh")
 
     def _save_canvas_state(self):
         """Save canvas state to the current directory."""

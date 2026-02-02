@@ -735,8 +735,13 @@ class GroupsFilterPanel(QWidget):
             self._favorites_manager.group_created.connect(self._on_groups_changed)
             self._favorites_manager.group_deleted.connect(self._on_groups_changed)
             self._favorites_manager.group_updated.connect(self._on_groups_changed)
+            # Single-item signals
             self._favorites_manager.like_changed.connect(self._on_like_changed)
             self._favorites_manager.item_groups_changed.connect(self._on_item_groups_changed)
+            # Batch signals - update counts once instead of per-item
+            self._favorites_manager.items_liked_batch.connect(self._on_likes_batch_changed)
+            self._favorites_manager.items_unliked_batch.connect(self._on_likes_batch_changed)
+            self._favorites_manager.items_groups_changed_batch.connect(self._on_groups_batch_changed)
 
     def _on_groups_changed(self, group_id=None):
         """Rebuild the filter list when groups change."""
@@ -750,6 +755,26 @@ class GroupsFilterPanel(QWidget):
 
     def _on_item_groups_changed(self, path):
         """Update group counts when item group membership changes."""
+        if self._favorites_manager:
+            for group in self._favorites_manager.get_groups():
+                if group.group_id in self._filter_items:
+                    count = self._favorites_manager.get_group_item_count(group.group_id)
+                    self._filter_items[group.group_id].set_count(count)
+
+    def _on_likes_batch_changed(self, paths: list):
+        """Update liked count after batch like/unlike operation.
+
+        Called once after batch operation instead of per-item for performance.
+        """
+        if "liked" in self._filter_items:
+            count = self._favorites_manager.get_liked_count()
+            self._filter_items["liked"].set_count(count)
+
+    def _on_groups_batch_changed(self, paths: list):
+        """Update group counts after batch group operation.
+
+        Called once after batch operation instead of per-item for performance.
+        """
         if self._favorites_manager:
             for group in self._favorites_manager.get_groups():
                 if group.group_id in self._filter_items:

@@ -453,11 +453,14 @@ class UIManager(BaseGalleryManager):
         self.tab._last_displayed_paths = current_paths
         self.tab._last_view_mode = self.tab._view_mode
 
-        # Update ordered list for shift-select
-        self.tab._visible_items_ordered = [item['path'] for item in sorted_items]
+        # Note: _visible_items_ordered is set by reorder_widgets or display_items internally,
+        # so we don't need to set it here (avoids redundant O(n) list comprehension)
 
     def _animate_gallery_transition(self, sorted_items):
         """Rebuild gallery display with a smooth opacity transition.
+
+        Performance optimization: Skips opacity animation for large galleries
+        to avoid performance impact.
 
         Args:
             sorted_items: Sorted list of items to display
@@ -472,26 +475,33 @@ class UIManager(BaseGalleryManager):
         if hasattr(self, '_transition_anim') and self._transition_anim:
             self._transition_anim.stop()
 
+        # Skip opacity animation for large galleries (100+ items)
+        cache_size = len(getattr(self.tab, '_widget_cache', {}))
+        if cache_size > 100:
+            # Just rebuild without animation
+            self.tab._manager.display_items(sorted_items, self.tab._view_mode)
+            return
+
         # Quick dip: set opacity down, rebuild, then fade back up
         effect = container.graphicsEffect()
         if not isinstance(effect, QGraphicsOpacityEffect):
             effect = QGraphicsOpacityEffect(container)
             container.setGraphicsEffect(effect)
 
-        effect.setOpacity(0.6)
+        effect.setOpacity(0.7)  # Less drastic dip
 
         # Rebuild the display
         self.tab._manager.display_items(sorted_items, self.tab._view_mode)
 
-        # Fade back to full opacity
+        # Fade back to full opacity with shorter duration
         self._transition_anim = create_property_animation(
-            effect, b"opacity", 0.6, 1.0,
-            duration=200, easing=QEasingCurve.OutCubic
+            effect, b"opacity", 0.7, 1.0,
+            duration=100, easing=QEasingCurve.OutCubic  # Reduced from 200ms
         )
         self._transition_anim.start()
 
         # Remove effect after animation to avoid rendering overhead
-        QTimer.singleShot(250, self._cleanup_transition)
+        QTimer.singleShot(150, self._cleanup_transition)  # Reduced from 250ms
 
     def _cleanup_transition(self):
         """Remove transition opacity effect from gallery container."""
