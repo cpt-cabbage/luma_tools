@@ -498,8 +498,9 @@ def wait_for_completion_http(
                         return False
                 else:
                     consecutive_errors += 1
-                    if consecutive_errors > 5 and elapsed - last_print_time >= 10:
-                        logger.info(f"Waiting for result... ({elapsed}s)")
+                    # Only log waiting status after longer intervals to reduce noise
+                    if consecutive_errors > 5 and elapsed - last_print_time >= 60:
+                        logger.debug(f"Waiting for result... ({elapsed}s)")
                         last_print_time = elapsed
 
             consecutive_errors = 0
@@ -546,7 +547,6 @@ def wait_for_completion(
         dict with 'success', 'node_timing', 'total_duration_ms' if track_node_timing=True
     """
     if WEBSOCKET_AVAILABLE:
-        logger.info("Using WebSocket for real-time progress monitoring")
         try:
             return wait_for_completion_websocket(
                 prompt_id, server_url=server_url, port=port,
@@ -798,10 +798,6 @@ def move_output_files(
     os.makedirs(target_dir, exist_ok=True)
     cutoff_time = time.time() - (recent_minutes * 60)
 
-    logger.info(f"[move_output_files] Searching for {extensions} in {comfyui_output_dir}")
-    logger.info(f"[move_output_files] Target prefix: {filename_prefix}")
-    logger.info(f"[move_output_files] Looking for files modified in last {recent_minutes} minutes")
-
     all_matches = []
     for ext in extensions:
         top_pattern = os.path.join(comfyui_output_dir, f"*{ext}")
@@ -819,15 +815,10 @@ def move_output_files(
             mtime = os.path.getmtime(file_path)
             if mtime > cutoff_time:
                 recent_files.append((file_path, mtime))
-        except Exception as e:
-            logger.error(f"[move_output_files] Error checking {file_path}: {e}")
+        except Exception:
+            pass  # Skip files that can't be accessed
 
     recent_files.sort(key=lambda x: x[1], reverse=True)
-
-    logger.info(f"[move_output_files] Found {len(recent_files)} recent files out of {len(all_matches)} total")
-    for file_path, mtime in recent_files:
-        age = int((time.time() - mtime) / 60)
-        logger.info(f"  - {os.path.basename(file_path)} ({age} min ago)")
 
     for src_path, mtime in recent_files:
         original_filename = os.path.basename(src_path)
@@ -852,14 +843,16 @@ def move_output_files(
             final_size = os.path.getsize(src_path)
 
             if initial_size != final_size:
-                logger.info(f"[move_output_files] File still being written, waiting: {original_filename}")
-                time.sleep(2)
+                time.sleep(2)  # Wait for file to finish writing
 
             shutil.move(src_path, dest_path)
-            logger.info(f"[move_output_files] Moved: {original_filename} -> {new_filename}")
             moved_files.append(dest_path)
         except Exception as e:
             logger.error(f"[move_output_files] Failed to move {original_filename}: {e}")
+
+    # Log summary instead of per-file
+    if moved_files:
+        logger.info(f"[move_output_files] Moved {len(moved_files)} files to {target_dir}")
 
     return moved_files
 

@@ -59,6 +59,11 @@ class ImageNode(QGraphicsItem):
     BADGE_SIZE = 20
     BORDER_WIDTH = 3
 
+    # Scale modes for image rendering
+    SCALE_FIT = "fit"        # Fit within bounds, preserve aspect ratio (letterbox)
+    SCALE_FILL = "fill"      # Fill bounds, preserve aspect ratio (crop overflow)
+    SCALE_STRETCH = "stretch"  # Stretch to fill bounds (distort)
+
     # LOD thresholds: (display_width_threshold, scale_factor)
     # When display width is below threshold, use scaled version
     LOD_LEVELS = [
@@ -106,6 +111,8 @@ class ImageNode(QGraphicsItem):
         self._rotation: float = 0.0  # Rotation in degrees
         self._opacity: float = 1.0  # 0.0 to 1.0
         self._grayscale: bool = False  # Grayscale toggle
+        self._scale_mode: str = self.SCALE_FIT  # How image fills node bounds
+        self._original_aspect: float = 1.0  # Original image aspect ratio (set after load)
 
         # Gallery integration
         self._show_gallery_border = True  # Toggle for showing group/like colors
@@ -135,6 +142,8 @@ class ImageNode(QGraphicsItem):
                 self._missing = False
                 # Clear LOD cache when loading new image
                 self._lod_cache.clear()
+                # Store original aspect ratio for constrained resize
+                self._original_aspect = self._pixmap.width() / max(1, self._pixmap.height())
                 # Use original image dimensions if no size was specified
                 if self._requested_width is None and self._requested_height is None:
                     self._width = float(self._pixmap.width())
@@ -205,7 +214,6 @@ class ImageNode(QGraphicsItem):
 
         # Cache it
         self._lod_cache[scale_factor] = lod_pixmap
-        logger.debug(f"Created LOD cache for {self.filename}: {scale_factor:.0%} ({lod_width}x{lod_height})")
 
         return lod_pixmap
 
@@ -290,26 +298,47 @@ class ImageNode(QGraphicsItem):
                 else:
                     source_rect = QRectF(pixmap.rect())
 
-                # Calculate destination rectangle
-                # Center the image if aspect ratio differs
+                # Calculate destination rectangle based on scale mode
                 img_aspect = source_rect.width() / max(1, source_rect.height())
                 rect_aspect = self._width / max(1, self._height)
 
-                if img_aspect > rect_aspect:
-                    # Image is wider - fit to width
+                if self._scale_mode == self.SCALE_STRETCH:
+                    # Stretch to fill bounds (distort aspect ratio)
                     draw_width = self._width
-                    draw_height = self._width / img_aspect
-                else:
-                    # Image is taller - fit to height
                     draw_height = self._height
-                    draw_width = self._height * img_aspect
-
-                draw_rect = QRectF(
-                    (self._width - draw_width) / 2,
-                    (self._height - draw_height) / 2,
-                    draw_width,
-                    draw_height
-                )
+                    draw_rect = QRectF(0, 0, draw_width, draw_height)
+                elif self._scale_mode == self.SCALE_FILL:
+                    # Fill bounds, preserve aspect ratio (crop overflow)
+                    if img_aspect > rect_aspect:
+                        # Image is wider - fit to height, crop sides
+                        draw_height = self._height
+                        draw_width = self._height * img_aspect
+                    else:
+                        # Image is taller - fit to width, crop top/bottom
+                        draw_width = self._width
+                        draw_height = self._width / img_aspect
+                    draw_rect = QRectF(
+                        (self._width - draw_width) / 2,
+                        (self._height - draw_height) / 2,
+                        draw_width,
+                        draw_height
+                    )
+                else:
+                    # SCALE_FIT (default): Fit within bounds, preserve aspect ratio (letterbox)
+                    if img_aspect > rect_aspect:
+                        # Image is wider - fit to width
+                        draw_width = self._width
+                        draw_height = self._width / img_aspect
+                    else:
+                        # Image is taller - fit to height
+                        draw_height = self._height
+                        draw_width = self._height * img_aspect
+                    draw_rect = QRectF(
+                        (self._width - draw_width) / 2,
+                        (self._height - draw_height) / 2,
+                        draw_width,
+                        draw_height
+                    )
 
                 # Apply rotation if needed
                 if self._rotation != 0:
@@ -461,7 +490,7 @@ class ImageNode(QGraphicsItem):
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         """Handle mouse move for resize."""
         if self._resize_handle != ResizeHandle.NONE:
-            self._do_resize(event.pos())
+            self._do_resize(event.pos(), event.modifiers())
             event.accept()
             return
 
@@ -478,8 +507,13 @@ class ImageNode(QGraphicsItem):
 
         super().mouseReleaseEvent(event)
 
-    def _do_resize(self, pos: QPointF):
-        """Perform the resize operation."""
+    def _do_resize(self, pos: QPointF, modifiers: Qt.KeyboardModifiers = Qt.NoModifier):
+        """Perform the resize operation.
+
+        Args:
+            pos: Current mouse position
+            modifiers: Keyboard modifiers (Shift for aspect-ratio constrained)
+        """
         if not self._resize_start_rect or not self._resize_start_pos:
             return
 
@@ -513,10 +547,37 @@ class ImageNode(QGraphicsItem):
             if new_width > self.MIN_SIZE:
                 new_x = self.x() + delta.x()
 
+        # If Shift is held, constrain to original aspect ratio
+        if modifiers & Qt.ShiftModifier and self._original_aspect > 0:
+            aspect = self._original_aspect
+            # Determine which dimension to constrain based on the drag direction
+            # Use the dimension that changed more as the driver
+            width_change = abs(new_width - old_rect.width())
+            height_change = abs(new_height - old_rect.height())
+
+            if width_change >= height_change:
+                # Width drives, adjust height
+                constrained_height = new_width / aspect
+                height_diff = constrained_height - new_height
+
+                # Adjust position for handles that move the top edge
+                if self._resize_handle in (ResizeHandle.TOP_LEFT, ResizeHandle.TOP_RIGHT):
+                    new_y -= height_diff
+                new_height = constrained_height
+            else:
+                # Height drives, adjust width
+                constrained_width = new_height * aspect
+                width_diff = constrained_width - new_width
+
+                # Adjust position for handles that move the left edge
+                if self._resize_handle in (ResizeHandle.TOP_LEFT, ResizeHandle.BOTTOM_LEFT):
+                    new_x -= width_diff
+                new_width = constrained_width
+
         # Apply changes
         self.prepareGeometryChange()
-        self._width = new_width
-        self._height = new_height
+        self._width = max(self.MIN_SIZE, new_width)
+        self._height = max(self.MIN_SIZE, new_height)
         self.setPos(new_x, new_y)
         self.update()
 
@@ -634,6 +695,27 @@ class ImageNode(QGraphicsItem):
     def is_grayscale(self) -> bool:
         """Check if grayscale mode is enabled."""
         return self._grayscale
+
+    def set_scale_mode(self, mode: str):
+        """Set the scale mode for rendering.
+
+        Args:
+            mode: One of SCALE_FIT, SCALE_FILL, or SCALE_STRETCH
+        """
+        if mode in (self.SCALE_FIT, self.SCALE_FILL, self.SCALE_STRETCH):
+            self._scale_mode = mode
+            self.update()
+
+    def get_scale_mode(self) -> str:
+        """Get the current scale mode."""
+        return self._scale_mode
+
+    def cycle_scale_mode(self):
+        """Cycle through scale modes: fit -> fill -> stretch -> fit."""
+        modes = [self.SCALE_FIT, self.SCALE_FILL, self.SCALE_STRETCH]
+        current_idx = modes.index(self._scale_mode) if self._scale_mode in modes else 0
+        self._scale_mode = modes[(current_idx + 1) % len(modes)]
+        self.update()
 
     def reset_transforms(self):
         """Reset all non-destructive transforms to default."""
@@ -838,6 +920,16 @@ class ImageNode(QGraphicsItem):
         gs_text = "Color Mode" if self._grayscale else "Grayscale (Shift+G)"
         grayscale_action = menu.addAction(gs_text)
         grayscale_action.triggered.connect(self.toggle_grayscale)
+
+        # Scale mode submenu
+        mode_labels = {self.SCALE_FIT: "Fit", self.SCALE_FILL: "Fill", self.SCALE_STRETCH: "Stretch"}
+        current_label = mode_labels.get(self._scale_mode, "Fit")
+        scale_menu = menu.addMenu(f"Scale Mode ({current_label})")
+        for mode, label in mode_labels.items():
+            mode_action = scale_menu.addAction(label)
+            mode_action.setCheckable(True)
+            mode_action.setChecked(self._scale_mode == mode)
+            mode_action.triggered.connect(lambda checked, m=mode: self.set_scale_mode(m))
 
         menu.addSeparator()
 
@@ -1227,9 +1319,24 @@ class StickyNote(QGraphicsItem):
         # Setup flags
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
 
         self.setPos(x, y)
+
+    def itemChange(self, change, value):
+        """Handle item changes for snapping."""
+        if change == QGraphicsItem.ItemPositionChange:
+            new_pos = value
+            scene = self.scene()
+            if scene and scene.views():
+                view = scene.views()[0]
+                if hasattr(view, 'snap_position_to_grid'):
+                    new_pos = view.snap_position_to_grid(new_pos)
+                if hasattr(view, 'snap_to_neighbor_items'):
+                    new_pos = view.snap_to_neighbor_items(self, new_pos)
+            return new_pos
+        return super().itemChange(change, value)
 
     def boundingRect(self) -> QRectF:
         margin = self.HANDLE_SIZE if self.isSelected() else 0
@@ -1328,14 +1435,29 @@ class StickyNote(QGraphicsItem):
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
         """Edit text on double-click."""
-        text, ok = QInputDialog.getMultiLineText(
-            None, "Edit Note",
-            "Enter note text:",
-            self.text
-        )
-        if ok:
-            self.text = text
-            self.update()
+        # Set editing flag on canvas to suppress shortcuts during text input
+        canvas = None
+        scene = self.scene()
+        if scene:
+            views = scene.views()
+            if views:
+                canvas = views[0]
+                if hasattr(canvas, '_editing_text'):
+                    canvas._editing_text = True
+
+        try:
+            text, ok = QInputDialog.getMultiLineText(
+                None, "Edit Note",
+                "Enter note text:",
+                self.text
+            )
+            if ok:
+                self.text = text
+                self.update()
+        finally:
+            # Reset editing flag
+            if canvas and hasattr(canvas, '_editing_text'):
+                canvas._editing_text = False
 
     def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
         """Show context menu."""
@@ -1395,11 +1517,26 @@ class GroupRegion(QGraphicsRectItem):
         # Setup
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(-10)  # Draw behind everything
 
         self.setPos(x, y)
         self._update_appearance()
+
+    def itemChange(self, change, value):
+        """Handle item changes for snapping."""
+        if change == QGraphicsItem.ItemPositionChange:
+            new_pos = value
+            scene = self.scene()
+            if scene and scene.views():
+                view = scene.views()[0]
+                if hasattr(view, 'snap_position_to_grid'):
+                    new_pos = view.snap_position_to_grid(new_pos)
+                if hasattr(view, 'snap_to_neighbor_items'):
+                    new_pos = view.snap_to_neighbor_items(self, new_pos)
+            return new_pos
+        return super().itemChange(change, value)
 
     def _update_appearance(self):
         """Update brush and pen based on color."""

@@ -15,12 +15,13 @@ This project has skills in `.claude/skills/`.
 
 | Skill | When to Apply |
 |-------|---------------|
-| **check-code** | **After writing any code** - verify threading, imports, settings patterns before presenting |
+| **check-code** | **After writing any code** - verify threading, imports, settings patterns before presenting. MANDATORY. |
 | **trace-flow** | **Before modifying features** - trace "how does X work?" to understand before changing |
+| **debug-symptoms** | When debugging issues - maps symptoms to root causes |
 | **new-tab** | When scaffolding a new tab - follow the question checklist before generating code |
 | **new-node** | When adding ComfyUI node support - follow the question checklist before modifying node_configs.py |
 
-Skills are loaded into context automatically. Read them and follow their instructions.
+Skills are loaded into context automatically. **Use them proactively** - don't wait to be asked.
 
 ## Project Overview
 

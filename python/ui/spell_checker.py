@@ -246,3 +246,30 @@ class SpellCheckTextEdit(QTextEdit):
 def is_spell_check_available():
     """Check if spell checking is available."""
     return ENCHANT_AVAILABLE
+
+
+def add_spell_checking(text_edit, language="en_US"):
+    """Add spell checking to an existing QTextEdit widget.
+
+    This adds a SpellCheckHighlighter to the text edit's document.
+    No-op if PyEnchant is not available.
+
+    Args:
+        text_edit: A QTextEdit widget
+        language: Language code for spell checking (default: "en_US")
+
+    Returns:
+        The SpellCheckHighlighter instance, or None if not available
+    """
+    if not ENCHANT_AVAILABLE:
+        logger.debug("Spell checking not available - PyEnchant not installed")
+        return None
+
+    try:
+        highlighter = SpellCheckHighlighter(text_edit.document(), language)
+        # Store reference to prevent GC
+        text_edit._spell_highlighter = highlighter
+        return highlighter
+    except Exception as e:
+        logger.warning(f"Failed to add spell checking: {e}")
+        return None

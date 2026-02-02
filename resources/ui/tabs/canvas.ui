@@ -88,22 +88,6 @@
         </property>
        </widget>
       </item>
-      <item>
-       <widget class="QPushButton" name="CanvasSourceToggle">
-        <property name="text">
-         <string>Network Folder</string>
-        </property>
-        <property name="toolTip">
-         <string>Click to switch between network output folder and custom folder</string>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>110</width>
-          <height>26</height>
-         </size>
-        </property>
-       </widget>
-      </item>
 
       <!-- SEPARATOR -->
       <item>
@@ -838,86 +822,6 @@
         </property>
         <property name="styleSheet">
          <string>color: #888;</string>
-        </property>
-       </widget>
-      </item>
-
-      <!-- Timeline Toggle -->
-      <item>
-       <widget class="QPushButton" name="CanvasTimelineToggle">
-        <property name="text">
-         <string>Timeline</string>
-        </property>
-        <property name="toolTip">
-         <string>Show/hide generation timeline panel</string>
-        </property>
-        <property name="flat">
-         <bool>true</bool>
-        </property>
-        <property name="checkable">
-         <bool>true</bool>
-        </property>
-        <property name="styleSheet">
-         <string>color: #888;</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-
-   <!-- ================================================================== -->
-   <!-- TIMELINE CONTAINER (collapsible) -->
-   <!-- ================================================================== -->
-   <item>
-    <widget class="QFrame" name="CanvasTimelineContainer">
-     <property name="minimumSize">
-      <size>
-       <width>0</width>
-       <height>120</height>
-      </size>
-     </property>
-     <property name="maximumSize">
-      <size>
-       <width>16777215</width>
-       <height>180</height>
-      </size>
-     </property>
-     <property name="frameShape">
-      <enum>QFrame::NoFrame</enum>
-     </property>
-     <property name="styleSheet">
-      <string>background-color: #222;</string>
-     </property>
-     <property name="visible">
-      <bool>false</bool>
-     </property>
-     <layout class="QVBoxLayout" name="timelineLayout">
-      <property name="spacing">
-       <number>4</number>
-      </property>
-      <property name="leftMargin">
-       <number>8</number>
-      </property>
-      <property name="topMargin">
-       <number>4</number>
-      </property>
-      <property name="rightMargin">
-       <number>8</number>
-      </property>
-      <property name="bottomMargin">
-       <number>4</number>
-      </property>
-      <item>
-       <widget class="QLabel" name="CanvasTimelineLabel">
-        <property name="text">
-         <string>Generation Timeline</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignCenter</set>
-        </property>
-        <property name="styleSheet">
-         <string>color: #666;</string>
         </property>
        </widget>
       </item>

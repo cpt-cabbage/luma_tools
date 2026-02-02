@@ -326,6 +326,144 @@ class DrawingPath(DrawingItemBase):
             ))
         self._rebuild_path()
 
+    def normalize_to_local(self):
+        """Convert from scene coordinates to local coordinates for proper movement.
+
+        After drawing, points are in scene coordinates while item pos is (0,0).
+        This method calculates the bounding box, moves the item position to the
+        top-left, and translates all points to be relative to that position.
+        """
+        if not self._points:
+            return
+
+        # Calculate bounding box of all points
+        min_x = min(p.pos.x() for p in self._points)
+        min_y = min(p.pos.y() for p in self._points)
+
+        # Set item position to top-left of bounds
+        self.setPos(min_x, min_y)
+
+        # Translate all points to be relative to item position
+        for p in self._points:
+            p.pos = QPointF(p.pos.x() - min_x, p.pos.y() - min_y)
+
+        # Rebuild path with new local coordinates
+        self._rebuild_path()
+
+    def erase_at(self, scene_pos: QPointF, radius: float) -> 'list[DrawingPath] | None':
+        """Erase points within radius of scene_pos.
+
+        This method removes points that fall within the eraser radius and
+        potentially splits the path into multiple segments.
+
+        Args:
+            scene_pos: Position in scene coordinates
+            radius: Eraser radius
+
+        Returns:
+            - None: No points were erased (path unchanged)
+            - Empty list: All points erased (path should be deleted)
+            - List of DrawingPath: Path was split into these new paths
+        """
+        if not self._points:
+            return []
+
+        # Convert scene position to local item coordinates
+        local_pos = self.mapFromScene(scene_pos)
+
+        # Find which points are within the eraser radius
+        points_to_keep = []
+        erased_any = False
+
+        for point in self._points:
+            dx = point.pos.x() - local_pos.x()
+            dy = point.pos.y() - local_pos.y()
+            distance = (dx * dx + dy * dy) ** 0.5
+
+            if distance <= radius:
+                erased_any = True
+                # Mark gap by appending None
+                if points_to_keep and points_to_keep[-1] is not None:
+                    points_to_keep.append(None)
+            else:
+                points_to_keep.append(point)
+
+        if not erased_any:
+            return None  # No change
+
+        # Remove trailing None
+        while points_to_keep and points_to_keep[-1] is None:
+            points_to_keep.pop()
+
+        # If all points were erased
+        if not points_to_keep or all(p is None for p in points_to_keep):
+            return []  # Delete this path
+
+        # Split into segments at None gaps
+        segments = []
+        current_segment = []
+
+        for point in points_to_keep:
+            if point is None:
+                if len(current_segment) >= 2:  # Need at least 2 points for a path
+                    segments.append(current_segment)
+                current_segment = []
+            else:
+                current_segment.append(point)
+
+        if len(current_segment) >= 2:
+            segments.append(current_segment)
+
+        # If no valid segments remain
+        if not segments:
+            return []  # Delete this path
+
+        # If only one segment and it's the same as original (minus some points)
+        if len(segments) == 1:
+            # Update this path in place
+            self._points = segments[0]
+            self._rebuild_path()
+            return None  # Path was modified but not split
+
+        # Multiple segments - create new paths for each
+        new_paths = []
+        item_pos = self.pos()
+
+        for segment_points in segments:
+            new_path = DrawingPath()
+            new_path.set_pen_color(self._pen_color)
+            new_path.set_pen_width(self._pen_width)
+            new_path._line_style = self._line_style
+            new_path._line_cap = self._line_cap
+            new_path._fill_color = self._fill_color
+            new_path._use_pressure = self._use_pressure
+            new_path._min_width = self._min_width
+            new_path._max_width = self._max_width
+
+            # Copy points (they're in local coordinates, need to convert to scene)
+            for point in segment_points:
+                # Convert local point to scene coordinates
+                scene_point_pos = QPointF(point.pos.x() + item_pos.x(),
+                                          point.pos.y() + item_pos.y())
+                new_path._points.append(PenPoint(
+                    scene_point_pos,
+                    point.pressure,
+                    point.tilt_x,
+                    point.tilt_y,
+                    point.rotation
+                ))
+
+            new_path._rebuild_path()
+            new_path.normalize_to_local()
+
+            # Set flags for proper selection/movement
+            new_path.setFlag(QGraphicsItem.ItemIsMovable, True)
+            new_path.setFlag(QGraphicsItem.ItemIsSelectable, True)
+
+            new_paths.append(new_path)
+
+        return new_paths
+
 
 class DrawingRect(DrawingItemBase):
     """Rectangle drawing item."""
@@ -373,6 +511,19 @@ class DrawingRect(DrawingItemBase):
         r = state.get('rect', [0, 0, 100, 100])
         self._rect = QRectF(r[0], r[1], r[2], r[3])
 
+    def normalize_to_local(self):
+        """Convert from scene coordinates to local coordinates for proper movement.
+
+        After drawing, rect is in scene coordinates while item pos is (0,0).
+        This method sets item position to rect's top-left and adjusts rect to local coords.
+        """
+        # Set item position to rect's top-left
+        self.setPos(self._rect.x(), self._rect.y())
+
+        # Adjust rect to be at (0, 0) relative to item position
+        self._rect = QRectF(0, 0, self._rect.width(), self._rect.height())
+        self.update()
+
 
 class DrawingEllipse(DrawingItemBase):
     """Ellipse drawing item."""
@@ -419,6 +570,19 @@ class DrawingEllipse(DrawingItemBase):
         super().set_state(state)
         r = state.get('rect', [0, 0, 100, 100])
         self._rect = QRectF(r[0], r[1], r[2], r[3])
+
+    def normalize_to_local(self):
+        """Convert from scene coordinates to local coordinates for proper movement.
+
+        After drawing, rect is in scene coordinates while item pos is (0,0).
+        This method sets item position to rect's top-left and adjusts rect to local coords.
+        """
+        # Set item position to rect's top-left
+        self.setPos(self._rect.x(), self._rect.y())
+
+        # Adjust rect to be at (0, 0) relative to item position
+        self._rect = QRectF(0, 0, self._rect.width(), self._rect.height())
+        self.update()
 
 
 class DrawingLine(DrawingItemBase):
@@ -523,6 +687,26 @@ class DrawingLine(DrawingItemBase):
         l = state.get('line', [0, 0, 100, 100])
         self._line = QLineF(l[0], l[1], l[2], l[3])
         self._show_arrow = state.get('arrow', False)
+
+    def normalize_to_local(self):
+        """Convert from scene coordinates to local coordinates for proper movement.
+
+        After drawing, line is in scene coordinates while item pos is (0,0).
+        This method sets item position to line's bounding top-left and adjusts line to local coords.
+        """
+        # Get bounding box of the line
+        min_x = min(self._line.x1(), self._line.x2())
+        min_y = min(self._line.y1(), self._line.y2())
+
+        # Set item position to bounding box top-left
+        self.setPos(min_x, min_y)
+
+        # Adjust line points to be relative to item position
+        self._line = QLineF(
+            self._line.x1() - min_x, self._line.y1() - min_y,
+            self._line.x2() - min_x, self._line.y2() - min_y
+        )
+        self.update()
 
 
 class DrawingToolbar(QFrame):

@@ -42,17 +42,19 @@ class GalleryManager(BaseGalleryManager):
         Returns:
             Sorted list of items
         """
+        # All sort modes use a secondary key (filename) for stability when primary key is identical.
+        # This prevents items with the same mtime/name from "jumping" between refreshes.
         if sort_mode == "date_desc":
-            return sorted(items, key=lambda x: x['mtime'], reverse=True)
+            return sorted(items, key=lambda x: (-x['mtime'], x['name']))
         elif sort_mode == "date_asc":
-            return sorted(items, key=lambda x: x['mtime'])
+            return sorted(items, key=lambda x: (x['mtime'], x['name']))
         elif sort_mode == "name_asc":
-            return sorted(items, key=lambda x: x['name'])
+            return sorted(items, key=lambda x: (x['name'], -x['mtime']))
         elif sort_mode == "name_desc":
-            return sorted(items, key=lambda x: x['name'], reverse=True)
+            return sorted(items, key=lambda x: (x['name'], x['mtime']), reverse=True)
         elif sort_mode == "workflow":
-            # Sort by workflow name, then by date within each workflow
-            return sorted(items, key=lambda x: (x['workflow'] or 'zzz_unknown', -x['mtime']))
+            # Sort by workflow name, then by date (newest first), then by filename for stability
+            return sorted(items, key=lambda x: (x['workflow'] or 'zzz_unknown', -x['mtime'], x['name']))
         else:
             return items
 
@@ -646,10 +648,16 @@ class GalleryManager(BaseGalleryManager):
         Args:
             items: List of item dicts in sorted order
         """
+        # Use the same grouping logic as _update_stacked_items_incrementally
+        from core.settings_manager import get_setting
+        stacking_mode = get_setting("gallery_stacking_mode")
 
-
-        # Use the same grouping logic as display to get correct prefix order
-        groups = self.group_items_by_prefix(items)
+        if stacking_mode == "groups":
+            groups = self.group_items_by_groups(items, fallback_to_job=False)
+        elif stacking_mode == "both":
+            groups = self.group_items_by_groups(items, fallback_to_job=True)
+        else:
+            groups = self.group_items_by_prefix(items)
         seen_prefixes = list(groups.keys())
 
         # Reposition widgets in the layout according to sorted prefix order

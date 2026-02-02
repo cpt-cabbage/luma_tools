@@ -89,8 +89,8 @@ def cleanup_job_temp_files(output_dir: str) -> int:
             try:
                 os.remove(file_path)
                 deleted_count += 1
-            except Exception as e:
-                logger.debug(f"Could not delete temp file {file_path}: {e}")
+            except Exception:
+                pass  # Silently skip files that can't be deleted
 
     return deleted_count
 
@@ -116,8 +116,8 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
                     'size': stat.st_size,
                     'extension': ext,
                 })
-            except Exception as e:
-                logger.debug(f"Could not stat file {path}: {e}")
+            except Exception:
+                pass  # Skip files that can't be accessed
 
     output_files.sort(key=lambda x: x['created'], reverse=True)
     return output_files
@@ -135,6 +135,10 @@ _gallery_metadata_cache_lock = threading.RLock()
 
 def _get_metadata_path(output_dir: str) -> str:
     """Get the path to the metadata file for a directory."""
+    # Validate input type - catch common error of passing widget instead of path
+    if not isinstance(output_dir, (str, os.PathLike)):
+        logger.error(f"[Metadata] Invalid output_dir type: {type(output_dir).__name__} (expected str or PathLike)")
+        raise TypeError(f"output_dir must be a string or path-like object, not {type(output_dir).__name__}")
     return os.path.join(output_dir, GALLERY_METADATA_FILE)
 
 

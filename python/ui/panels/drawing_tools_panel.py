@@ -35,7 +35,7 @@ class DrawingToolsPanel(QWidget):
 
         self._current_tool = "pen"
         self._brush_size = 3
-        self._current_color = QColor(255, 255, 255)
+        self._current_color = QColor(255, 0, 0)  # Red to match canvas default
         self._tool_buttons = {}
 
         self._setup_ui()
@@ -107,6 +107,15 @@ class DrawingToolsPanel(QWidget):
         tools_layout = QVBoxLayout(tools_frame)
         tools_layout.setContentsMargins(8, 8, 8, 8)
         tools_layout.setSpacing(6)
+
+        # Top row: Select drawings and Eraser
+        row0 = QHBoxLayout()
+        row0.setSpacing(4)
+
+        self._add_tool_button(row0, "select_drawings", "Select", "")
+        self._add_tool_button(row0, "eraser", "Eraser", "E")
+
+        tools_layout.addLayout(row0)
 
         # Tool buttons row 1
         row1 = QHBoxLayout()
@@ -206,7 +215,8 @@ class DrawingToolsPanel(QWidget):
 
     def _add_tool_button(self, layout: QHBoxLayout, tool_id: str, label: str, shortcut: str):
         """Add a tool button to the layout."""
-        btn = QPushButton(f"{label} [{shortcut}]")
+        btn_text = f"{label} [{shortcut}]" if shortcut else label
+        btn = QPushButton(btn_text)
         btn.setCheckable(True)
         btn.setFixedHeight(28)
         btn.setStyleSheet("""
@@ -334,7 +344,8 @@ class DrawingToolsPanel(QWidget):
             header_rect = self._header.geometry()
             if header_rect.contains(event.pos()):
                 self._dragging = True
-                self._drag_offset = event.pos()
+                # Store the offset from the window's top-left to the click position
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                 self._header.setCursor(Qt.ClosedHandCursor)
                 event.accept()
                 return
@@ -343,14 +354,8 @@ class DrawingToolsPanel(QWidget):
     def mouseMoveEvent(self, event):
         """Handle mouse move for dragging."""
         if self._dragging and self._drag_offset:
-            new_pos = self.mapToParent(event.pos() - self._drag_offset)
-            # Clamp to parent bounds if we have a parent
-            if self.parent():
-                parent_rect = self.parent().rect()
-                new_x = max(0, min(new_pos.x(), parent_rect.width() - self.width()))
-                new_y = max(0, min(new_pos.y(), parent_rect.height() - self.height()))
-                new_pos.setX(new_x)
-                new_pos.setY(new_y)
+            # Calculate new position in global screen coordinates
+            new_pos = event.globalPosition().toPoint() - self._drag_offset
             self.move(new_pos)
             event.accept()
             return

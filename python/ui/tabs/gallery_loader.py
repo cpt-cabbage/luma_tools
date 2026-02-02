@@ -58,11 +58,8 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
             try:
                 cleaned = re.sub(r'_\d+$', '', base)
                 prefix = cleaned if cleaned != base else None
-                result = (prefix, True)
-                logger.debug(f"[Detection] {filename} -> OUTPUT (ComfyUI temp, prefix={result[0]})")
-                return result
-            except Exception as e:
-                logger.error(f"[Detection] Error processing ComfyUI file {filename}: {e}")
+                return (prefix, True)
+            except Exception:
                 return (base, True)  # Still mark as output
 
         # Look for _genXX pattern (marks it as an output)
@@ -73,11 +70,9 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 prefix = base[:gen_match.start()]
                 # Clean up trailing underscores
                 prefix = prefix.rstrip('_')
-                result = (prefix if prefix else None, True)
-                logger.debug(f"[Detection] {filename} -> OUTPUT (has _genXX, prefix={result[0]})")
-                return result
-        except Exception as e:
-            logger.error(f"[Detection] Error in _genXX pattern search for {filename}: {e}")
+                return (prefix if prefix else None, True)
+        except Exception:
+            pass  # Fall through to next pattern
 
         # No _genXX pattern - check for other output indicators
         # Files with trailing sequence numbers (4+ digits) are likely outputs
@@ -87,11 +82,9 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
             if sequence_match:
                 # Extract prefix before sequence number
                 prefix = base[:sequence_match.start()]
-                result = (prefix if prefix else None, True)
-                logger.debug(f"[Detection] {filename} -> OUTPUT (4+ digit sequence, prefix={result[0]})")
-                return result
-        except Exception as e:
-            logger.error(f"[Detection] Error in 4+ digit sequence search for {filename}: {e}")
+                return (prefix if prefix else None, True)
+        except Exception:
+            pass  # Fall through to next pattern
 
         # Files with shorter trailing numbers might also be outputs (3 digits)
         # But be more conservative - only if there's an underscore before them
@@ -101,11 +94,9 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
                 prefix = base[:short_sequence_match.start()]
                 # Only treat as output if prefix is substantial (not just a few chars)
                 if len(prefix) > 3:
-                    result = (prefix, True)
-                    logger.debug(f"[Detection] {filename} -> OUTPUT (3 digit sequence, prefix={result[0]})")
-                    return result
-        except Exception as e:
-            logger.error(f"[Detection] Error in 3 digit sequence search for {filename}: {e}")
+                    return (prefix, True)
+        except Exception:
+            pass  # Fall through to fallback
 
         # No clear output pattern
         # 3D models are typically generated outputs, so default them to output
@@ -114,17 +105,12 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
             cleaned = re.sub(r'_?\d+$', '', base)
             # 3D models (and video/audio) default to output, images default to input
             is_output = file_type in ('model', 'video', 'audio')
-            result = (cleaned if cleaned else None, is_output)
-            status = 'OUTPUT' if is_output else 'INPUT'
-            logger.debug(f"[Detection] {filename} -> {status} (no pattern match, type={file_type}, prefix={result[0]})")
-            return result
-        except Exception as e:
-            logger.error(f"[Detection] Error in cleanup for {filename}: {e}")
+            return (cleaned if cleaned else None, is_output)
+        except Exception:
             is_output = file_type in ('model', 'video', 'audio')
             return (base, is_output)  # Return base as fallback
 
-    except Exception as e:
-        logger.error(f"[Detection] Unexpected error processing {filename}: {e}")
+    except Exception:
         is_output = file_type in ('model', 'video', 'audio')
         return (None, is_output)
 
@@ -207,10 +193,8 @@ class GalleryLoader:
                         # Load full metadata for advanced detection
                         full_metadata = load_gallery_metadata(dir_path)
                         if not isinstance(full_metadata, dict):
-                            logger.warning(f"[Loader] Invalid metadata format from {dir_path}, expected dict")
                             full_metadata = {}
-                    except Exception as e:
-                        logger.error(f"[Loader] Error loading full metadata from {dir_path}: {e}")
+                    except Exception:
                         full_metadata = {}
 
                     try:
@@ -218,8 +202,7 @@ class GalleryLoader:
                         workflow_map = get_workflow_preset_for_files(dir_path, filenames)
                         if not isinstance(workflow_map, dict):
                             workflow_map = {}
-                    except Exception as e:
-                        logger.error(f"[Loader] Error loading workflow presets from {dir_path}: {e}")
+                    except Exception:
                         workflow_map = {}
 
                 # Build items dict
@@ -231,8 +214,7 @@ class GalleryLoader:
                     if full_metadata and _lookup_file_metadata:
                         try:
                             file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
-                        except Exception as e:
-                            logger.error(f"[Loader] Error looking up metadata for {filename}: {e}")
+                        except Exception:
                             file_metadata = None
 
                     # Determine if file is output and get job prefix
@@ -250,9 +232,7 @@ class GalleryLoader:
                             source_images = file_metadata.get('source_images', [])
                             if not isinstance(source_images, list):
                                 source_images = []
-                            logger.debug(f"[Detection] {filename} -> {'OUTPUT' if is_output else 'INPUT'} (from metadata, prefix={job_prefix})")
-                        except Exception as e:
-                            logger.error(f"[Loader] Error reading metadata fields for {filename}: {e}")
+                        except Exception:
                             is_output = None
                             job_prefix = None
                             has_metadata = False
@@ -262,8 +242,7 @@ class GalleryLoader:
                     if is_output is None or (is_output and job_prefix is None):
                         try:
                             job_prefix, is_output = extract_job_prefix(filename, file_type)
-                        except Exception as e:
-                            logger.error(f"[Loader] Error extracting prefix from {filename}: {e}")
+                        except Exception:
                             job_prefix = None
                             # 3D models/video/audio default to output, images to input
                             is_output = file_type in ('model', 'video', 'audio')
@@ -275,7 +254,6 @@ class GalleryLoader:
                                 from comfyui.metadata import is_known_input_file
                                 if is_known_input_file(output_dir, filename):
                                     is_output = False
-                                    logger.debug(f"[Detection] {filename} -> INPUT (known source image)")
                             except ImportError:
                                 pass
 
@@ -364,6 +342,13 @@ class GalleryLoader:
         except Exception as e:
             logger.error(f"Error scanning gallery directory: {e}")
 
+        # Log summary instead of per-file
+        if items:
+            outputs = sum(1 for i in items if not i.get('is_input', False))
+            inputs = len(items) - outputs
+            with_meta = sum(1 for i in items if i.get('has_metadata', False))
+            logger.debug(f"[Loader] Scanned {len(items)} files: {outputs} outputs, {inputs} inputs, {with_meta} with metadata")
+
         return items
 
     @staticmethod
@@ -395,8 +380,7 @@ class GalleryLoader:
                         item['job_prefix'] = job_prefix
                         item['is_input'] = not is_output
                         item['source_images'] = []
-                    except Exception as e:
-                        logger.error(f"[Prewarm] Error extracting prefix: {e}")
+                    except Exception:
                         item['job_prefix'] = None
                         # 3D models/video/audio default to output, images to input
                         file_type = item.get('type', 'image')
@@ -414,8 +398,8 @@ class GalleryLoader:
                 if output_dir not in items_by_dir:
                     items_by_dir[output_dir] = []
                 items_by_dir[output_dir].append(item)
-            except Exception as e:
-                logger.error(f"[Prewarm] Error grouping item: {e}")
+            except Exception:
+                pass  # Skip invalid items
 
         # Batch load metadata per directory
         for output_dir, dir_items in items_by_dir.items():
@@ -427,8 +411,7 @@ class GalleryLoader:
                 full_metadata = load_gallery_metadata(output_dir)
                 if not isinstance(full_metadata, dict):
                     full_metadata = {}
-            except Exception as e:
-                logger.error(f"[Prewarm] Error loading metadata from {output_dir}: {e}")
+            except Exception:
                 full_metadata = {}
 
             # Try to load workflow presets
@@ -437,8 +420,7 @@ class GalleryLoader:
                 workflow_map = get_workflow_preset_for_files(output_dir, filenames)
                 if not isinstance(workflow_map, dict):
                     workflow_map = {}
-            except Exception as e:
-                logger.error(f"[Prewarm] Error loading workflow presets from {output_dir}: {e}")
+            except Exception:
                 workflow_map = {}
 
             # Enrich each item
@@ -461,8 +443,8 @@ class GalleryLoader:
                         if full_metadata:
                             try:
                                 file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
-                            except Exception as e:
-                                logger.error(f"[Prewarm] Error looking up metadata for {filename}: {e}")
+                            except Exception:
+                                pass  # Fall back to filename pattern
 
                         if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
                             # Use metadata-based detection
@@ -473,9 +455,7 @@ class GalleryLoader:
                                 if not isinstance(source_images, list):
                                     source_images = []
                                 item['source_images'] = source_images
-                                logger.info(f"[Prewarm] {filename} -> {'OUTPUT' if is_output else 'INPUT'} (from metadata, prefix={job_prefix})")
-                            except Exception as e:
-                                logger.error(f"[Prewarm] Error reading metadata fields for {filename}: {e}")
+                            except Exception:
                                 # Fall back to filename pattern
                                 file_type = item.get('type', 'image')
                                 job_prefix, is_output = extract_job_prefix(filename, file_type)
@@ -489,8 +469,7 @@ class GalleryLoader:
                         item['job_prefix'] = job_prefix
                         item['is_input'] = not is_output
 
-                except Exception as e:
-                    logger.error(f"[Prewarm] Error enriching item {item.get('path', 'unknown')}: {e}")
+                except Exception:
                     # Set safe defaults
                     if 'workflow' not in item:
                         item['workflow'] = ''
