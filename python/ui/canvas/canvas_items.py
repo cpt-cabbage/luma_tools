@@ -102,6 +102,8 @@ class ImageNode(QGraphicsItem):
         self._resize_handle = ResizeHandle.NONE
         self._resize_start_rect: Optional[QRectF] = None
         self._resize_start_pos: Optional[QPointF] = None
+        self._resize_start_size: Optional[Tuple[float, float]] = None  # For undo support
+        self._resize_start_item_pos: Optional[QPointF] = None  # For undo support
 
         # LOD cache: {scale_factor: QPixmap}
         self._lod_cache: Dict[float, QPixmap] = {}
@@ -510,6 +512,9 @@ class ImageNode(QGraphicsItem):
             if self._resize_handle != ResizeHandle.NONE:
                 self._resize_start_rect = QRectF(0, 0, self._width, self._height)
                 self._resize_start_pos = event.pos()
+                # Store initial size and position for undo support
+                self._resize_start_size = (self._width, self._height)
+                self._resize_start_item_pos = QPointF(self.x(), self.y())
                 event.accept()
                 return
 
@@ -527,13 +532,48 @@ class ImageNode(QGraphicsItem):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         """Handle mouse release after resize."""
         if self._resize_handle != ResizeHandle.NONE:
+            # Push undo command if size actually changed
+            if self._resize_start_size is not None:
+                old_size = self._resize_start_size
+                new_size = (self._width, self._height)
+                # Only create undo command if size changed
+                if old_size != new_size:
+                    self._push_resize_undo_command(old_size, new_size)
+
             self._resize_handle = ResizeHandle.NONE
             self._resize_start_rect = None
             self._resize_start_pos = None
+            self._resize_start_size = None
+            self._resize_start_item_pos = None
             event.accept()
             return
 
         super().mouseReleaseEvent(event)
+
+    def _push_resize_undo_command(self, old_size: Tuple[float, float], new_size: Tuple[float, float]):
+        """Push a resize command to the undo stack.
+
+        Args:
+            old_size: (width, height) before resize
+            new_size: (width, height) after resize
+        """
+        scene = self.scene()
+        if not scene or not scene.views():
+            return
+
+        view = scene.views()[0]
+        if not hasattr(view, '_undo_stack') or not view._undo_stack:
+            return
+
+        from .canvas_undo import ResizeItemCommand
+
+        # Use filename as the item ID
+        cmd = ResizeItemCommand(view, self.filename, old_size, new_size)
+        # Don't execute - the resize already happened, just record it
+        view._undo_stack._undo_stack.append(cmd)
+        view._undo_stack._redo_stack.clear()
+        view._undo_stack._emit_changes()
+        logger.debug(f"Pushed resize command: {old_size} -> {new_size}")
 
     def _do_resize(self, pos: QPointF, modifiers: Qt.KeyboardModifiers = Qt.NoModifier):
         """Perform the resize operation.
