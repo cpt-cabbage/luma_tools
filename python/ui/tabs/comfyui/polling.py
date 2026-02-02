@@ -466,6 +466,7 @@ class PollingMixin:
 
             self.ui.ComfyUIIterateStatus.setText("Completed!")
 
+            from PySide6.QtGui import QPixmap
             pixmap = QPixmap(latest_image)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(
@@ -482,6 +483,9 @@ class PollingMixin:
             if gallery_tab:
                 self.log("[Iterate] Triggering gallery refresh...")
                 gallery_tab._on_refresh(show_status=False)
+
+            # Update model thumbnail in background
+            self._update_model_thumbnail_background()
 
             # Auto-add to canvas if enabled
             self._auto_add_to_canvas(output_files)
@@ -510,6 +514,31 @@ class PollingMixin:
                 return
 
         self.show_status("No image input field found in current workflow", "warning")
+
+    def _update_model_thumbnail_background(self):
+        """Update model thumbnail in background thread after job completion."""
+        preset_name = getattr(self, '_current_preset_name', None)
+        if not preset_name:
+            return
+
+        from ui_components import Worker
+        from PySide6.QtCore import QThreadPool
+        from comfyui.ratings import update_model_thumbnail
+
+        def do_update():
+            try:
+                return update_model_thumbnail(preset_name)
+            except Exception as e:
+                logger.warning(f"[Polling] Background thumbnail update failed: {e}")
+                return None
+
+        def on_done(thumb_path):
+            if thumb_path:
+                logger.info(f"[Polling] Updated thumbnail for '{preset_name}'")
+
+        self._thumbnail_worker = Worker(do_update)
+        self._thumbnail_worker.signals.result.connect(on_done)
+        QThreadPool.globalInstance().start(self._thumbnail_worker)
 
     # =========================================================================
     # BATCH MODE POLLING

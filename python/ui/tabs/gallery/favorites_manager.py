@@ -486,6 +486,101 @@ class FavoritesManager(BaseGalleryManager, QObject):
         self._ensure_loaded()
         return [item for item in items if item.get('path') not in self._item_groups or not self._item_groups.get(item.get('path'))]
 
+    def _get_file_type(self, path: str) -> str:
+        """Determine file type from extension."""
+        from core.config import (
+            GALLERY_IMAGE_EXTENSIONS,
+            GALLERY_MODEL_EXTENSIONS,
+            GALLERY_VIDEO_EXTENSIONS,
+            GALLERY_AUDIO_EXTENSIONS,
+        )
+        ext = os.path.splitext(path)[1].lower()
+        if ext in GALLERY_MODEL_EXTENSIONS:
+            return 'model'
+        elif ext in GALLERY_VIDEO_EXTENSIONS:
+            return 'video'
+        elif ext in GALLERY_AUDIO_EXTENSIONS:
+            return 'audio'
+        elif ext in GALLERY_IMAGE_EXTENSIONS:
+            return 'image'
+        return 'image'  # Default
+
+    def get_liked_items_as_dicts(self, exclude_dir: Optional[str] = None) -> List[Dict]:
+        """Get all liked items as gallery item dicts.
+
+        Creates minimal item dicts for liked paths that exist.
+        Used when showing "Liked" filter to include items from any directory.
+
+        Args:
+            exclude_dir: Optional directory path to exclude items from
+
+        Returns:
+            List of gallery item dicts for liked items
+        """
+        self._ensure_loaded()
+        items = []
+        exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
+
+        for path in self._liked_items:
+            # Skip items in the excluded directory
+            if exclude_dir_norm and os.path.normpath(path).startswith(exclude_dir_norm):
+                continue
+
+            if os.path.exists(path):
+                filename = os.path.basename(path)
+                items.append({
+                    'path': path,
+                    'filename': filename,
+                    'name': filename.lower(),
+                    'type': self._get_file_type(path),
+                    'mtime': os.path.getmtime(path),
+                    'is_external': True,
+                    'has_metadata': False,
+                    'metadata_level': 'none',
+                    'is_input': False,
+                    'job_prefix': None,
+                })
+        return items
+
+    def get_group_items_as_dicts(self, group_id: str, exclude_dir: Optional[str] = None) -> List[Dict]:
+        """Get all items in a group as gallery item dicts.
+
+        Creates minimal item dicts for grouped paths that exist.
+        Used when showing group filter to include items from any directory.
+
+        Args:
+            group_id: The group ID to get items for
+            exclude_dir: Optional directory path to exclude items from
+
+        Returns:
+            List of gallery item dicts for items in the group
+        """
+        self._ensure_loaded()
+        items = []
+        exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
+        group_paths = self.get_items_in_group(group_id)
+
+        for path in group_paths:
+            # Skip items in the excluded directory
+            if exclude_dir_norm and os.path.normpath(path).startswith(exclude_dir_norm):
+                continue
+
+            if os.path.exists(path):
+                filename = os.path.basename(path)
+                items.append({
+                    'path': path,
+                    'filename': filename,
+                    'name': filename.lower(),
+                    'type': self._get_file_type(path),
+                    'mtime': os.path.getmtime(path),
+                    'is_external': True,
+                    'has_metadata': False,
+                    'metadata_level': 'none',
+                    'is_input': False,
+                    'job_prefix': None,
+                })
+        return items
+
     # =========================================================================
     # CLEANUP
     # =========================================================================

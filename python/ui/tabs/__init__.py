@@ -10,7 +10,7 @@ from .pass_builder_tab import PassBuilderTab
 from .mp4_maker_tab import MP4MakerTab
 from .republish_tab import RePublishTab
 from .shot_cleaner_tab import ShotCleanerTab
-from .comfyui_tab import ComfyUITab
+from .comfyui import ComfyUITab
 from .gallery_tab import GalleryTab
 from .canvas_tab import CanvasTab
 from .settings_tab import SettingsTab

@@ -753,9 +753,21 @@ class GalleryTab(BaseTab):
         if filter_type == "all":
             return items
         elif filter_type == "liked":
-            return self._favorites_manager.filter_liked(items)
+            # Get liked items from current directory
+            local_liked = self._favorites_manager.filter_liked(items)
+            # Also include liked items from other directories
+            external_liked = self._favorites_manager.get_liked_items_as_dicts(
+                exclude_dir=self._current_path
+            )
+            return local_liked + external_liked
         elif filter_type == "group" and filter_id:
-            return self._favorites_manager.filter_by_group(items, filter_id)
+            # Get grouped items from current directory
+            local_grouped = self._favorites_manager.filter_by_group(items, filter_id)
+            # Also include grouped items from other directories
+            external_grouped = self._favorites_manager.get_group_items_as_dicts(
+                filter_id, exclude_dir=self._current_path
+            )
+            return local_grouped + external_grouped
         elif filter_type == "ungrouped":
             return self._favorites_manager.filter_ungrouped(items)
         elif filter_type == "stack" and filter_id:

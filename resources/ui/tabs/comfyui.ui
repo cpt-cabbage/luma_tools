@@ -54,7 +54,7 @@
        <item>
         <widget class="QGroupBox" name="comfyuiWorkflowGroupBox">
          <property name="title">
-          <string>Workflow</string>
+          <string>Model</string>
          </property>
          <layout class="QVBoxLayout" name="comfyuiWorkflowLayout">
           <property name="spacing">
@@ -73,43 +73,17 @@
                 <verstretch>0</verstretch>
                </sizepolicy>
               </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>32</height>
+               </size>
+              </property>
               <property name="text">
                <string>Choose Model</string>
               </property>
               <property name="toolTip">
-               <string>Select a workflow preset</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ComfyUIAddPreset">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-                <horstretch>1</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="text">
-               <string>Add Model...</string>
-              </property>
-              <property name="toolTip">
-               <string>Add a new workflow preset</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="ComfyUIEditPreset">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-                <horstretch>1</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="text">
-               <string>Edit Model...</string>
-              </property>
-              <property name="toolTip">
-               <string>Edit the selected workflow preset</string>
+               <string>Click to browse and select a workflow model</string>
               </property>
              </widget>
             </item>

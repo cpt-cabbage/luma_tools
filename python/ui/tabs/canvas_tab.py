@@ -181,32 +181,42 @@ class CanvasTab(BaseTab):
             self.add_image_to_canvas(image_path)
 
     def _setup_minimap(self):
-        """Setup the canvas minimap widget."""
+        """Setup the floating canvas minimap widget."""
         from ui.canvas import CanvasMinimap
 
-        if not hasattr(self.ui, 'CanvasMinimapContainer'):
-            return
-
-        # Create minimap widget
+        # Create floating minimap widget (no parent for floating window)
         self._minimap = CanvasMinimap()
         self._minimap.set_canvas(self._canvas)
 
-        # Use existing layout or create one if needed
-        minimap_layout = self.ui.CanvasMinimapContainer.layout()
-        if minimap_layout is None:
-            minimap_layout = QtWidgets.QVBoxLayout(self.ui.CanvasMinimapContainer)
-            minimap_layout.setContentsMargins(2, 2, 2, 2)
+        # Connect minimap_trigger signal to show minimap on pan/zoom
+        self._canvas.minimap_trigger.connect(self._on_minimap_trigger)
 
-        # Clear any placeholder widgets and add minimap
-        while minimap_layout.count():
-            item = minimap_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        # Hide CanvasMinimapContainer if it exists (no longer used)
+        if hasattr(self.ui, 'CanvasMinimapContainer'):
+            self.ui.CanvasMinimapContainer.setVisible(False)
 
-        minimap_layout.addWidget(self._minimap)
+    def _on_minimap_trigger(self):
+        """Show the minimap when user pans or zooms."""
+        if not hasattr(self, '_minimap') or not self._minimap:
+            return
+        # Position minimap in bottom-right corner of canvas
+        self._position_minimap()
+        self._minimap.show_temporarily()
 
-        # Make container visible
-        self.ui.CanvasMinimapContainer.setVisible(True)
+    def _position_minimap(self):
+        """Position the minimap in the bottom-right corner of the canvas."""
+        if not hasattr(self, '_minimap') or not self._minimap:
+            return
+
+        # Get canvas global position and size
+        canvas_rect = self._canvas.rect()
+        canvas_global = self._canvas.mapToGlobal(canvas_rect.bottomRight())
+
+        # Position minimap with margin from bottom-right corner
+        margin = 15
+        x = canvas_global.x() - self._minimap.width() - margin
+        y = canvas_global.y() - self._minimap.height() - margin
+        self._minimap.move(x, y)
 
     def _setup_timeline(self):
         """Setup the generation timeline widget."""
@@ -681,13 +691,14 @@ class CanvasTab(BaseTab):
     def _sync_zoom_slider(self):
         """Sync the zoom slider with the current canvas zoom level."""
         zoom = self._canvas.get_zoom_level()
-        slider_value = int(zoom * 100)
-        slider_value = max(5, min(320, slider_value))  # Clamp to slider range
+        zoom_percent = int(zoom * 100)
+        # Clamp slider to its range (5-320), but show actual percent in label
+        slider_value = max(5, min(320, zoom_percent))
         self.ui.CanvasZoomSlider.blockSignals(True)
         self.ui.CanvasZoomSlider.setValue(slider_value)
         self.ui.CanvasZoomSlider.blockSignals(False)
-        # Update percent label
-        self.ui.CanvasZoomPercent.setText(f"{slider_value}%")
+        # Update percent label with actual zoom value
+        self.ui.CanvasZoomPercent.setText(f"{zoom_percent}%")
 
     def _on_zoom_from_canvas(self, zoom: float):
         """Handle zoom changes from the canvas (wheel, fit, etc.)."""

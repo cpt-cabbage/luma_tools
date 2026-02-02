@@ -59,23 +59,26 @@ class CollaborativeCanvas(QGraphicsView):
     canvas_modified = Signal()  # general modification signal
     cursor_moved = Signal(float, float)  # x, y in scene coordinates
     zoom_changed = Signal(float)  # emitted when zoom level changes
+    minimap_trigger = Signal()  # emitted when minimap should appear (pan/zoom)
 
-    # Zoom limits (Photoshop-style: 5% to 3200%)
-    MIN_ZOOM = 0.05
+    # Zoom limits (Photoshop-style: dynamic minimum to 3200%)
+    ABSOLUTE_MIN_ZOOM = 0.01  # Absolute floor: 1%
+    MIN_ZOOM = 0.05  # Default minimum: 5% (may go lower dynamically)
     MAX_ZOOM = 32.0
 
     # Grid settings
     GRID_SIZE = 50  # Fixed 50px grid
 
-    # Scene expansion margin (how much to expand when items approach edge)
-    SCENE_EXPANSION_MARGIN = 5000
+    # Scene expansion margin (how much to expand when approaching edge)
+    # Larger values = less frequent expansion, smoother infinite feel
+    SCENE_EXPANSION_MARGIN = 10000
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Create scene with initial bounds (will expand dynamically)
+        # Create scene with large initial bounds (will expand dynamically for infinite canvas)
         self._scene = QGraphicsScene(self)
-        self._scene.setSceneRect(-50000, -50000, 100000, 100000)
+        self._scene.setSceneRect(-100000, -100000, 200000, 200000)
         self.setScene(self._scene)
 
         # Setup view
@@ -612,11 +615,12 @@ class CollaborativeCanvas(QGraphicsView):
         else:
             zoom_factor = zoom_out_factor
 
-        # Check zoom limits
+        # Check zoom limits - use dynamic minimum based on content bounds
+        min_zoom = self._get_content_min_zoom()
         new_zoom = self._current_zoom * zoom_factor
-        if new_zoom < self.MIN_ZOOM:
-            zoom_factor = self.MIN_ZOOM / self._current_zoom
-            new_zoom = self.MIN_ZOOM
+        if new_zoom < min_zoom:
+            zoom_factor = min_zoom / self._current_zoom
+            new_zoom = min_zoom
         elif new_zoom > self.MAX_ZOOM:
             zoom_factor = self.MAX_ZOOM / self._current_zoom
             new_zoom = self.MAX_ZOOM
@@ -628,6 +632,7 @@ class CollaborativeCanvas(QGraphicsView):
         # Emit signal if zoom actually changed
         if abs(old_zoom - new_zoom) > 0.001:
             self.zoom_changed.emit(self._current_zoom)
+            self.minimap_trigger.emit()
 
         event.accept()
 
@@ -690,6 +695,9 @@ class CollaborativeCanvas(QGraphicsView):
             self.verticalScrollBar().setValue(
                 self.verticalScrollBar().value() - int(delta.y())
             )
+            # Expand scene if approaching edges (infinite canvas)
+            self._expand_scene_if_needed()
+            self.minimap_trigger.emit()
             event.accept()
             return
 
@@ -962,14 +970,14 @@ class CollaborativeCanvas(QGraphicsView):
         return self._drawing_width
 
     def fit_all(self):
-        """Fit all items in view."""
+        """Fit all items in view with padding, allowing zoom below MIN_ZOOM for large content."""
         items_rect = self._scene.itemsBoundingRect()
         if not items_rect.isEmpty():
             self.fitInView(items_rect.adjusted(-50, -50, 50, 50), Qt.KeepAspectRatio)
             self._current_zoom = self.transform().m11()
-            # Clamp zoom to limits
-            if self._current_zoom < self.MIN_ZOOM:
-                self.set_zoom_level(self.MIN_ZOOM)
+            # Clamp to absolute minimum and max only
+            if self._current_zoom < self.ABSOLUTE_MIN_ZOOM:
+                self.set_zoom_level(self.ABSOLUTE_MIN_ZOOM)
             elif self._current_zoom > self.MAX_ZOOM:
                 self.set_zoom_level(self.MAX_ZOOM)
             self.zoom_changed.emit(self._current_zoom)
@@ -992,6 +1000,42 @@ class CollaborativeCanvas(QGraphicsView):
     def zoom_out(self):
         """Zoom out by one step."""
         self.set_zoom_level(self._current_zoom / 1.25)
+
+    def _get_content_min_zoom(self) -> float:
+        """
+        Calculate the minimum zoom level needed to fit all content in the viewport.
+
+        Returns:
+            Minimum zoom level based on content bounds, clamped to ABSOLUTE_MIN_ZOOM.
+        """
+        items_rect = self._scene.itemsBoundingRect()
+        if items_rect.isEmpty():
+            return self.MIN_ZOOM
+
+        # Add padding around content
+        padding = 100
+        content_width = items_rect.width() + padding * 2
+        content_height = items_rect.height() + padding * 2
+
+        # Get viewport size
+        viewport = self.viewport()
+        if not viewport:
+            return self.MIN_ZOOM
+
+        view_width = viewport.width()
+        view_height = viewport.height()
+
+        if view_width <= 0 or view_height <= 0:
+            return self.MIN_ZOOM
+
+        # Calculate zoom needed to fit content
+        zoom_x = view_width / content_width if content_width > 0 else 1.0
+        zoom_y = view_height / content_height if content_height > 0 else 1.0
+        min_zoom_for_content = min(zoom_x, zoom_y)
+
+        # Return the lower of default MIN_ZOOM or content-based minimum
+        # but never below ABSOLUTE_MIN_ZOOM
+        return max(self.ABSOLUTE_MIN_ZOOM, min(self.MIN_ZOOM, min_zoom_for_content))
 
     # -------------------------------------------------------------------------
     # Grid and Snapping
@@ -1165,6 +1209,45 @@ class CollaborativeCanvas(QGraphicsView):
     # Dynamic Scene Expansion
     # -------------------------------------------------------------------------
 
+    def _expand_scene_if_needed(self):
+        """
+        Expand the scene if the viewport is approaching the edges.
+
+        This enables truly infinite panning by dynamically growing the scene
+        as the user pans towards any edge.
+        """
+        # Get the currently visible area in scene coordinates
+        visible_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        current_scene = self._scene.sceneRect()
+
+        # Check if we're within the expansion threshold of any edge
+        threshold = self.SCENE_EXPANSION_MARGIN / 2  # Expand when halfway to edge
+        margin = self.SCENE_EXPANSION_MARGIN
+
+        needs_expansion = False
+        new_rect = QRectF(current_scene)
+
+        # Check each edge
+        if visible_rect.left() < current_scene.left() + threshold:
+            new_rect.setLeft(current_scene.left() - margin)
+            needs_expansion = True
+
+        if visible_rect.right() > current_scene.right() - threshold:
+            new_rect.setRight(current_scene.right() + margin)
+            needs_expansion = True
+
+        if visible_rect.top() < current_scene.top() + threshold:
+            new_rect.setTop(current_scene.top() - margin)
+            needs_expansion = True
+
+        if visible_rect.bottom() > current_scene.bottom() - threshold:
+            new_rect.setBottom(current_scene.bottom() + margin)
+            needs_expansion = True
+
+        if needs_expansion:
+            self._scene.setSceneRect(new_rect)
+            logger.debug(f"Scene expanded during pan to: {new_rect}")
+
     def _ensure_scene_contains(self, rect: QRectF):
         """
         Ensure the scene rect contains the given rectangle.
@@ -1202,13 +1285,14 @@ class CollaborativeCanvas(QGraphicsView):
         Optimize scene bounds to fit current content.
 
         Call this periodically to reclaim unused scene space.
+        Note: This is a user-triggered action, not automatic.
         """
         items_rect = self._scene.itemsBoundingRect()
         if items_rect.isEmpty():
-            # Reset to default
-            self._scene.setSceneRect(-50000, -50000, 100000, 100000)
+            # Reset to default large bounds
+            self._scene.setSceneRect(-100000, -100000, 200000, 200000)
         else:
-            # Add margin around items
+            # Add generous margin around items
             margin = self.SCENE_EXPANSION_MARGIN
             self._scene.setSceneRect(items_rect.adjusted(-margin, -margin, margin, margin))
 
@@ -1997,7 +2081,9 @@ class CollaborativeCanvas(QGraphicsView):
         Args:
             zoom: Zoom level where 1.0 = 100%, 0.5 = 50%, 2.0 = 200%
         """
-        zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, zoom))
+        # Use dynamic minimum based on content bounds
+        min_zoom = self._get_content_min_zoom()
+        zoom = max(min_zoom, min(self.MAX_ZOOM, zoom))
         if abs(zoom - self._current_zoom) < 0.001:
             return  # No change needed
 
@@ -2005,6 +2091,7 @@ class CollaborativeCanvas(QGraphicsView):
         self.resetTransform()
         self.scale(zoom, zoom)
         self._current_zoom = zoom
+        self.zoom_changed.emit(self._current_zoom)
 
     def set_zoom(self, zoom: float):
         """

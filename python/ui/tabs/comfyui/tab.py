@@ -7,7 +7,6 @@ Refactored to delegate business logic to helper classes.
 Cross-tab communication:
 - Subscribes to gallery selection events via PipelineEventBus
 - Emits job events for gallery awareness
-- Shows recent outputs panel for quick access to generated images
 """
 
 import os
@@ -24,11 +23,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap
 
-from .base_tab import BaseTab
+from ..base_tab import BaseTab
 from dialog_helpers import confirm_action
-from .comfyui_polling import PollingMixin
-from .comfyui_ui_manager import ComfyUIWidgetManager
-from .comfyui_state_manager import ComfyUIStateManager
+from .polling import PollingMixin
+from .ui_manager import ComfyUIWidgetManager
+from .state_manager import ComfyUIStateManager
+from .model_picker_overlay import ModelPickerOverlay
+from .star_rating import CompactStarRating
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +56,15 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Connect ComfyUI tab signals."""
         from icons import IconManager, DEFAULT_ICON_COLOR
 
-        # Workflow preset signals
+        # Model picker toggle
         self.ui.ComfyUIChoosePreset.clicked.connect(self._on_choose_preset_clicked)
-        self.ui.ComfyUIAddPreset.clicked.connect(self._on_add_preset_clicked)
-        self.ui.ComfyUIEditPreset.clicked.connect(self._on_edit_preset_clicked)
+
+        # Generation settings
         self.ui.ComfyUISubmit.clicked.connect(self._on_submit_clicked)
         self.ui.ComfyUIGenerationCount.valueChanged.connect(self._on_generation_count_changed)
         self.ui.ComfyUISeed.valueChanged.connect(self._on_seed_changed)
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_randomize_seed)
         self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 16))
-
 
         # Iterate mode signals
         self.ui.ComfyUIUseAsInput.clicked.connect(self._on_use_as_input_clicked)
@@ -82,10 +82,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
         self.state_manager = ComfyUIStateManager()
 
+        # Setup model picker (inline expandable panel)
+        self._setup_model_picker()
+
         # Create workflow selector dropdown (will be added to UI dynamically)
         self._setup_workflow_selector()
         self._setup_note_display()
-        self._setup_style_preset_controls()
 
         # Initialize polling state from mixin
         self._init_polling_state()
@@ -107,14 +109,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Initial validation
         self._validate_inputs()
-
-        # Hide add/edit model buttons from non-admin users
-        if not self.app_state.is_admin:
-            self.ui.ComfyUIAddPreset.setVisible(False)
-            self.ui.ComfyUIEditPreset.setVisible(False)
-
-        # Setup recent outputs panel (below submit buttons)
-        self._setup_recent_outputs_panel()
 
         # Subscribe to event bus for cross-tab communication
         self._setup_event_bus_subscriptions()
@@ -177,6 +171,60 @@ class ComfyUITab(PollingMixin, BaseTab):
             "Generated images are saved here.\n"
             "Configure in Settings tab."
         )
+
+    def _setup_model_picker(self):
+        """Set up the full-screen model picker overlay."""
+        # Create the model picker overlay (parented to main window for full-screen)
+        self._model_picker = ModelPickerOverlay(
+            is_admin=self.app_state.is_admin,
+            parent=self.main_window
+        )
+
+        # Connect signals
+        self._model_picker.model_selected.connect(self._on_model_selected)
+        self._model_picker.add_model_requested.connect(self._on_add_preset_clicked)
+
+    def _on_model_selected(self, model_name: str, workflow_name: str):
+        """Handle model selection from the overlay.
+
+        Args:
+            model_name: The selected model/preset name
+            workflow_name: The selected workflow name (for multi-workflow models)
+        """
+        # The overlay hides itself on selection, no need to close here
+
+        # Store the workflow name if provided (for multi-workflow models)
+        if workflow_name:
+            self.state_manager.current_selected_workflow = workflow_name
+
+        # Select the preset (this updates the UI and loads the workflow)
+        self._select_preset(model_name)
+
+        # Update the button text to show the rating
+        self._update_model_button_with_rating()
+
+    def _update_model_button_with_rating(self):
+        """Update the model button text to show name + rating stars."""
+        from comfyui.ratings import get_model_rating
+
+        if not self.state_manager.current_preset_name:
+            self.ui.ComfyUIChoosePreset.setText("Choose Model")
+            return
+
+        # Get display name
+        display_name = self._get_preset_display_name(self.state_manager.current_preset_name)
+
+        # Get rating data
+        rating_data = get_model_rating(self.state_manager.current_preset_name)
+        average = rating_data.get("average", 0.0)
+
+        if average > 0:
+            # Format: "Model Name ★★★★☆ (4.2)"
+            filled = int(round(average))
+            stars = "★" * filled + "☆" * (5 - filled)
+            self.ui.ComfyUIChoosePreset.setText(f"{display_name}  {stars} ({average:.1f})")
+        else:
+            self.ui.ComfyUIChoosePreset.setText(display_name)
 
     def _setup_session_resume_banner(self):
         """Set up the session resume banner if a previous session is available."""
@@ -380,224 +428,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._note_display_widget.setVisible(False)
 
     # =========================================================================
-    # STYLE PRESETS (Parameter Snapshots)
-    # =========================================================================
-
-    def _setup_style_preset_controls(self):
-        """Set up preset controls for saving/loading parameter combinations.
-
-        Adds controls directly to the existing button row (comfyuiPresetButtonsLayout).
-        """
-        if not hasattr(self.ui, 'comfyuiPresetButtonsLayout'):
-            return
-
-        # Preset label
-        self._preset_label = QLabel("Preset:")
-        self._preset_label.setStyleSheet("color: #aaaaaa;")
-        self._preset_label.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._preset_label, 0)
-
-        # Combo box for preset selection
-        self._style_preset_combo = QtWidgets.QComboBox()
-        self._style_preset_combo.setMinimumWidth(120)
-        self._style_preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._style_preset_combo.currentTextChanged.connect(self._on_style_preset_selected)
-        self._style_preset_combo.addItem("(None)")
-        self._style_preset_combo.setToolTip("Load a saved parameter preset")
-        self._style_preset_combo.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._style_preset_combo, 1)
-
-        # Save preset button
-        self._style_save_btn = QPushButton("Save Preset")
-        self._style_save_btn.setToolTip("Save current parameters as a preset")
-        self._style_save_btn.clicked.connect(self._on_save_style_preset)
-        self._style_save_btn.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._style_save_btn, 0)
-
-        # Undo button
-        self._undo_btn = QPushButton("Undo")
-        self._undo_btn.setToolTip("Undo last parameter change")
-        self._undo_btn.clicked.connect(self._on_undo_clicked)
-        self._undo_btn.setEnabled(False)
-        self._undo_btn.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._undo_btn, 0)
-
-        # Track visibility state
-        self._preset_controls_visible = False
-
-    def _update_style_preset_list(self):
-        """Update the preset combo box with available presets."""
-        from comfyui.presets_manager import get_style_preset_names
-
-        current_workflow = self.state_manager.current_preset_name
-
-        # Show/hide preset controls based on workflow state
-        has_workflow = bool(current_workflow)
-        if hasattr(self, '_preset_label'):
-            self._preset_label.setVisible(has_workflow)
-        if hasattr(self, '_style_preset_combo'):
-            self._style_preset_combo.setVisible(has_workflow)
-        if hasattr(self, '_style_save_btn'):
-            self._style_save_btn.setVisible(has_workflow)
-        if hasattr(self, '_undo_btn'):
-            self._undo_btn.setVisible(has_workflow)
-
-        if not current_workflow:
-            return
-
-        # Get presets for current workflow
-        presets = get_style_preset_names(current_workflow)
-
-        # Update combo box
-        self._style_preset_combo.blockSignals(True)
-        try:
-            current_text = self._style_preset_combo.currentText()
-            self._style_preset_combo.clear()
-            self._style_preset_combo.addItem("(None)")
-
-            for name in presets:
-                self._style_preset_combo.addItem(name)
-
-            # Restore selection if still valid
-            if current_text and current_text in presets:
-                self._style_preset_combo.setCurrentText(current_text)
-        finally:
-            self._style_preset_combo.blockSignals(False)
-
-    def _on_style_preset_selected(self, preset_name: str):
-        """Handle preset selection."""
-        from comfyui.presets_manager import load_style_preset
-
-        if preset_name == "(None)" or not preset_name:
-            return
-
-        preset = load_style_preset(preset_name)
-        if not preset:
-            self.log(f"[ComfyUI] Style preset not found: {preset_name}")
-            return
-
-        # Apply editable values to widgets
-        editable_values = preset.get('editable_values', {})
-        if editable_values:
-            # Push current state for undo before applying preset
-            self._push_undo_before_change(f"Load preset: {preset_name}")
-
-            self.widget_manager.pending_editable_values = editable_values
-            self.widget_manager._apply_pending_editable_values()
-            self.show_status(f"Loaded style preset: {preset_name}", "success")
-            self.log(f"[ComfyUI] Loaded style preset: {preset_name}")
-
-    def _on_save_style_preset(self):
-        """Save current parameters as a style preset."""
-        from comfyui.presets_manager import save_style_preset
-        from dialog_helpers import show_warning
-
-        current_workflow = self.state_manager.current_preset_name
-        if not current_workflow:
-            show_warning(
-                "Save Style Preset",
-                "Please select a workflow preset first.",
-                parent=self.main_window
-            )
-            return
-
-        # Get current editable values
-        editable_values, _ = self.widget_manager.collect_editable_values()
-        if not editable_values:
-            show_warning(
-                "Save Style Preset",
-                "No editable parameters to save.\n\n"
-                "Load a workflow first to configure parameters.",
-                parent=self.main_window
-            )
-            return
-
-        # Ask for preset name
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(
-            self.main_window,
-            "Save Style Preset",
-            "Enter a name for this style preset:",
-            text=""
-        )
-
-        if not ok or not name.strip():
-            return
-
-        name = name.strip()
-
-        # Save the preset
-        success = save_style_preset(
-            name=name,
-            editable_values=editable_values,
-            workflow_preset=current_workflow
-        )
-
-        if success:
-            self._update_style_preset_list()
-            self._style_preset_combo.setCurrentText(name)
-            self.show_status(f"Saved style preset: {name}", "success")
-        else:
-            show_warning(
-                "Save Failed",
-                "Could not save the style preset. Check the logs for details.",
-                parent=self.main_window
-            )
-
-    def _on_delete_style_preset(self):
-        """Delete the selected style preset."""
-        from comfyui.presets_manager import delete_style_preset
-        from dialog_helpers import confirm_action
-
-        preset_name = self._style_preset_combo.currentText()
-        if preset_name == "(None)":
-            return
-
-        if confirm_action(
-            "Delete Style Preset",
-            f"Delete style preset '{preset_name}'?\n\n"
-            "This cannot be undone.",
-            parent=self.main_window
-        ):
-            if delete_style_preset(preset_name):
-                self._update_style_preset_list()
-                self.show_status(f"Deleted style preset: {preset_name}", "info")
-            else:
-                self.log(f"[ComfyUI] Failed to delete style preset: {preset_name}")
-
-    def _on_undo_clicked(self):
-        """Handle undo button click - restore previous parameter state."""
-        if not self.widget_manager.can_undo():
-            return
-
-        # Pop and apply the previous state
-        state = self.widget_manager.pop_undo_state()
-        if state:
-            self.widget_manager.apply_undo_state(state)
-            description = state.get('description', 'parameter change')
-            self.show_status(f"Undone: {description}", "info")
-            self._update_undo_button_state()
-
-    def _update_undo_button_state(self):
-        """Update the undo button enabled state."""
-        if hasattr(self, '_undo_btn'):
-            can_undo = self.widget_manager.can_undo()
-            self._undo_btn.setEnabled(can_undo)
-            count = self.widget_manager.undo_stack_size()
-            if count > 0:
-                self._undo_btn.setToolTip(f"Undo last parameter change ({count} available)")
-            else:
-                self._undo_btn.setToolTip("No undo history")
-
-    def _push_undo_before_change(self, description: str = None):
-        """Push current state to undo stack before making a change.
-
-        Call this before applying style presets or other batch changes.
-        """
-        self.widget_manager.push_undo_state(description)
-        self._update_undo_button_state()
-
-    # =========================================================================
     # GENERATION SETTINGS
     # =========================================================================
 
@@ -632,60 +462,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         return full_name
 
     def _on_choose_preset_clicked(self):
-        """Show popup menu with available workflow presets, grouped by folder."""
-        from comfyui.presets_manager import get_comfyui_workflow_presets
-
-        menu = QMenu(self.main_window)
-
-        presets = get_comfyui_workflow_presets()
-        if not presets:
-            action = menu.addAction("No presets available")
-            action.setEnabled(False)
-        else:
-            # Group presets by folder prefix
-            folders = {}  # folder_name -> [(full_name, display_name), ...]
-            root_items = []  # Items without folder prefix
-
-            for name in sorted(presets.keys()):
-                # Check for folder separator (support both / and \)
-                if '/' in name:
-                    folder, display = name.rsplit('/', 1)
-                    if folder not in folders:
-                        folders[folder] = []
-                    folders[folder].append((name, display))
-                elif '\\' in name:
-                    folder, display = name.rsplit('\\', 1)
-                    if folder not in folders:
-                        folders[folder] = []
-                    folders[folder].append((name, display))
-                else:
-                    root_items.append((name, name))
-
-            # Add root items first
-            for full_name, display_name in root_items:
-                action = menu.addAction(display_name)
-                action.setData(full_name)
-                if full_name == self.state_manager.current_preset_name:
-                    action.setCheckable(True)
-                    action.setChecked(True)
-
-            # Add folders as submenus
-            for folder in sorted(folders.keys()):
-                submenu = menu.addMenu(folder)
-                for full_name, display_name in folders[folder]:
-                    action = submenu.addAction(display_name)
-                    action.setData(full_name)
-                    if full_name == self.state_manager.current_preset_name:
-                        action.setCheckable(True)
-                        action.setChecked(True)
-
-        # Show menu below the button
-        action = menu.exec_(self.ui.ComfyUIChoosePreset.mapToGlobal(
-            self.ui.ComfyUIChoosePreset.rect().bottomLeft()
-        ))
-
-        if action and action.data():
-            self._select_preset(action.data())
+        """Show the full-screen model picker overlay."""
+        # Set current selection for highlighting
+        self._model_picker.set_current_model(self.state_manager.current_preset_name)
+        # Show the overlay
+        self._model_picker.show_overlay()
 
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
@@ -696,8 +477,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
 
         self.state_manager.current_preset_name = preset_name
-        display_name = self._get_preset_display_name(preset_name)
-        self.ui.ComfyUIChoosePreset.setText(display_name)
+
+        # Update button text with rating
+        self._update_model_button_with_rating()
 
         # Check if this is a multi-workflow model
         is_multi = is_workflow_preset_multi(preset_name)
@@ -731,74 +513,32 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
-            self._update_style_preset_list()
             self._save_state()
         else:
+            display_name = self._get_preset_display_name(preset_name)
             self.ui.ComfyUIChoosePreset.setText(f"{display_name} (missing)")
             self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
-            self._update_style_preset_list()
             # Guard for animator not being initialized yet during tab initialization
             self.show_status(f"Workflow file not found: {workflow_path}", "error")
 
     def _on_add_preset_clicked(self):
-        """Add a new workflow preset."""
-        from comfyui.presets_manager import (
-            get_comfyui_workflow_presets,
-            save_comfyui_workflow_preset
-        )
-        from file_dialogs import browse_file_with_memory
+        """Add a new workflow preset using the wizard."""
+        from .add_model_wizard import AddModelWizard
 
-        # Use last browsed directory for workflows
-        file_path = browse_file_with_memory(
-            self.main_window,
-            context="comfyui_workflow",
-            title="Select ComfyUI Workflow",
-            file_filter="ComfyUI JSON (*.json)",
-            fallback_path=""
-        )
-        if not file_path:
-            return
-
-        # Ask for a preset name
-        name, ok = QInputDialog.getText(
-            self.main_window, "Add Workflow Preset",
-            "Enter a name for this workflow preset:"
-        )
-        if not ok or not name:
-            return
-
-        name = name.strip()
-        if not name:
-            self.show_status("Preset name cannot be empty", "error")
-            return
-
-        # Check if preset already exists
-        presets = get_comfyui_workflow_presets()
-        if name in presets:
-            if not confirm_action(
-                "Overwrite Preset",
-                f"Preset '{name}' already exists. Overwrite?",
-                self.main_window
-            ):
-                return
-
-        # Ask if workflow supports iterate mode
-        iteratable = confirm_action(
-            "Iterate Mode",
-            "Does this workflow support Iterate mode?\n\n"
-            "Iterate mode is automatically enabled when only 1 image is selected.\n"
-            "It allows reviewing results and refining prompts between generations.",
-            self.main_window
-        )
-
-        # Save the preset and select it
-        save_comfyui_workflow_preset(name, file_path, iteratable=iteratable)
-        self._select_preset(name)
-        self.show_status(f"Workflow preset '{name}' saved", "success")
+        wizard = AddModelWizard(parent=self.main_window)
+        if wizard.exec_() == QDialog.Accepted:
+            # Get the model name that was just created
+            model_name = wizard.field("model_name")
+            if model_name:
+                self._select_preset(model_name)
+                self.show_status(f"Model '{model_name}' created", "success")
+                # Refresh the picker if it's visible
+                if hasattr(self, '_model_picker'):
+                    self._model_picker.refresh()
 
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
@@ -809,7 +549,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             update_comfyui_workflow_preset,
             delete_comfyui_workflow_preset
         )
-        from .comfyui_preset_editor import PresetEditorDialog
+        from .preset_editor import PresetEditorDialog
 
         if not self.state_manager.current_preset_name:
             self.show_status("No preset selected", "error")
@@ -1094,6 +834,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from deadline.submitter import submit_comfyui_job
         from core.settings_manager import get_setting
         from comfyui.presets_manager import get_workflow_preset_config
+        from .polling import format_elapsed_time
 
         # Immediately save state before submission (crash recovery)
         self._save_state()
@@ -1118,7 +859,6 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Show time estimate if available
         if self.state_manager.current_preset_name:
             from core.user_preferences import get_workflow_estimated_time_per_frame
-            from ui.tabs.comfyui_polling import format_elapsed_time
             per_frame = get_workflow_estimated_time_per_frame(self.state_manager.current_preset_name)
             if per_frame:
                 total_estimate = per_frame * generation_count
@@ -1212,6 +952,11 @@ class ComfyUITab(PollingMixin, BaseTab):
                 )
                 self.log(f"ComfyUI submission complete: {job_ids}")
 
+                # Increment model usage count for rating system
+                if self.state_manager.current_preset_name:
+                    from comfyui.ratings import increment_model_usage
+                    increment_model_usage(self.state_manager.current_preset_name)
+
                 # Start polling for job completion
                 self.log(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
                 if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
@@ -1256,7 +1001,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
 
     # =========================================================================
-    # POLLING METHODS - See comfyui_polling.py (PollingMixin)
+    # POLLING METHODS - See polling.py (PollingMixin)
     # =========================================================================
     # The following methods are provided by PollingMixin:
     # - _start_iterate_polling, _poll_iterate_job, _on_iterate_poll_result
@@ -1418,80 +1163,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             self.widget_manager.pending_editable_values = pending_values
 
     # =========================================================================
-    # RECENT OUTPUTS PANEL (Cross-tab awareness)
-    # =========================================================================
-
-    def _setup_recent_outputs_panel(self):
-        """Set up the recent outputs preview panel below submit buttons."""
-        from .comfyui_recent_outputs import RecentOutputsPanel
-
-        self._recent_outputs_panel = RecentOutputsPanel()
-        self._recent_outputs_panel.thumbnail_clicked.connect(self._on_recent_output_clicked)
-        self._recent_outputs_panel.use_as_input.connect(self._on_recent_output_use_as_input)
-
-        # Insert after the settingsAndSubmitLayout (before iterate frame)
-        # The layout order is: Workflow, Input, SettingsAndSubmit, [INSERT HERE], IterateFrame, Spacer
-        if hasattr(self.ui, 'comfyuiLayout'):
-            # Find the iterate frame's index and insert before it
-            layout = self.ui.comfyuiLayout
-            iterate_index = -1
-            for i in range(layout.count()):
-                item = layout.itemAt(i)
-                if item and item.widget() == self.ui.comfyuiIterateFrame:
-                    iterate_index = i
-                    break
-
-            if iterate_index >= 0:
-                layout.insertWidget(iterate_index, self._recent_outputs_panel)
-            else:
-                # Fallback: add before spacer
-                layout.insertWidget(layout.count() - 1, self._recent_outputs_panel)
-
-        # Initialize with any existing recent outputs from app state
-        self._refresh_recent_outputs_panel()
-
-    def _refresh_recent_outputs_panel(self):
-        """Refresh the recent outputs panel with current data."""
-        if not hasattr(self, '_recent_outputs_panel'):
-            return
-
-        from core.state_manager import app_state
-
-        # Get recent outputs from app state
-        recent_outputs = app_state.comfyui_recent_outputs or []
-        self._recent_outputs_panel.update_outputs(recent_outputs)
-
-        # Get session stats
-        stats = app_state.get_session_stats()
-        total = stats.get('total_generated', 0)
-        total_time = stats.get('total_time_seconds', 0.0)
-        avg_time = total_time / total if total > 0 else 0.0
-        self._recent_outputs_panel.update_stats(total, avg_time)
-
-    def _on_recent_output_clicked(self, path: str):
-        """Handle click on recent output thumbnail - open in gallery viewer."""
-        gallery_tab = self.main_window.get_tab("gallery")
-        if gallery_tab:
-            self.main_window.switch_to_tab("gallery")
-            gallery_tab._open_viewer(start_image=path)
-
-    def _on_recent_output_use_as_input(self, path: str):
-        """Handle drag/use as input request from recent output."""
-        if not path or not os.path.exists(path):
-            self.show_status("File not found", "error")
-            return
-
-        # Find an image input widget and add the image
-        for node_id, container in self.widget_manager.dynamic_widgets.items():
-            input_widget = getattr(container, 'input_widget', None)
-            if input_widget and hasattr(input_widget, 'add_images'):
-                input_widget.add_images([path])
-                self.show_status("Image added to input", "success")
-                return
-
-        self.show_status("No image input field in current workflow", "warning")
-
-    # =========================================================================
     # EVENT BUS INTEGRATION (Cross-tab communication)
     # =========================================================================
 
@@ -1505,7 +1176,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         pipeline_events.use_as_input.connect(self._on_use_images_from_gallery)
         pipeline_events.copy_settings.connect(self.apply_settings_from_metadata)
 
-        # Subscribe to our own job completion events to update recent outputs
+        # Subscribe to our own job completion events
         pipeline_events.job_completed.connect(self._on_own_job_completed)
         pipeline_events.all_jobs_completed.connect(self._on_all_own_jobs_completed)
 
@@ -1540,9 +1211,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.show_status("No image input field in current workflow", "warning")
 
     def _on_own_job_completed(self, job_id: str, output_paths: list):
-        """Handle our own job completion - update recent outputs panel."""
-        self._refresh_recent_outputs_panel()
+        """Handle our own job completion."""
+        pass
 
     def _on_all_own_jobs_completed(self, total_outputs: int, elapsed_seconds: float):
-        """Handle all jobs completed - final update to recent outputs panel."""
-        self._refresh_recent_outputs_panel()
+        """Handle all jobs completed."""
+        pass

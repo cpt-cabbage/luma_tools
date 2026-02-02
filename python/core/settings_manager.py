@@ -123,6 +123,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # ComfyUI-Gallery integration settings
     "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
     "comfyui_show_recent_outputs": SettingDef("comfyui_show_recent_outputs", True, "user"),
+    # ComfyUI Model Picker settings
+    "comfyui_model_sort": SettingDef("comfyui_model_sort", "recently_used", "user"),
+    "comfyui_model_filter": SettingDef("comfyui_model_filter", "all", "user"),
     "gallery_show_job_status": SettingDef("gallery_show_job_status", True, "user"),
     "gallery_show_quick_actions": SettingDef("gallery_show_quick_actions", True, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)

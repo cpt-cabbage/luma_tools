@@ -1,15 +1,19 @@
 """
 Canvas minimap widget for navigation overview.
 
-Provides a bird's-eye view of the entire canvas with thumbnail previews
+Provides a bird's-eye view of the entire canvas with colored outlines
 of image nodes and a viewport rectangle showing the current view.
+Floats over the canvas and auto-shows/hides on pan/zoom.
 """
 
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPixmap, QImage
+from PySide6.QtCore import (
+    Qt, QRectF, QPointF, Signal, QTimer,
+    QPropertyAnimation, QEasingCurve
+)
+from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 from PySide6.QtWidgets import QWidget, QGraphicsView
 
 logger = logging.getLogger(__name__)
@@ -17,31 +21,34 @@ logger = logging.getLogger(__name__)
 
 class CanvasMinimap(QWidget):
     """
-    Minimap widget showing an overview of the canvas.
+    Floating minimap widget showing an overview of the canvas.
 
     Features:
-    - Thumbnail previews of all image nodes
+    - Colored outlines of all image nodes (no thumbnails)
     - Viewport rectangle showing current view
     - Click to navigate to location
     - Drag to pan the main canvas
-    - Auto-updates when canvas changes
+    - Auto show/hide on pan/zoom with fade animation
+    - Nuke-style appearance
     """
 
     # Signals
     navigate_requested = Signal(float, float)  # x, y in scene coordinates
 
     # Size constants
-    MIN_WIDTH = 150
-    MIN_HEIGHT = 100
-    MAX_WIDTH = 250
-    MAX_HEIGHT = 180
+    WIDTH = 200
+    HEIGHT = 150
+
+    # Timing
+    VISIBILITY_DURATION = 2000  # ms to stay visible after interaction
+    FADE_DURATION = 300  # ms for fade animation
 
     # Colors
-    BACKGROUND_COLOR = QColor(30, 30, 30, 220)
-    BORDER_COLOR = QColor(80, 80, 80)
-    VIEWPORT_FILL = QColor(255, 255, 255, 30)
+    BACKGROUND_COLOR = QColor(20, 20, 20, 200)
+    BORDER_COLOR = QColor(60, 60, 60)
+    VIEWPORT_FILL = QColor(255, 255, 255, 20)
     VIEWPORT_BORDER = QColor(100, 150, 255, 200)
-    NODE_BORDER = QColor(100, 100, 100)
+    DEFAULT_NODE_COLOR = QColor(180, 180, 180)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,22 +56,39 @@ class CanvasMinimap(QWidget):
         self._canvas: Optional[QGraphicsView] = None
         self._scene_rect = QRectF()
         self._viewport_rect = QRectF()
-        self._node_thumbnails = {}  # node_id -> QPixmap
         self._node_rects = {}  # node_id -> QRectF (in scene coords)
+        self._node_colors = {}  # node_id -> QColor
 
         # Interaction state
         self._is_dragging = False
-        self._drag_start = QPointF()
 
-        # Setup widget
-        self.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
-        self.setMaximumSize(self.MAX_WIDTH, self.MAX_HEIGHT)
+        # Setup as floating overlay
+        self.setWindowFlags(
+            Qt.Tool |
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(self.WIDTH, self.HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
 
-        # Update timer for smooth updates
+        # Visibility timer for auto-hide
+        self._visibility_timer = QTimer(self)
+        self._visibility_timer.setSingleShot(True)
+        self._visibility_timer.timeout.connect(self._start_fade_out)
+
+        # Fade animation
+        self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
+        self._fade_animation.setDuration(self.FADE_DURATION)
+        self._fade_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        # Update timer for tracking while visible (nodes + viewport)
         self._update_timer = QTimer(self)
-        self._update_timer.setInterval(100)  # Update every 100ms
-        self._update_timer.timeout.connect(self._update_viewport)
+        self._update_timer.setInterval(50)  # 20 FPS update
+        self._update_timer.timeout.connect(self._update_all)
+
+        # Start hidden
+        self.hide()
 
     def set_canvas(self, canvas: QGraphicsView):
         """
@@ -75,20 +99,46 @@ class CanvasMinimap(QWidget):
         """
         self._canvas = canvas
 
-        # Connect to canvas signals
+        # Connect to canvas signals for content changes
         if hasattr(canvas, 'canvas_modified'):
-            canvas.canvas_modified.connect(self._on_canvas_changed)
+            canvas.canvas_modified.connect(self._update_all)
 
-        # Start viewport tracking
+    def show_temporarily(self):
+        """Show the minimap and start the auto-hide timer."""
+        # Stop any ongoing fade
+        self._fade_animation.stop()
+        self.setWindowOpacity(1.0)
+
+        # Update content
+        self._update_all()
+
+        # Show and raise
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+
+        # Start viewport updates
         self._update_timer.start()
-        self._update_all()
 
-    def _on_canvas_changed(self):
-        """Handle canvas modification - update thumbnails."""
-        self._update_all()
+        # Restart visibility timer
+        self._visibility_timer.start(self.VISIBILITY_DURATION)
+
+    def _start_fade_out(self):
+        """Begin fade-out animation."""
+        self._update_timer.stop()
+        self._fade_animation.setStartValue(1.0)
+        self._fade_animation.setEndValue(0.0)
+        self._fade_animation.finished.connect(self._on_fade_complete)
+        self._fade_animation.start()
+
+    def _on_fade_complete(self):
+        """Handle fade animation completion."""
+        self._fade_animation.finished.disconnect(self._on_fade_complete)
+        if self.windowOpacity() < 0.1:
+            self.hide()
 
     def _update_all(self):
-        """Update the entire minimap (thumbnails and viewport)."""
+        """Update the entire minimap (node rects and viewport)."""
         if not self._canvas:
             return
 
@@ -96,46 +146,71 @@ class CanvasMinimap(QWidget):
         if not scene:
             return
 
-        # Get scene bounds
-        self._scene_rect = scene.itemsBoundingRect()
-        if self._scene_rect.isEmpty():
-            self._scene_rect = QRectF(-500, -500, 1000, 1000)
+        # Get items bounding rect
+        items_rect = scene.itemsBoundingRect()
 
-        # Update node thumbnails
-        self._update_thumbnails()
+        # Get current viewport in scene coordinates
+        viewport_rect = self._canvas.mapToScene(
+            self._canvas.viewport().rect()
+        ).boundingRect()
+
+        # Use union of items and viewport so minimap expands when zoomed out
+        if items_rect.isEmpty():
+            self._scene_rect = viewport_rect if not viewport_rect.isEmpty() else QRectF(-500, -500, 1000, 1000)
+        elif viewport_rect.isEmpty():
+            self._scene_rect = items_rect
+        else:
+            self._scene_rect = items_rect.united(viewport_rect)
+
+        # Update node information
+        self._update_nodes()
         self._update_viewport()
         self.update()
 
-    def _update_thumbnails(self):
-        """Update thumbnail cache from canvas image nodes."""
+    def _update_nodes(self):
+        """Update node rectangles and colors from canvas."""
         if not self._canvas:
             return
 
-        self._node_thumbnails.clear()
         self._node_rects.clear()
+        self._node_colors.clear()
 
         # Get image nodes from canvas
         if hasattr(self._canvas, '_image_nodes'):
             for node_id, node in self._canvas._image_nodes.items():
                 try:
-                    # Get node bounds
-                    bounds = node.sceneBoundingRect()
+                    # Get actual image rect (not sceneBoundingRect which has 300px margin)
+                    # ImageNode has _width/_height for actual dimensions
+                    pos = node.pos()
+                    width = getattr(node, '_width', 100)
+                    height = getattr(node, '_height', 100)
+                    bounds = QRectF(pos.x(), pos.y(), width, height)
                     self._node_rects[node_id] = bounds
 
-                    # Create tiny thumbnail
-                    if hasattr(node, 'image_path') and node.image_path:
-                        # Use cached pixmap if available
-                        if hasattr(node, '_pixmap') and node._pixmap and not node._pixmap.isNull():
-                            # Scale down to minimap size
-                            thumb_size = 20  # Small thumbnail
-                            scaled = node._pixmap.scaled(
-                                thumb_size, thumb_size,
-                                Qt.KeepAspectRatio,
-                                Qt.FastTransformation
-                            )
-                            self._node_thumbnails[node_id] = scaled
+                    # Get node color (from metadata or default)
+                    color = self._get_node_color(node)
+                    self._node_colors[node_id] = color
                 except Exception as e:
-                    logger.debug(f"Error getting thumbnail for {node_id}: {e}")
+                    logger.debug(f"Error getting node info for {node_id}: {e}")
+
+    def _get_node_color(self, node) -> QColor:
+        """Get the display color for a node."""
+        # Check if node has a color attribute (from metadata/group)
+        if hasattr(node, 'display_color') and node.display_color:
+            return QColor(node.display_color)
+
+        # Check for group color
+        if hasattr(node, 'group_color') and node.group_color:
+            return QColor(node.group_color)
+
+        # Use a color based on node index for variety
+        if hasattr(node, 'node_id'):
+            # Generate a consistent color from node_id hash
+            hash_val = hash(node.node_id)
+            hue = (hash_val % 360)
+            return QColor.fromHsv(hue, 150, 200)
+
+        return self.DEFAULT_NODE_COLOR
 
     def _update_viewport(self):
         """Update the viewport rectangle position."""
@@ -208,39 +283,43 @@ class CanvasMinimap(QWidget):
         return QRectF(top_left, bottom_right)
 
     def paintEvent(self, event):
-        """Paint the minimap."""
+        """Paint the minimap with colored outlines."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Background
-        painter.fillRect(self.rect(), self.BACKGROUND_COLOR)
+        # Rounded rectangle background
+        painter.setBrush(QBrush(self.BACKGROUND_COLOR))
         painter.setPen(QPen(self.BORDER_COLOR, 1))
-        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
 
         if self._scene_rect.isEmpty():
             # Draw "No items" text
-            painter.setPen(QColor(128, 128, 128))
+            painter.setPen(QColor(100, 100, 100))
             painter.drawText(self.rect(), Qt.AlignCenter, "No items")
             return
 
-        # Draw node thumbnails
+        # Draw node outlines (no thumbnails, just colored rectangles)
         for node_id, scene_rect in self._node_rects.items():
             minimap_rect = self._scene_rect_to_minimap(scene_rect)
+            target_rect = minimap_rect.toRect()
 
-            # Draw node rectangle
-            if node_id in self._node_thumbnails:
-                thumb = self._node_thumbnails[node_id]
-                # Scale thumbnail to fit rect
-                target_rect = minimap_rect.toRect()
-                if target_rect.width() > 2 and target_rect.height() > 2:
-                    painter.drawPixmap(target_rect, thumb)
-                    painter.setPen(QPen(self.NODE_BORDER, 1))
-                    painter.drawRect(target_rect)
-            else:
-                # Draw placeholder rectangle
-                painter.fillRect(minimap_rect, QColor(80, 80, 80))
-                painter.setPen(QPen(self.NODE_BORDER, 1))
-                painter.drawRect(minimap_rect)
+            # Ensure minimum visible size (at least 4x4 pixels)
+            if target_rect.width() < 4:
+                center_x = target_rect.center().x()
+                target_rect.setLeft(center_x - 2)
+                target_rect.setRight(center_x + 2)
+            if target_rect.height() < 4:
+                center_y = target_rect.center().y()
+                target_rect.setTop(center_y - 2)
+                target_rect.setBottom(center_y + 2)
+
+            # Get node color
+            color = self._node_colors.get(node_id, self.DEFAULT_NODE_COLOR)
+
+            # Draw colored outline only (no fill)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(color, 2))
+            painter.drawRect(target_rect)
 
         # Draw viewport rectangle
         if not self._viewport_rect.isEmpty():
@@ -253,8 +332,9 @@ class CanvasMinimap(QWidget):
         """Handle mouse press - start navigation."""
         if event.button() == Qt.LeftButton:
             self._is_dragging = True
-            self._drag_start = event.position()
             self._navigate_to(event.position())
+            # Reset visibility timer while interacting
+            self._visibility_timer.start(self.VISIBILITY_DURATION)
             event.accept()
 
     def mouseMoveEvent(self, event):
