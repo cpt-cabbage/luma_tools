@@ -319,6 +319,49 @@ class ResizeItemCommand(CanvasCommand):
             return False
 
 
+class AddDrawingCommand(CanvasCommand):
+    """Command to add a drawing item to the canvas."""
+
+    def __init__(self, canvas, drawing_item, drawing_id: str):
+        """
+        Initialize add drawing command.
+
+        Args:
+            canvas: The canvas
+            drawing_item: The drawing QGraphicsItem (DrawingPath, DrawingRect, etc.)
+            drawing_id: Unique ID for the drawing
+        """
+        super().__init__(canvas, "Add drawing")
+        self._drawing_item = drawing_item
+        self._drawing_id = drawing_id
+
+    def execute(self) -> bool:
+        """Execute is a no-op since the drawing is already added."""
+        # Drawing is already added to scene when this command is created
+        return True
+
+    def undo(self) -> bool:
+        """Remove the drawing from the canvas."""
+        try:
+            self._canvas.remove_drawing(self._drawing_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to undo add drawing: {e}")
+            return False
+
+    def redo(self) -> bool:
+        """Re-add the drawing to the canvas."""
+        try:
+            # Re-add to scene and tracking dict
+            self._canvas._scene.addItem(self._drawing_item)
+            self._canvas._drawings[self._drawing_id] = self._drawing_item
+            self._canvas._emit_modified()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to redo add drawing: {e}")
+            return False
+
+
 class CompositeCommand(CanvasCommand):
     """Command that groups multiple commands together."""
 

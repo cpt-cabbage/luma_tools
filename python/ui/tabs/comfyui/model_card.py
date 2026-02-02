@@ -435,20 +435,20 @@ class OverlayModelCard(QFrame):
     def _setup_ui(self):
         """Set up the card UI."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Thumbnail - fills card width, no margins
-        thumb_width = OVERLAY_CARD_WIDTH
+        # Thumbnail - account for border (2px total)
+        thumb_width = OVERLAY_CARD_WIDTH - 2
         thumb_height = OVERLAY_THUMB_HEIGHT
         self._thumbnail = QLabel()
-        self._thumbnail.setFixedSize(thumb_width, thumb_height)
+        self._thumbnail.setFixedHeight(thumb_height)
         self._thumbnail.setAlignment(Qt.AlignCenter)
         self._thumbnail.setStyleSheet("""
             QLabel {
                 background-color: #1a1a1a;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
                 color: #555;
                 font-size: 11px;
             }
@@ -477,7 +477,7 @@ class OverlayModelCard(QFrame):
         # Content area with padding
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(8, 4, 8, 0)
+        content_layout.setContentsMargins(8, 6, 8, 8)
         content_layout.setSpacing(2)
 
         # Model name

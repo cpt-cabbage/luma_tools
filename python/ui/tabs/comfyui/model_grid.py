@@ -131,12 +131,9 @@ class ModelGrid(QWidget):
             models: List of (model_name, preset_config, rating_data) tuples
             username: Current username for favorites
         """
-        logger.debug(f"[ModelGrid] set_models called with {len(models)} models for user {username}")
-
         # Cancel any pending resize timeout to prevent double rebuild
         if hasattr(self, '_resize_timer') and self._resize_timer.isActive():
             self._resize_timer.stop()
-            logger.debug("[ModelGrid] Cancelled pending resize timeout")
 
         # Skip the next resize rebuild since we're about to rebuild anyway
         self._skip_resize_rebuild = True
@@ -162,7 +159,6 @@ class ModelGrid(QWidget):
 
     def _rebuild_grid(self):
         """Rebuild the grid with current models."""
-        logger.debug(f"[ModelGrid] _rebuild_grid called: models={len(self._models)}, cards={len(self._cards)}")
 
         # Clear existing cards - remove from layout first, then delete
         while self._grid_layout.count():
@@ -209,7 +205,6 @@ class ModelGrid(QWidget):
 
             self._grid_layout.addWidget(card, row, col)
             self._cards[model_name] = card
-            logger.debug(f"[ModelGrid] Created card for '{model_name}' at row={row}, col={col}")
 
             # Mark current model as selected
             if model_name == self._current_model:

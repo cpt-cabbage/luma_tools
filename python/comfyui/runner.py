@@ -635,7 +635,6 @@ def main():
 
                 moved = []
                 if args.comfyui_output_dir:
-                    logger.info(f"[Runner] Checking for output files to move")
                     moved = move_output_files(
                         args.comfyui_output_dir,
                         args.output_directory,
@@ -666,12 +665,8 @@ def main():
                                 execution_time_ms=file_execution_time,
                                 node_execution_trace=node_execution_trace
                             )
-                            if node_execution_trace:
-                                logger.info(f"Stored per-file metadata for {filename} with {len(node_execution_trace)} node trace(s)")
-                            else:
-                                logger.info(f"Stored per-file metadata for {filename}")
-                        except Exception as e:
-                            logger.warning(f"Could not store per-file metadata for {filename}: {e}")
+                        except Exception:
+                            pass  # Silently skip metadata storage failures
             else:
                 logger.error(f"Frame {frame_num} failed or timed out")
                 failed += 1

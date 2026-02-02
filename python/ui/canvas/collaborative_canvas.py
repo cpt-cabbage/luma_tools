@@ -13,17 +13,25 @@ Infinite canvas features:
 """
 
 import os
+import uuid
 import logging
 from typing import Optional, List, Dict, Any
 
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QBrush, QPen, QWheelEvent, QMouseEvent,
-    QFont, QFontMetrics, QPainterPath, QKeyEvent, QImage, QClipboard
+    QFont, QFontMetrics, QPainterPath, QKeyEvent, QImage, QClipboard,
+    QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent
 )
 from PySide6.QtWidgets import (
-    QGraphicsView, QGraphicsScene, QGraphicsItem, QMenu, QApplication,
-    QToolTip, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
+    QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsEllipseItem,
+    QMenu, QApplication, QToolTip, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QFrame, QPushButton
+)
+
+# Drag-drop utilities
+from drag_drop import (
+    extract_files_from_mime_data, filter_files_by_category, IMAGE_EXTENSIONS
 )
 
 from .canvas_items import ImageNode, ConnectionLine, StickyNote, GroupRegion
@@ -60,6 +68,8 @@ class CollaborativeCanvas(QGraphicsView):
     cursor_moved = Signal(float, float)  # x, y in scene coordinates
     zoom_changed = Signal(float)  # emitted when zoom level changes
     minimap_trigger = Signal()  # emitted when minimap should appear (pan/zoom)
+    files_dropped_on_canvas = Signal(list)  # emitted when external files are dropped (for gallery integration)
+    tool_changed = Signal(str)  # emitted when the current tool changes
 
     # Zoom limits (Photoshop-style: dynamic minimum to 3200%)
     ABSOLUTE_MIN_ZOOM = 0.01  # Absolute floor: 1%
@@ -130,12 +140,35 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Drawing tool state
         self._is_drawing = False
+        self._is_erasing = False  # Eraser mode active
         self._draw_start_pos: Optional[QPointF] = None
         self._current_drawing_item = None  # Current shape being drawn
         self._drawings: Dict[str, Any] = {}  # Track drawing items by ID
         self._drawing_toolbar: Optional[DrawingToolbar] = None
         self._drawing_color = QColor(255, 0, 0)  # Default red
         self._drawing_width = 3
+
+        # Brush size indicator (circle following cursor in pen/eraser mode)
+        self._brush_indicator = QGraphicsEllipseItem()
+        self._brush_indicator.setPen(QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine))
+        self._brush_indicator.setBrush(Qt.NoBrush)
+        self._brush_indicator.setZValue(9999)  # Always on top
+        self._brush_indicator.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self._brush_indicator.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self._brush_indicator.setAcceptedMouseButtons(Qt.NoButton)  # Pass through mouse events
+        self._brush_indicator.hide()
+        self._scene.addItem(self._brush_indicator)
+
+        # Space+drag temporary pan state (Photoshop-style)
+        self._space_pressed = False
+        self._was_panning_with_space = False
+
+        # Text editing state (skip shortcuts when editing)
+        self._editing_text = False
+
+        # Drag-drop state
+        self._drop_highlight_active = False
+        self.setAcceptDrops(True)
 
     def set_tab(self, tab):
         """
@@ -213,6 +246,9 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Accept drops
         self.setAcceptDrops(True)
+
+        # Accept keyboard focus (required for keyboard shortcuts)
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def drawBackground(self, painter: QPainter, rect: QRectF):
         """
@@ -346,7 +382,29 @@ class CollaborativeCanvas(QGraphicsView):
             zoom_text
         )
 
+        # Draw drop highlight overlay when dragging files
+        if self._drop_highlight_active:
+            self._draw_drop_overlay(painter)
+
         painter.restore()
+
+    def _draw_drop_overlay(self, painter: QPainter):
+        """Draw a visual overlay when files are being dragged over the canvas."""
+        viewport_rect = QRectF(self.viewport().rect())
+
+        # Semi-transparent blue overlay
+        painter.fillRect(viewport_rect, QColor(74, 158, 255, 40))
+
+        # Dashed border
+        border_pen = QPen(QColor(74, 158, 255), 3, Qt.DashLine)
+        painter.setPen(border_pen)
+        painter.drawRect(viewport_rect.adjusted(4, 4, -4, -4))
+
+        # "Drop images here" text
+        font = QFont("Segoe UI", 16, QFont.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor(74, 158, 255))
+        painter.drawText(viewport_rect, Qt.AlignCenter, "Drop images here")
 
     # -------------------------------------------------------------------------
     # Tool Management
@@ -357,8 +415,8 @@ class CollaborativeCanvas(QGraphicsView):
         Set the current tool.
 
         Args:
-            tool: One of 'select', 'pan', 'connect', 'annotate', 'group',
-                  'pen', 'rect', 'ellipse', 'line', 'crop'
+            tool: One of 'select', 'select_drawings', 'pan', 'connect', 'annotate',
+                  'group', 'pen', 'rect', 'ellipse', 'line', 'eraser', 'crop'
         """
         self._current_tool = tool
 
@@ -366,6 +424,10 @@ class CollaborativeCanvas(QGraphicsView):
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             self.setCursor(Qt.OpenHandCursor)
         elif tool == 'select':
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+            self.setCursor(Qt.ArrowCursor)
+        elif tool == 'select_drawings':
+            # Drawing selection mode - only drawings are selectable
             self.setDragMode(QGraphicsView.RubberBandDrag)
             self.setCursor(Qt.ArrowCursor)
         elif tool == 'connect':
@@ -380,7 +442,7 @@ class CollaborativeCanvas(QGraphicsView):
         elif tool == 'crop':
             self.setDragMode(QGraphicsView.NoDrag)
             self.setCursor(Qt.CrossCursor)
-        elif tool in ('pen', 'rect', 'ellipse', 'line'):
+        elif tool in ('pen', 'rect', 'ellipse', 'line', 'eraser'):
             # Drawing tools - disable drag mode so we can handle mouse events
             self.setDragMode(QGraphicsView.NoDrag)
             self.setCursor(Qt.CrossCursor)
@@ -389,9 +451,77 @@ class CollaborativeCanvas(QGraphicsView):
                 self._drawing_toolbar.show()
                 self._drawing_toolbar.set_tool(tool)
 
+        # Hide brush indicator for non-brush tools
+        if tool not in ('pen', 'eraser'):
+            try:
+                indicator = self._ensure_brush_indicator()
+                indicator.hide()
+            except RuntimeError:
+                pass  # Indicator was deleted, ignore
+
+        # Manage item selectability based on tool
+        if tool == 'select_drawings':
+            # Only drawings are selectable
+            self._set_drawings_selectable(True)
+            self._set_other_items_selectable(False)
+        elif tool == 'select':
+            # All items are selectable
+            self._set_drawings_selectable(True)
+            self._set_other_items_selectable(True)
+        else:
+            # Non-selection tools - nothing selectable (prevents accidental selection)
+            self._set_drawings_selectable(False)
+            self._set_other_items_selectable(False)
+
+        # Emit signal so tab can respond (e.g., show/hide drawing panel)
+        self.tool_changed.emit(tool)
+
     def current_tool(self) -> str:
         """Get the current tool."""
         return self._current_tool
+
+    def _restore_cursor_for_tool(self):
+        """Restore cursor to match the current tool (after space+drag pan ends)."""
+        tool = self._current_tool
+        if tool in ('select', 'select_drawings'):
+            self.setCursor(Qt.ArrowCursor)
+        elif tool == 'pan':
+            self.setCursor(Qt.OpenHandCursor)
+        elif tool in ('connect', 'annotate', 'crop', 'group', 'pen', 'rect', 'ellipse', 'line', 'eraser'):
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+    def _set_drawings_selectable(self, selectable: bool):
+        """Enable/disable selection for drawing items.
+
+        Args:
+            selectable: Whether drawings should be selectable
+        """
+        for drawing in self._drawings.values():
+            drawing.setFlag(QGraphicsItem.ItemIsSelectable, selectable)
+            drawing.setFlag(QGraphicsItem.ItemIsMovable, selectable)
+
+    def _set_other_items_selectable(self, selectable: bool):
+        """Enable/disable selection for non-drawing items (images, notes, groups).
+
+        Args:
+            selectable: Whether items should be selectable
+        """
+        # Image nodes
+        for node in self._image_nodes.values():
+            node.setFlag(QGraphicsItem.ItemIsSelectable, selectable)
+            node.setFlag(QGraphicsItem.ItemIsMovable, selectable)
+
+        # Sticky notes
+        for note in self._sticky_notes.values():
+            note.setFlag(QGraphicsItem.ItemIsSelectable, selectable)
+            note.setFlag(QGraphicsItem.ItemIsMovable, selectable)
+
+        # Group regions
+        for group in self._groups.values():
+            group.setFlag(QGraphicsItem.ItemIsSelectable, selectable)
+            group.setFlag(QGraphicsItem.ItemIsMovable, selectable)
 
     # -------------------------------------------------------------------------
     # Adding Items
@@ -601,6 +731,14 @@ class CollaborativeCanvas(QGraphicsView):
             self.item_removed.emit('group', group_id)
             self._emit_modified()
 
+    def remove_drawing(self, drawing_id: str):
+        """Remove a drawing by ID."""
+        drawing = self._drawings.pop(drawing_id, None)
+        if drawing:
+            self._scene.removeItem(drawing)
+            self.item_removed.emit('drawing', drawing_id)
+            self._emit_modified()
+
     # -------------------------------------------------------------------------
     # View Navigation
     # -------------------------------------------------------------------------
@@ -638,6 +776,18 @@ class CollaborativeCanvas(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press for pan and tool actions."""
+        # Grab keyboard focus on click (for keyboard shortcuts)
+        self.setFocus()
+
+        # Space+left click for temporary pan (Photoshop-style)
+        if event.button() == Qt.LeftButton and self._space_pressed:
+            self._is_panning = True
+            self._was_panning_with_space = True
+            self._pan_start = event.position()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+
         # Middle mouse for pan
         if event.button() == Qt.MiddleButton:
             self._is_panning = True
@@ -662,7 +812,19 @@ class CollaborativeCanvas(QGraphicsView):
 
         if self._current_tool == 'annotate' and event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.position().toPoint())
-            self.add_sticky_note(pos.x(), pos.y())
+            note = self.add_sticky_note(pos.x(), pos.y())
+            # Switch to select tool after creating note (prevents continuous note creation)
+            self.set_tool('select')
+            # Select the new note so user can immediately edit it
+            self._scene.clearSelection()
+            note.setSelected(True)
+            event.accept()
+            return
+
+        # Eraser tool
+        if self._current_tool == 'eraser' and event.button() == Qt.LeftButton:
+            self._is_erasing = True
+            self._erase_at_position(event)
             event.accept()
             return
 
@@ -671,6 +833,19 @@ class CollaborativeCanvas(QGraphicsView):
             self._start_drawing(event)
             event.accept()
             return
+
+        # Shift-select: toggle item selection without clearing others
+        if self._current_tool == 'select' and event.button() == Qt.LeftButton:
+            modifiers = QApplication.keyboardModifiers()
+            if modifiers & Qt.ShiftModifier:
+                scene_pos = self.mapToScene(event.position().toPoint())
+                item = self._scene.itemAt(scene_pos, self.transform())
+                if item:
+                    # Toggle selection of the clicked item
+                    item.setSelected(not item.isSelected())
+                    event.accept()
+                    return
+                # If no item clicked, let default behavior handle (rubber band starts)
 
         super().mousePressEvent(event)
 
@@ -685,6 +860,16 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Update coordinate display
         self.viewport().update()
+
+        # Update brush indicator position when in brush tool mode
+        if self._current_tool in ('pen', 'eraser'):
+            indicator = self._ensure_brush_indicator()
+            size = self._drawing_width
+            indicator.setRect(
+                scene_pos.x() - size / 2, scene_pos.y() - size / 2, size, size
+            )
+            if not indicator.isVisible():
+                indicator.show()
 
         if self._is_panning:
             delta = event.position() - self._pan_start
@@ -706,6 +891,12 @@ class CollaborativeCanvas(QGraphicsView):
             # Update temp line endpoint
             pass
 
+        # Eraser dragging
+        if self._is_erasing:
+            self._erase_at_position(event)
+            event.accept()
+            return
+
         # Drawing preview
         if self._is_drawing and self._current_drawing_item is not None:
             self._update_drawing(event)
@@ -716,11 +907,23 @@ class CollaborativeCanvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Handle mouse release after pan."""
+        # Space+left click pan release
+        if event.button() == Qt.LeftButton and self._was_panning_with_space:
+            self._is_panning = False
+            self._was_panning_with_space = False
+            # If space still held, show open hand; otherwise restore tool cursor
+            if self._space_pressed:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self._restore_cursor_for_tool()
+            event.accept()
+            return
+
         if event.button() == Qt.MiddleButton and self._is_panning:
             self._is_panning = False
             if self._current_tool == 'pan':
                 self.setCursor(Qt.OpenHandCursor)
-            elif self._current_tool in ('pen', 'rect', 'ellipse', 'line', 'connect', 'annotate', 'crop', 'group'):
+            elif self._current_tool in ('pen', 'rect', 'ellipse', 'line', 'eraser', 'connect', 'annotate', 'crop', 'group'):
                 self.setCursor(Qt.CrossCursor)
             else:
                 self.setCursor(Qt.ArrowCursor)
@@ -733,6 +936,12 @@ class CollaborativeCanvas(QGraphicsView):
             event.accept()
             return
 
+        # Complete erasing
+        if self._is_erasing and event.button() == Qt.LeftButton:
+            self._is_erasing = False
+            event.accept()
+            return
+
         # Complete drawing
         if self._is_drawing and event.button() == Qt.LeftButton:
             self._finish_drawing(event)
@@ -740,6 +949,64 @@ class CollaborativeCanvas(QGraphicsView):
             return
 
         super().mouseReleaseEvent(event)
+
+    # -------------------------------------------------------------------------
+    # Drag and Drop
+    # -------------------------------------------------------------------------
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter - accept if contains image files."""
+        paths = extract_files_from_mime_data(event.mimeData())
+        image_paths = filter_files_by_category(paths, {'image'})
+        if image_paths:
+            event.acceptProposedAction()
+            self._drop_highlight_active = True
+            self.viewport().update()
+            logger.debug(f"Canvas drag enter: {len(image_paths)} image(s)")
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent):
+        """Handle drag move - continue accepting if valid."""
+        paths = extract_files_from_mime_data(event.mimeData())
+        image_paths = filter_files_by_category(paths, {'image'})
+        if image_paths:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent):
+        """Handle drag leave - hide drop highlight."""
+        self._drop_highlight_active = False
+        self.viewport().update()
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent):
+        """Handle drop - add images to canvas."""
+        self._drop_highlight_active = False
+        self.viewport().update()
+
+        paths = extract_files_from_mime_data(event.mimeData())
+        image_paths = filter_files_by_category(paths, {'image'})
+
+        if not image_paths:
+            event.ignore()
+            return
+
+        # Get drop position in scene coordinates
+        drop_pos = self.mapToScene(event.position().toPoint())
+        logger.info(f"Dropped {len(image_paths)} image(s) at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
+
+        # Add images to canvas, staggering position if multiple
+        offset = 0
+        for path in image_paths:
+            self.add_image(path, drop_pos.x() + offset, drop_pos.y() + offset)
+            offset += 50  # Stagger multiple images
+
+        # Emit signal for gallery integration (to copy external files to gallery)
+        self.files_dropped_on_canvas.emit(image_paths)
+
+        event.acceptProposedAction()
 
     def _start_connection(self, event: QMouseEvent):
         """Start creating a connection from clicked node."""
@@ -790,29 +1057,48 @@ class CollaborativeCanvas(QGraphicsView):
             self._current_drawing_item = DrawingPath()
             self._current_drawing_item.set_pen_color(self._drawing_color)
             self._current_drawing_item.set_pen_width(self._drawing_width)
+            # Disable movable/selectable during drawing to prevent scene from intercepting events
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            self._current_drawing_item.setAcceptedMouseButtons(Qt.NoButton)
             self._current_drawing_item.add_point(pos)
             self._scene.addItem(self._current_drawing_item)
 
         elif tool == 'rect':
-            # Create a rectangle
+            # Create a rectangle - hide until first update to prevent origin flash
             self._current_drawing_item = DrawingRect(QRectF(pos, pos))
             self._current_drawing_item.set_pen_color(self._drawing_color)
             self._current_drawing_item.set_pen_width(self._drawing_width)
+            # Disable movable/selectable during drawing to prevent scene from intercepting events
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            self._current_drawing_item.setAcceptedMouseButtons(Qt.NoButton)
+            self._current_drawing_item.setOpacity(0)  # Hide until first mouse move
             self._scene.addItem(self._current_drawing_item)
 
         elif tool == 'ellipse':
-            # Create an ellipse
+            # Create an ellipse - hide until first update to prevent origin flash
             self._current_drawing_item = DrawingEllipse(QRectF(pos, pos))
             self._current_drawing_item.set_pen_color(self._drawing_color)
             self._current_drawing_item.set_pen_width(self._drawing_width)
+            # Disable movable/selectable during drawing to prevent scene from intercepting events
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            self._current_drawing_item.setAcceptedMouseButtons(Qt.NoButton)
+            self._current_drawing_item.setOpacity(0)  # Hide until first mouse move
             self._scene.addItem(self._current_drawing_item)
 
         elif tool == 'line':
-            # Create a line
+            # Create a line - hide until first update to prevent origin flash
             from PySide6.QtCore import QLineF
             self._current_drawing_item = DrawingLine(QLineF(pos, pos))
             self._current_drawing_item.set_pen_color(self._drawing_color)
             self._current_drawing_item.set_pen_width(self._drawing_width)
+            # Disable movable/selectable during drawing to prevent scene from intercepting events
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            self._current_drawing_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            self._current_drawing_item.setAcceptedMouseButtons(Qt.NoButton)
+            self._current_drawing_item.setOpacity(0)  # Hide until first mouse move
             self._scene.addItem(self._current_drawing_item)
 
         logger.debug(f"Started drawing with tool: {tool}")
@@ -821,6 +1107,10 @@ class CollaborativeCanvas(QGraphicsView):
         """Update the current drawing as the mouse moves."""
         if not self._current_drawing_item or not self._draw_start_pos:
             return
+
+        # Show the item on first update (fixes origin flash bug)
+        if self._current_drawing_item.opacity() == 0:
+            self._current_drawing_item.setOpacity(1)
 
         pos = self.mapToScene(event.position().toPoint())
         tool = self._current_tool
@@ -863,9 +1153,24 @@ class CollaborativeCanvas(QGraphicsView):
         # Final update
         self._update_drawing(event)
 
-        # Track the drawing
-        drawing_id = f"drawing_{len(self._drawings)}"
+        # Normalize coordinates from scene to local for proper dragging
+        if hasattr(self._current_drawing_item, 'normalize_to_local'):
+            self._current_drawing_item.normalize_to_local()
+
+        # Re-enable selection and movement flags now that drawing is complete
+        self._current_drawing_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self._current_drawing_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self._current_drawing_item.setAcceptedMouseButtons(Qt.LeftButton)
+
+        # Track the drawing with unique UUID-based ID
+        drawing_id = f"drawing_{uuid.uuid4().hex[:8]}"
         self._drawings[drawing_id] = self._current_drawing_item
+
+        # Push to undo stack for undo/redo support
+        if self._undo_stack:
+            from .canvas_undo import AddDrawingCommand
+            cmd = AddDrawingCommand(self, self._current_drawing_item, drawing_id)
+            self._undo_stack.push(cmd)
 
         # Emit modified signal
         self._emit_modified()
@@ -876,6 +1181,83 @@ class CollaborativeCanvas(QGraphicsView):
         self._is_drawing = False
         self._draw_start_pos = None
         self._current_drawing_item = None
+
+    def _erase_at_position(self, event: QMouseEvent):
+        """Erase drawings at the current mouse position.
+
+        For DrawingPath: Partially erases by removing points within the eraser radius,
+        potentially splitting the path into multiple segments.
+
+        For shapes (DrawingRect, DrawingEllipse, DrawingLine): Removes the entire shape
+        if it intersects with the eraser.
+
+        Uses the brush size as the eraser radius.
+        """
+        pos = self.mapToScene(event.position().toPoint())
+        radius = self._drawing_width / 2
+
+        # Create an eraser rect around cursor position for quick intersection test
+        erase_rect = QRectF(pos.x() - radius, pos.y() - radius, radius * 2, radius * 2)
+
+        # Find all items that intersect with the erase rect
+        items = self._scene.items(erase_rect)
+
+        modified = False
+        paths_to_process = []
+        shapes_to_remove = []
+
+        # Separate paths (partial erase) from shapes (full delete)
+        for item in items:
+            if isinstance(item, DrawingPath):
+                paths_to_process.append(item)
+            elif isinstance(item, (DrawingRect, DrawingEllipse, DrawingLine)):
+                shapes_to_remove.append(item)
+
+        # Process paths with partial erasing
+        for path in paths_to_process:
+            result = path.erase_at(pos, radius)
+
+            if result is None:
+                # Path was modified in place (some points removed but not split)
+                modified = True
+            elif isinstance(result, list):
+                if len(result) == 0:
+                    # All points erased - remove the path entirely
+                    for drawing_id, drawing in list(self._drawings.items()):
+                        if drawing is path:
+                            del self._drawings[drawing_id]
+                            break
+                    self._scene.removeItem(path)
+                    modified = True
+                else:
+                    # Path was split into multiple new paths
+                    # Remove original
+                    for drawing_id, drawing in list(self._drawings.items()):
+                        if drawing is path:
+                            del self._drawings[drawing_id]
+                            break
+                    self._scene.removeItem(path)
+
+                    # Add new split paths
+                    for new_path in result:
+                        drawing_id = f"drawing_{uuid.uuid4().hex[:8]}"
+                        self._drawings[drawing_id] = new_path
+                        self._scene.addItem(new_path)
+
+                    modified = True
+
+        # Remove shapes entirely (they don't support partial erasing)
+        for shape in shapes_to_remove:
+            for drawing_id, drawing in list(self._drawings.items()):
+                if drawing is shape:
+                    del self._drawings[drawing_id]
+                    break
+            self._scene.removeItem(shape)
+            modified = True
+
+        if modified:
+            self._emit_modified()
+            logger.debug(f"Eraser action at ({pos.x():.0f}, {pos.y():.0f})")
 
     def _make_rect(self, start: QPointF, end: QPointF, constrain: bool = False) -> QRectF:
         """
@@ -957,9 +1339,58 @@ class CollaborativeCanvas(QGraphicsView):
         """Set the drawing color for new drawings."""
         self._drawing_color = color
 
+    def _ensure_brush_indicator(self) -> QGraphicsEllipseItem:
+        """Ensure brush indicator exists and is valid, recreating if needed.
+
+        The brush indicator can be deleted when the scene is cleared.
+        This method checks if it's still valid and recreates it if not.
+
+        Returns:
+            The valid brush indicator item.
+        """
+        need_recreate = False
+
+        # Check if we need to recreate
+        if not hasattr(self, '_brush_indicator') or self._brush_indicator is None:
+            need_recreate = True
+        else:
+            # Check if C++ object is still valid
+            try:
+                # Accessing any property will raise RuntimeError if deleted
+                self._brush_indicator.zValue()
+            except RuntimeError:
+                need_recreate = True
+
+        if need_recreate:
+            self._brush_indicator = QGraphicsEllipseItem()
+            self._brush_indicator.setPen(QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine))
+            self._brush_indicator.setBrush(Qt.NoBrush)
+            self._brush_indicator.setZValue(9999)  # Always on top
+            self._brush_indicator.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            self._brush_indicator.setFlag(QGraphicsItem.ItemIsMovable, False)
+            self._brush_indicator.setAcceptedMouseButtons(Qt.NoButton)  # Pass through
+            self._brush_indicator.hide()
+            self._scene.addItem(self._brush_indicator)
+
+        return self._brush_indicator
+
     def set_drawing_width(self, width: int):
         """Set the drawing width for new drawings."""
         self._drawing_width = max(1, width)
+
+        # Update brush indicator size if visible
+        try:
+            indicator = self._ensure_brush_indicator()
+            if indicator.isVisible():
+                rect = indicator.rect()
+                center_x = rect.center().x()
+                center_y = rect.center().y()
+                indicator.setRect(
+                    center_x - width / 2, center_y - width / 2, width, width
+                )
+        except RuntimeError:
+            # C++ object deleted mid-operation, ignore
+            pass
 
     def get_drawing_color(self) -> QColor:
         """Get the current drawing color."""
@@ -968,6 +1399,14 @@ class CollaborativeCanvas(QGraphicsView):
     def get_drawing_width(self) -> int:
         """Get the current drawing width."""
         return self._drawing_width
+
+    def set_brush_size(self, size: int):
+        """Set the brush size for drawing tools (alias for set_drawing_width)."""
+        self.set_drawing_width(size)
+
+    def get_brush_size(self) -> int:
+        """Get the current brush size (alias for get_drawing_width)."""
+        return self.get_drawing_width()
 
     def fit_all(self):
         """Fit all items in view with padding, allowing zoom below MIN_ZOOM for large content."""
@@ -1117,13 +1556,19 @@ class CollaborativeCanvas(QGraphicsView):
         Args:
             item: The item being moved
             pos: Proposed position
-            threshold: Snap distance in pixels
+            threshold: Snap distance in screen pixels (scaled by zoom)
 
         Returns:
             Snapped position
         """
         if not self._snap_to_neighbors:
             return pos
+
+        # Scale threshold by zoom level to maintain consistent screen distance
+        # At 100% zoom, threshold is 15. At 50%, it's 30 scene units (still 15 screen px)
+        zoom_level = self.transform().m11()
+        if zoom_level > 0:
+            threshold = threshold / zoom_level
 
         # Get item's bounds at proposed position
         item_rect = item.boundingRect()
@@ -1360,6 +1805,11 @@ class CollaborativeCanvas(QGraphicsView):
                     if group == item:
                         self.remove_group(gid)
                         break
+            elif isinstance(item, (DrawingPath, DrawingRect, DrawingEllipse, DrawingLine)):
+                for did, drawing in list(self._drawings.items()):
+                    if drawing == item:
+                        self.remove_drawing(did)
+                        break
 
     # -------------------------------------------------------------------------
     # Context Menu
@@ -1416,6 +1866,20 @@ class CollaborativeCanvas(QGraphicsView):
         """Handle keyboard shortcuts."""
         key = event.key()
         modifiers = event.modifiers()
+
+        # Skip shortcuts when editing text
+        if self._editing_text:
+            super().keyPressEvent(event)
+            return
+
+        # Space key for temporary pan mode (Photoshop-style)
+        if key == Qt.Key_Space and not modifiers:
+            # Ctrl+Space is fit all, so only handle plain Space
+            if not self._space_pressed:
+                self._space_pressed = True
+                self.setCursor(Qt.OpenHandCursor)
+            event.accept()
+            return
 
         # Delete selected
         if key == Qt.Key_Delete:
@@ -1485,18 +1949,44 @@ class CollaborativeCanvas(QGraphicsView):
             self.show_color_history_panel()
             return
 
-        # Tool shortcuts
+        # Tool shortcuts (toggle behavior - press again to return to select)
+        # Note: Pan mode (H key) removed - use Space+drag instead (Photoshop-style)
         if key == Qt.Key_V and not modifiers:
             self.set_tool('select')
             return
-        if key == Qt.Key_H and not modifiers:
-            self.set_tool('pan')
-            return
         if key == Qt.Key_C and not modifiers:
-            self.set_tool('connect')
+            # Toggle connect mode
+            self.set_tool('select' if self._current_tool == 'connect' else 'connect')
             return
         if key == Qt.Key_N and not modifiers:
-            self.set_tool('annotate')
+            # Toggle annotate mode
+            self.set_tool('select' if self._current_tool == 'annotate' else 'annotate')
+            return
+        if key == Qt.Key_D and not modifiers:
+            # Enter drawing mode (pen tool) - only exits via V key
+            if self._current_tool not in ('pen', 'rect', 'ellipse', 'line', 'eraser', 'select_drawings'):
+                self.set_tool('pen')
+            return
+        if key == Qt.Key_E and not modifiers:
+            # Enter eraser mode - only exits via V key
+            if self._current_tool != 'eraser':
+                self.set_tool('eraser')
+            return
+        if key == Qt.Key_P and not modifiers:
+            # Pen tool
+            self.set_tool('pen')
+            return
+        if key == Qt.Key_L and not modifiers:
+            # Line tool
+            self.set_tool('line')
+            return
+        if key == Qt.Key_U and not modifiers:
+            # Rectangle (U for "rect" since R is rotate)
+            self.set_tool('rect')
+            return
+        if key == Qt.Key_O and not modifiers:
+            # Ellipse/Oval tool
+            self.set_tool('ellipse')
             return
 
         # Image manipulation shortcuts (when images selected)
@@ -1589,6 +2079,18 @@ class CollaborativeCanvas(QGraphicsView):
     def keyReleaseEvent(self, event: QKeyEvent):
         """Handle key release events."""
         key = event.key()
+
+        # Stop Space+drag pan mode when Space is released
+        if key == Qt.Key_Space and self._space_pressed:
+            self._space_pressed = False
+            # Stop any space-initiated panning
+            if self._was_panning_with_space:
+                self._is_panning = False
+                self._was_panning_with_space = False
+            # Restore cursor to match current tool
+            self._restore_cursor_for_tool()
+            event.accept()
+            return
 
         # Stop color sampling when S is released
         if key == Qt.Key_S and self._is_sampling_color:
@@ -1802,10 +2304,24 @@ class CollaborativeCanvas(QGraphicsView):
             direction: 'horizontal' or 'vertical'
         """
         selected = self._scene.selectedItems()
+        logger.debug(f"distribute_selection({direction}): {len(selected)} items selected")
+
         if len(selected) < 3:
+            logger.debug("distribute_selection: need at least 3 items")
             return
 
-        items_with_rects = [(item, item.sceneBoundingRect()) for item in selected]
+        # Filter to items with valid (non-empty) bounding rects
+        items_with_rects = []
+        for item in selected:
+            rect = item.sceneBoundingRect()
+            if not rect.isEmpty() and rect.width() > 0 and rect.height() > 0:
+                items_with_rects.append((item, rect))
+            else:
+                logger.debug(f"distribute_selection: skipping item with invalid rect: {rect}")
+
+        if len(items_with_rects) < 3:
+            logger.debug(f"distribute_selection: only {len(items_with_rects)} items with valid rects")
+            return
 
         if direction == 'horizontal':
             items_with_rects.sort(key=lambda x: x[1].left())
@@ -1813,7 +2329,11 @@ class CollaborativeCanvas(QGraphicsView):
             last_rect = items_with_rects[-1][1]
             total_span = last_rect.right() - first_rect.left()
             total_item_width = sum(r.width() for _, r in items_with_rects)
+
+            if len(items_with_rects) <= 1:
+                return
             gap = (total_span - total_item_width) / (len(items_with_rects) - 1)
+            logger.debug(f"distribute_selection horizontal: span={total_span}, gap={gap}")
 
             current_x = first_rect.left()
             for item, rect in items_with_rects:
@@ -1826,7 +2346,11 @@ class CollaborativeCanvas(QGraphicsView):
             last_rect = items_with_rects[-1][1]
             total_span = last_rect.bottom() - first_rect.top()
             total_item_height = sum(r.height() for _, r in items_with_rects)
+
+            if len(items_with_rects) <= 1:
+                return
             gap = (total_span - total_item_height) / (len(items_with_rects) - 1)
+            logger.debug(f"distribute_selection vertical: span={total_span}, gap={gap}")
 
             current_y = first_rect.top()
             for item, rect in items_with_rects:
@@ -2054,9 +2578,13 @@ class CollaborativeCanvas(QGraphicsView):
         self._connections.clear()
         self._sticky_notes.clear()
         self._groups.clear()
+        self._drawings.clear()
 
-        # Clear scene
+        # Clear scene (this deletes all items including brush indicator)
         self._scene.clear()
+
+        # Recreate brush indicator (it was deleted with scene.clear())
+        self._ensure_brush_indicator()
 
     # -------------------------------------------------------------------------
     # Accessors
@@ -2403,10 +2931,15 @@ class CollaborativeCanvas(QGraphicsView):
             self._color_history_panel.color_selected.connect(self._on_history_color_selected)
 
         self._color_history_panel.update_colors(self._color_history)
-        self._color_history_panel.show()
 
-        # Position in corner of canvas
-        self._color_history_panel.move(10, 10)
+        # Position in top-left corner of the viewport (not screen)
+        # Use viewport coordinates for proper positioning within canvas
+        self._color_history_panel.move(10, 40)  # Leave room for toolbar
+        self._color_history_panel.show()
+        self._color_history_panel.raise_()
+
+        # Start auto-hide timer (will hide after 2 seconds unless mouse enters)
+        self._color_history_panel.start_auto_hide()
 
     def hide_color_history_panel(self):
         """Hide the color history panel."""
@@ -2435,6 +2968,7 @@ class ColorHistoryPanel(QFrame):
     Floating panel showing the 5-color history.
 
     Clicking a color copies its HEX to clipboard.
+    Positioned as a child widget of the canvas, not a top-level window.
     """
 
     color_selected = Signal(QColor)
@@ -2442,11 +2976,14 @@ class ColorHistoryPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
+        # Use FramelessWindowHint only - keep as child widget, not tool window
+        # This ensures it stays within the canvas bounds
+        self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         self._colors: List[QColor] = []
         self._buttons: List[QPushButton] = []
+        self._auto_hide_timer: Optional[QTimer] = None
 
         self._setup_ui()
 
@@ -2516,6 +3053,39 @@ class ColorHistoryPanel(QFrame):
         """Handle color button click."""
         if index < len(self._colors):
             self.color_selected.emit(self._colors[index])
+
+    def start_auto_hide(self, delay_ms: int = 2000):
+        """Start auto-hide timer.
+
+        Args:
+            delay_ms: Delay in milliseconds before hiding (default 2 seconds)
+        """
+        # Cancel any existing timer
+        if self._auto_hide_timer:
+            self._auto_hide_timer.stop()
+            self._auto_hide_timer = None
+
+        # Start new timer
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.hide)
+        self._auto_hide_timer.start(delay_ms)
+
+    def cancel_auto_hide(self):
+        """Cancel the auto-hide timer."""
+        if self._auto_hide_timer:
+            self._auto_hide_timer.stop()
+            self._auto_hide_timer = None
+
+    def enterEvent(self, event):
+        """Cancel auto-hide when mouse enters the panel."""
+        self.cancel_auto_hide()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Restart auto-hide when mouse leaves the panel."""
+        self.start_auto_hide()
+        super().leaveEvent(event)
 
 
 class CursorItem(QGraphicsItem):

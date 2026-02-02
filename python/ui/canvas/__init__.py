@@ -25,7 +25,6 @@ from .canvas_undo import (
 from .canvas_export import export_to_luma, import_from_luma, get_luma_info, LUMA_EXTENSION
 from .sync_manager import CanvasSyncManager, CursorPresenceManager
 from .minimap import CanvasMinimap
-from .timeline import GenerationTimeline, TimelinePanel
 
 __all__ = [
     'CollaborativeCanvas',
@@ -50,8 +49,6 @@ __all__ = [
     'CanvasSyncManager',
     'CursorPresenceManager',
     'CanvasMinimap',
-    'GenerationTimeline',
-    'TimelinePanel',
     'export_to_luma',
     'import_from_luma',
     'get_luma_info',

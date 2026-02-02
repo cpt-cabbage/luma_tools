@@ -49,12 +49,12 @@ class CanvasTab(BaseTab):
     def connect_signals(self):
         """Connect canvas tab signals."""
         # Directory controls
-        self.ui.CanvasSourceToggle.clicked.connect(self._on_source_toggle)
         self.ui.CanvasOpenExplorer.clicked.connect(self._on_open_explorer)
 
         # Toolbar buttons - Basic tools
         self.ui.CanvasToolSelect.clicked.connect(lambda: self._set_tool("select"))
-        self.ui.CanvasToolPan.clicked.connect(lambda: self._set_tool("pan"))
+        # Pan button removed - use Space+drag instead (Photoshop-style)
+        self.ui.CanvasToolPan.setVisible(False)
         self.ui.CanvasToolConnect.clicked.connect(lambda: self._set_tool("connect"))
         self.ui.CanvasToolAnnotate.clicked.connect(lambda: self._set_tool("annotate"))
         self.ui.CanvasToolGroup.clicked.connect(lambda: self._set_tool("group"))
@@ -88,22 +88,16 @@ class CanvasTab(BaseTab):
         # Toolbar collapse
         self.ui.CanvasToolbarToggle.clicked.connect(self._toggle_toolbar)
 
-        # Timeline collapse
-        self.ui.CanvasTimelineToggle.clicked.connect(self._toggle_timeline)
-
     def initialize(self):
         """Initialize the canvas tab."""
         from ui.canvas import CollaborativeCanvas, CanvasSyncManager, CursorPresenceManager, UndoStack
 
-        # Source mode: "network" or "custom"
-        self._source_mode = "network"
-        self._custom_path = ""
+        # Path state
         self._current_path = ""
 
         # Tool state
         self._current_tool = "select"
         self._toolbar_collapsed = False
-        self._timeline_collapsed = True  # Default collapsed per plan
 
         # Create the canvas widget
         self._canvas = CollaborativeCanvas()
@@ -127,6 +121,8 @@ class CanvasTab(BaseTab):
         self._canvas.cursor_moved.connect(self._on_cursor_moved)
         self._canvas.cursor_moved.connect(self._update_coordinates)
         self._canvas.zoom_changed.connect(self._on_zoom_from_canvas)
+        self._canvas.files_dropped_on_canvas.connect(self._on_files_dropped_to_canvas)
+        self._canvas.tool_changed.connect(self._on_canvas_tool_changed)
 
         # Setup sync manager for collaboration (use canvas as parent since it's a QObject)
         self._sync_manager = CanvasSyncManager(self._canvas)
@@ -144,10 +140,6 @@ class CanvasTab(BaseTab):
 
         # Setup floating drawing tools panel
         self._setup_drawing_panel()
-
-        # Setup timeline (collapsed by default)
-        self._setup_timeline()
-        self.ui.CanvasTimelineContainer.setVisible(False)
 
         # Load initial directory
         self._update_canvas_path()
@@ -218,12 +210,6 @@ class CanvasTab(BaseTab):
         y = canvas_global.y() - self._minimap.height() - margin
         self._minimap.move(x, y)
 
-    def _setup_timeline(self):
-        """Setup the generation timeline widget."""
-        # Timeline will be implemented in Phase 5
-        # For now, container exists but is collapsed
-        pass
-
     def _setup_drawing_panel(self):
         """Setup the floating drawing tools panel."""
         from ui.panels import DrawingToolsPanel
@@ -260,9 +246,18 @@ class CanvasTab(BaseTab):
         if not hasattr(self, '_drawing_panel'):
             return
 
+        # Sync panel state from canvas (in case color/size was changed elsewhere)
+        canvas_color = self._canvas.get_drawing_color()
+        canvas_width = self._canvas.get_drawing_width()
+        self._drawing_panel.set_color(canvas_color)
+        self._drawing_panel.set_brush_size(canvas_width)
+
         # Position panel in top-left of canvas area with some padding
-        panel_x = 10
-        panel_y = 10
+        # Convert local coordinates to global since panel is a tool window
+        from PySide6.QtCore import QPoint
+        canvas_global_pos = self._canvas.mapToGlobal(QPoint(0, 0))
+        panel_x = canvas_global_pos.x() + 10
+        panel_y = canvas_global_pos.y() + 10
         self._drawing_panel.show_at(panel_x, panel_y)
 
     def _on_drawing_tool_changed(self, tool: str):
@@ -284,6 +279,28 @@ class CanvasTab(BaseTab):
         # Uncheck the Draw button and switch to select tool
         self.ui.CanvasToolDraw.setChecked(False)
         self._set_tool("select")
+
+    def _on_canvas_tool_changed(self, tool: str):
+        """Handle tool change from canvas (e.g., keyboard shortcut).
+
+        Shows/hides the drawing panel and updates the Draw button state.
+        """
+        # Drawing-related tools that should show the drawing panel
+        is_drawing_tool = tool in ('pen', 'rect', 'ellipse', 'line', 'eraser', 'select_drawings')
+
+        # Update Draw button state
+        self.ui.CanvasToolDraw.setChecked(is_drawing_tool)
+
+        # Show/hide drawing panel
+        if is_drawing_tool:
+            if not self._drawing_panel.isVisible():
+                self._show_drawing_panel()
+            # Sync the panel's tool selection (for actual drawing tools)
+            if tool in ('pen', 'rect', 'ellipse', 'line', 'eraser', 'select_drawings'):
+                self._drawing_panel.set_tool(tool)
+        else:
+            if self._drawing_panel.isVisible():
+                self._drawing_panel.hide()
 
     def _configure_sync_managers(self):
         """Configure sync managers for the current directory."""
@@ -316,21 +333,12 @@ class CanvasTab(BaseTab):
         """Update the canvas to the current directory."""
         from core.settings_manager import safe_get_setting
 
-        if self._source_mode == "network":
-            network_path = safe_get_setting("comfyui_network_output_path", "")
-            if network_path and self.app_state.user:
-                self._current_path = os.path.join(network_path, self.app_state.user)
-            else:
-                self._current_path = ""
+        # Always use network path with user subfolder
+        network_path = safe_get_setting("comfyui_network_output_path", "")
+        if network_path and self.app_state.user:
+            self._current_path = os.path.join(network_path, self.app_state.user)
         else:
-            self._current_path = self._custom_path
-
-        # Update button text
-        if self._source_mode == "network":
-            self.ui.CanvasSourceToggle.setText("Network Folder")
-        else:
-            dir_name = os.path.basename(self._current_path) if self._current_path else "Custom"
-            self.ui.CanvasSourceToggle.setText(f"Custom: {dir_name}")
+            self._current_path = ""
 
         # Stop existing sync before path change
         if hasattr(self, '_sync_manager'):
@@ -403,26 +411,6 @@ class CanvasTab(BaseTab):
         except Exception as e:
             logger.error(f"Failed to save canvas state: {e}")
 
-    def _on_source_toggle(self):
-        """Handle source toggle button click."""
-        from file_dialogs import browse_directory_with_memory
-
-        if self._source_mode == "network":
-            # Switch to custom mode - prompt for directory
-            selected = browse_directory_with_memory(
-                parent=self.main_window,
-                title="Select Canvas Directory",
-                context="canvas_custom_dir"
-            )
-            if selected:
-                self._source_mode = "custom"
-                self._custom_path = selected
-                self._update_canvas_path()
-        else:
-            # Switch back to network mode
-            self._source_mode = "network"
-            self._update_canvas_path()
-
     def _on_open_explorer(self):
         """Open current directory in file explorer."""
         if self._current_path and os.path.exists(self._current_path):
@@ -439,17 +427,16 @@ class CanvasTab(BaseTab):
 
     def _update_tool_buttons(self):
         """Update toolbar button checked states."""
-        # Main toolbar tools
+        # Main toolbar tools (pan removed - use Space+drag instead)
         tools = {
             "select": self.ui.CanvasToolSelect,
-            "pan": self.ui.CanvasToolPan,
             "connect": self.ui.CanvasToolConnect,
             "annotate": self.ui.CanvasToolAnnotate,
             "group": self.ui.CanvasToolGroup,
             "crop": self.ui.CanvasToolCrop,
         }
-        # Drawing tools are in the floating panel
-        drawing_tools = {"pen", "rect", "ellipse", "line"}
+        # Drawing tools are in the floating panel (includes eraser and select_drawings)
+        drawing_tools = {"pen", "rect", "ellipse", "line", "eraser", "select_drawings"}
         is_drawing_tool = self._current_tool in drawing_tools
 
         for tool_name, button in tools.items():
@@ -527,10 +514,16 @@ class CanvasTab(BaseTab):
         align_menu.addAction("Center Horizontally", lambda: self._canvas.align_selection("center_h"))
         align_menu.addAction("Center Vertically", lambda: self._canvas.align_selection("center_v"))
 
-        # Distribute submenu
+        # Distribute submenu (requires 3+ items)
+        selected_count = len(self._canvas._scene.selectedItems())
         dist_menu = menu.addMenu("Distribute Selection")
-        dist_menu.addAction("Distribute Horizontally", lambda: self._canvas.distribute_selection("horizontal"))
-        dist_menu.addAction("Distribute Vertically", lambda: self._canvas.distribute_selection("vertical"))
+        dist_h = dist_menu.addAction("Distribute Horizontally", lambda: self._canvas.distribute_selection("horizontal"))
+        dist_v = dist_menu.addAction("Distribute Vertically", lambda: self._canvas.distribute_selection("vertical"))
+        # Disable if fewer than 3 items selected
+        if selected_count < 3:
+            dist_h.setEnabled(False)
+            dist_v.setEnabled(False)
+            dist_menu.setToolTip("Select at least 3 items to distribute")
 
         # Arrange submenu
         arrange_menu = menu.addMenu("Arrange Selection")
@@ -717,11 +710,6 @@ class CanvasTab(BaseTab):
             self.ui.CanvasToolbarToggle.setText("-")
             self.ui.CanvasToolbarToggle.setToolTip("Collapse secondary toolbar")
 
-    def _toggle_timeline(self):
-        """Toggle timeline collapsed state."""
-        self._timeline_collapsed = not self.ui.CanvasTimelineToggle.isChecked()
-        self.ui.CanvasTimelineContainer.setVisible(not self._timeline_collapsed)
-
     # =========================================================================
     # Zoom Controls
     # =========================================================================
@@ -798,6 +786,47 @@ class CanvasTab(BaseTab):
     def _on_item_added(self, item_id: str):
         """Handle new item added to canvas."""
         logger.debug(f"Item added to canvas: {item_id}")
+
+    def _on_files_dropped_to_canvas(self, paths: list):
+        """Handle files dropped to canvas - copy external files to gallery.
+
+        Args:
+            paths: List of file paths that were dropped onto the canvas
+        """
+        import shutil
+        from core.settings_manager import get_setting
+
+        try:
+            gallery_path = get_setting("comfyui_network_output_path")
+            if not gallery_path:
+                logger.warning("Cannot copy dropped files: no gallery path configured")
+                return
+
+            # Copy external files (ones not already in gallery) to gallery
+            copied = 0
+            for path in paths:
+                # Skip files already in the gallery folder
+                if path.startswith(gallery_path):
+                    continue
+
+                # Copy to gallery
+                dest = os.path.join(gallery_path, os.path.basename(path))
+                if not os.path.exists(dest):
+                    shutil.copy2(path, dest)
+                    copied += 1
+                    logger.info(f"Copied dropped file to gallery: {os.path.basename(path)}")
+
+            # Trigger gallery refresh if files were copied
+            if copied > 0:
+                try:
+                    from core.event_bus import pipeline_events
+                    pipeline_events.gallery_refresh_requested.emit()
+                    self.show_status(f"Added {copied} file(s) to gallery", "success")
+                except ImportError:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Error copying dropped files to gallery: {e}")
 
     def _on_remote_state_changed(self, state: dict):
         """Handle remote canvas state change from sync manager."""
@@ -885,6 +914,10 @@ class CanvasTab(BaseTab):
 
     def on_tab_activated(self):
         """Called when canvas tab becomes visible."""
+        # Give canvas focus for keyboard shortcuts
+        if hasattr(self, '_canvas'):
+            self._canvas.setFocus()
+
         # Refresh sync if enabled
         if hasattr(self, '_sync_timer') and self._sync_timer.isActive():
             self._on_sync_poll()
@@ -933,6 +966,14 @@ class CanvasTab(BaseTab):
 
     def on_tab_deactivated(self):
         """Called when switching away from canvas tab."""
+        # Hide floating panels that shouldn't persist across tabs
+        if hasattr(self, '_drawing_panel') and self._drawing_panel:
+            self._drawing_panel.hide()
+
+        # Hide color history panel
+        if hasattr(self, '_canvas') and self._canvas:
+            self._canvas.hide_color_history_panel()
+
         # Save state before leaving
         self._save_canvas_state()
         logger.debug("Canvas tab deactivated")
