@@ -52,6 +52,7 @@ class CanvasSyncManager(QObject):
 
         # Lock for thread-safe file operations (RLock for reentrant safety)
         self._file_lock = threading.RLock()
+        self._saving = False  # Flag to skip polling during active save
 
         # Load sync interval from global settings (default 1000ms = 1 second)
         from core.settings_manager import safe_get_setting
@@ -207,6 +208,7 @@ class CanvasSyncManager(QObject):
                 self.sync_error.emit("Could not acquire write lock")
                 return False
 
+            self._saving = True
             try:
                 # Add metadata
                 state["version"] = "1.0"
@@ -221,15 +223,22 @@ class CanvasSyncManager(QObject):
                             pts = d.get('points', [])
                             logger.debug(f"Saving path drawing: id={d.get('id')}, points={len(pts)}, pos=({d.get('x')}, {d.get('y')})")
 
-                # Atomic write via temp file
+                # Atomic write via temp file + os.replace()
                 temp_path = state_path + ".tmp"
                 with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(state, f, indent=2)
 
-                # Replace original
-                if os.path.exists(state_path):
-                    os.remove(state_path)
-                os.rename(temp_path, state_path)
+                # Atomic replace with retry for WinError 32 (file locked)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        os.replace(temp_path, state_path)
+                        break
+                    except PermissionError:
+                        if attempt < max_retries - 1:
+                            time.sleep(0.1)
+                        else:
+                            raise
 
                 self._last_local_save = time.time()
                 self._last_state_mtime = os.path.getmtime(state_path)
@@ -244,6 +253,7 @@ class CanvasSyncManager(QObject):
                 return False
 
             finally:
+                self._saving = False
                 self._release_lock()
 
     def load_state(self) -> Optional[dict]:
@@ -270,6 +280,9 @@ class CanvasSyncManager(QObject):
 
     def _poll_state(self):
         """Poll for state changes from other users."""
+        if self._saving:
+            return  # Skip polling during active save to avoid file contention
+
         state_path = self.state_file_path
         if not state_path or not os.path.exists(state_path):
             return

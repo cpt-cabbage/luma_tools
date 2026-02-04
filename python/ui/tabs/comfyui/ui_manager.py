@@ -44,6 +44,19 @@ class ComfyUIWidgetManager:
         self.pending_semantic_values = {}
         self.pending_settings_values = {}  # For settings node restoration
 
+    def _get_node_override(self, node, node_overrides: Dict[str, Any]) -> Dict[str, Any]:
+        """Get override dict for a node, supporting per-parameter keys.
+
+        Key format: "{node_id}:{widget_name}" for per-parameter granularity,
+        falling back to "{node_id}" then title for legacy compatibility.
+        """
+        if node.widget_name:
+            key = f"{node.node_id}:{node.widget_name}"
+            if key in node_overrides:
+                return node_overrides[key]
+        # Fall back to node_id then title (legacy)
+        return node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+
     def clear_widgets(self):
         """Clear all dynamic widgets from the layout."""
         while self.layout.count():
@@ -115,7 +128,7 @@ class ComfyUIWidgetManager:
         # Count total image nodes for pairing calculation
         total_image_nodes = sum(1 for node in editable_nodes
                                if node.widget_type == 'image'
-                               and node_overrides.get(str(node.node_id), node_overrides.get(node.title, {})).get("enabled", True))
+                               and self._get_node_override(node, node_overrides).get("enabled", True))
         logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
 
         # Collect widgets separately for horizontal layout
@@ -125,9 +138,7 @@ class ComfyUIWidgetManager:
         # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
             # Check if this node is disabled via overrides
-            # Support both node_id (new, unique) and title (legacy, may not be unique)
-            # Prefer node_id if available, fall back to title
-            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+            override = self._get_node_override(node, node_overrides)
             if not override.get("enabled", True):
                 continue
 
@@ -214,8 +225,7 @@ class ComfyUIWidgetManager:
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:
             # Skip disabled nodes
-            # Support both node_id (new, unique) and title (legacy)
-            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+            override = self._get_node_override(node, node_overrides)
             if not override.get("enabled", True):
                 continue
 
@@ -593,7 +603,7 @@ class ComfyUIWidgetManager:
         # Filter out disabled nodes
         enabled_nodes = []
         for node in settings_nodes:
-            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+            override = self._get_node_override(node, node_overrides)
             if override.get("enabled", True):
                 enabled_nodes.append(node)
 

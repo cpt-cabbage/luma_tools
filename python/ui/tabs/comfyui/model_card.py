@@ -178,6 +178,10 @@ class ModelCard(QFrame):
 
         layout.addLayout(stats_row)
 
+        # Prevent child QLabels from intercepting context menu events
+        for child in self.findChildren(QLabel):
+            child.setContextMenuPolicy(Qt.NoContextMenu)
+
         self._apply_style()
 
     def _setup_effects(self):
@@ -532,6 +536,11 @@ class OverlayModelCard(QFrame):
         content_layout.addWidget(self._usage_label)
 
         layout.addWidget(content)
+
+        # Prevent child QLabels from intercepting context menu events
+        # so right-click propagates to the card's contextMenuEvent
+        for child in self.findChildren(QLabel):
+            child.setContextMenuPolicy(Qt.NoContextMenu)
 
         self._apply_style()
 

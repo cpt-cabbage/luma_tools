@@ -263,32 +263,6 @@ python -m pytest tests/              # Run all tests
 python -m pytest tests/test_config.py -v  # Run single test file
 python -m pytest tests/ -k "test_name"    # Run specific test by name
 ```
-`tests/conftest.py` auto-configures PYTHONPATH and skips `test_animation_controller` and `test_loaders` if numpy is broken (common in some venv states). Manual testing also required (both launcher modes, with/without AYON env).
-
-### Windows PowerShell (for Claude Code)
-Always use PowerShell in bash (Bash compatibility layer has path issues):
-```powershell
-# Syntax check a file
-powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m py_compile python\ui\tabs\file.py"
-
-# Run all tests
-powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m pytest tests/ -v"
-
-# Run single test file
-powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -m pytest tests\test_loaders.py -v"
-
-# Quick import check
-powershell -Command "Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'; python\venv\Scripts\python.exe -c \"import sys; sys.path.insert(0, 'python'); sys.path.insert(0, 'resources/ui'); from ui.tabs.my_tab import MyTab; print('OK')\""
-```
-
-**CRITICAL: PowerShell `$` variable escaping.** The bash compatibility layer mangles PowerShell `$` variables (e.g., `$LASTEXITCODE` becomes `extglob`, `$env:PYTHONPATH` becomes `:PYTHONPATH`). For any commands that use PowerShell variables or `$env:`, write a temporary `.ps1` script file and run it instead:
-```powershell
-# Write the script
-Write tool → _temp_script.ps1
-
-# Execute it
-powershell -ExecutionPolicy Bypass -File "l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\_temp_script.ps1"
-```
 
 ### Debugging
 
@@ -358,7 +332,6 @@ When a bug appears during testing, **always determine if it's pre-existing befor
 1. Run the app with `--tab <target> --auto-close <seconds>` in background
 2. Wait for it to close (or read logs while running)
 3. Read the log file with `Read` tool or search with `Grep`
-4. All gallery, prewarm, thumbnail, and incremental sync events are logged to the file
 
 ### UI Modifications
 Edit `.ui` files in Qt Designer, update tab logic in `python/ui/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.

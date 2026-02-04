@@ -1049,7 +1049,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.show_status("Settings applied from image", "success")
 
         # Switch to this tab
-        self.main_window.switch_to_tab("comfyui")
+        self.main_window.select_tab_by_name("comfyui")
 
     def _restore_source_files_from_metadata(self, metadata):
         """Restore source images and models from metadata to input widgets.

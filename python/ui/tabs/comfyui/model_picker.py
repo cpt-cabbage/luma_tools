@@ -475,7 +475,7 @@ class ModelPickerPanel(QWidget):
 
     def _on_card_context_menu(self, model_name: str, pos):
         """Handle card right-click context menu."""
-        if not app_state.is_admin:
+        if not app_state.has_elevated_access:
             return
 
         menu = QMenu(self)

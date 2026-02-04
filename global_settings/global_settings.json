@@ -1,30 +1,5 @@
 {
   "comfyui_workflow_presets": {
-    "Geometry\\Trellis": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
-      "description": "",
-      "iteratable": false,
-      "note": "- Only one character in the image\n- Must be in the center of the image\n- Clear Difference between fg and bg",
-      "full_restart": false,
-      "node_overrides": {},
-      "is_multi": true,
-      "workflows": {
-        "Fast": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_LQ.json",
-          "note": "",
-          "iteratable": false,
-          "full_restart": true,
-          "node_overrides": {}
-        },
-        "High Quality": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Geometry/la_TRELLIS2_HQ.json",
-          "note": "",
-          "iteratable": false,
-          "full_restart": true,
-          "node_overrides": {}
-        }
-      }
-    },
     "Animation/Hy-Motion": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Animation/la_Hy_Motion.json",
       "description": "",
@@ -101,7 +76,9 @@
   "sup_users": [
     "bruce.mclaren",
     "craig.portnoy",
-    "phoebe.redelinghuys"
+    "phoebe.redelinghuys",
+    "mia.bermanlevy",
+    "andre.heyneke"
   ],
   "hdri_list": [
     {

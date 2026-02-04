@@ -93,10 +93,6 @@ class ModelPickerOverlay(QWidget):
         self._sort_key = get_setting("comfyui_model_sort")
         self._category_filter = get_setting("comfyui_model_filter")
 
-        # Must be a child of the main window to overlay everything
-        if parent:
-            self.setParent(parent)
-        self.setWindowFlags(Qt.Widget)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.setFocusPolicy(Qt.StrongFocus)
 
@@ -266,7 +262,8 @@ class ModelPickerOverlay(QWidget):
             title="Favorites",
             icon="★",
             on_card_selected=self._on_model_activated,
-            on_favorite_toggled=self._on_favorite_toggled
+            on_favorite_toggled=self._on_favorite_toggled,
+            on_context_menu=self._on_context_menu
         )
         scroll_layout.addWidget(self._favorites_row)
 
@@ -274,7 +271,8 @@ class ModelPickerOverlay(QWidget):
             title="Recently Used",
             icon="⏱",
             on_card_selected=self._on_model_activated,
-            on_favorite_toggled=self._on_favorite_toggled
+            on_favorite_toggled=self._on_favorite_toggled,
+            on_context_menu=self._on_context_menu
         )
         scroll_layout.addWidget(self._recents_row)
 
@@ -370,6 +368,9 @@ class ModelPickerOverlay(QWidget):
 
         # Backdrop fills everything
         self._backdrop.setGeometry(parent_rect)
+
+        # Ensure content is above backdrop in Z-order
+        self._content.raise_()
 
     def _refresh_thumbnails_background(self):
         """Refresh thumbnails in background thread on picker open."""
@@ -508,7 +509,7 @@ class ModelPickerOverlay(QWidget):
 
     def _on_context_menu(self, model_name: str, pos: QPoint):
         """Handle context menu request."""
-        if not self._is_admin:
+        if not app_state.has_elevated_access:
             return
 
         from PySide6.QtWidgets import QMenu

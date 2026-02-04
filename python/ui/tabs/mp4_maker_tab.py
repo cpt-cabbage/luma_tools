@@ -250,11 +250,13 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             self.app_state.mp4_output_path,
             self.app_state.mp4_startframe,
             self.app_state.mp4_endframe,
-            quality_index=quality_index,
-            burn_in_timecode=burn_in_timecode,
+            worker_kwargs={
+                "quality_index": quality_index,
+                "burn_in_timecode": burn_in_timecode,
+            },
             on_result=on_result,
             on_error=on_error,
-            on_progress=on_progress
+            on_progress=on_progress,
         )
 
     def _on_add_to_gallery_changed(self, state):

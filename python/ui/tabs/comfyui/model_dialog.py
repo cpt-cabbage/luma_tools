@@ -3,16 +3,16 @@ Model Dialog for ComfyUI Tab.
 
 Modern edit dialog for workflow models/presets with sections for:
 - Basic Info: Name, description, workflow path, iteratable, full_restart
+- Workflows: Multi-workflow support with per-workflow settings
+- Exposed Parameters: Per-parameter visibility and default value overrides
 - Thumbnail: Preview, upload button, "Generate from Gallery" button
 - Tags: Checkbox list of predefined tags
 - Ratings: Display current rating + "Clear All Ratings" button (admin)
-
-This replaces the old PresetEditorDialog with a cleaner, tabbed interface.
 """
 
 import os
 import logging
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -75,6 +75,12 @@ class ModelDialog(QDialog):
         # Multi-workflow storage
         self._workflow_entry_widgets = {}
 
+        # Exposed parameters state
+        self._exposed_param_widgets: Dict[str, Dict] = {}  # key -> {checkbox, default_input, node}
+        self._exposed_params_dirty = True  # Needs refresh on first show
+        self._multi_overrides: Dict[str, Dict] = {}  # wf_name -> overrides dict (multi-workflow)
+        self._current_exposed_wf: Optional[str] = None  # Currently selected workflow for exposed params
+
         self._setup_ui()
         self._load_data()
         self._connect_signals()
@@ -97,6 +103,9 @@ class ModelDialog(QDialog):
 
         # Workflows tab (for multi-workflow support)
         self._setup_workflows_tab()
+
+        # Exposed Parameters tab
+        self._setup_exposed_params_tab()
 
         # Thumbnail tab
         self._setup_thumbnail_tab()
@@ -256,6 +265,7 @@ class ModelDialog(QDialog):
             self._path_edit.setPlaceholderText("(Using multi-workflow mode - configure in Workflows tab)")
         else:
             self._path_edit.setPlaceholderText("")
+        self._mark_exposed_params_dirty()
 
     def _populate_workflows(self):
         """Populate the workflows list from preset data."""
@@ -385,6 +395,249 @@ class ModelDialog(QDialog):
         )
         if file_path:
             path_edit.setText(file_path)
+
+    # =========================================================================
+    # EXPOSED PARAMETERS TAB
+    # =========================================================================
+
+    def _setup_exposed_params_tab(self):
+        """Set up the Exposed Parameters tab.
+
+        Shows editable parameters from the workflow with toggles to control
+        visibility and optional default values. Supports both single-workflow
+        and multi-workflow modes.
+        """
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Workflow selector (only visible in multi-workflow mode)
+        self._exposed_wf_selector = QComboBox()
+        self._exposed_wf_selector.currentTextChanged.connect(self._on_exposed_wf_changed)
+        self._exposed_wf_selector_label = QLabel("Workflow:")
+        selector_row = QHBoxLayout()
+        selector_row.addWidget(self._exposed_wf_selector_label)
+        selector_row.addWidget(self._exposed_wf_selector, 1)
+        layout.addLayout(selector_row)
+        # Hide selector by default; shown when multi-workflow mode is active
+        self._exposed_wf_selector.setVisible(False)
+        self._exposed_wf_selector_label.setVisible(False)
+
+        # Info label
+        info_label = QLabel("Toggle which parameters are visible to users. "
+                            "Optionally set default values for text/string parameters.")
+        info_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # Scroll area for parameter rows
+        self._exposed_scroll = QScrollArea()
+        self._exposed_scroll.setWidgetResizable(True)
+        self._exposed_scroll.setStyleSheet(
+            "QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3c3c; }"
+        )
+
+        self._exposed_container = QWidget()
+        self._exposed_layout = QVBoxLayout(self._exposed_container)
+        self._exposed_layout.setContentsMargins(10, 10, 10, 10)
+        self._exposed_layout.setSpacing(6)
+        self._exposed_scroll.setWidget(self._exposed_container)
+        layout.addWidget(self._exposed_scroll, 1)
+
+        self._exposed_params_tab_index = self._tabs.count()
+        self._tabs.addTab(tab, "Exposed Parameters")
+
+    def _on_tab_changed(self, index: int):
+        """Handle tab change — refresh exposed params lazily."""
+        if index == self._exposed_params_tab_index and self._exposed_params_dirty:
+            self._refresh_exposed_params()
+            self._exposed_params_dirty = False
+
+    def _mark_exposed_params_dirty(self):
+        """Mark exposed params for refresh on next tab selection."""
+        self._exposed_params_dirty = True
+
+    def _on_exposed_wf_changed(self, wf_name: str):
+        """Handle workflow selector change in exposed params tab."""
+        if not wf_name:
+            return
+        # Save current overrides before switching
+        self._save_current_exposed_overrides()
+        self._current_exposed_wf = wf_name
+        self._refresh_exposed_params()
+
+    def _save_current_exposed_overrides(self):
+        """Save the current exposed parameter overrides to the appropriate storage."""
+        if not self._exposed_param_widgets:
+            return
+
+        overrides = self._collect_exposed_param_overrides()
+        is_multi = self._is_multi_check.isChecked()
+
+        if is_multi and self._current_exposed_wf:
+            self._multi_overrides[self._current_exposed_wf] = overrides
+        # For single-workflow, overrides are collected at save time
+
+    def _refresh_exposed_params(self):
+        """Refresh the exposed parameters list from the current workflow."""
+        # Clear existing widgets
+        while self._exposed_layout.count():
+            item = self._exposed_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._exposed_param_widgets.clear()
+
+        is_multi = self._is_multi_check.isChecked()
+
+        # Update selector visibility
+        self._exposed_wf_selector.setVisible(is_multi)
+        self._exposed_wf_selector_label.setVisible(is_multi)
+
+        if is_multi:
+            # Populate workflow selector from current workflow entries
+            self._exposed_wf_selector.blockSignals(True)
+            self._exposed_wf_selector.clear()
+            for original_name, wf_widgets in self._workflow_entry_widgets.items():
+                display_name = wf_widgets["name_edit"].text().strip() or original_name
+                self._exposed_wf_selector.addItem(display_name)
+            self._exposed_wf_selector.blockSignals(False)
+
+            if self._exposed_wf_selector.count() == 0:
+                self._add_no_params_label("No workflows configured. Add workflows in the Workflows tab.")
+                return
+
+            # Select current or first
+            if self._current_exposed_wf and self._exposed_wf_selector.findText(self._current_exposed_wf) >= 0:
+                self._exposed_wf_selector.setCurrentText(self._current_exposed_wf)
+            else:
+                self._current_exposed_wf = self._exposed_wf_selector.currentText()
+
+            # Find the workflow path for the selected workflow
+            workflow_path, node_overrides = self._get_exposed_wf_info(self._current_exposed_wf)
+        else:
+            workflow_path = self._path_edit.text().strip()
+            node_overrides = self.preset_data.get("node_overrides", {})
+
+        if not workflow_path or not os.path.exists(workflow_path):
+            self._add_no_params_label("No workflow selected or file not found.")
+            return
+
+        editable_nodes = self.extract_editable_nodes(workflow_path)
+        if not editable_nodes:
+            self._add_no_params_label("No editable parameters found in this workflow.")
+            return
+
+        # Build parameter rows
+        for node in editable_nodes:
+            override_key = f"{node.node_id}:{node.widget_name}" if node.widget_name else str(node.node_id)
+            # Look up existing override (try per-param key, then legacy node_id, then title)
+            override = node_overrides.get(
+                override_key,
+                node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+            )
+            is_enabled = override.get("enabled", True)
+            default_value = override.get("default_value", "")
+
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 2, 0, 2)
+            row_layout.setSpacing(8)
+
+            # Checkbox
+            checkbox = QCheckBox()
+            checkbox.setChecked(is_enabled)
+            checkbox.setToolTip("Show this parameter in the UI")
+            checkbox.setFixedWidth(20)
+            row_layout.addWidget(checkbox)
+
+            # Display name
+            name_label = QLabel(node.display_name)
+            name_label.setMinimumWidth(180)
+            name_label.setMaximumWidth(250)
+            name_label.setStyleSheet("color: #e0e0e0;")
+            name_label.setToolTip(
+                f"Node: {node.title}\nID: {node.node_id}\n"
+                f"Type: {node.node_type}\nWidget: {node.widget_name or 'value'}"
+            )
+            row_layout.addWidget(name_label)
+
+            # Type badge
+            type_badge = QLabel(node.widget_type)
+            type_badge.setFixedWidth(60)
+            type_badge.setAlignment(Qt.AlignCenter)
+            type_badge.setStyleSheet(
+                "color: #888; background-color: #333; border-radius: 3px; "
+                "padding: 1px 4px; font-size: 10px;"
+            )
+            row_layout.addWidget(type_badge)
+
+            # Default value input (text/string only)
+            if node.widget_type in ('text', 'string'):
+                default_input = QLineEdit()
+                default_input.setPlaceholderText("Default value...")
+                default_input.setText(default_value)
+                default_input.setToolTip("Pre-fill this value (leave empty to use workflow default)")
+                row_layout.addWidget(default_input, 1)
+            else:
+                default_input = None
+                row_layout.addStretch(1)
+
+            self._exposed_layout.addWidget(row)
+            self._exposed_param_widgets[override_key] = {
+                "checkbox": checkbox,
+                "default_input": default_input,
+                "node": node,
+            }
+
+        self._exposed_layout.addStretch()
+
+    def _add_no_params_label(self, text: str):
+        """Add an informational label to the exposed params area."""
+        label = QLabel(text)
+        label.setStyleSheet("color: #888; font-style: italic;")
+        label.setWordWrap(True)
+        self._exposed_layout.addWidget(label)
+        self._exposed_layout.addStretch()
+
+    def _get_exposed_wf_info(self, wf_display_name: str):
+        """Get workflow path and node_overrides for a multi-workflow entry by display name.
+
+        Returns:
+            Tuple of (workflow_path, node_overrides)
+        """
+        for original_name, wf_widgets in self._workflow_entry_widgets.items():
+            actual_name = wf_widgets["name_edit"].text().strip() or original_name
+            if actual_name == wf_display_name:
+                path = wf_widgets["path_edit"].text().strip()
+                # Use multi_overrides if we have them, otherwise fall back to stored preset data
+                overrides = self._multi_overrides.get(
+                    wf_display_name,
+                    wf_widgets.get("node_overrides", {})
+                )
+                return path, overrides
+        return "", {}
+
+    def _collect_exposed_param_overrides(self) -> Dict[str, Any]:
+        """Collect overrides from the current exposed parameter widgets.
+
+        Only stores overrides for parameters that are disabled or have a
+        non-empty default value.
+
+        Returns:
+            Dict mapping override_key -> {"enabled": bool, "default_value": str}
+        """
+        overrides = {}
+        for key, widgets in self._exposed_param_widgets.items():
+            is_enabled = widgets["checkbox"].isChecked()
+            default_input = widgets["default_input"]
+            default_value = default_input.text().strip() if default_input else ""
+
+            if not is_enabled or default_value:
+                overrides[key] = {
+                    "enabled": is_enabled,
+                    "default_value": default_value,
+                }
+        return overrides
 
     def _setup_thumbnail_tab(self):
         """Set up the Thumbnail tab."""
@@ -548,7 +801,7 @@ class ModelDialog(QDialog):
 
     def _connect_signals(self):
         """Connect signals."""
-        pass  # Most connections done inline
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
     def _load_data(self):
         """Load current data into UI."""
@@ -667,6 +920,9 @@ class ModelDialog(QDialog):
         is_multi = self._is_multi_check.isChecked()
         output_type = self._output_type_map.get(self._output_type_combo.currentText(), "image")
 
+        # Save any in-progress exposed param edits before collecting
+        self._save_current_exposed_overrides()
+
         if is_multi:
             # Multi-workflow mode: collect all workflows
             new_workflows = {}
@@ -681,12 +937,18 @@ class ModelDialog(QDialog):
                     show_warning("Invalid Workflow", f"Workflow '{actual_wf_name}' path cannot be empty.", self)
                     return
 
+                # Use exposed param overrides if available, otherwise fall back to stored overrides
+                wf_overrides = self._multi_overrides.get(
+                    actual_wf_name,
+                    wf_widgets.get("node_overrides", {})
+                )
+
                 new_workflows[actual_wf_name] = {
                     "path": wf_path,
                     "note": wf_widgets["note_edit"].text().strip(),
                     "iteratable": wf_widgets["iteratable_check"].isChecked(),
                     "full_restart": wf_widgets["full_restart_check"].isChecked(),
-                    "node_overrides": wf_widgets.get("node_overrides", {})
+                    "node_overrides": wf_overrides
                 }
 
             if not new_workflows:
@@ -709,7 +971,11 @@ class ModelDialog(QDialog):
             new_iteratable = self._iteratable_check.isChecked()
             new_full_restart = self._full_restart_check.isChecked()
             new_note = self._note_edit.toPlainText().strip()
-            new_node_overrides = self.preset_data.get("node_overrides", {})
+            # Use exposed param overrides if the tab was visited, otherwise keep existing
+            if self._exposed_param_widgets:
+                new_node_overrides = self._collect_exposed_param_overrides()
+            else:
+                new_node_overrides = self.preset_data.get("node_overrides", {})
 
         # Collect tags
         selected_tags = [

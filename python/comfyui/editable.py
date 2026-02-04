@@ -24,6 +24,7 @@ class EditableNode:
     title: str
     display_name: str  # User-friendly name derived from title
     widget_type: str   # 'text', 'image', 'int', 'float', 'combo', 'toggle', '3d_model'
+    widget_name: str = ""  # Name of the specific widget parameter (e.g. 'steps', 'cfg', 'seed')
     current_value: Any = None
     options: List[str] = field(default_factory=list)  # For combo boxes
     condition_node: Optional[str] = None  # Node name that controls visibility (from @if_<name> syntax)
@@ -152,6 +153,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     title=title,
                     display_name=f"{display_name} - {widget_name}" if len(config) > 1 else display_name,
                     widget_type=widget_type,
+                    widget_name=widget_name,
                     current_value=current_value,
                     condition_node=condition_node_name,
                 ))
@@ -165,6 +167,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     title=title,
                     display_name=display_name,
                     widget_type='text',
+                    widget_name='value',
                     current_value=str(widgets_values[0]) if widgets_values else '',
                     condition_node=condition_node_name,
                 ))

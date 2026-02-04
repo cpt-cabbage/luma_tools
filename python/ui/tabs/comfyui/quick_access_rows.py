@@ -36,6 +36,7 @@ class QuickAccessCard(QFrame):
 
     clicked = Signal(str)  # model_name
     favorite_toggled = Signal(str)  # model_name
+    context_menu_requested = Signal(str, object)  # model_name, global_pos
 
     def __init__(
         self,
@@ -155,6 +156,10 @@ class QuickAccessCard(QFrame):
 
             layout.addLayout(btn_row)
 
+        # Prevent child QLabels from intercepting context menu events
+        for child in self.findChildren(QLabel):
+            child.setContextMenuPolicy(Qt.NoContextMenu)
+
     def _get_display_name(self) -> str:
         """Get display name (last part of full path)."""
         if '/' in self._model_name:
@@ -181,6 +186,10 @@ class QuickAccessCard(QFrame):
         """Handle favorite button click."""
         self.favorite_toggled.emit(self._model_name)
 
+    def contextMenuEvent(self, event):
+        """Handle right-click for context menu."""
+        self.context_menu_requested.emit(self._model_name, event.globalPos())
+
     def mouseDoubleClickEvent(self, event):
         """Handle double-click to select."""
         if event.button() == Qt.LeftButton:
@@ -200,6 +209,7 @@ class QuickAccessRow(QWidget):
         icon: str = "",
         on_card_selected: Optional[Callable[[str], None]] = None,
         on_favorite_toggled: Optional[Callable[[str], None]] = None,
+        on_context_menu: Optional[Callable] = None,
         parent=None
     ):
         """
@@ -210,6 +220,7 @@ class QuickAccessRow(QWidget):
             icon: Icon to show before title (e.g., "★", "⏱")
             on_card_selected: Callback when card is double-clicked
             on_favorite_toggled: Callback when favorite is toggled
+            on_context_menu: Callback for right-click context menu
             parent: Parent widget
         """
         super().__init__(parent)
@@ -217,6 +228,7 @@ class QuickAccessRow(QWidget):
         self._icon = icon
         self._on_card_selected = on_card_selected
         self._on_favorite_toggled = on_favorite_toggled
+        self._on_context_menu = on_context_menu
 
         self._cards: List[QuickAccessCard] = []
         self._models: List[Tuple[str, Dict, Dict]] = []
@@ -413,6 +425,7 @@ class QuickAccessRow(QWidget):
 
             card.clicked.connect(self._on_card_clicked)
             card.favorite_toggled.connect(self._on_card_favorite_toggled)
+            card.context_menu_requested.connect(self._on_card_context_menu)
 
             self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
             self._cards.append(card)
@@ -426,6 +439,11 @@ class QuickAccessRow(QWidget):
         """Handle favorite toggle."""
         if self._on_favorite_toggled:
             self._on_favorite_toggled(model_name)
+
+    def _on_card_context_menu(self, model_name: str, pos):
+        """Handle card context menu request."""
+        if self._on_context_menu:
+            self._on_context_menu(model_name, pos)
 
     def _scroll_left(self):
         """Scroll the row left."""
