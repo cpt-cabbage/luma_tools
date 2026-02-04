@@ -1171,13 +1171,14 @@ class ConnectionLine(QGraphicsPathItem):
 
     def __init__(self, source_node: ImageNode, target_node: ImageNode,
                  connection_type: str = 'manual', label: str = '',
-                 parent: QGraphicsItem = None):
+                 connection_id: str = None, parent: QGraphicsItem = None):
         super().__init__(parent)
 
         self.source_node = source_node
         self.target_node = target_node
         self.connection_type = connection_type
         self.label = label
+        self.connection_id = connection_id  # Set by canvas after creation
 
         # Setup
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -1344,8 +1345,17 @@ class ConnectionLine(QGraphicsPathItem):
         menu.exec_(event.screenPos())
 
     def _remove(self):
-        """Remove this connection from the scene."""
+        """Remove this connection via the canvas for proper cleanup."""
         scene = self.scene()
+        if scene and self.connection_id:
+            # Get the canvas (view) to call remove_connection for proper cleanup
+            views = scene.views()
+            if views:
+                canvas = views[0]
+                if hasattr(canvas, 'remove_connection'):
+                    canvas.remove_connection(self.connection_id)
+                    return
+        # Fallback: direct scene removal (won't update canvas dict or emit signals)
         if scene:
             scene.removeItem(self)
 

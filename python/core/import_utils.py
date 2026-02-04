@@ -65,7 +65,7 @@ def get_event_bus():
     Example:
         pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
         if EVENT_BUS_AVAILABLE:
-            pipeline_events.gallery_refresh_requested.emit()
+            pipeline_events.gallery_refresh_requested.emit(False)  # False=normal, True=force
     """
     try:
         from core.event_bus import pipeline_events

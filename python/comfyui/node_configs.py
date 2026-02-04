@@ -49,6 +49,81 @@ EDITABLE_NODE_CONFIGS = {
 }
 
 
+# Settings node configurations - for nodes with '_settings' suffix
+# These appear in the collapsible "Workflow Settings" section, grouped by node title
+# Format: {node_type: [(widget_index, widget_name, widget_type), ...]}
+SETTINGS_NODE_CONFIGS = {
+    # Sampler settings
+    'KSampler': [
+        (2, 'steps', 'int'),
+        (3, 'cfg', 'float'),
+        (6, 'denoise', 'float'),
+    ],
+    'KSamplerAdvanced': [
+        (3, 'steps', 'int'),
+        (4, 'cfg', 'float'),
+    ],
+
+    # TRELLIS2 mesh settings
+    'Trellis2MeshWithVoxelAdvancedGenerator': [
+        (2, 'pipeline_type', 'combo'),
+        (3, 'sparse_structure_steps', 'int'),
+        (4, 'sparse_structure_guidance_strength', 'float'),
+        (7, 'shape_steps', 'int'),
+        (8, 'shape_guidance_strength', 'float'),
+        (11, 'texture_steps', 'int'),
+        (12, 'texture_guidance_strength', 'float'),
+    ],
+    'Trellis2PostProcessMesh': [
+        (0, 'fill_holes', 'toggle'),
+        (5, 'remove_small_connected_components', 'toggle'),
+        (8, 'remove_floaters', 'toggle'),
+    ],
+    'Trellis2SimplifyMesh': [
+        (0, 'target_face_num', 'int'),
+        (1, 'method', 'combo'),
+    ],
+    'Trellis2PostProcessAndUnWrapAndRasterizer': [
+        (4, 'texture_size', 'int'),
+        (5, 'remesh', 'toggle'),
+        (8, 'target_face_num', 'int'),
+        (15, 'remove_floaters', 'toggle'),
+    ],
+
+    # UltraShape settings
+    'UltraShapeRefine': [
+        (0, 'steps', 'int'),
+        (1, 'guidance_scale', 'float'),
+        (2, 'octree_resolution', 'int'),
+    ],
+
+    # HYMotion settings
+    'HYMotionGenerate': [
+        (0, 'duration', 'float'),
+        (2, 'cfg_scale', 'float'),
+        (3, 'num_samples', 'int'),
+    ],
+
+    # Image scaling settings
+    'ImageScale': [
+        (0, 'upscale_method', 'combo'),
+        (1, 'width', 'int'),
+        (2, 'height', 'int'),
+    ],
+    'ImageScaleBy': [
+        (0, 'upscale_method', 'combo'),
+        (1, 'scale_by', 'float'),
+    ],
+
+    # Latent settings
+    'EmptyLatentImage': [
+        (0, 'width', 'int'),
+        (1, 'height', 'int'),
+        (2, 'batch_size', 'int'),
+    ],
+}
+
+
 # Widget mappings for convert_to_api_format
 # Maps node type to list of widget names in order of widgets_values array
 # Use None for button/UI-only widgets that don't map to inputs

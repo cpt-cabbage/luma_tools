@@ -2,7 +2,7 @@
 Gallery Manager module.
 
 Handles gallery UI management operations:
-- Item sorting and filtering
+- Item sorting and filtering (delegates to services.gallery_sorting)
 - Widget creation and caching
 - Layout management
 - Display coordination (stacked and grid views)
@@ -15,6 +15,11 @@ from shiboken6 import isValid
 from ui_components import ThumbnailWidget, StackedThumbnailWidget
 
 from .base_manager import BaseGalleryManager
+from services.gallery_sorting import (
+    sort_items as _sort_items,
+    group_items_by_prefix as _group_by_prefix,
+    group_items_by_user_groups,
+)
 
 # Animation threshold - skip animations when gallery has more items than this
 ANIMATION_THRESHOLD = 100
@@ -45,67 +50,19 @@ class GalleryManager(BaseGalleryManager):
         Returns:
             Sorted list of items
         """
-        # All sort modes use a secondary key (filename) for stability when primary key is identical.
-        # This prevents items with the same mtime/name from "jumping" between refreshes.
-        if sort_mode == "date_desc":
-            return sorted(items, key=lambda x: (-x['mtime'], x['name']))
-        elif sort_mode == "date_asc":
-            return sorted(items, key=lambda x: (x['mtime'], x['name']))
-        elif sort_mode == "name_asc":
-            return sorted(items, key=lambda x: (x['name'], -x['mtime']))
-        elif sort_mode == "name_desc":
-            return sorted(items, key=lambda x: (x['name'], x['mtime']), reverse=True)
-        elif sort_mode == "workflow":
-            # Sort by workflow name, then by date (newest first), then by filename for stability
-            return sorted(items, key=lambda x: (x['workflow'] or 'zzz_unknown', -x['mtime'], x['name']))
-        else:
-            return items
+        return _sort_items(items, sort_mode)
 
     def group_items_by_prefix(self, items, separate_inputs=True):
         """Group items by their job prefix, preserving the input sort order.
 
         Args:
-            items: List of item dicts with 'job_prefix' field (already sorted by user's preference)
+            items: List of item dicts with 'job_prefix' field (already sorted)
             separate_inputs: If True, group all input images into a separate "Inputs" group
 
         Returns:
-            dict: {prefix: [items]} ordered by first item's position in the input list
+            OrderedDict: {prefix: [items]} ordered by first item's position
         """
-        from collections import OrderedDict
-
-        groups = {}  # prefix -> (first_seen_index, [items])
-        input_group = []  # Separate list for input images
-        input_first_index = None
-
-        for idx, item in enumerate(items):
-            # Separate input images into their own group
-            if separate_inputs and item.get('is_input', False):
-                input_group.append(item)
-                if input_first_index is None:
-                    input_first_index = idx
-                continue
-
-            prefix = item.get('job_prefix') or 'Other'
-            if prefix not in groups:
-                # Store the index of first item in this group (for ordering groups)
-                groups[prefix] = (idx, [item])
-            else:
-                first_idx, group_items = groups[prefix]
-                group_items.append(item)
-
-        # Sort groups by first-seen index (preserves input sort order for groups)
-        sorted_groups = sorted(groups.items(), key=lambda x: x[1][0])
-
-        # Build ordered dict - items within groups already in correct order from input
-        result = OrderedDict()
-        for prefix, (_, group_items) in sorted_groups:
-            result[prefix] = group_items  # Already sorted from input
-
-        # Add inputs group at the end if there are any
-        if input_group:
-            result['📥 Inputs'] = input_group  # Already sorted from input
-
-        return result
+        return _group_by_prefix(items, separate_inputs)
 
     def group_items_by_groups(self, items, fallback_to_job=True, separate_inputs=True):
         """Group items by their user-defined groups, preserving input sort order.
@@ -118,72 +75,20 @@ class GalleryManager(BaseGalleryManager):
         Returns:
             OrderedDict: {group_name: [items]} plus group_colors dict
         """
-        from collections import OrderedDict
-
         # Get favorites manager from tab
         favorites_manager = getattr(self.tab, '_favorites_manager', None)
         if not favorites_manager:
             # Fall back to job prefix grouping if no favorites manager
             return self.group_items_by_prefix(items, separate_inputs)
 
-        groups = {}  # group_id -> (group_def, first_seen_index, [items])
-        ungrouped = []  # Items not in any group
-        input_group = []  # Separate list for input images
-
-        for idx, item in enumerate(items):
-            # Separate input images
-            if separate_inputs and item.get('is_input', False):
-                input_group.append(item)
-                continue
-
-            # Check if item is in any group
-            item_groups = favorites_manager.get_item_groups(item['path'])
-            if item_groups:
-                # Use primary (first) group
-                primary_group_id = item_groups[0]
-                group_def = favorites_manager.get_group(primary_group_id)
-                if group_def:
-                    if primary_group_id not in groups:
-                        groups[primary_group_id] = (group_def, idx, [item])
-                    else:
-                        group_def_stored, first_idx, group_items = groups[primary_group_id]
-                        group_items.append(item)
-                else:
-                    ungrouped.append(item)
-            else:
-                ungrouped.append(item)
-
-        # Sort groups by user-defined order, then by first-seen index
-        sorted_groups = sorted(
-            groups.items(),
-            key=lambda x: (x[1][0].order, x[1][1])  # (group_def.order, first_seen_index)
+        # Delegate to service with callbacks for favorites manager access
+        result, group_colors = group_items_by_user_groups(
+            items,
+            get_item_groups=favorites_manager.get_item_groups,
+            get_group_def=favorites_manager.get_group,
+            fallback_to_job=fallback_to_job,
+            separate_inputs=separate_inputs
         )
-
-        # Build ordered dict - items already in correct order from input
-        result = OrderedDict()
-        group_colors = {}  # Store colors for stacked widget styling
-
-        for group_id, (group_def, _, group_items) in sorted_groups:
-            group_name = f"🏷 {group_def.name}"
-            result[group_name] = group_items  # Already sorted from input
-            group_colors[group_name] = group_def.color
-
-        # Handle ungrouped items
-        if ungrouped:
-            if fallback_to_job:
-                # Stack ungrouped items by job prefix (preserves sort order)
-                job_groups = self.group_items_by_prefix(ungrouped, separate_inputs=False)
-                for prefix, job_items in job_groups.items():
-                    result[prefix] = job_items
-            else:
-                # Show each ungrouped item individually (single-item "groups")
-                for item in ungrouped:
-                    # Use path as unique key for individual items
-                    result[item['path']] = [item]
-
-        # Add inputs group at the end
-        if input_group:
-            result['📥 Inputs'] = input_group  # Already sorted from input
 
         # Store group colors on the manager for use by display methods
         self._group_colors = group_colors

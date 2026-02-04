@@ -52,8 +52,8 @@ def _atomic_json_write(file_path: str, data: Any) -> None:
 # ============================================================================
 
 def get_feature_requests_base_dir() -> str:
-    """Get base path for feature requests (ComfyUI network output path)."""
-    network_path = get_setting("comfyui_network_output_path")
+    """Get base path for feature requests (network output path)."""
+    network_path = get_setting("network_output_path")
     if not network_path:
         # Fallback to global settings if network path not configured
         return os.path.join(get_global_settings_path(), "feature_requests")

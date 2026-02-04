@@ -40,13 +40,14 @@
       "is_multi": false
     },
     "Qwen Image Edit 2511": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
+      "path": "",
       "description": "",
       "iteratable": false,
       "note": "",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": true,
+      "output_type": "image",
       "workflows": {
         "Single Input": {
           "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
@@ -82,7 +83,7 @@
     "mark.zimmer",
     "christophe.leyder"
   ],
-  "comfyui_network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
+  "network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
   "comfyui_use_user_subfolder": true,
   "comfyui_fast_mode": true,
   "comfyui_fp16_accumulation": true,
@@ -115,5 +116,19 @@
       "name": "northcliff_4k",
       "path": "L:/asset_libs/textures/hdri/HDRIHaven/northcliff/northcliff_4k.hdr"
     }
+  ],
+  "canvas_sync_interval": 500,
+  "comfyui_preset_categories": [
+    "Upscaling",
+    "Generation",
+    "Video",
+    "Style Transfer",
+    "Inpainting",
+    "3D",
+    "Animation",
+    "Portrait",
+    "Landscape",
+    "Experimental",
+    "Image Editing"
   ]
 }

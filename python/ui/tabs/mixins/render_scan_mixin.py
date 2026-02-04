@@ -27,9 +27,11 @@ Usage:
         def _get_source_options(self):
             return [("For Comp", "for_comp"), ("Raw", "raw"), ("Custom", "custom")]
 """
-
+import logging
 import os
 from typing import List, Tuple, Callable, Optional, Any
+
+logger = logging.getLogger(__name__)
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
 
@@ -142,7 +144,7 @@ class RenderScanMixin:
                 custom_label.setText(f"Custom path: {custom_dir}")
                 custom_label.setStyleSheet(UIStyles.LABEL_PATH)
 
-            self.log(f"{self.tab_name}: Custom path set to: {custom_dir}")
+            logger.info(f"{self.tab_name}: Custom path set to: {custom_dir}")
             self.show_status(f"Custom: {os.path.basename(custom_dir)}", "info")
             self._on_scan_renders_clicked()
 
@@ -204,14 +206,14 @@ class RenderScanMixin:
         if self._source == "for_comp":
             output_subdir = getattr(self.app_state, 'output_subdirectory', '')
             search_path = os.path.join(searchpath, output_subdir) if output_subdir else searchpath
-            self.log(f"{status_prefix}: Scanning {output_subdir or 'root'}: {search_path}")
+            logger.debug(f"{status_prefix}: Scanning {output_subdir or 'root'}: {search_path}")
             if os.path.exists(search_path):
                 found = scan_func(search_path)
                 for render_seq in found:
                     renders.append((output_subdir or "root", render_seq))
 
         elif self._source == "raw":
-            self.log(f"{status_prefix}: Scanning raw path: {searchpath}")
+            logger.debug(f"{status_prefix}: Scanning raw path: {searchpath}")
             if os.path.exists(searchpath):
                 found = scan_func(searchpath)
                 for render_seq in found:
@@ -219,7 +221,7 @@ class RenderScanMixin:
 
         elif self._source == "custom":
             custom_path = getattr(self.app_state, self._custom_path_attr, "")
-            self.log(f"{status_prefix}: Scanning custom path: {custom_path}")
+            logger.debug(f"{status_prefix}: Scanning custom path: {custom_path}")
             if custom_path and os.path.exists(custom_path):
                 found = scan_func(custom_path)
                 for render_seq in found:
@@ -233,7 +235,7 @@ class RenderScanMixin:
             action_button.setEnabled(False)
 
         # Populate list
-        self.log(f"{status_prefix}: Found {len(renders)} sequence(s)")
+        logger.info(f"{status_prefix}: Found {len(renders)} sequence(s)")
         if renders:
             for subdir, render_seq in renders:
                 display_name = os.path.basename(str(render_seq))

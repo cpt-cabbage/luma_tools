@@ -38,7 +38,6 @@ class CanvasSyncManager(QObject):
     users_changed = Signal(list)  # List of active users changed
 
     # Sync intervals
-    STATE_POLL_INTERVAL = 2000  # 2 seconds per plan
     LOCK_TIMEOUT = 5.0  # seconds to wait for lock
 
     def __init__(self, parent=None):
@@ -54,10 +53,16 @@ class CanvasSyncManager(QObject):
         # Lock for thread-safe file operations (RLock for reentrant safety)
         self._file_lock = threading.RLock()
 
+        # Load sync interval from global settings (default 1000ms = 1 second)
+        from core.settings_manager import safe_get_setting
+        sync_interval = safe_get_setting("canvas_sync_interval", 1000)
+
         # Setup state sync timer
         self._state_timer = QTimer(self)
-        self._state_timer.setInterval(self.STATE_POLL_INTERVAL)
+        self._state_timer.setInterval(sync_interval)
         self._state_timer.timeout.connect(self._poll_state)
+
+        logger.debug(f"Canvas sync interval: {sync_interval}ms")
 
         # Track active users (from presence files)
         self._active_users = []
@@ -207,6 +212,14 @@ class CanvasSyncManager(QObject):
                 state["version"] = "1.0"
                 state["last_modified"] = datetime.now().isoformat()
                 state["modified_by"] = self._username
+
+                # Debug: log drawings being saved
+                drawings = state.get('drawings', [])
+                if drawings:
+                    for d in drawings:
+                        if d.get('type') == 'path':
+                            pts = d.get('points', [])
+                            logger.debug(f"Saving path drawing: id={d.get('id')}, points={len(pts)}, pos=({d.get('x')}, {d.get('y')})")
 
                 # Atomic write via temp file
                 temp_path = state_path + ".tmp"
@@ -442,15 +455,15 @@ class CursorPresenceManager(QObject):
 
         current_time = time.time()
         active_cursors = {}
-        pattern = f"{self._jobname}_"
 
         try:
             for filename in os.listdir(presence_dir):
-                if not filename.startswith(pattern) or not filename.endswith(".json"):
+                # Only look at JSON presence files
+                if not filename.endswith(".json"):
                     continue
 
-                # Extract username from filename
-                username = filename[len(pattern):-5]
+                # Extract username from filename (format: {username}.json)
+                username = filename[:-5]  # Remove .json extension
 
                 # Skip our own cursor
                 if username == self._username:
@@ -483,8 +496,8 @@ class CursorPresenceManager(QObject):
                             # Clean up stale file
                             try:
                                 os.remove(filepath)
-                            except:
-                                pass
+                            except OSError:
+                                pass  # File already deleted or inaccessible
 
                 except Exception:
                     # Ignore individual file read errors

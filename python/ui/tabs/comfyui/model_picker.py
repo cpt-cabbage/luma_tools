@@ -383,6 +383,7 @@ class ModelPickerPanel(QWidget):
 
     def refresh(self):
         """Public method to refresh the picker content."""
+        self._setup_tag_filters()
         self._refresh_cards()
 
     def _refresh_cards(self):

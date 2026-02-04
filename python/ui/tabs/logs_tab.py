@@ -3,12 +3,15 @@ Logs tab module for Luma Tools.
 
 Handles the terminal log output display and clear functionality.
 """
+import logging
 
 from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QClipboard
+
+logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import QMenu, QApplication
 from PySide6.QtCore import Qt
 
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 from core.settings_manager import get_setting, set_setting
 
 # Prefixes that indicate debug messages
@@ -37,24 +40,14 @@ _DEFAULT_LOG_COLOR = "#b0b5bd"
 class LogsTab(BaseTab):
     """Tab for displaying terminal log output."""
 
+    TAB_CONFIG = TabConfig(ui_file="logs.ui", tab_name="Logs", tab_id="logs")
+
     def __init__(self, main_window=None, app_state=None):
         self._paused = False
         self._paused_messages = []
         self._show_debug = False
         self._all_messages = []
         super().__init__(main_window, app_state)
-
-    @property
-    def ui_file(self) -> str:
-        return "logs.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "Logs"
-
-    @property
-    def tab_id(self) -> str:
-        return "logs"
 
     def connect_signals(self):
         """Connect log tab signals."""
@@ -133,7 +126,7 @@ class LogsTab(BaseTab):
         self.ui.LogOutput.clear()
         self._all_messages.clear()
         self._paused_messages.clear()
-        self.log("Log cleared")
+        logger.info("Log cleared")
 
     def _on_pause_log_clicked(self, checked: bool):
         """Toggle pause state for log output."""

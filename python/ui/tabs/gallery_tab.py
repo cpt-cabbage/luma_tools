@@ -23,7 +23,7 @@ import threading
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QTimer, QThreadPool
 
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 from .gallery_loader import GalleryLoader
 from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager, GalleryManager
 from .gallery.favorites_manager import FavoritesManager
@@ -39,17 +39,7 @@ pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 class GalleryTab(BaseTab):
     """Tab for viewing generated images."""
 
-    @property
-    def ui_file(self) -> str:
-        return "gallery.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "Gallery"
-
-    @property
-    def tab_id(self) -> str:
-        return "gallery"
+    TAB_CONFIG = TabConfig(ui_file="gallery.ui", tab_name="Gallery", tab_id="gallery")
 
     def connect_signals(self):
         """Connect gallery tab signals."""
@@ -330,7 +320,7 @@ class GalleryTab(BaseTab):
 
     def on_tab_deactivated(self):
         """Called when user switches away from this tab. Stop watchers and timers."""
-        self.log("[Gallery] on_tab_deactivated START")
+        logging.debug("[Gallery] on_tab_deactivated START")
         self._refresh_controller.stop_watcher()
         self._refresh_controller.stop_network_polling()
 
@@ -342,7 +332,7 @@ class GalleryTab(BaseTab):
             from core.state_manager import app_state
             app_state.gallery_visible = False
             pipeline_events.update_gallery_context(visible=False)
-        self.log("[Gallery] on_tab_deactivated COMPLETE")
+        logging.debug("[Gallery] on_tab_deactivated COMPLETE")
 
     def _set_gallery_drop_enabled(self, enabled):
         """Enable or disable drop targets on gallery widgets."""
@@ -356,9 +346,9 @@ class GalleryTab(BaseTab):
                     for child in content.findChildren(QWidget):
                         if child.acceptDrops():
                             child.setAcceptDrops(enabled)
-            self.log(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
+            logging.debug(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
         except Exception as e:
-            self.log(f"[Gallery] Error setting drop enabled: {e}")
+            logging.debug(f"[Gallery] Error setting drop enabled: {e}")
 
     def _handle_scan_complete(self, items):
         """Handle scan complete event with item processing."""
@@ -371,7 +361,7 @@ class GalleryTab(BaseTab):
             new_paths = current_paths - self._known_items
             self._new_items.update(new_paths)
             if new_paths:
-                self.log(f"[Gallery] {len(new_paths)} new item(s) detected")
+                logging.debug(f"[Gallery] {len(new_paths)} new item(s) detected")
         self._known_items = current_paths
 
         # Apply filter and sort
@@ -382,7 +372,7 @@ class GalleryTab(BaseTab):
         # Incremental mode compares existing items vs new and only adds/removes differences
         if self._first_scan_after_prewarm:
             self._first_scan_after_prewarm = False
-            self.log("[Gallery] First scan after prewarm, using incremental sync")
+            logging.debug("[Gallery] First scan after prewarm, using incremental sync")
         incremental = self._initial_scan_done
         self._manager.display_items(sorted_items, self._view_mode, incremental=incremental)
 
@@ -420,7 +410,7 @@ class GalleryTab(BaseTab):
         """Get the network gallery path for a user."""
         from core.settings_manager import get_setting
 
-        base_path = get_setting("comfyui_network_output_path")
+        base_path = get_setting("network_output_path")
         if not base_path:
             return None
 
@@ -444,7 +434,6 @@ class GalleryTab(BaseTab):
             self._initial_scan_done = False
             self._first_scan_after_prewarm = False
             self._cached_items = None
-
         # Update watcher
         if self._current_path:
             self._start_watcher(self._current_path)
@@ -455,7 +444,7 @@ class GalleryTab(BaseTab):
         import platform
 
         if not self._current_path or not os.path.exists(self._current_path):
-            self.log("[Gallery] No valid path to open")
+            logging.debug("[Gallery] No valid path to open")
             return
 
         system = platform.system()
@@ -469,7 +458,7 @@ class GalleryTab(BaseTab):
             # Show success status
             self.show_status("Opened gallery folder", "info")
         except Exception as e:
-            self.log(f"[Gallery] Error opening explorer: {e}")
+            logging.warning(f"[Gallery] Error opening explorer: {e}")
             self.show_status(f"Could not open folder: {e}", "error")
 
     def _on_source_toggle(self):
@@ -965,6 +954,16 @@ class GalleryTab(BaseTab):
         # Subscribe to navigation requests from other tabs (e.g., canvas)
         pipeline_events.gallery_navigate_to.connect(self._on_navigate_to_requested)
 
+        # Subscribe to viewer action requests (from image viewers)
+        pipeline_events.toggle_item_like.connect(self._on_toggle_item_like)
+        pipeline_events.add_item_to_group.connect(self._on_add_item_to_group)
+        pipeline_events.create_item_group.connect(self._on_create_item_group)
+        pipeline_events.show_item_properties.connect(self._on_show_item_properties)
+        pipeline_events.publish_item.connect(self._on_publish_item)
+        pipeline_events.view_input_image.connect(self._on_view_input_image)
+        pipeline_events.request_groups_list.connect(self._on_request_groups_list)
+        pipeline_events.request_item_like_status.connect(self._on_request_item_like_status)
+
         logger.debug("Gallery tab subscribed to event bus")
 
     def _on_job_submitted(self, job_id: str, expected_count: int, job_prefix: str):
@@ -1064,6 +1063,61 @@ class GalleryTab(BaseTab):
             self.select_and_scroll_to_item(image_path)
         elif hasattr(self, '_selection_manager'):
             self._selection_manager.select_item_by_path(image_path)
+
+    # =========================================================================
+    # EVENT BUS HANDLERS (image viewer actions)
+    # =========================================================================
+
+    def _on_toggle_item_like(self, path: str, source: str):
+        """Handle toggle like request from event bus (e.g., image viewer)."""
+        if not path:
+            return
+        self._favorites_manager.toggle_like(path)
+
+    def _on_add_item_to_group(self, path: str, group_id: str, source: str):
+        """Handle add to group request from event bus."""
+        if not path or not group_id:
+            return
+        self._favorites_manager.add_to_group(path, group_id)
+
+    def _on_create_item_group(self, path: str, group_name: str, color: str, source: str):
+        """Handle create group request from event bus."""
+        if not path or not group_name:
+            return
+        group = self._favorites_manager.create_group(group_name, color)
+        if group:
+            self._favorites_manager.add_to_group(path, group.group_id)
+
+    def _on_show_item_properties(self, path: str, source: str):
+        """Handle show properties request from event bus."""
+        if not path:
+            return
+        self._operations_manager.show_properties_for_path(path)
+
+    def _on_publish_item(self, path: str, source: str):
+        """Handle publish request from event bus."""
+        if not path:
+            return
+        self._operations_manager.publish_items([path])
+
+    def _on_view_input_image(self, path: str, source: str):
+        """Handle view input image request from event bus."""
+        if not path:
+            return
+        self._viewer_manager.open_viewer(path)
+
+    def _on_request_groups_list(self, source: str):
+        """Handle request for groups list from event bus."""
+        if EVENT_BUS_AVAILABLE:
+            groups = self._favorites_manager.get_groups()
+            groups_data = [{"id": g.group_id, "name": g.name, "color": g.color} for g in groups]
+            pipeline_events.groups_list_response.emit(groups_data, source)
+
+    def _on_request_item_like_status(self, path: str, source: str):
+        """Handle request for item like status from event bus."""
+        if EVENT_BUS_AVAILABLE and path:
+            is_liked = self._favorites_manager.is_liked(path)
+            pipeline_events.item_like_status_response.emit(path, is_liked, source)
 
     def _on_favorites_changed(self, *args):
         """Forward favorites changes to event bus for cross-tab sync.
@@ -1263,3 +1317,35 @@ class GalleryTab(BaseTab):
             # Reset filter buttons
             self.ui.GalleryShowAllButton.setChecked(True)
             self._ui_manager._current_filter = 'all'
+
+    def cleanup(self):
+        """Clean up resources when tab is being destroyed.
+
+        Disconnects signals and releases resources to prevent memory leaks.
+        Should be called by the main window when the app is closing.
+        """
+        # Clean up groups panel signals
+        if hasattr(self, '_groups_panel') and self._groups_panel:
+            self._groups_panel.cleanup()
+
+        # Disconnect event bus subscriptions
+        if EVENT_BUS_AVAILABLE:
+            try:
+                pipeline_events.job_submitted.disconnect(self._on_job_submitted)
+                pipeline_events.job_progress.disconnect(self._on_job_progress)
+                pipeline_events.job_output_ready.disconnect(self._on_job_output_ready)
+                pipeline_events.job_completed.disconnect(self._on_job_completed)
+                pipeline_events.job_failed.disconnect(self._on_job_failed)
+                pipeline_events.all_jobs_completed.disconnect(self._on_all_jobs_completed)
+                pipeline_events.use_as_input.disconnect(self._on_use_as_input_requested)
+                pipeline_events.gallery_refresh_requested.disconnect(self._on_refresh_requested)
+                pipeline_events.gallery_navigate_to.disconnect(self._on_navigate_to_requested)
+            except (RuntimeError, TypeError):
+                # Already disconnected or invalid connection
+                pass
+
+        # Stop refresh controller timers
+        if hasattr(self, '_refresh_controller') and self._refresh_controller:
+            self._refresh_controller.stop_all()
+
+        logger.debug("Gallery tab cleanup completed")

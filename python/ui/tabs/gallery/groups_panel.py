@@ -744,6 +744,22 @@ class GroupsFilterPanel(QWidget):
             self._favorites_manager.items_unliked_batch.connect(self._on_likes_batch_changed)
             self._favorites_manager.items_groups_changed_batch.connect(self._on_groups_batch_changed)
 
+    def cleanup(self):
+        """Disconnect signals to prevent memory leaks when panel is destroyed."""
+        if self._favorites_manager:
+            try:
+                self._favorites_manager.group_created.disconnect(self._on_groups_changed)
+                self._favorites_manager.group_deleted.disconnect(self._on_groups_changed)
+                self._favorites_manager.group_updated.disconnect(self._on_groups_changed)
+                self._favorites_manager.like_changed.disconnect(self._on_like_changed)
+                self._favorites_manager.item_groups_changed.disconnect(self._on_item_groups_changed)
+                self._favorites_manager.items_liked_batch.disconnect(self._on_likes_batch_changed)
+                self._favorites_manager.items_unliked_batch.disconnect(self._on_likes_batch_changed)
+                self._favorites_manager.items_groups_changed_batch.disconnect(self._on_groups_batch_changed)
+            except (RuntimeError, TypeError):
+                # Already disconnected or invalid connection
+                pass
+
     def _on_groups_changed(self, group_id=None):
         """Rebuild the filter list when groups change."""
         self._build_filter_list()

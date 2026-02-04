@@ -123,11 +123,22 @@ class DrawingItemBase(QGraphicsItem):
 
     def get_state(self) -> dict:
         """Get serializable state."""
+        # Helper to safely convert Qt enums to int for JSON serialization
+        def enum_to_int(val, default=0):
+            if isinstance(val, int):
+                return val
+            if hasattr(val, 'value'):
+                return val.value
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return default
+
         return {
             'pen_color': self._pen_color.name(),
             'pen_width': self._pen_width,
-            'line_style': self._line_style,
-            'line_cap': self._line_cap,
+            'line_style': enum_to_int(self._line_style, Qt.SolidLine.value),
+            'line_cap': enum_to_int(self._line_cap, Qt.RoundCap.value),
             'fill_color': self._fill_color.name() if self._fill_color else None,
             'attached_to': self._attached_to,
             'x': self.x(),
@@ -138,8 +149,11 @@ class DrawingItemBase(QGraphicsItem):
         """Restore from serialized state."""
         self._pen_color = QColor(state.get('pen_color', '#FF0000'))
         self._pen_width = state.get('pen_width', 3)
-        self._line_style = state.get('line_style', Qt.SolidLine)
-        self._line_cap = state.get('line_cap', Qt.RoundCap)
+        # line_style/line_cap are stored as ints, convert back to Qt enums
+        line_style = state.get('line_style', Qt.SolidLine)
+        self._line_style = Qt.PenStyle(line_style) if isinstance(line_style, int) else line_style
+        line_cap = state.get('line_cap', Qt.RoundCap)
+        self._line_cap = Qt.PenCapStyle(line_cap) if isinstance(line_cap, int) else line_cap
         fill = state.get('fill_color')
         self._fill_color = QColor(fill) if fill else None
         self._attached_to = state.get('attached_to')
@@ -315,8 +329,11 @@ class DrawingPath(DrawingItemBase):
         self._min_width = state.get('min_width', 1)
         self._max_width = state.get('max_width', 20)
 
+        points_data = state.get('points', [])
+        logger.debug(f"DrawingPath.set_state: received {len(points_data)} points, item pos=({state.get('x')}, {state.get('y')})")
+
         self._points = []
-        for p in state.get('points', []):
+        for p in points_data:
             self._points.append(PenPoint(
                 QPointF(p['x'], p['y']),
                 p.get('pressure', 1.0),
@@ -324,7 +341,10 @@ class DrawingPath(DrawingItemBase):
                 p.get('tilt_y', 0.0),
                 p.get('rotation', 0.0)
             ))
+
+        logger.debug(f"DrawingPath.set_state: created {len(self._points)} PenPoint objects")
         self._rebuild_path()
+        logger.debug(f"DrawingPath.set_state: path rebuilt, isEmpty={self._path.isEmpty()}")
 
     def normalize_to_local(self):
         """Convert from scene coordinates to local coordinates for proper movement.

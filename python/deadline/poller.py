@@ -37,7 +37,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         if not DEADLINE_PATH:
             return {"status": "Unknown", "progress": 0, "error_message": "Deadline not available"}
 
-        result = run_command([DEADLINE_PATH, "GetJob", job_id])
+        result = run_command([DEADLINE_PATH, "GetJob", job_id], timeout=30)
 
         output = result.stdout.strip()
 
@@ -384,7 +384,7 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
             return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": "Deadline not available"}
 
         # Get all pending (queued) jobs
-        result = run_command([DEADLINE_PATH, "GetJobIdsFilter", "Status=Pending"])
+        result = run_command([DEADLINE_PATH, "GetJobIdsFilter", "Status=Pending"], timeout=30)
 
         if result.returncode != 0:
             return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": result.stderr.strip()}
@@ -399,7 +399,7 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
         # Filter to only luma_tools ComfyUI jobs
         jobs_info = []
         for pending_id in pending_job_ids:
-            job_result = run_command([DEADLINE_PATH, "GetJob", pending_id])
+            job_result = run_command([DEADLINE_PATH, "GetJob", pending_id], timeout=15)
 
             if job_result.returncode == 0:
                 job_info = parse_job_info(job_result.stdout)
@@ -467,7 +467,7 @@ def complete_deadline_job(job_id: str) -> Tuple[bool, str]:
         if not DEADLINE_PATH:
             return False, "Deadline not available"
 
-        result = run_command([DEADLINE_PATH, "CompleteJob", job_id])
+        result = run_command([DEADLINE_PATH, "CompleteJob", job_id], timeout=30)
 
         if result.returncode == 0:
             return True, f"Job {job_id} completed"
@@ -509,7 +509,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     try:
         # Get all active/pending jobs from Deadline
         for status_filter in ["Active", "Pending"]:
-            result = run_command([DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"])
+            result = run_command([DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"], timeout=30)
 
             if result.returncode != 0:
                 continue
@@ -517,7 +517,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
             job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
 
             for job_id in job_ids:
-                job_result = run_command([DEADLINE_PATH, "GetJob", job_id])
+                job_result = run_command([DEADLINE_PATH, "GetJob", job_id], timeout=15)
 
                 if job_result.returncode != 0:
                     continue

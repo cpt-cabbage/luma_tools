@@ -14,8 +14,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QListWidget, QListWidgetItem, QMenu,
-    QWidget, QComboBox, QMessageBox
+    QWidget, QComboBox
 )
+from dialog_helpers import confirm_action, show_warning
 
 from .canvas_metadata import CanvasMetadataManager, CanvasDef, CanvasScope
 
@@ -287,10 +288,7 @@ class CanvasSelectorDialog(QDialog):
                 self.canvas_created.emit(canvas.id)
                 self.accept()
             else:
-                QMessageBox.warning(
-                    self, "Error",
-                    "Failed to create canvas. Please try again."
-                )
+                show_warning("Error", "Failed to create canvas. Please try again.", self)
 
     def _show_context_menu(self, pos):
         """Show context menu for canvas item."""
@@ -355,10 +353,7 @@ class CanvasSelectorDialog(QDialog):
             if self._metadata_manager.rename_canvas(canvas_id, new_name):
                 self._populate_canvas_list()
             else:
-                QMessageBox.warning(
-                    self, "Error",
-                    "Failed to rename canvas."
-                )
+                show_warning("Error", "Failed to rename canvas.", self)
 
     def _duplicate_canvas(self, canvas_id: str):
         """Duplicate a canvas."""
@@ -383,10 +378,7 @@ class CanvasSelectorDialog(QDialog):
             if new_canvas:
                 self._populate_canvas_list()
             else:
-                QMessageBox.warning(
-                    self, "Error",
-                    "Failed to duplicate canvas."
-                )
+                show_warning("Error", "Failed to duplicate canvas.", self)
 
     def _delete_canvas(self, canvas_id: str):
         """Delete a canvas with confirmation."""
@@ -395,23 +387,21 @@ class CanvasSelectorDialog(QDialog):
             return
 
         # Confirm deletion
-        reply = QMessageBox.question(
-            self,
+        if confirm_action(
             "Delete Canvas",
             f"Are you sure you want to delete '{canvas.name}'?\n\n"
             "This action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
+            self,
+            default_yes=False
+        ):
             if self._metadata_manager.delete_canvas(canvas_id):
                 self._populate_canvas_list()
             else:
-                QMessageBox.warning(
-                    self, "Cannot Delete",
+                show_warning(
+                    "Cannot Delete",
                     "Cannot delete the last canvas in this scope.\n"
-                    "Create another canvas first."
+                    "Create another canvas first.",
+                    self
                 )
 
 

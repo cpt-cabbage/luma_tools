@@ -11,8 +11,7 @@ Handles:
 import os
 import json
 import logging
-import threading
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from core.config import COMFYUI_OUTPUT_EXTENSIONS
@@ -48,18 +47,30 @@ def get_job_output_files(
     supported_extensions = set(COMFYUI_OUTPUT_EXTENSIONS)
     files = []
 
-    for filename in os.listdir(output_dir):
-        ext = os.path.splitext(filename)[1].lower()
-        if ext in supported_extensions:
-            # Filter by job prefix if provided
-            if job_prefix and not filename.startswith(job_prefix):
-                continue
-            full_path = os.path.join(output_dir, filename)
-            mtime = os.path.getmtime(full_path)
-            # Filter by minimum modification time if provided
-            if min_mtime is not None and mtime < min_mtime:
-                continue
-            files.append((full_path, mtime))
+    # Use os.scandir() for better performance - stat info is cached
+    try:
+        with os.scandir(output_dir) as entries:
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext not in supported_extensions:
+                    continue
+                # Filter by job prefix if provided
+                if job_prefix and not entry.name.startswith(job_prefix):
+                    continue
+                # Get mtime from cached stat (no extra syscall)
+                try:
+                    mtime = entry.stat().st_mtime
+                except OSError:
+                    continue  # Skip files that can't be stat'd
+                # Filter by minimum modification time if provided
+                if min_mtime is not None and mtime < min_mtime:
+                    continue
+                files.append((entry.path, mtime))
+    except OSError as e:
+        logger.warning(f"Error scanning directory {output_dir}: {e}")
+        return []
 
     files.sort(key=lambda x: x[1], reverse=True)
     return [f[0] for f in files]
@@ -128,110 +139,61 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
 # ============================================================================
 
 GALLERY_METADATA_FILE = "comfyui_gallery_metadata.json"
-_gallery_metadata_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
-# Use RLock for reentrant safety (same thread can acquire multiple times)
-_gallery_metadata_cache_lock = threading.RLock()
 
 
-def _get_metadata_path(output_dir: str) -> str:
-    """Get the path to the metadata file for a directory."""
-    # Validate input type - catch common error of passing widget instead of path
+def _validate_output_dir(output_dir: str) -> bool:
+    """Validate output_dir is a valid path string."""
     if not isinstance(output_dir, (str, os.PathLike)):
         logger.error(f"[Metadata] Invalid output_dir type: {type(output_dir).__name__} (expected str or PathLike)")
-        raise TypeError(f"output_dir must be a string or path-like object, not {type(output_dir).__name__}")
-    return os.path.join(output_dir, GALLERY_METADATA_FILE)
+        return False
+    return True
+
+
+def _get_gallery_metadata_file(output_dir: str):
+    """Get MetadataFile instance for gallery metadata (uses centralized caching)."""
+    from core.metadata_file import get_metadata_file
+    return get_metadata_file(output_dir, GALLERY_METADATA_FILE)
 
 
 def clear_gallery_metadata_cache(output_dir: str = None) -> None:
     """Clear the gallery metadata cache. Thread-safe."""
-    global _gallery_metadata_cache
-    with _gallery_metadata_cache_lock:
-        if output_dir:
-            _gallery_metadata_cache.pop(output_dir, None)
-        else:
-            _gallery_metadata_cache.clear()
+    from core.metadata_file import clear_metadata_file_cache
+    if output_dir:
+        clear_metadata_file_cache(output_dir, GALLERY_METADATA_FILE)
+    else:
+        # Clear all gallery metadata caches
+        clear_metadata_file_cache()
 
 
 def load_gallery_metadata(output_dir: str, use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
     """Load gallery metadata from the output directory.
 
-    Thread-safe: Uses lock for cache access. Handles TOCTOU race by
-    re-checking mtime after file read before caching.
+    Thread-safe via MetadataFile. Uses mtime-based cache invalidation.
 
     Returns:
         Dict with metadata, or empty dict if file missing/corrupted
     """
-    global _gallery_metadata_cache
-
-    if not output_dir:
+    if not output_dir or not _validate_output_dir(output_dir):
         return {}
 
     try:
-        metadata_path = _get_metadata_path(output_dir)
-    except Exception as e:
-        logger.error(f"[Metadata] Error getting metadata path for {output_dir}: {e}")
-        return {}
-
-    if not os.path.exists(metadata_path):
-        return {}
-
-    try:
-        # Get initial mtime for cache check
-        initial_mtime = os.path.getmtime(metadata_path)
-
-        # Check cache (thread-safe)
-        if use_cache:
-            with _gallery_metadata_cache_lock:
-                if output_dir in _gallery_metadata_cache:
-                    try:
-                        cached_mtime, cached_data = _gallery_metadata_cache[output_dir]
-                        if cached_mtime == initial_mtime and isinstance(cached_data, dict):
-                            return cached_data
-                    except Exception as e:
-                        logger.error(f"[Metadata] Error reading cache: {e}")
-
-        # Load from file (outside lock - file I/O can be slow)
-        with open(metadata_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # Validate data is a dict
-        if not isinstance(data, dict):
-            logger.warning(f"[Metadata] Invalid metadata format in {metadata_path}, expected dict but got {type(data)}")
-            return {}
-
-        # TOCTOU fix: Re-check mtime after reading to detect file changes during read
-        # Only cache if file hasn't changed since we started reading
-        final_mtime = os.path.getmtime(metadata_path)
-
-        # Update cache (thread-safe) only if mtime is stable
-        if final_mtime == initial_mtime:
-            with _gallery_metadata_cache_lock:
-                _gallery_metadata_cache[output_dir] = (final_mtime, data)
-        else:
-            logger.debug(f"[Metadata] File changed during read, not caching: {metadata_path}")
-
-        return data
-
-    except json.JSONDecodeError as e:
-        logger.error(f"[Metadata] Corrupted JSON in {metadata_path}: {e}")
-        return {}
+        metadata_file = _get_gallery_metadata_file(output_dir)
+        return metadata_file.load(default={}, use_cache=use_cache)
     except Exception as e:
         logger.error(f"[Metadata] Error loading gallery metadata from {output_dir}: {e}")
         return {}
 
 
 def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) -> bool:
-    """Save gallery metadata to the output directory."""
-    metadata_path = _get_metadata_path(output_dir)
+    """Save gallery metadata to the output directory (atomic write)."""
+    if not output_dir or not _validate_output_dir(output_dir):
+        return False
 
     try:
-        ensure_directory(output_dir)
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, default=str)
-        clear_gallery_metadata_cache(output_dir)
-        return True
+        metadata_file = _get_gallery_metadata_file(output_dir)
+        return metadata_file.save(metadata)
     except Exception as e:
-        logger.error(f"Error saving gallery metadata: {e}")
+        logger.error(f"[Metadata] Error saving gallery metadata: {e}")
         return False
 
 

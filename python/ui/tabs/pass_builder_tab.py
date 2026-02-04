@@ -5,27 +5,18 @@ Handles render scanning, pass detection, and pass building functionality.
 """
 
 import os
-
+import logging
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QThreadPool
 
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
+
 
 
 class PassBuilderTab(BaseTab):
     """Tab for building render passes."""
 
-    @property
-    def ui_file(self) -> str:
-        return "pass_builder.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "Pass Builder"
-
-    @property
-    def tab_id(self) -> str:
-        return "passbuilder"
+    TAB_CONFIG = TabConfig(ui_file="pass_builder.ui", tab_name="Pass Builder", tab_id="passbuilder")
 
     def connect_signals(self):
         """Connect pass builder tab signals."""
@@ -156,7 +147,7 @@ class PassBuilderTab(BaseTab):
         def on_error(error_msg, traceback_str):
             """Called when pass detection fails."""
             self.passes_spinner.stop()
-            self.log(f"Pass detection error: {error_msg}")
+            logging.error(f"Pass detection error: {error_msg}")
             self.ui.BuildPasses.setEnabled(False)
 
         # Use BaseTab helper for worker management
@@ -168,7 +159,7 @@ class PassBuilderTab(BaseTab):
         from core.user_preferences import get_all_default_passes
 
         selectedpasses = load_pass_config(passes_file)
-        self.log(f"Loaded passes from file: {selectedpasses}")
+        logging.info(f"Loaded passes from file: {selectedpasses}")
 
         # Select items in UI
         for i in range(self.ui.Passes.count()):
@@ -193,7 +184,7 @@ class PassBuilderTab(BaseTab):
 
         # Save pass selection for this render
         save_pass_config(self.app_state.passesfile, selected_passes)
-        self.log(f"Building with passes: {all_passes}")
+        logging.info(f"Building with passes: {all_passes}")
 
         # Get build location (Local or Farm)
         build_type = self._build_type
@@ -220,7 +211,7 @@ class PassBuilderTab(BaseTab):
 
         def on_result(result):
             """Called when build completes."""
-            self.log(f"Build completed: {result}")
+            logging.info(f"Build completed: {result}")
             self.update_status_with_spinner(
                 "Pass Builder: Build completed successfully",
                 StatusColors.SUCCESS,
@@ -230,7 +221,7 @@ class PassBuilderTab(BaseTab):
 
         def on_error(error_msg, traceback_str):
             """Called when build fails."""
-            self.log(f"Build failed: {error_msg}")
+            logging.error(f"Build failed: {error_msg}")
             self.update_status_with_spinner(
                 f"Pass Builder failed: {error_msg}",
                 StatusColors.ERROR,

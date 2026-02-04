@@ -26,7 +26,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QMenu
 
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +34,7 @@ logger = logging.getLogger(__name__)
 class CanvasTab(BaseTab):
     """Tab for collaborative infinite canvas workspace."""
 
-    @property
-    def ui_file(self) -> str:
-        return "canvas.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "Canvas"
-
-    @property
-    def tab_id(self) -> str:
-        return "canvas"
+    TAB_CONFIG = TabConfig(ui_file="canvas.ui", tab_name="Canvas", tab_id="canvas")
 
     def connect_signals(self):
         """Connect canvas tab signals."""
@@ -107,6 +97,9 @@ class CanvasTab(BaseTab):
         self._current_tool = "select"
         self._toolbar_collapsed = False
 
+        # Sync state
+        self._sync_viewport = False  # Off by default - users keep their own view
+
         # Create the canvas widget
         self._canvas = CollaborativeCanvas()
         self._canvas.set_tab(self)  # Set tab reference for gallery integration
@@ -151,6 +144,9 @@ class CanvasTab(BaseTab):
 
         # Setup canvas dropdown menu
         self._setup_canvas_dropdown()
+
+        # Setup viewport sync toggle button
+        self._setup_viewport_sync_toggle()
 
         # Load initial directory
         self._update_canvas_path()
@@ -353,7 +349,7 @@ class CanvasTab(BaseTab):
         from ui.canvas import CanvasMetadataManager
 
         # Get network path (shared location, not per-user)
-        network_path = safe_get_setting("comfyui_network_output_path", "")
+        network_path = safe_get_setting("network_output_path", "")
         if not network_path:
             logger.warning("No network output path configured for canvas")
             self._current_path = ""
@@ -512,6 +508,44 @@ class CanvasTab(BaseTab):
 
         self.ui.CanvasDropdown.setMenu(self._canvas_menu)
         self._canvas_menu.aboutToShow.connect(self._populate_canvas_menu)
+
+    def _setup_viewport_sync_toggle(self):
+        """Setup the viewport sync toggle button in the toolbar."""
+        # Create the toggle button
+        self._viewport_sync_btn = QtWidgets.QPushButton("View Sync")
+        self._viewport_sync_btn.setToolTip(
+            "Sync viewport (pan/zoom) with other users.\n"
+            "When ON, your view follows others' changes.\n"
+            "When OFF, you control your own view."
+        )
+        self._viewport_sync_btn.setCheckable(True)
+        self._viewport_sync_btn.setChecked(self._sync_viewport)
+        self._viewport_sync_btn.setMinimumSize(70, 24)
+        self._viewport_sync_btn.clicked.connect(self._on_toggle_viewport_sync)
+
+        # Insert after the Snap button in the secondary toolbar
+        layout = self.ui.CanvasToolbarContent.layout()
+        if layout:
+            # Find index of CanvasToggleSnap
+            snap_index = -1
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item and item.widget() == self.ui.CanvasToggleSnap:
+                    snap_index = i
+                    break
+
+            if snap_index >= 0:
+                layout.insertWidget(snap_index + 1, self._viewport_sync_btn)
+            else:
+                # Fallback: add to end before stretch
+                layout.addWidget(self._viewport_sync_btn)
+
+    def _on_toggle_viewport_sync(self):
+        """Toggle viewport sync on/off."""
+        self._sync_viewport = self._viewport_sync_btn.isChecked()
+        state = "ON" if self._sync_viewport else "OFF"
+        logger.debug(f"Viewport sync toggled: {state}")
+        self.show_status(f"View sync: {state}", "info")
 
     def _populate_canvas_menu(self):
         """Populate the canvas dropdown menu with available canvases."""
@@ -1161,7 +1195,7 @@ class CanvasTab(BaseTab):
         from core.settings_manager import get_setting
 
         try:
-            gallery_path = get_setting("comfyui_network_output_path")
+            gallery_path = get_setting("network_output_path")
             if not gallery_path:
                 logger.warning("Cannot copy dropped files: no gallery path configured")
                 return
@@ -1184,7 +1218,7 @@ class CanvasTab(BaseTab):
             if copied > 0:
                 try:
                     from core.event_bus import pipeline_events
-                    pipeline_events.gallery_refresh_requested.emit()
+                    pipeline_events.gallery_refresh_requested.emit(False)
                     self.show_status(f"Added {copied} file(s) to gallery", "success")
                 except ImportError:
                     pass
@@ -1195,6 +1229,12 @@ class CanvasTab(BaseTab):
     def _on_remote_state_changed(self, state: dict):
         """Handle remote canvas state change from sync manager."""
         logger.info(f"Remote canvas state changed by {state.get('modified_by', 'unknown')}")
+
+        # If viewport sync is off, remove viewport from state so user keeps their view
+        if not self._sync_viewport and 'viewport' in state:
+            state = dict(state)  # Copy to avoid modifying original
+            del state['viewport']
+
         # Reload canvas state - last-write-wins
         self._canvas.load_state(state)
 

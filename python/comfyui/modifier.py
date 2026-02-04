@@ -102,6 +102,10 @@ def modify_workflow_api_format(
             node_type = node_info.node_type if node_info else 'unknown'
             widget_type = node_info.widget_type if node_info else 'unknown'
 
+            # Check if this is a settings node with explicit widget_name
+            # (from SettingsNode with widget_name attribute)
+            widget_name = getattr(node_info, 'widget_name', None)
+
             # Apply value based on widget type
             if widget_type == 'text':
                 inputs['prompt'] = value
@@ -124,20 +128,53 @@ def modify_workflow_api_format(
                     node_data['mode'] = 4  # 4 = bypassed
                     logger.info(f"  Bypassed image loader node {node_id} ({node_type}) - no image provided")
             elif widget_type == 'int':
-                inputs['seed'] = value
-                inputs['noise_seed'] = value
-                logger.info(f"  Set int node {node_id} ({node_type}): {value}")
+                # For settings nodes, use explicit widget_name if available
+                if widget_name:
+                    try:
+                        inputs[widget_name] = int(value)
+                        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"  Failed to convert {value} to int for {widget_name}")
+                else:
+                    # Default behavior for editable nodes (seed-related)
+                    inputs['seed'] = value
+                    inputs['noise_seed'] = value
+                    logger.info(f"  Set int node {node_id} ({node_type}): {value}")
             elif widget_type == 'float':
-                inputs['cfg'] = value
-                logger.info(f"  Set float node {node_id} ({node_type}): {value}")
+                # For settings nodes, use explicit widget_name if available
+                if widget_name:
+                    try:
+                        inputs[widget_name] = float(value)
+                        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"  Failed to convert {value} to float for {widget_name}")
+                else:
+                    # Default behavior for editable nodes
+                    inputs['cfg'] = value
+                    logger.info(f"  Set float node {node_id} ({node_type}): {value}")
             elif widget_type == 'string':
-                inputs['filename_prefix'] = value
-                logger.info(f"  Set string node {node_id} ({node_type}): {value}")
+                if widget_name:
+                    inputs[widget_name] = value
+                    logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+                else:
+                    inputs['filename_prefix'] = value
+                    logger.info(f"  Set string node {node_id} ({node_type}): {value}")
+            elif widget_type == 'combo':
+                # Combo box - use widget_name if available
+                if widget_name:
+                    inputs[widget_name] = value
+                    logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+                else:
+                    logger.info(f"  Combo node {node_id} ({node_type}): {value} (no widget_name)")
             elif widget_type == 'toggle':
                 # Toggle/switch value (0 or 1)
                 int_value = 1 if value else 0
-                inputs['index'] = int_value
-                logger.info(f"  Set toggle node {node_id} ({node_type}): {int_value}")
+                if widget_name:
+                    inputs[widget_name] = int_value
+                    logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {int_value}")
+                else:
+                    inputs['index'] = int_value
+                    logger.info(f"  Set toggle node {node_id} ({node_type}): {int_value}")
             elif widget_type == '3d_model':
                 # 3D model file path
                 if value:

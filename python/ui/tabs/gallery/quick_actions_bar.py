@@ -37,12 +37,21 @@ class QuickActionsBar(QFrame):
     compare_to_source = Signal(str)  # Path of item to compare
     recreate_settings = Signal(str)  # Path of item to recreate from
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_comfyui_features: bool = True):
+        """
+        Initialize the quick actions bar.
+
+        Args:
+            parent: Parent widget
+            show_comfyui_features: If False, hide ComfyUI-specific buttons
+                (Use in ComfyUI, Copy Prompt, Recreate Settings)
+        """
         super().__init__(parent)
         self._selected_paths: List[str] = []
         self._is_visible = False
         self._fade_animation = None
         self._get_metadata_func: Optional[Callable] = None
+        self._show_comfyui_features = show_comfyui_features
 
         # Create opacity effect for fade animations (required for non-top-level widgets)
         self._opacity_effect = QGraphicsOpacityEffect(self)
@@ -82,20 +91,24 @@ class QuickActionsBar(QFrame):
 
         layout.addSpacing(8)
 
-        # Action buttons
-        self._use_in_comfyui_btn = self._create_action_button(
-            "Use in ComfyUI",
-            "Load selected images as ComfyUI inputs",
-            self._on_use_in_comfyui
-        )
-        layout.addWidget(self._use_in_comfyui_btn)
+        # Action buttons - ComfyUI-specific buttons only shown for elevated users
+        if self._show_comfyui_features:
+            self._use_in_comfyui_btn = self._create_action_button(
+                "Use in ComfyUI",
+                "Load selected images as ComfyUI inputs",
+                self._on_use_in_comfyui
+            )
+            layout.addWidget(self._use_in_comfyui_btn)
 
-        self._copy_prompt_btn = self._create_action_button(
-            "Copy Prompt",
-            "Copy the prompt text from this image",
-            self._on_copy_prompt
-        )
-        layout.addWidget(self._copy_prompt_btn)
+            self._copy_prompt_btn = self._create_action_button(
+                "Copy Prompt",
+                "Copy the prompt text from this image",
+                self._on_copy_prompt
+            )
+            layout.addWidget(self._copy_prompt_btn)
+        else:
+            self._use_in_comfyui_btn = None
+            self._copy_prompt_btn = None
 
         self._compare_btn = self._create_action_button(
             "Compare to Source",
@@ -104,12 +117,15 @@ class QuickActionsBar(QFrame):
         )
         layout.addWidget(self._compare_btn)
 
-        self._recreate_btn = self._create_action_button(
-            "Recreate Settings",
-            "Restore all ComfyUI settings from this image",
-            self._on_recreate_settings
-        )
-        layout.addWidget(self._recreate_btn)
+        if self._show_comfyui_features:
+            self._recreate_btn = self._create_action_button(
+                "Recreate Settings",
+                "Restore all ComfyUI settings from this image",
+                self._on_recreate_settings
+            )
+            layout.addWidget(self._recreate_btn)
+        else:
+            self._recreate_btn = None
 
         layout.addStretch()
 
@@ -170,10 +186,13 @@ class QuickActionsBar(QFrame):
         has_single = count == 1
         has_any = count > 0
 
-        self._use_in_comfyui_btn.setEnabled(has_any)
-        self._copy_prompt_btn.setEnabled(has_single)  # Only for single selection
+        if self._use_in_comfyui_btn:
+            self._use_in_comfyui_btn.setEnabled(has_any)
+        if self._copy_prompt_btn:
+            self._copy_prompt_btn.setEnabled(has_single)  # Only for single selection
         self._compare_btn.setEnabled(has_single)  # Only for single selection
-        self._recreate_btn.setEnabled(has_single)  # Only for single selection
+        if self._recreate_btn:
+            self._recreate_btn.setEnabled(has_single)  # Only for single selection
 
         # Show the bar
         self._show_with_fade()

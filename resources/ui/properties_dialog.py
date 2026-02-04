@@ -29,20 +29,30 @@ class PropertiesDialog(QDialog):
     
     copy_settings_requested = Signal(dict)  # Emit metadata to apply settings
     
-    def __init__(self, item_path: str, output_dir: str = None, metadata: Dict[str, Any] = None, parent=None):
+    def __init__(
+        self,
+        item_path: str,
+        output_dir: str = None,
+        metadata: Dict[str, Any] = None,
+        parent=None,
+        show_comfyui_features: bool = True
+    ):
         """Initialize the properties dialog.
-        
+
         Args:
             item_path: Full path to the image or model file
             output_dir: Output directory containing metadata (defaults to item's directory)
             metadata: Pre-loaded metadata dict (optional, will load if not provided)
             parent: Parent widget
+            show_comfyui_features: If False, hide ComfyUI-specific features like
+                "Apply Settings to ComfyUI" button
         """
         super().__init__(parent)
         self.item_path = item_path
         self.output_dir = output_dir or os.path.dirname(item_path)
         self._metadata = metadata
         self._is_model = self._check_if_model(item_path)
+        self._show_comfyui_features = show_comfyui_features
         
         self.setWindowTitle(f"Properties - {os.path.basename(item_path)}")
         self.setMinimumSize(700, 600)
@@ -128,12 +138,16 @@ class PropertiesDialog(QDialog):
         # Button bar
         button_layout = QHBoxLayout()
         button_layout.setSpacing(8)
-        
-        self.apply_settings_btn = QPushButton("Apply Settings to ComfyUI")
-        self.apply_settings_btn.setMinimumHeight(32)
-        self.apply_settings_btn.clicked.connect(self._apply_settings)
-        button_layout.addWidget(self.apply_settings_btn)
-        
+
+        # Only show ComfyUI buttons for users with elevated access
+        if self._show_comfyui_features:
+            self.apply_settings_btn = QPushButton("Apply Settings to ComfyUI")
+            self.apply_settings_btn.setMinimumHeight(32)
+            self.apply_settings_btn.clicked.connect(self._apply_settings)
+            button_layout.addWidget(self.apply_settings_btn)
+        else:
+            self.apply_settings_btn = None
+
         button_layout.addStretch()
         
         self.copy_path_btn = QPushButton("Copy Path")

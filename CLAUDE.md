@@ -8,21 +8,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - listing remaining steps clearly for the user to continue later OR
 - Deferring to a new task on task list so compact threshold can be hit.
 **Do not silently drop items, cut corners, or produce partial implementations. Every todo item created must be completed or explicitly handed off. "Good enough" is not acceptable when the full scope was requested.**
-**When adding new features or doing any larger changes, always ask clarifying questions to the user to create absolute certianty in task planning**
+**When adding new features or doing any larger changes, always ask clarifying questions to the user to create absolute certainty in task planning**
+
+## Multi-File Implementation Discipline
+
+When a feature touches more than 2-3 files, follow these rules to avoid introducing regressions:
+
+**Implement in layers, not all at once:**
+1. Data/config layer first (settings, state, models)
+2. Service/logic layer next (business logic, utilities)
+3. Signal wiring and integration
+4. UI layer last
+After each layer, pause and tell the user what existing flows could be affected and what to test before continuing.
+
+**Before removing or renaming anything:**
+- Grep the entire codebase for all references before deleting or renaming functions, methods, signals, or attributes
+- Update all call sites in the same change — never leave orphaned references
+- If tests reference removed code, update tests in the same pass
+
+**When adding new attribute usage to a class:**
+- Check that the attribute is initialized in `__init__` (or the class's setup method like `initialize()`)
+- This is the #1 source of runtime `AttributeError` bugs in this codebase
+
+**When modifying event handlers, signals, or mouse/keyboard interactions:**
+- Trace what other features share that event path (e.g., mouse events used by both pen tool and pan, keyboard events shared between gallery and canvas)
+- Test the adjacent features, not just the one being changed
+
+**Run the test suite at natural checkpoints** — after completing a logical layer of changes, not after every single edit.
 
 ## Skills
 
 This project has skills in `.claude/skills/`.
 
-| Skill | When to Apply |
-|-------|---------------|
-| **check-code** | **After writing any code** - verify threading, imports, settings patterns before presenting. MANDATORY. |
-| **trace-flow** | **Before modifying features** - trace "how does X work?" to understand before changing |
-| **debug-symptoms** | When debugging issues - maps symptoms to root causes |
-| **new-tab** | When scaffolding a new tab - follow the question checklist before generating code |
-| **new-node** | When adding ComfyUI node support - follow the question checklist before modifying node_configs.py |
+| Skill | When to Apply | Invocation |
+|-------|---------------|------------|
+| **check-code** | **After writing any code that affects:** - threading, imports, settings patterns before presenting. MANDATORY. | Auto |
+| **commit-message** | Generate well-formatted commit messages from staged/unstaged changes | `/commit-message` |
 
-Skills are loaded into context automatically. **Use them proactively** - don't wait to be asked.
+## Per-Module Documentation
+
+Detailed architecture and API reference for each module lives in CLAUDE.md files within the module directories. These are loaded automatically when working on files in those directories.
+
+| Module CLAUDE.md | Contents |
+|------------------|----------|
+| `python/core/CLAUDE.md` | utils, error_handling, validators, caching, metadata_file, config, logging_utils, subprocess_utils |
+| `python/comfyui/CLAUDE.md` | Workflow pipeline, editable nodes, export nodes, subgraphs, metadata, Deadline integration |
+| `python/ui/canvas/CLAUDE.md` | Canvas architecture, multi-canvas system, network sync, items, drawing, undo, export |
+| `python/ui/tabs/CLAUDE.md` | BaseTab pattern, helpers, PollingMixin, RenderScanMixin, tab registration |
+| `python/ui/tabs/gallery/CLAUDE.md` | Gallery managers, incremental updates, favorites, groups, keyboard shortcuts, thumbnail styling |
+| `resources/ui/CLAUDE.md` | dialog_helpers, file_dialogs, option_button, thumbnails, spinners, viewers, effects |
 
 ## Project Overview
 
@@ -51,30 +85,25 @@ python python/core/luma_tools.py
 
 ```
 python/
-├── core/         # luma_tools.py (main), config.py, state_manager.py, settings_manager.py, user_preferences.py
-│                 # error_handling.py, utils.py, import_utils.py, logging_utils.py, subprocess_utils.py
-├── deadline/     # submitter.py, poller.py, parser.py, utils.py - Deadline farm job management
-├── comfyui/      # workflow.py, editable.py, modifier.py, node_configs.py, metadata.py
-│                 # presets_manager.py, runner.py, server.py, client.py, ayon_publisher.py, utils.py
-├── geo/          # loader.py, threejs_viewer.py, animation_controller.py, animation_utils.py, thumbnail_service.py, thumbnail_renderer.py
-│   └── loaders/  # base.py, factory.py, open3d_loader.py, trimesh_loader.py, assimp_loader.py, usd_loader.py, smpl_loader.py
-├── ayon/         # service.py (Strategy Pattern), validators/
-├── services/     # pass_builder.py, render_service.py, mp4_maker.py, file_operations.py
-├── ui/           # spell_checker.py, gallery_prewarm.py
-│   └── tabs/     # base_tab.py, *_tab.py, gallery_loader.py, comfyui_polling.py (mixin)
-│       ├── gallery/  # base_manager.py, gallery_manager.py, selection_manager.py, viewer_manager.py
-│       │             # operations_manager.py, refresh_controller.py, ui_manager.py, favorites_manager.py, groups_panel.py
-│       ├── mixins/   # render_scan_mixin.py (shared render tab functionality)
-│       └── dialogs/  # feature_request_dialog.py
+├── core/         # App entry (luma_tools.py), config, state_manager, settings_manager, utils, error_handling
+├── deadline/     # Deadline farm job submission, polling, parsing
+├── comfyui/      # Workflow load/modify/submit pipeline, presets, server/client
+├── geo/          # 3D model loading (Strategy pattern), Three.js viewer, animation
+│   └── loaders/  # Format-specific loaders (USD, Trimesh, Assimp, Open3D, SMPL)
+├── ayon/         # AYON publishing service (Strategy pattern), validators
+├── services/     # pass_builder, render_service, mp4_maker, file_operations
+├── ui/
+│   ├── canvas/   # Collaborative infinite canvas with network sync
+│   └── tabs/     # BaseTab subclasses, one per tool tab
+│       ├── gallery/  # Decomposed manager architecture (see gallery/CLAUDE.md)
+│       └── mixins/   # Shared tab functionality (RenderScanMixin)
 resources/
-├── ui/           # workers.py, styles.py, image_viewers.py, small_widgets.py, dialogs.py
-│                 # file_dialogs.py, dialog_helpers.py, option_button.py, properties_dialog.py
-│                 # thumbnail_base.py, thumbnail_styles.py, splash_screen.py, spinners.py
+├── ui/           # Shared widgets, dialogs, styles, workers, thumbnails
 │   └── tabs/     # .ui files for each tab (Qt Designer)
-├── version.json  # App version
-└── changelog.md  # Release notes
-scripts/          # install_venv.py (venv installer), deploy.py (production deployment)
-tests/            # run_tests.py, conftest.py, test_*.py
+├── version.json
+└── changelog.md
+scripts/          # deploy.py, install_venv.py
+tests/
 ```
 
 ### Import Patterns
@@ -104,7 +133,7 @@ from ui_components import Worker  # resources/ui/ in PYTHONPATH
 ## Architecture Patterns
 
 ### Tabs (BaseTab)
-Inherit from `ui/tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`ui/tabs/__init__.py`) with `restrict_key` for access control (matches keys in `global_settings.json` → `restricted_tabs` to hide tabs from non-admin users).
+Inherit from `ui/tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`ui/tabs/__init__.py`) with `restrict_key` for access control. See `python/ui/tabs/CLAUDE.md` for BaseTab helpers and mixin patterns.
 
 ### Threading (CRITICAL)
 
@@ -150,7 +179,7 @@ with self._cache_lock:
 
 - **User:** `~/.luma_tools/settings.json` (window state, tab order, last dirs)
 - **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs)
-- **Key global setting:** `comfyui_network_output_path` — network path for ComfyUI outputs AND centralized logs (currently `W:/LumaRND/tmp/ComfyUI_OUT`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
+- **Key global setting:** `network_output_path` — network path for outputs AND centralized logs (currently `W:/LumaRND/tmp/ComfyUI_OUT`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 
@@ -204,35 +233,14 @@ if app_state.has_shot_context():   # True when launched with AYON context
 
 State groups: command line args (jobname, shot, task, shotpath, user), Pass Builder (renders, channels, searchpath, frames), MP4 (mp4_renders, mp4_searchpath), rePublish (republish_renders), ComfyUI (comfyui_workflow_path, comfyui_iterate_mode), standalone_mode.
 
-### 3D Model Loaders (Strategy Pattern)
-`geo/loaders/factory.py`: `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL). Each loader in `geo/loaders/` implements `BaseModelLoader` ABC.
-
-### Gallery Managers
-`ui/tabs/gallery/` decomposes gallery functionality: `selection_manager.py` (multi-select), `viewer_manager.py` (viewer lifecycle), `operations_manager.py` (batch ops), `refresh_controller.py` (file watching), `ui_manager.py` (sort/filter/view mode), `favorites_manager.py` (likes/groups), `groups_panel.py` (sidebar UI).
-
-**Incremental Updates:** Gallery uses incremental display to avoid flashing when new items arrive. `display_items(items, view_mode, incremental=True)` adds only new items without clearing existing widgets. Stacked view uses `_update_stacked_items_incrementally()`.
-
-**Item Metadata:** Gallery items have `has_metadata` field indicating if ComfyUI metadata was found (for styling), `is_input` for source images, and `job_prefix` for grouping.
-
-**Likes & Groups:** Users can like items and organize them into color-coded groups. Data stored in `_gallery_favorites.json` per output directory.
-
-**Gallery Keyboard Shortcuts:** `L` (toggle like), `G` (quick add to group), `Ctrl+G` (group management dialog), `1-9` (quick assign to group by number).
-
-**Thumbnail Styling:** `resources/ui/thumbnail_styles.py` centralizes thumbnail appearance via `ThumbnailStyler`. Border/background color priority: group color > liked color > stack color > metadata-based default. New items use a pulsing "NEW" badge (blue) rather than border color changes.
-
-### Mixin Pattern
-`PollingMixin` (`ui/tabs/comfyui_polling.py`): Add via inheritance, call `_init_polling_state()` in `initialize()`, then `_start_iterate_polling()` or `_start_batch_polling(job_ids)`.
-
-`RenderScanMixin` (`ui/tabs/mixins/render_scan_mixin.py`): For tabs working with render sequences. Provides source selection (for_comp/raw/custom), version handling, render scanning.
-```python
-class MyRenderTab(RenderScanMixin, BaseTab):
-    # Widget names to override
-    _render_list_widget = "MyRendersList"
-    _source_button = "MySourceButton"
-    # app_state attributes
-    _renders_attr = "my_renders"
-    _searchpath_attr = "my_searchpath"
-```
+### Domain-Specific Architecture
+- **ComfyUI:** Workflow load/modify/submit pipeline. See `python/comfyui/CLAUDE.md`
+- **Canvas:** Collaborative infinite canvas with network sync. See `python/ui/canvas/CLAUDE.md`
+- **Gallery:** Decomposed manager architecture. See `python/ui/tabs/gallery/CLAUDE.md`
+- **3D Loaders:** Strategy pattern in `geo/loaders/factory.py` — `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL)
+- **Pass Building:** `find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
+- **MP4 Generation:** Scan renders → configure quality/burn-in → `services/mp4_maker.py` (FFmpeg)
+- **File Scanners:** Strategy pattern in `services/scanners.py` — `RenderScanner`, `get_scanner(type)`, `scan_files(dir, type)`
 
 ## Configuration
 
@@ -243,23 +251,6 @@ class MyRenderTab(RenderScanMixin, BaseTab):
 **Key Settings:** ACES-ACEScg colorspace, sRGB view, 25 FPS, Deadline pool=luma, group=processing_group
 
 **Standalone Mode:** Limited functionality when AYON unavailable (no OIIO/FFmpeg)
-
-## Key Workflows
-
-### ComfyUI
-1. Select preset, scan for `_editable` suffix nodes (dynamic UI), select images, configure params
-2. Submit to Deadline (each frame = different seed), `comfyui/runner.py` executes on farm
-3. **Module decomposition:** `workflow.py` (load/format detection/API conversion), `editable.py` (node extraction), `modifier.py` (parameter modification), `service.py` (re-exports all public APIs)
-4. **Editable Nodes:** See `EDITABLE_NODE_CONFIGS` in `comfyui/node_configs.py`
-5. **Subgraph Expansion:** `expand_subgraphs()` expands UUID component nodes into concrete nodes
-6. **Export Nodes:** Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param), add to `WIDGET_MAPPINGS`
-7. **Metadata:** `comfyui/metadata.py` stores/loads job metadata (job_prefix, is_output, source_images) in `_gallery_metadata.json` per directory
-
-### Pass Building
-`find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
-
-### MP4 Generation
-Scan renders → configure quality/burn-in → `services/mp4_maker.py` (FFmpeg)
 
 ## Development
 
@@ -308,7 +299,7 @@ logger = logging.getLogger(__name__)
 ```
 Use `logger.info()`, `logger.warning()`, `logger.error()`. Never use `print()` for new code.
 
-**Log Files:** All logs are centralized on the network path from `comfyui_network_output_path` global setting:
+**Log Files:** All logs are centralized on the network path from `network_output_path` global setting:
 ```
 <network_path>/_logs/
 ├── users/    # Main app logs: luma_tools_<user>_<hostname>_<timestamp>.log
@@ -356,6 +347,12 @@ python\venv\Scripts\python.exe python\core\luma_tools.py --tab gallery --auto-cl
 # After app closes, read the latest log from network path
 powershell -Command "Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName }"
 ```
+
+**Bug triage — pre-existing vs. introduced:**
+When a bug appears during testing, **always determine if it's pre-existing before debugging:**
+1. Check if the error's code path was touched by current changes (git diff)
+2. If untouched, it's pre-existing — flag it to the user and move on rather than spending rounds fixing unrelated bugs
+3. Only invest debugging time in bugs caused by the current changes
 
 **Debugging workflow:**
 1. Run the app with `--tab <target> --auto-close <seconds>` in background
@@ -454,139 +451,3 @@ cache.set("key", value, ttl=60)
 
 ### Thread Safety
 Always use `threading.RLock()` (not `Lock()`) for thread-safe access. RLock allows the same thread to acquire the lock multiple times without deadlock.
-
-## Utilities
-
-**core/utils.py:** Common helpers:
-- `ensure_directory(path)` - create directory if needed (prefer over `os.makedirs`)
-- `load_json(path, default)` / `save_json(path, data)` - with error handling and atomic writes
-- `remove_prefix(s, prefix)` / `remove_suffix(s, suffix)` - Python <3.9 compatible
-- `normalize_path(path)` - Windows backslash → forward slash for AYON/Deadline
-- `extract_render_name(filename, strip_frame_padding=False)` - extract render name from sequence filename
-
-**core/error_handling.py:** Consistent error handling utilities:
-- `@safe_operation(name, return_on_error)` - decorator for functions that may fail
-- `with handle_errors(name, reraise=False)` - context manager for error blocks
-- `log_error(operation, error, variable)` - consistent error logging format
-- `format_error(operation, error, variable, include_traceback)` - format error message string
-
-**core/validators.py:** Path and data validation utilities:
-- `is_valid_file(path)`, `is_valid_directory(path)` - boolean checks
-- `validate_file(path)`, `validate_directory(path)` - raise ValidationError on failure
-- `validate_file_for_operation(path, operation)` - returns bool, logs errors
-- `safe_list_dir(path, pattern)` - list directory with error handling
-
-**core/caching.py:** Reusable caching patterns:
-- `@cached_with_ttl(seconds)` - decorator for time-based cache invalidation
-- `ThreadSafeCache(max_size)` - thread-safe dictionary cache with optional size limit
-- `CachedProperty(ttl)` - property descriptor with optional expiration
-
-**core/metadata_file.py:** Thread-safe JSON metadata file handling:
-- `MetadataFile(directory, filename)` - class for JSON files with mtime-based caching
-- `get_metadata_file(directory, filename)` - factory for reusing MetadataFile instances
-
-**core/config.py:** `UIColors` (background, text, accent, status colors, `GROUP_COLORS` for gallery groups), `UIStyles` (reusable stylesheet snippets)
-
-**core/import_utils.py:** `safe_import()`, `safe_import_multiple()` - graceful optional imports with `*_AVAILABLE` flags
-
-**resources/ui/dialog_helpers.py:** Wrapper functions for QMessageBox (use instead of raw QMessageBox):
-- `confirm_action(title, message, parent, detail, default_yes)` → bool - Yes/No confirmation
-- `show_warning(title, message, parent, detail)` - warning dialog
-- `show_error(title, message, parent, detail)` - error dialog
-- `show_info(title, message, parent, detail)` - info dialog
-
-**resources/ui/file_dialogs.py:** File dialogs with last-directory memory per context:
-- `browse_file_with_memory()`, `browse_directory_with_memory()`, `save_file_with_memory()`, `browse_multiple_files_with_memory()`
-- Context-specific helpers: `browse_workflow_file()`, `browse_images()`, `save_mp4_file()`, `browse_comfyui_output_dir()`, `browse_hdri_file()`, `browse_custom_renders_dir()`
-
-**resources/ui/option_button.py:** Reusable popup menu button pattern:
-```python
-from option_button import OptionButtonManager, IndexedOptionButtonManager
-
-self._source_manager = OptionButtonManager(
-    button=self.ui.SourceButton,
-    options=[("For Comp", "for_comp"), ("Raw", "raw")],
-    initial_value="for_comp",
-    on_changed=self._on_source_changed,
-    label_prefix="Source: "
-)
-# Access: self._source_manager.value, self._source_manager.set_value("raw")
-```
-
-**core/subprocess_utils.py:** Subprocess execution utilities (Windows-compatible console hiding):
-- `run_command(cmd, capture_output, text, timeout, cwd, shell)` - execute command, return CompletedProcess
-- `run_command_with_result(cmd, log_prefix, timeout)` - execute command, return (success, stdout, stderr) tuple
-- `start_process(cmd, cwd, stdout, stderr, text, encoding, env)` - start long-running process
-
-**core/logging_utils.py:** Centralized logging utilities (paths, streams, setup):
-- `get_network_output_path()` - get network path from global settings (cached)
-- `get_network_log_dir(subdirectory)` - get network log directory with fallback
-- `get_local_log_dir()` - get local fallback directory (~/.luma_tools/logs/)
-- `clear_path_cache()` - clear cached paths after settings changes
-- `TeeStream` - stream that writes to both original stream and logging function
-- `TeeWriter` - stream that writes timestamped lines to log file and console
-- `setup_file_logging(log_prefix, subdirectory, include_hostname, include_username, redirect_stdout, tee_mode)` - setup file logging
-- `cleanup_old_logs(log_dir, prefix, keep_count)` - remove old log files
-- `setup_exception_hook()` - install global exception handler
-
-**deadline/** Deadline farm job management package:
-- `deadline.submitter` - Job submission: `submit_comfyui_to_deadline()`, `submit_comfyui_to_deadline_server_mode()`, `submit_comfyui_job()`
-- `deadline.poller` - Status polling: `poll_deadline_job_status()`, `get_queue_info()`, `find_user_running_jobs()`, `cancel_deadline_jobs()`
-- `deadline.parser` - Output parsing: `parse_deadline_output()`, `parse_job_info()`, `extract_job_id()`, `is_job_not_found()`
-- `deadline.utils` - Utilities: `run_deadline_command()`, `submit_deadline_job()`
-
-```python
-from deadline import submit_comfyui_job, poll_deadline_job_status
-from deadline.utils import submit_deadline_job
-from deadline.parser import parse_deadline_output, extract_job_id
-```
-
-**comfyui/utils.py:** ComfyUI utilities:
-- `resolve_comfyui_paths(comfyui_path, mode)` - get python exe and main.py for embedded/portable/standalone modes
-- `check_server_health()`, `wait_for_server()` - server management
-
-**geo/animation_controller.py:** `AnimationController` (playback state, timing), `AnimationTransportBar` (play/pause/loop UI)
-
-**services/scanners.py:** File scanner strategy pattern:
-- `RenderScanner`, `HIPScanner`, `CompScanner`, `ImageScanner`, `VideoScanner`, `ModelScanner`, `USDScanner`
-- `get_scanner(scanner_type)` - factory function for scanner instances
-- `scan_files(directory, scanner_type)` - convenience function for one-line scanning
-
-```python
-from services.scanners import RenderScanner, get_scanner
-scanner = RenderScanner()
-files = scanner.scan("/path/to/renders")
-# Or use factory:
-files = get_scanner("render").scan("/path/to/renders")
-```
-
-**ui/tabs/base_tab.py Helpers:**
-- `TAB_CONFIG` class attribute - define tab metadata using `TabConfig(ui_file, tab_name, tab_id)` dataclass
-- `self.start_worker(func, *args, on_result=..., on_error=..., on_progress=..., worker_kwargs={})` - simplified worker thread management (use `worker_kwargs` for keyword arguments to function)
-- `self.spinner_context(message, success_msg)` - context manager for spinner lifecycle
-- `self.show_status(message, level)` - status bar updates (info/success/warning/error)
-- `self.update_status_with_spinner(message, color, start=True)` - status bar with spinner control
-- `self.pulse_button(widget)` - safe button animation
-- `self.on_worker_success()` / `self.on_worker_error()` - standard completion handlers
-
-```python
-from ui.tabs.base_tab import BaseTab, TabConfig
-
-class MyTab(BaseTab):
-    TAB_CONFIG = TabConfig(ui_file="my_tab.ui", tab_name="My Tab")
-
-    def do_work(self):
-        with self.spinner_context("Processing...", success_msg="Done!"):
-            heavy_computation()
-```
-
-**ui/tabs/gallery/base_manager.py:** Base class for gallery manager components with same helpers as BaseTab
-
-**resources/ui/ Additional Modules:**
-- `properties_dialog.py` - Comprehensive properties dialog for gallery items (file info, metadata, workflow details, relationships)
-- `thumbnail_base.py` - Base class for thumbnail widgets with disk/memory cache management
-- `thumbnail_styles.py` - `ThumbnailStyler` for consistent thumbnail appearance (borders, badges, colors)
-- `splash_screen.py` - Application splash screen with async loading progress
-- `spinners.py` - Loading spinner widgets for async operations
-- `batch_selector.py` - Batch/range selection widget 
-- `effects.py` - UI animation effects (pulse, glow, fade)

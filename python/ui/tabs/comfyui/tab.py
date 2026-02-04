@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap
 
-from ..base_tab import BaseTab
+from ..base_tab import BaseTab, TabConfig
 from dialog_helpers import confirm_action
 from .polling import PollingMixin
 from .ui_manager import ComfyUIWidgetManager
@@ -40,17 +40,7 @@ pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 class ComfyUITab(PollingMixin, BaseTab):
     """Tab for ComfyUI AI image generation."""
 
-    @property
-    def ui_file(self) -> str:
-        return "comfyui.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "ComfyUI"
-
-    @property
-    def tab_id(self) -> str:
-        return "comfyui"
+    TAB_CONFIG = TabConfig(ui_file="comfyui.ui", tab_name="ComfyUI", tab_id="comfyui")
 
     def connect_signals(self):
         """Connect ComfyUI tab signals."""
@@ -289,7 +279,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Update the network path display label."""
         from core.settings_manager import get_setting
 
-        network_path = get_setting("comfyui_network_output_path")
+        network_path = get_setting("network_output_path")
         if network_path:
             self.ui.ComfyUINetworkPathDisplay.setText(network_path)
             self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #aaaaaa;")
@@ -568,13 +558,8 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
         from comfyui.editable import extract_editable_nodes
-        from comfyui.presets_manager import (
-            get_comfyui_workflow_presets,
-            save_comfyui_workflow_preset,
-            update_comfyui_workflow_preset,
-            delete_comfyui_workflow_preset
-        )
-        from .preset_editor import PresetEditorDialog
+        from comfyui.presets_manager import get_comfyui_workflow_presets
+        from .model_dialog import ModelDialog
 
         if not self.state_manager.current_preset_name:
             self.show_status("No preset selected", "error")
@@ -594,73 +579,34 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         current_name = self.state_manager.current_preset_name
 
-        # Create and show preset editor dialog
-        dialog = PresetEditorDialog(
+        # Create and show model dialog (handles save internally)
+        dialog = ModelDialog(
             parent=self.main_window,
-            preset_name=current_name,
+            model_name=current_name,
             preset_data=preset,
             main_window=self.main_window,
             extract_editable_nodes_func=extract_editable_nodes
         )
 
         if dialog.exec_() == QDialog.Accepted:
-            result = dialog.get_result()
-            if not result:
-                return
-
-            new_name = result["name"]
-            new_path = result["path"]
-            new_iteratable = result["iteratable"]
-            new_note = result["note"]
-            new_full_restart = result["full_restart"]
-            new_node_overrides = result["node_overrides"]
-            new_is_multi = result["is_multi"]
-            new_workflows = result["workflows"]
-            new_output_type = result.get("output_type", "image")
-
-            # Check if name changed and new name already exists
-            if new_name != current_name:
-                if new_name in presets:
-                    self.show_status(f"A preset named '{new_name}' already exists", "error")
-                    return
-
-                # Delete old preset and create new one with new name
-                delete_comfyui_workflow_preset(current_name)
-                save_comfyui_workflow_preset(
-                    new_name, new_path,
-                    iteratable=new_iteratable,
-                    note=new_note,
-                    full_restart=new_full_restart,
-                    node_overrides=new_node_overrides,
-                    is_multi=new_is_multi,
-                    workflows=new_workflows,
-                    output_type=new_output_type
-                )
-                self.state_manager.current_preset_name = new_name
-                self.state_manager.current_selected_workflow = None
-                self.ui.ComfyUIChoosePreset.setText(self._get_preset_display_name(new_name))
-                self.show_status(f"Preset renamed to '{new_name}'", "success")
-            else:
-                # Just update the existing preset
-                update_comfyui_workflow_preset(
-                    current_name,
-                    workflow_path=new_path,
-                    iteratable=new_iteratable,
-                    note=new_note,
-                    full_restart=new_full_restart,
-                    node_overrides=new_node_overrides,
-                    is_multi=new_is_multi,
-                    workflows=new_workflows,
-                    output_type=new_output_type
-                )
-                self.show_status(f"Preset '{current_name}' updated", "success")
+            self.show_status(f"Model '{current_name}' updated", "success")
 
             # Update auto-add to canvas visibility based on output type
             self._update_auto_add_canvas_visibility()
 
             # Refresh the UI with the (possibly new) preset name
-            self.state_manager.current_selected_workflow = None
-            self._select_preset(self.state_manager.current_preset_name)
+            # Re-fetch presets in case name changed
+            presets = get_comfyui_workflow_presets()
+
+            # Find the current preset (may have been renamed)
+            if current_name not in presets:
+                # Name was changed, find the new name by looking for the preset
+                # that was just modified (most recent save)
+                # For simplicity, just refresh the combo
+                self._refresh_presets_combo()
+            else:
+                self.state_manager.current_selected_workflow = None
+                self._select_preset(self.state_manager.current_preset_name)
 
     # =========================================================================
     # EDITABLE NODES
@@ -682,6 +628,12 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Use widget manager to refresh widgets
         self.widget_manager.refresh_editable_nodes(
+            self.app_state.comfyui_workflow_path,
+            node_overrides
+        )
+
+        # Also refresh settings nodes (collapsible section)
+        self.widget_manager.refresh_settings_nodes(
             self.app_state.comfyui_workflow_path,
             node_overrides
         )
@@ -852,7 +804,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from core.settings_manager import get_setting
 
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
-        network_path_ok = bool(get_setting("comfyui_network_output_path"))
+        network_path_ok = bool(get_setting("network_output_path"))
         self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
 
     # =========================================================================
@@ -876,13 +828,13 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Get network output path - always use user subfolder
-        network_output_dir = get_setting("comfyui_network_output_path")
+        network_output_dir = get_setting("network_output_path")
         if not network_output_dir:
             self.show_status("Network output path not configured in Settings", "error")
             return
 
         network_output_dir = os.path.join(network_output_dir, self.app_state.user)
-        self.log(f"[ComfyUI] Using user subfolder: {network_output_dir}")
+        logger.info(f"[ComfyUI] Using user subfolder: {network_output_dir}")
 
         # Get generation count from UI
         generation_count = self.ui.ComfyUIGenerationCount.value()
@@ -893,7 +845,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             per_frame = get_workflow_estimated_time_per_frame(self.state_manager.current_preset_name)
             if per_frame:
                 total_estimate = per_frame * generation_count
-                self.log(f"[ComfyUI] Estimated time: ~{format_elapsed_time(total_estimate)} ({generation_count} frame(s))")
+                logger.info(f"[ComfyUI] Estimated time: ~{format_elapsed_time(total_estimate)} ({generation_count} frame(s))")
 
         # Collect editable values using widget manager
         editable_values, selected_image_count = self.widget_manager.collect_editable_values()
@@ -910,9 +862,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.app_state.comfyui_iterate_mode = use_iterate_mode
 
         if use_iterate_mode:
-            self.log(f"[ComfyUI] Iterate mode enabled (1 image selected, workflow supports iteration)")
+            logger.debug("[ComfyUI] Iterate mode enabled (1 image selected, workflow supports iteration)")
         else:
-            self.log(f"[ComfyUI] Batch mode ({selected_image_count} images selected)")
+            logger.debug(f"[ComfyUI] Batch mode ({selected_image_count} images selected)")
 
         # Build job name from shot/project
         job_name = f"{self.app_state.shot}_luma_tools" if self.app_state.shot else "luma_tools_job"
@@ -931,7 +883,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Get seed value
         base_seed = self.ui.ComfyUISeed.value()
 
-        self.log(f"[ComfyUI] Network output path: {network_output_dir}")
+        logger.info(f"[ComfyUI] Network output path: {network_output_dir}")
 
         # Get full_restart from workflow config
         full_restart = workflow_config.get("full_restart", False) if workflow_config else False
@@ -973,7 +925,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         from ui_components import StatusColors
 
         try:
-            self.log(f"[ComfyUI] on_result called with: {result}")
+            logger.debug(f"[ComfyUI] on_result called with: {result}")
             job_ids, error_msg = result
             ctx = self._submit_context
 
@@ -985,7 +937,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                     f"ComfyUI: {job_count} job(s) submitted",
                     StatusColors.SUCCESS
                 )
-                self.log(f"ComfyUI submission complete: {job_ids}")
+                logger.info(f"ComfyUI submission complete: {job_ids}")
 
                 # Increment model usage count for rating system
                 if self.state_manager.current_preset_name:
@@ -993,7 +945,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                     increment_model_usage(self.state_manager.current_preset_name)
 
                 # Start polling for job completion
-                self.log(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
+                logger.info(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
                 if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
                     self._start_iterate_polling(job_ids[0], ctx["network_output_dir"])
                 else:
@@ -1007,8 +959,8 @@ class ComfyUITab(PollingMixin, BaseTab):
                 )
         except Exception as e:
             import traceback
-            self.log(f"[ComfyUI] ERROR in on_result: {e}")
-            self.log(traceback.format_exc())
+            logger.error(f"[ComfyUI] ERROR in on_result: {e}")
+            logger.error(traceback.format_exc())
 
     def _on_submit_error(self, error_tuple):
         """Handle ComfyUI job submission error."""
@@ -1022,9 +974,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             f"ComfyUI error: {error_msg}",
             StatusColors.ERROR
         )
-        self.log(f"ComfyUI submission error: {error_msg}")
+        logger.error(f"ComfyUI submission error: {error_msg}")
         if traceback_str:
-            self.log(traceback_str)
+            logger.error(traceback_str)
 
     def _on_submit_progress(self, progress, message):
         """Handle ComfyUI job submission progress."""
@@ -1072,13 +1024,13 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Debug: show what metadata keys we received
-        self.log(f"[ComfyUI] Applying settings from metadata. Keys: {list(metadata.keys())}")
+        logger.debug(f"[ComfyUI] Applying settings from metadata. Keys: {list(metadata.keys())}")
         if 'source_images' in metadata:
-            self.log(f"[ComfyUI]   source_images: {metadata.get('source_images')}")
+            logger.debug(f"[ComfyUI]   source_images: {metadata.get('source_images')}")
         if 'input_image' in metadata:
-            self.log(f"[ComfyUI]   input_image: {metadata.get('input_image')}")
+            logger.debug(f"[ComfyUI]   input_image: {metadata.get('input_image')}")
         if '_output_dir' in metadata:
-            self.log(f"[ComfyUI]   _output_dir: {metadata.get('_output_dir')}")
+            logger.debug(f"[ComfyUI]   _output_dir: {metadata.get('_output_dir')}")
 
         # Use state manager to apply metadata
         pending_values = self.state_manager.apply_settings_from_metadata(
@@ -1089,7 +1041,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             # Store pending values and try to apply them
             self.widget_manager.pending_editable_values = pending_values
             self.widget_manager._apply_pending_editable_values()
-            self.log(f"[ComfyUI] Applied {len(pending_values)} editable value(s)")
+            logger.debug(f"[ComfyUI] Applied {len(pending_values)} editable value(s)")
 
         # Restore source images/models to input widgets
         self._restore_source_files_from_metadata(metadata)
@@ -1119,11 +1071,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         source_models = metadata.get('source_models') or []
 
         if not output_dir:
-            self.log("[ComfyUI] Cannot restore source files - no output directory in metadata")
+            logger.warning("[ComfyUI] Cannot restore source files - no output directory in metadata")
             return
 
         if not source_images and not source_models:
-            self.log("[ComfyUI] No source files found in metadata")
+            logger.debug("[ComfyUI] No source files found in metadata")
             return
 
         # Build full paths for source files
@@ -1135,7 +1087,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             if os.path.exists(full_path):
                 image_paths.append(full_path)
             else:
-                self.log(f"[ComfyUI] Source image not found: {full_path}")
+                logger.warning(f"[ComfyUI] Source image not found: {full_path}")
 
         model_paths = []
         for basename in source_models:
@@ -1145,7 +1097,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             if os.path.exists(full_path):
                 model_paths.append(full_path)
             else:
-                self.log(f"[ComfyUI] Source model not found: {full_path}")
+                logger.warning(f"[ComfyUI] Source model not found: {full_path}")
 
         # Find and populate input widgets
         for node_id, container in self.widget_manager.dynamic_widgets.items():
@@ -1161,19 +1113,19 @@ class ComfyUITab(PollingMixin, BaseTab):
             if node.widget_type == 'image' and image_paths:
                 if hasattr(input_widget, 'set_images'):
                     input_widget.set_images(image_paths)
-                    self.log(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
                 elif hasattr(input_widget, 'add_images'):
                     if hasattr(input_widget, 'clear_images'):
                         input_widget.clear_images()
                     input_widget.add_images(image_paths)
-                    self.log(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
 
             # Add models to 3D model input widgets
             elif node.widget_type == '3d_model' and model_paths:
                 if hasattr(input_widget, 'setText'):
                     # For single model input (text field)
                     input_widget.setText(model_paths[0])
-                    self.log(f"[ComfyUI] Restored source model: {model_paths[0]}")
+                    logger.info(f"[ComfyUI] Restored source model: {model_paths[0]}")
 
     # =========================================================================
     # STATE PERSISTENCE

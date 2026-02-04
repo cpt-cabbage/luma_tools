@@ -108,7 +108,7 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
     """Set up file logging for the persistent server.
 
     Writes logs to the network path from global settings
-    (comfyui_network_output_path/_logs/) for accessibility from all machines.
+    (network_output_path/_logs/) for accessibility from all machines.
 
     Args:
         global_settings: Loaded global settings dict
@@ -141,7 +141,7 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
 
     # From global settings network path
     if not log_dir and global_settings:
-        network_path = global_settings.get('comfyui_network_output_path', '')
+        network_path = global_settings.get('network_output_path', '')
         if network_path and os.path.isdir(network_path):
             log_dir = os.path.join(network_path, '_logs', 'server')
             ensure_directory(log_dir)

@@ -87,6 +87,27 @@ def _safe_glob(pattern):
         return None
 
 
+def _get_cached_tool_path(setting_key: str) -> str:
+    """Get a cached tool path from user settings (for standalone fallback).
+
+    Uses lazy import to avoid circular dependency with settings_manager.
+
+    Args:
+        setting_key: The setting key (e.g., "cached_oiio_path")
+
+    Returns:
+        The cached path if it exists and is valid, otherwise None
+    """
+    try:
+        from .settings_manager import safe_get_setting
+        cached = safe_get_setting(setting_key, "")
+        if cached and os.path.isfile(cached):
+            return cached
+    except Exception:
+        pass
+    return None
+
+
 # ============================================================================
 # TOOL PATHS (may be None in standalone mode)
 # ============================================================================
@@ -104,18 +125,44 @@ if _AYON_DIR:
     AYON_CONSOLE_ROOT = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
     AYON_CONSOLE = _safe_glob(AYON_CONSOLE_ROOT)
 else:
-    # Standalone mode - try to find tools via PATH or common locations
+    # Standalone mode - try to find tools via PATH, then fall back to cached paths
     OIIO_ROOT = None
-    OIIO_PATH = shutil.which("oiiotool")
+    OIIO_PATH = shutil.which("oiiotool") or _get_cached_tool_path("cached_oiio_path")
     OIIO_INFO_ROOT = None
-    OIIO_INFO_PATH = shutil.which("iinfo")
+    OIIO_INFO_PATH = shutil.which("iinfo") or _get_cached_tool_path("cached_oiio_info_path")
     FFMPEG_ROOT = None
-    FFMPEG_PATH = shutil.which("ffmpeg")
+    FFMPEG_PATH = shutil.which("ffmpeg") or _get_cached_tool_path("cached_ffmpeg_path")
     AYON_CONSOLE_ROOT = None
     AYON_CONSOLE = None
 
 # Deadline - try both AYON path and system PATH
 DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR) if _DEADLINE_DIR else shutil.which("deadlinecommand")
+
+
+def cache_tool_paths():
+    """Cache working tool paths to user settings for standalone mode fallback.
+
+    Call this during app startup when paths are successfully discovered.
+    Only caches paths that are valid and exist.
+    """
+    try:
+        from .settings_manager import safe_get_setting, safe_set_setting
+
+        paths_to_cache = [
+            ("cached_oiio_path", OIIO_PATH),
+            ("cached_oiio_info_path", OIIO_INFO_PATH),
+            ("cached_ffmpeg_path", FFMPEG_PATH),
+        ]
+
+        for setting_key, current_path in paths_to_cache:
+            if current_path and os.path.isfile(current_path):
+                # Only update if path changed
+                cached = safe_get_setting(setting_key, "")
+                if cached != current_path:
+                    safe_set_setting(setting_key, current_path)
+    except Exception:
+        pass  # Silently fail during early startup
+
 
 # UI paths (relative to luma_tools root directory)
 UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "main_window.ui")
@@ -445,7 +492,7 @@ def get_network_output_path() -> str:
         Network path string, or empty string if not configured.
     """
     from core.settings_manager import safe_get_setting
-    return safe_get_setting("comfyui_network_output_path", "")
+    return safe_get_setting("network_output_path", "")
 
 
 def is_mp4_add_to_gallery_enabled() -> bool:

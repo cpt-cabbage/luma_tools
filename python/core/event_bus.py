@@ -133,6 +133,50 @@ class PipelineEventBus(QObject):
     # Args: None - listeners should re-query their items
     favorites_changed = Signal()
 
+    # =========================================================================
+    # Viewer Events (for image viewers to request gallery actions)
+    # =========================================================================
+
+    # Emitted to toggle like status for an item
+    # Args: path (str), output_dir (str)
+    toggle_item_like = Signal(str, str)
+
+    # Emitted to add an item to a group
+    # Args: path (str), group_id (str), output_dir (str)
+    add_item_to_group = Signal(str, str, str)
+
+    # Emitted to create a new group with an item
+    # Args: path (str), output_dir (str)
+    create_item_group = Signal(str, str)
+
+    # Emitted to show properties dialog for an item
+    # Args: path (str), output_dir (str)
+    show_item_properties = Signal(str, str)
+
+    # Emitted to publish an item to AYON
+    # Args: path (str)
+    publish_item = Signal(str)
+
+    # Emitted to view the input/source image for an output
+    # Args: input_path (str)
+    view_input_image = Signal(str)
+
+    # Emitted to request groups list (response comes via groups_list_response)
+    # Args: output_dir (str), requester_id (str)
+    request_groups_list = Signal(str, str)
+
+    # Response signal with groups list
+    # Args: requester_id (str), groups (list of dict with 'id', 'name', 'color')
+    groups_list_response = Signal(str, list)
+
+    # Emitted to check if an item is liked (response via item_like_status)
+    # Args: path (str), output_dir (str), requester_id (str)
+    request_item_like_status = Signal(str, str, str)
+
+    # Response with like status
+    # Args: requester_id (str), path (str), is_liked (bool)
+    item_like_status = Signal(str, str, bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._active_jobs: Dict[str, JobInfo] = {}

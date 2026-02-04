@@ -28,7 +28,7 @@ def get_gallery_output_path() -> Optional[str]:
         from core.settings_manager import get_setting
         from core.state_manager import app_state
 
-        network_path = get_setting("comfyui_network_output_path")
+        network_path = get_setting("network_output_path")
         if not network_path:
             return None
 

@@ -72,7 +72,6 @@ class PollingMixin:
     - self.ui: The UI object with ComfyUI widgets
     - self.main_window: Main window reference
     - self.app_state: Application state
-    - self.log(): Logging method
     - self.widget_manager: UI manager with dynamic_widgets dict
     - self.animator: Animation controller
     - self.show_status(): Status display method
@@ -152,7 +151,7 @@ class PollingMixin:
                             logger.warning(f"Failed to add {path} to canvas: {e}")
 
         if added_count > 0:
-            self.log(f"[Canvas] Auto-added {added_count} image(s) to canvas")
+            logger.info(f"[Canvas] Auto-added {added_count} image(s) to canvas")
             self.show_status(f"Added {added_count} image(s) to Canvas", "success")
 
     # =========================================================================
@@ -170,9 +169,9 @@ class PollingMixin:
         self._iterate_total_tasks = self.ui.ComfyUIGenerationCount.value()
         self._iterate_start_time = time.time()
 
-        self.log(f"[Iterate] Starting polling for job {job_id}")
-        self.log(f"[Iterate] Network output dir: {network_output_dir}")
-        self.log(f"[Iterate] Expected jobs: {self._iterate_total_tasks}")
+        logger.info(f"[Iterate] Starting polling for job {job_id}")
+        logger.info(f"[Iterate] Network output dir: {network_output_dir}")
+        logger.info(f"[Iterate] Expected jobs: {self._iterate_total_tasks}")
 
         self.main_window.start_status_spinner()
 
@@ -220,7 +219,7 @@ class PollingMixin:
         # Store worker to prevent garbage collection
         self._iterate_poll_worker = Worker(poll_deadline_job_status, job_id, output_dir)
         self._iterate_poll_worker.signals.result.connect(self._on_iterate_poll_result)
-        self._iterate_poll_worker.signals.error.connect(lambda msg, tb: self.log(f"Poll error: {msg}"))
+        self._iterate_poll_worker.signals.error.connect(lambda msg, tb: logger.warning(f"Poll error: {msg}"))
         QThreadPool.globalInstance().start(self._iterate_poll_worker)
 
     def _on_iterate_poll_result(self, result):
@@ -248,7 +247,7 @@ class PollingMixin:
         # Track when rendering actually starts
         if status in ("Active", "Rendering") and self._iterate_rendering_start_time is None:
             self._iterate_rendering_start_time = time.time()
-            self.log(f"[Iterate Poll] Rendering started at {time.time()}")
+            logger.debug(f"[Iterate Poll] Rendering started at {time.time()}")
 
         # Infer model loading if rendering but no progress for a while
         # If we've been rendering for >5 seconds with no task progress, assume loading models
@@ -256,20 +255,20 @@ class PollingMixin:
             rendering_elapsed = time.time() - self._iterate_rendering_start_time
             if rendering_elapsed > 5:  # After 5 seconds with no progress, assume loading models
                 is_loading_model = True
-                self.log(f"[Iterate Poll] Inferring model loading (rendering for {int(rendering_elapsed)}s with no progress)")
+                logger.debug(f"[Iterate Poll] Inferring model loading (rendering for {int(rendering_elapsed)}s with no progress)")
 
         # If we got task progress, models are loaded - reset the flag for next job
         if task_progress and task_progress.get('current_node', 0) > 0:
             self._iterate_rendering_start_time = None
 
-        self.log(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{display_total}")
+        logger.debug(f"[Iterate Poll] Status: {status}, Progress: {progress}%, Tasks: {completed_tasks}/{display_total}")
 
         elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
         elapsed_str = format_elapsed_time(elapsed)
 
         if completed_tasks > self._iterate_completed_tasks:
             new_frames = completed_tasks - self._iterate_completed_tasks
-            self.log(f"[Iterate] {new_frames} new job(s) rendered! ({completed_tasks}/{display_total})")
+            logger.info(f"[Iterate] {new_frames} new job(s) rendered! ({completed_tasks}/{display_total})")
             self._iterate_completed_tasks = completed_tasks
             self._refresh_gallery_for_new_frames("[Iterate]")
 
@@ -400,7 +399,7 @@ class PollingMixin:
             from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / frames
             record_workflow_execution_time(self._current_preset_name, per_frame_time)
-            self.log(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")
+            logger.info(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")
 
         self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
         self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
@@ -426,25 +425,25 @@ class PollingMixin:
         network_dir = self._iterate_network_output_dir
         job_start_time = self._iterate_start_time
 
-        self.log("[Iterate] Looking for output files...")
-        self.log(f"[Iterate] Network dir: {network_dir}")
-        self.log(f"[Iterate] Job start time: {job_start_time}")
+        logger.debug("[Iterate] Looking for output files...")
+        logger.debug(f"[Iterate] Network dir: {network_dir}")
+        logger.debug(f"[Iterate] Job start time: {job_start_time}")
 
         if network_dir:
             deleted = cleanup_job_temp_files(network_dir)
             if deleted:
-                self.log(f"[Iterate] Cleaned up {deleted} temp files from network dir")
+                logger.debug(f"[Iterate] Cleaned up {deleted} temp files from network dir")
 
         if network_dir:
             # Filter by modification time to only get files created AFTER this job started
             output_files = get_job_output_files(network_dir, min_mtime=job_start_time)
             if output_files:
-                self.log(f"[Iterate] Found {len(output_files)} files created after job started")
+                logger.info(f"[Iterate] Found {len(output_files)} files created after job started")
 
         if output_files:
             latest_image = output_files[0]
             self.app_state.comfyui_last_generated_image = latest_image
-            self.log(f"[Iterate] Latest output: {latest_image}")
+            logger.info(f"[Iterate] Latest output: {latest_image}")
 
             # Emit job completion event and update session stats
             if EVENT_BUS_AVAILABLE:
@@ -481,7 +480,7 @@ class PollingMixin:
 
             gallery_tab = self.main_window.get_tab("gallery")
             if gallery_tab:
-                self.log("[Iterate] Triggering gallery refresh...")
+                logger.debug("[Iterate] Triggering gallery refresh...")
                 gallery_tab._on_refresh(show_status=False)
 
             # Update model thumbnail in background
@@ -490,7 +489,7 @@ class PollingMixin:
             # Auto-add to canvas if enabled
             self._auto_add_to_canvas(output_files)
         else:
-            self.log("[Iterate] No output files found in either directory")
+            logger.warning("[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
             self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
             self.animator.update_status_animated(
@@ -565,7 +564,7 @@ class PollingMixin:
         total_jobs = len(job_ids)
         total_frames = total_jobs * self._batch_generation_count
 
-        self.log(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
+        logger.info(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
 
         self.update_status_with_spinner(
             f"ComfyUI Batch: {total_jobs} submission(s), {total_frames} job(s) - Waiting for workers...",
@@ -624,7 +623,7 @@ class PollingMixin:
 
     def _on_batch_poll_error(self, job_id, error_msg):
         """Handle poll error for a single job."""
-        self.log(f"[Batch] Poll error for {job_id}: {error_msg}")
+        logger.warning(f"[Batch] Poll error for {job_id}: {error_msg}")
         self._batch_poll_results[job_id] = {"status": "PollError", "error_message": error_msg}
         self._batch_poll_pending_results -= 1
         if self._batch_poll_pending_results <= 0:
@@ -640,7 +639,7 @@ class PollingMixin:
             pending = self._batch_poll_pending_results - 1
             logger.debug(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}")
 
-            self.log(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
+            logger.debug(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
             self._batch_poll_results[job_id] = result
             self._batch_poll_pending_results -= 1
 
@@ -657,7 +656,7 @@ class PollingMixin:
 
             from ui_components import StatusColors
 
-            self.log(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
+            logger.debug(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
             had_new_frames = False
             total_new_frames = 0  # Track total new frames for gallery count
             total_jobs = len(self._batch_job_ids)
@@ -687,23 +686,23 @@ class PollingMixin:
                 prev_completed = self._batch_completed_tasks.get(job_id, 0)
                 if completed_tasks > prev_completed:
                     new_frames = completed_tasks - prev_completed
-                    self.log(f"[Batch] Job {job_id}: {new_frames} new job(s) rendered! ({completed_tasks}/{total_tasks})")
+                    logger.info(f"[Batch] Job {job_id}: {new_frames} new job(s) rendered! ({completed_tasks}/{total_tasks})")
                     self._batch_completed_tasks[job_id] = completed_tasks
                     had_new_frames = True
                     total_new_frames += new_frames
 
-                self.log(f"[Batch Poll] Job {job_id}: {status}, Tasks: {completed_tasks}/{total_tasks}")
+                logger.debug(f"[Batch Poll] Job {job_id}: {status}, Tasks: {completed_tasks}/{total_tasks}")
 
                 if status == "Completed":
                     self._batch_pending_jobs.discard(job_id)
                     self._batch_completed_tasks[job_id] = self._batch_total_tasks.get(job_id, 1)
-                    self.log(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
+                    logger.info(f"[Batch] Job {job_id} completed, {len(self._batch_pending_jobs)} remaining")
 
                 elif status == "Failed":
                     self._batch_pending_jobs.discard(job_id)
                     self._batch_failed_jobs.add(job_id)
                     error_msg = result.get("error_message", "Unknown error")
-                    self.log(f"[Batch] Job {job_id} FAILED: {error_msg}")
+                    logger.error(f"[Batch] Job {job_id} FAILED: {error_msg}")
 
             if had_new_frames:
                 self._refresh_gallery_for_new_frames("[Batch]")
@@ -816,8 +815,8 @@ class PollingMixin:
             import traceback
             import sys
             logger.error(f"ERROR in _process_collected_poll_results: {e}", exc_info=True)
-            self.log(f"[Batch] ERROR in _process_collected_poll_results: {e}")
-            self.log(traceback.format_exc())
+            logger.error(f"[Batch] ERROR in _process_collected_poll_results: {e}")
+            logger.error(traceback.format_exc())
 
     def _stop_batch_polling(self):
         """Stop the batch poll timer."""
@@ -855,15 +854,15 @@ class PollingMixin:
         completed_frames = sum(self._batch_completed_tasks.values())
 
         if had_failures:
-            self.log("[Batch] Jobs finished with failures!")
+            logger.warning("[Batch] Jobs finished with failures!")
         else:
-            self.log("[Batch] All jobs completed successfully!")
-        self.log(f"[Batch] Network dir: {network_dir}")
+            logger.info("[Batch] All jobs completed successfully!")
+        logger.debug(f"[Batch] Network dir: {network_dir}")
 
         if network_dir:
             deleted = cleanup_job_temp_files(network_dir)
             if deleted:
-                self.log(f"[Batch] Cleaned up {deleted} temp files from network dir")
+                logger.debug(f"[Batch] Cleaned up {deleted} temp files from network dir")
 
         failed_count = len(self._batch_failed_jobs)
         total_count = len(self._batch_job_ids)
@@ -871,7 +870,7 @@ class PollingMixin:
 
         # Special handling for recovery mode - jobs completed while app was closed
         if was_recovery and self._batch_poll_count <= 1:
-            self.log("[Recovery] All batch jobs were already complete")
+            logger.info("[Recovery] All batch jobs were already complete")
             self.show_status(f"{total_count} ComfyUI job(s) completed while app was closed", "success")
             self.animator.update_status_animated(
                 f"Recovery: {total_count} job(s) already completed",
@@ -935,7 +934,7 @@ class PollingMixin:
 
         gallery_tab = self.main_window.get_tab("gallery")
         if gallery_tab:
-            self.log("[Batch] Triggering gallery refresh...")
+            logger.debug("[Batch] Triggering gallery refresh...")
             gallery_tab._on_refresh(show_status=False)
 
         # Auto-add to canvas if enabled
@@ -968,7 +967,7 @@ class PollingMixin:
             job_ids.extend(list(self._batch_pending_jobs))
 
         if not job_ids:
-            self.log("[Cancel] No running jobs to cancel")
+            logger.info("[Cancel] No running jobs to cancel")
             self.show_status("No running jobs to cancel", "warning")
             return
 
@@ -980,7 +979,7 @@ class PollingMixin:
         ):
             return
 
-        self.log(f"[Cancel] Cancelling {len(job_ids)} jobs...")
+        logger.info(f"[Cancel] Cancelling {len(job_ids)} jobs...")
         self.ui.ComfyUICancelJobs.setEnabled(False)
         self.ui.ComfyUICancelJobs.setText("Cancelling...")
 
@@ -1012,15 +1011,15 @@ class PollingMixin:
         self.ui.ComfyUIIterateProgress.setValue(0)
 
         if failed > 0:
-            self.log(f"[Cancel] Cancelled {succeeded} jobs, {failed} failed")
+            logger.warning(f"[Cancel] Cancelled {succeeded} jobs, {failed} failed")
             for err in errors:
-                self.log(f"[Cancel] Error: {err}")
+                logger.warning(f"[Cancel] Error: {err}")
             self.animator.update_status_animated(
                 f"Cancelled {succeeded} jobs, {failed} failed",
                 StatusColors.WARNING
             )
         else:
-            self.log(f"[Cancel] Successfully cancelled {succeeded} jobs")
+            logger.info(f"[Cancel] Successfully cancelled {succeeded} jobs")
             self.animator.update_status_animated(
                 f"Cancelled {succeeded} job(s)",
                 StatusColors.WARNING
@@ -1028,7 +1027,7 @@ class PollingMixin:
 
     def _on_cancel_error(self, msg, tb):
         """Handle cancel jobs error."""
-        self.log(f"[Cancel] Error: {msg}")
+        logger.error(f"[Cancel] Error: {msg}")
         self.ui.ComfyUICancelJobs.setText("Cancel Jobs")
         self.ui.ComfyUICancelJobs.setEnabled(True)
         self.show_status(f"Failed to cancel jobs: {msg}", "error")
@@ -1052,13 +1051,13 @@ class PollingMixin:
         """Refresh gallery and request attention for new jobs."""
         gallery_tab = self.main_window.get_tab("gallery")
         if gallery_tab:
-            self.log(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
+            logger.debug(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
             # Invalidate cache for current user so new items are detected when switching back
             # This handles the case where user is viewing another user's gallery when renders complete
             current_user = getattr(self.app_state, 'user', None)
             if current_user and hasattr(gallery_tab, '_user_cache') and current_user in gallery_tab._user_cache:
                 del gallery_tab._user_cache[current_user]
-                self.log(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
+                logger.debug(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
             gallery_tab._on_refresh(show_status=False)
             gallery_tab.signals.request_attention.emit()
 
@@ -1082,7 +1081,7 @@ class PollingMixin:
                 "start_time": self._iterate_start_time,
             }
             save_comfyui_running_jobs(job_state)
-            self.log("[Recovery] Saved iterate mode job state for recovery")
+            logger.info("[Recovery] Saved iterate mode job state for recovery")
 
         elif self._batch_poll_timer and self._batch_poll_timer.isActive():
             # Batch mode
@@ -1095,14 +1094,14 @@ class PollingMixin:
                 "start_time": self._batch_start_time,
             }
             save_comfyui_running_jobs(job_state)
-            self.log("[Recovery] Saved batch mode job state for recovery")
+            logger.info("[Recovery] Saved batch mode job state for recovery")
 
     def _clear_running_job_state(self):
         """Clear persisted running job state."""
         from core.user_preferences import save_comfyui_running_jobs
 
         save_comfyui_running_jobs(None)
-        self.log("[Recovery] Cleared persisted job state")
+        logger.debug("[Recovery] Cleared persisted job state")
 
     def _attempt_job_recovery(self):
         """Attempt to recover and resume polling for jobs that were running when app closed.
@@ -1126,9 +1125,9 @@ class PollingMixin:
             job_state = get_comfyui_running_jobs()
             if job_state:
                 mode = job_state.get("mode")
-                self.log(f"[Recovery] Found persisted {mode} mode job state from previous session")
+                logger.info(f"[Recovery] Found persisted {mode} mode job state from previous session")
         except Exception as e:
-            self.log(f"[Recovery] Error reading persisted job state: {e}")
+            logger.error(f"[Recovery] Error reading persisted job state: {e}")
             logger.error(f"[Recovery] Error reading persisted job state: {e}", exc_info=True)
 
         # Always check Deadline for running jobs from the current user
@@ -1156,14 +1155,14 @@ class PollingMixin:
             current_user = os.environ.get("USERNAME", os.environ.get("USER", ""))
 
         if not current_user:
-            self.log("[Recovery] Cannot determine current user, skipping Deadline check")
+            logger.warning("[Recovery] Cannot determine current user, skipping Deadline check")
             # Fall back to persisted state recovery only
             if persisted_state:
                 self._recover_from_persisted_state(persisted_state)
             return
 
-        self.log(f"[Recovery] Checking Deadline for running jobs from user: {current_user}")
-        self.log("[Recovery] Starting async Deadline query (this runs in background)...")
+        logger.info(f"[Recovery] Checking Deadline for running jobs from user: {current_user}")
+        logger.debug("[Recovery] Starting async Deadline query (this runs in background)...")
 
         # Store persisted state on instance to avoid lambda capture issues
         self._recovery_persisted_state = persisted_state
@@ -1175,7 +1174,7 @@ class PollingMixin:
                     "job_recovery", "Checking Deadline for running jobs"
                 )
         except Exception as e:
-            self.log(f"[Recovery] Warning: Could not start activity: {e}")
+            logger.debug(f"[Recovery] Warning: Could not start activity: {e}")
 
         # Run the Deadline query in background to avoid blocking UI
         # Store worker to prevent garbage collection
@@ -1190,7 +1189,7 @@ class PollingMixin:
             persisted_state = getattr(self, '_recovery_persisted_state', None)
             self._on_deadline_jobs_found(running_jobs, persisted_state)
         except Exception as e:
-            self.log(f"[Recovery] Error in recovery handler: {e}")
+            logger.error(f"[Recovery] Error in recovery handler: {e}")
             logger.error(f"[Recovery] Error in recovery handler: {e}", exc_info=True)
         finally:
             # Clean up stored state
@@ -1202,7 +1201,7 @@ class PollingMixin:
             persisted_state = getattr(self, '_recovery_persisted_state', None)
             self._on_deadline_query_error(error_msg, traceback_str, persisted_state)
         except Exception as e:
-            self.log(f"[Recovery] Error in error handler: {e}")
+            logger.error(f"[Recovery] Error in error handler: {e}")
             logger.error(f"[Recovery] Error in error handler: {e}", exc_info=True)
         finally:
             # Clean up stored state
@@ -1210,7 +1209,7 @@ class PollingMixin:
 
     def _on_deadline_query_error(self, error_msg, traceback_str, persisted_state):
         """Handle error from Deadline job query."""
-        self.log(f"[Recovery] Error checking Deadline for user jobs: {error_msg}")
+        logger.error(f"[Recovery] Error checking Deadline for user jobs: {error_msg}")
         logger.error(traceback_str)
 
         # Update status
@@ -1219,7 +1218,7 @@ class PollingMixin:
                 self.animator.end_activity("job_recovery")
                 self.animator.show_warning(f"Could not check Deadline: {error_msg}", show_in_status=True)
         except Exception as e:
-            self.log(f"[Recovery] Warning: Could not update status: {e}")
+            logger.debug(f"[Recovery] Warning: Could not update status: {e}")
 
         # Fall back to persisted state recovery
         if persisted_state:
@@ -1232,13 +1231,13 @@ class PollingMixin:
             if self.animator:
                 self.animator.end_activity("job_recovery")
         except Exception as e:
-            self.log(f"[Recovery] Warning: Could not end activity: {e}")
+            logger.debug(f"[Recovery] Warning: Could not end activity: {e}")
 
         try:
             running_jobs = running_jobs or []
 
             if not running_jobs:
-                self.log("[Recovery] No running jobs found on Deadline for current user")
+                logger.info("[Recovery] No running jobs found on Deadline for current user")
                 # Show status
                 try:
                     if self.animator:
@@ -1247,11 +1246,11 @@ class PollingMixin:
                             "Ready", StatusColors.INFO
                         )
                 except Exception as e:
-                    self.log(f"[Recovery] Warning: Could not update status: {e}")
+                    logger.debug(f"[Recovery] Warning: Could not update status: {e}")
 
                 # If we have persisted state but no running jobs, the job must have completed
                 if persisted_state:
-                    self.log("[Recovery] Persisted state exists but no running jobs - clearing state")
+                    logger.info("[Recovery] Persisted state exists but no running jobs - clearing state")
                     self._clear_running_job_state()
                     # Job completed while app was closed - show notification
                     mode = persisted_state.get("mode") if persisted_state else None
@@ -1261,9 +1260,9 @@ class PollingMixin:
                         self.show_status("Previous ComfyUI batch completed while app was closed", "success")
                 return
 
-            self.log(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")
+            logger.info(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")
             for job in running_jobs:
-                self.log(f"[Recovery]   - {job['job_id']}: {job['name']} ({job['status']})")
+                logger.info(f"[Recovery]   - {job['job_id']}: {job['name']} ({job['status']})")
 
             # Get job IDs from persisted state for comparison
             persisted_job_ids = set()
@@ -1282,13 +1281,13 @@ class PollingMixin:
             # Check if we found jobs that weren't in persisted state
             new_jobs = deadline_job_ids - persisted_job_ids
             if new_jobs:
-                self.log(f"[Recovery] Found {len(new_jobs)} job(s) not in persisted state - recovering from Deadline")
+                logger.info(f"[Recovery] Found {len(new_jobs)} job(s) not in persisted state - recovering from Deadline")
 
             # Recover using jobs found on Deadline
             self._recover_from_deadline_jobs(running_jobs, persisted_state)
 
         except Exception as e:
-            self.log(f"[Recovery] Error checking Deadline for user jobs: {e}")
+            logger.error(f"[Recovery] Error checking Deadline for user jobs: {e}")
             logger.error(f"[Recovery] Error checking Deadline for user jobs: {e}", exc_info=True)
             # Fall back to persisted state recovery
             if persisted_state:
@@ -1330,7 +1329,7 @@ class PollingMixin:
             job_id = job_ids[0]
             job = running_jobs[0]
 
-            self.log(f"[Recovery] Recovering single job {job_id} in iterate mode")
+            logger.info(f"[Recovery] Recovering single job {job_id} in iterate mode")
 
             self._iterate_network_output_dir = network_output_dir
             self._iterate_total_tasks = generation_count
@@ -1363,7 +1362,7 @@ class PollingMixin:
             self.show_status("Recovered running ComfyUI job from Deadline", "success")
         else:
             # Multiple jobs - use batch mode recovery
-            self.log(f"[Recovery] Recovering {len(job_ids)} jobs in batch mode")
+            logger.info(f"[Recovery] Recovering {len(job_ids)} jobs in batch mode")
 
             # Build total_tasks dict
             total_tasks = {}
@@ -1428,23 +1427,23 @@ class PollingMixin:
             network_output_dir = job_state.get("network_output_dir")
 
             if not job_id:
-                self.log("[Recovery] No job ID found, clearing state")
+                logger.warning("[Recovery] No job ID found, clearing state")
                 self._clear_running_job_state()
                 return
 
             # Check job status asynchronously
-            self.log(f"[Recovery] Checking status of iterate job {job_id} (async)")
+            logger.info(f"[Recovery] Checking status of iterate job {job_id} (async)")
 
             def on_status_result(status_result):
                 try:
                     self._handle_iterate_recovery_status(job_state, status_result)
                 except Exception as e:
-                    self.log(f"[Recovery] Error handling iterate recovery: {e}")
+                    logger.error(f"[Recovery] Error handling iterate recovery: {e}")
                     logger.error(f"[Recovery] Error handling iterate recovery: {e}", exc_info=True)
                     self._clear_running_job_state()
 
             def on_status_error(msg, tb):
-                self.log(f"[Recovery] Error checking iterate job status: {msg}")
+                logger.error(f"[Recovery] Error checking iterate job status: {msg}")
                 self._clear_running_job_state()
 
             # Store worker to prevent garbage collection
@@ -1461,14 +1460,14 @@ class PollingMixin:
                 generation_count = job_state.get("generation_count", 1)
 
                 if not job_ids:
-                    self.log("[Recovery] No job IDs found, clearing state")
+                    logger.warning("[Recovery] No job IDs found, clearing state")
                     self._clear_running_job_state()
                     return
 
                 # Fast recovery: Start polling immediately with all job IDs
                 # The polling mechanism will discover which jobs are still active/completed
                 # This avoids blocking the UI with synchronous status checks for each job
-                self.log(f"[Recovery] Fast-recovering {len(job_ids)} batch job(s), starting async polling...")
+                logger.info(f"[Recovery] Fast-recovering {len(job_ids)} batch job(s), starting async polling...")
 
                 # Show immediate feedback
                 from ui_components import StatusColors
@@ -1504,10 +1503,10 @@ class PollingMixin:
                 # Start immediate async poll to discover job states
                 self._poll_batch_jobs()
 
-                self.log("[Recovery] Batch mode polling started - job states will be discovered async")
+                logger.info("[Recovery] Batch mode polling started - job states will be discovered async")
                 self.show_status(f"Recovering {len(job_ids)} ComfyUI job(s)...", "success")
             except Exception as e:
-                self.log(f"[Recovery] Error recovering batch jobs: {e}")
+                logger.error(f"[Recovery] Error recovering batch jobs: {e}")
                 logger.error(f"[Recovery] Error recovering batch jobs: {e}", exc_info=True)
                 self._clear_running_job_state()
 
@@ -1526,7 +1525,7 @@ class PollingMixin:
         status = status_result.get("status", "Unknown")
 
         if status in ("Active", "Rendering", "Queued", "Pending"):
-            self.log(f"[Recovery] Job {job_id} is still {status}, resuming polling")
+            logger.info(f"[Recovery] Job {job_id} is still {status}, resuming polling")
 
             # Restore iterate mode state and resume polling
             self._iterate_network_output_dir = network_output_dir
@@ -1556,10 +1555,10 @@ class PollingMixin:
             # Start immediate poll to get current status
             self._poll_iterate_job()
 
-            self.log("[Recovery] Iterate mode polling resumed successfully")
+            logger.info("[Recovery] Iterate mode polling resumed successfully")
             self.show_status(f"Recovered running ComfyUI job (status: {status})", "success")
         else:
-            self.log(f"[Recovery] Job {job_id} is {status}, clearing state")
+            logger.info(f"[Recovery] Job {job_id} is {status}, clearing state")
             self._clear_running_job_state()
             if status == "Completed":
                 self.show_status("Previous ComfyUI job completed while app was closed", "success")

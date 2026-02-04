@@ -18,22 +18,26 @@ import json
 import socket
 import getpass
 import logging
+import threading
 from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Module-level tracking of TeeWriter instances for proper cleanup
+# Protected by lock for thread safety
 _active_tee_writers: list = []
+_tee_writers_lock = threading.RLock()
 
 
 def cleanup_tee_writers():
     """Clean up all active TeeWriter instances (close log files)."""
     global _active_tee_writers
-    for writer in _active_tee_writers:
-        if hasattr(writer, 'close'):
-            writer.close()
-    _active_tee_writers.clear()
+    with _tee_writers_lock:
+        for writer in _active_tee_writers:
+            if hasattr(writer, 'close'):
+                writer.close()
+        _active_tee_writers.clear()
 
 
 # =============================================================================
@@ -88,7 +92,7 @@ def get_network_output_path() -> Optional[str]:
         return _network_output_path_cache if _network_output_path_cache else None
 
     settings = _load_global_settings_raw()
-    path = settings.get('comfyui_network_output_path', '')
+    path = settings.get('network_output_path', '')
 
     if path and os.path.isdir(path):
         _network_output_path_cache = path
@@ -102,7 +106,7 @@ def get_network_log_dir(subdirectory: str = "users") -> Optional[str]:
     """
     Get network log directory from global settings.
 
-    Reads comfyui_network_output_path from global settings and returns
+    Reads network_output_path from global settings and returns
     the _logs/{subdirectory} path if available and writable.
 
     Args:
@@ -292,8 +296,9 @@ def setup_file_logging(
                 stderr_tee = TeeWriter(sys.__stderr__, log_file)
                 sys.stdout = stdout_tee
                 sys.stderr = stderr_tee
-                # Track for cleanup
-                _active_tee_writers.extend([stdout_tee, stderr_tee])
+                # Track for cleanup (thread-safe)
+                with _tee_writers_lock:
+                    _active_tee_writers.extend([stdout_tee, stderr_tee])
 
                 # Update logging StreamHandler to use the tee'd stderr
                 for handler in logging.getLogger().handlers:

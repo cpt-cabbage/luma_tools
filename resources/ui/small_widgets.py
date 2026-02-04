@@ -1119,11 +1119,14 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             except Exception as e:
                 logger.warning("Could not load metadata for stack top item: %s", e)
             
+            from core.state_manager import app_state
+
             dialog = PropertiesDialog(
-                item_path, 
-                output_dir, 
+                item_path,
+                output_dir,
                 metadata=metadata,
-                parent=parent_window
+                parent=parent_window,
+                show_comfyui_features=app_state.has_elevated_access
             )
             
             dialog.exec()

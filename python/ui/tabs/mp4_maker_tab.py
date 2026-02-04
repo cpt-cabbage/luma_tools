@@ -10,12 +10,15 @@ from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import QTimer
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
+import logging
 
 
 class MP4MakerTab(RenderScanMixin, BaseTab):
     """Tab for generating MP4 files from render sequences."""
+
+    TAB_CONFIG = TabConfig(ui_file="mp4_maker.ui", tab_name="MP4 Maker", tab_id="mp4maker")
 
     # RenderScanMixin widget configuration
     _render_list_widget = "MP4RendersList"
@@ -30,18 +33,6 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
     _renders_attr = "mp4_renders"
     _searchpath_attr = "mp4_searchpath"
     _custom_path_attr = "mp4_custom_path"
-
-    @property
-    def ui_file(self) -> str:
-        return "mp4_maker.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "MP4 Maker"
-
-    @property
-    def tab_id(self) -> str:
-        return "mp4maker"
 
     def connect_signals(self):
         """Connect MP4 maker tab signals."""
@@ -99,7 +90,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.app_state.mp4_startframe = render_seq.start()
         self.app_state.mp4_endframe = render_seq.end()
 
-        self.log(f"MP4 Maker: Selected render from '{subdir}' - frames {self.app_state.mp4_startframe} to {self.app_state.mp4_endframe}")
+        logging.info(f"MP4 Maker: Selected render from '{subdir}' - frames {self.app_state.mp4_startframe} to {self.app_state.mp4_endframe}")
 
         # Automatically set output path to user's Videos folder
         framename = render_seq.frame(render_seq.start())
@@ -249,8 +240,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 StatusColors.ERROR,
                 start=False
             )
-            self.log(f"MP4 generation error: {error_msg}")
-            self.log(traceback_str)
+            logging.error(f"MP4 generation error: {error_msg}")
+            logging.debug(traceback_str)
 
         # Use BaseTab helper for worker management
         self.start_worker(
@@ -302,7 +293,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 StatusColors.WARNING,
                 start=False
             )
-            self.log(f"Gallery copy error: {error_msg}")
+            logging.error(f"Gallery copy error: {error_msg}")
 
         # Run gallery copy on worker thread
         self.start_worker(

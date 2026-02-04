@@ -56,7 +56,7 @@ def _get_ratings_file() -> Optional[MetadataFile]:
     Returns:
         MetadataFile instance or None if network path not configured
     """
-    network_path = get_setting("comfyui_network_output_path")
+    network_path = get_setting("network_output_path")
     if not network_path:
         logger.warning("[Ratings] Network output path not configured")
         return None
@@ -422,12 +422,13 @@ def get_all_tags_in_use() -> List[str]:
 
 def get_predefined_tags() -> List[str]:
     """
-    Get the list of predefined tags.
+    Get the list of predefined tags from global settings.
 
     Returns:
-        List of predefined tag strings
+        List of predefined tag strings (from settings or default fallback)
     """
-    return PREDEFINED_TAGS.copy()
+    from core.settings_manager import safe_get_setting
+    return safe_get_setting("comfyui_preset_categories", PREDEFINED_TAGS.copy())
 
 
 def delete_model_data(model_name: str) -> bool:
@@ -648,7 +649,7 @@ def update_model_thumbnail(model_name: str) -> Optional[str]:
 
     from core.utils import ensure_directory, load_json
 
-    network_path = get_setting("comfyui_network_output_path")
+    network_path = get_setting("network_output_path")
     if not network_path:
         return None
 

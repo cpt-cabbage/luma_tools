@@ -605,12 +605,13 @@ class CollaborativeCanvas(QGraphicsView):
             logger.warning(f"Cannot create connection: nodes not found ({source_id} -> {target_id})")
             return None
 
-        # Create connection
-        connection = ConnectionLine(source, target, connection_type, label)
-        self._scene.addItem(connection)
-
         # Track by ID
         connection_id = connection_id or f"{source_id}_{target_id}"
+
+        # Create connection with ID
+        connection = ConnectionLine(source, target, connection_type, label, connection_id)
+        self._scene.addItem(connection)
+
         self._connections[connection_id] = connection
 
         # Emit signal
@@ -2497,7 +2498,60 @@ class CollaborativeCanvas(QGraphicsView):
                 'collapsed': group._collapsed
             })
 
+        # Drawings
+        state['drawings'] = []
+        for drawing_id, drawing in self._drawings.items():
+            try:
+                drawing_state = drawing.get_state()
+                drawing_state['id'] = drawing_id
+                state['drawings'].append(drawing_state)
+
+                # Debug logging
+                if drawing_state.get('type') == 'path':
+                    points_count = len(drawing_state.get('points', []))
+                    logger.debug(f"Saving drawing {drawing_id}: type=path, points={points_count}")
+            except Exception as e:
+                logger.warning(f"Failed to serialize drawing {drawing_id}: {e}")
+
         return state
+
+    def _restore_drawing(self, drawing_data: dict):
+        """
+        Restore a drawing item from serialized state.
+
+        Args:
+            drawing_data: Dict containing drawing state from get_state()
+        """
+        from .canvas_drawing import DrawingPath, DrawingRect, DrawingEllipse, DrawingLine
+
+        drawing_type = drawing_data.get('type')
+        drawing_id = drawing_data.get('id', f"drawing_{uuid.uuid4().hex[:8]}")
+
+        # Map drawing types to their classes
+        drawing_classes = {
+            'path': DrawingPath,
+            'rect': DrawingRect,
+            'ellipse': DrawingEllipse,
+            'line': DrawingLine
+        }
+
+        if drawing_type not in drawing_classes:
+            logger.warning(f"Unknown drawing type: {drawing_type}")
+            return
+
+        try:
+            # Create and restore the drawing
+            drawing = drawing_classes[drawing_type]()
+            drawing.set_state(drawing_data)
+            self._scene.addItem(drawing)
+            self._drawings[drawing_id] = drawing
+
+            # Debug logging
+            if drawing_type == 'path':
+                points_count = len(drawing_data.get('points', []))
+                logger.debug(f"Restored drawing {drawing_id}: type={drawing_type}, points={points_count}")
+        except Exception as e:
+            logger.warning(f"Failed to restore drawing {drawing_id}: {e}")
 
     def load_state(self, state: Dict[str, Any]):
         """
@@ -2558,6 +2612,15 @@ class CollaborativeCanvas(QGraphicsView):
                 )
                 if group_data.get('collapsed', False):
                     group._toggle_collapse()
+
+            # Load drawings
+            drawings_data = state.get('drawings', [])
+            logger.debug(f"load_state: loading {len(drawings_data)} drawings")
+            for drawing_data in drawings_data:
+                if drawing_data.get('type') == 'path':
+                    pts = drawing_data.get('points', [])
+                    logger.debug(f"load_state: path drawing has {len(pts)} points")
+                self._restore_drawing(drawing_data)
 
             # Restore viewport
             viewport = state.get('viewport', {})
@@ -2645,6 +2708,15 @@ class CollaborativeCanvas(QGraphicsView):
                 if group_data.get('collapsed', False):
                     group._toggle_collapse()
 
+            # Load drawings (same as load_state)
+            drawings_data = state.get('drawings', [])
+            logger.debug(f"load_state_with_preloaded_images: loading {len(drawings_data)} drawings")
+            for drawing_data in drawings_data:
+                if drawing_data.get('type') == 'path':
+                    pts = drawing_data.get('points', [])
+                    logger.debug(f"load_state_with_preloaded_images: path drawing has {len(pts)} points")
+                self._restore_drawing(drawing_data)
+
             # Restore viewport (same as load_state)
             viewport = state.get('viewport', {})
             if 'zoom' in viewport:
@@ -2668,6 +2740,7 @@ class CollaborativeCanvas(QGraphicsView):
         self._sticky_notes.clear()
         self._groups.clear()
         self._drawings.clear()
+        self._remote_cursors.clear()  # Also clear remote cursors (they'll be recreated)
 
         # Clear scene (this deletes all items including brush indicator)
         self._scene.clear()
@@ -2758,9 +2831,18 @@ class CollaborativeCanvas(QGraphicsView):
         # Update or create cursors for active users
         for username, data in cursors.items():
             if username in self._remote_cursors:
-                # Update existing cursor position
                 cursor_item = self._remote_cursors[username]
-                cursor_item.setPos(data['x'], data['y'])
+                try:
+                    # Update existing cursor position
+                    cursor_item.setPos(data['x'], data['y'])
+                except RuntimeError:
+                    # C++ object was deleted (e.g., by scene.clear())
+                    # Remove stale reference and recreate
+                    del self._remote_cursors[username]
+                    cursor_item = CursorItem(username, data['color'])
+                    cursor_item.setPos(data['x'], data['y'])
+                    self._scene.addItem(cursor_item)
+                    self._remote_cursors[username] = cursor_item
             else:
                 # Create new cursor item
                 cursor_item = CursorItem(username, data['color'])
@@ -2858,9 +2940,14 @@ class CollaborativeCanvas(QGraphicsView):
         """
         try:
             from properties_dialog import PropertiesDialog
+            from core.state_manager import app_state
 
             parent_widget = self._tab.main_window if self._tab else None
-            dialog = PropertiesDialog(image_path, parent_widget)
+            dialog = PropertiesDialog(
+                image_path,
+                parent=parent_widget,
+                show_comfyui_features=app_state.has_elevated_access
+            )
             dialog.exec_()
 
         except Exception as e:

@@ -250,7 +250,8 @@ def get_metadata_file(directory: str, filename: str) -> MetadataFile:
     Returns:
         MetadataFile instance
     """
-    key = os.path.join(directory, filename)
+    # Normalize path for consistent cache keys on Windows (C:/path vs C:\\path)
+    key = os.path.normpath(os.path.join(directory, filename))
 
     with _metadata_file_cache_lock:
         if key not in _metadata_file_cache:

@@ -312,6 +312,31 @@ class PickerSidebar(QWidget):
         """Handle Add Model button click."""
         self.add_model_clicked.emit()
 
+    def refresh_categories(self):
+        """Rebuild category radio buttons from current settings."""
+        # Remove old buttons from group and section
+        for button in list(self._category_buttons.values()):
+            self._category_group.removeButton(button)
+            button.deleteLater()
+        self._category_buttons.clear()
+
+        # Clear the section content layout
+        content_layout = self._categories_section._content_layout
+        while content_layout.count():
+            item = content_layout.takeAt(0)
+            # Widgets already deleted above via deleteLater
+
+        # Add fresh buttons
+        for tag in get_predefined_tags():
+            radio = SidebarRadioButton(tag, tag)
+            self._category_group.addButton(radio)
+            self._category_buttons[tag] = radio
+            self._categories_section.add_widget(radio)
+
+        # Reset to "All" since categories changed
+        self._current_category = "all"
+        self._all_models_btn.set_active(True)
+
     def set_category(self, category: str):
         """Set the current category."""
         self._current_category = category

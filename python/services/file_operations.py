@@ -24,19 +24,30 @@ from core.utils import truncate_at_suffix
 from core.error_handling import safe_operation
 
 
-def fast_scandir(dirname):
+def fast_scandir(dirname, max_depth=100, _current_depth=0):
     """
     Recursively scan directory and return all subdirectories.
 
     Args:
         dirname: Root directory to scan
+        max_depth: Maximum recursion depth (default 100, prevents stack overflow)
+        _current_depth: Internal counter for current depth (do not set manually)
 
     Returns:
         list: List of all subdirectory paths (strings)
     """
-    subfolders = [f.path for f in os.scandir(dirname) if f.is_dir()]
-    for dirname in list(subfolders):
-        subfolders.extend(fast_scandir(dirname))
+    if _current_depth >= max_depth:
+        logger.warning(f"Max scan depth ({max_depth}) reached at: {dirname}")
+        return []
+
+    try:
+        subfolders = [f.path for f in os.scandir(dirname) if f.is_dir()]
+    except (PermissionError, OSError) as e:
+        logger.warning(f"Cannot scan directory {dirname}: {e}")
+        return []
+
+    for folder in list(subfolders):
+        subfolders.extend(fast_scandir(folder, max_depth, _current_depth + 1))
     return subfolders
 
 

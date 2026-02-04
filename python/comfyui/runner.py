@@ -70,7 +70,7 @@ except ImportError:
 
 # Try to use centralized logging utilities, fall back to local implementations for farm execution
 try:
-    from core.logging_utils import TeeWriter, get_network_log_dir, get_local_log_dir
+    from core.logging_utils import setup_file_logging as _setup_file_logging
     _USE_CENTRAL_LOGGING = True
 except ImportError:
     _USE_CENTRAL_LOGGING = False
@@ -80,9 +80,47 @@ except ImportError:
 # LOGGING SETUP - Uses centralized module when available, falls back for farm
 # =============================================================================
 
-if not _USE_CENTRAL_LOGGING:
-    # Local fallback implementations for standalone farm execution
+def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
+    """Set up file logging by redirecting stdout/stderr to also write to a log file.
 
+    Logs are written to the network path from global settings
+    (network_output_path/_logs/) for accessibility from all machines.
+    Falls back to the job output directory, then ~/.luma_tools/logs/.
+
+    Args:
+        job_name: Optional job name for log filename
+        network_output_dir: Optional network directory to write log (fallback)
+
+    Returns:
+        Path to the log file
+    """
+    # Use centralized logging module when available
+    if _USE_CENTRAL_LOGGING:
+        # Build log prefix from job name
+        if job_name:
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
+            log_prefix = f"comfyui_runner_{safe_name}"
+        else:
+            log_prefix = "comfyui_runner"
+
+        return _setup_file_logging(
+            log_prefix=log_prefix,
+            subdirectory="runner",
+            include_hostname=False,
+            include_username=False,
+            redirect_stdout=True,
+            tee_mode="writer",
+            fallback_dir=network_output_dir
+        )
+
+    # Fallback for standalone farm execution when core module unavailable
+    return _setup_logging_fallback(job_name, network_output_dir)
+
+
+def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None) -> str:
+    """Fallback logging setup when centralized module is unavailable (farm execution)."""
+
+    # Local TeeWriter implementation
     class TeeWriter:
         """Writes to both the original stream and a log file."""
 
@@ -105,8 +143,8 @@ if not _USE_CENTRAL_LOGGING:
             self.original_stream.flush()
             self.log_file.flush()
 
-    def get_network_log_dir(subdirectory: str = "runner") -> str:
-        """Get network log directory from global settings (fallback for farm)."""
+    def get_network_log_dir_local(subdirectory: str = "runner") -> str:
+        """Get network log directory from global settings."""
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             settings_paths = [
@@ -118,7 +156,7 @@ if not _USE_CENTRAL_LOGGING:
                 if os.path.exists(norm_path):
                     with open(norm_path, 'r') as f:
                         settings = json.load(f)
-                    network_path = settings.get('comfyui_network_output_path', '')
+                    network_path = settings.get('network_output_path', '')
                     if network_path and os.path.isdir(network_path):
                         log_dir = os.path.join(network_path, '_logs', subdirectory)
                         os.makedirs(log_dir, exist_ok=True)
@@ -128,41 +166,18 @@ if not _USE_CENTRAL_LOGGING:
             pass
         return None
 
-    def get_local_log_dir() -> str:
-        """Get local fallback log directory."""
-        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        return log_dir
+    # Determine log directory
+    log_dir = get_network_log_dir_local("runner")
 
-
-def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
-    """Set up file logging by redirecting stdout/stderr to also write to a log file.
-
-    Logs are written to the network path from global settings
-    (comfyui_network_output_path/_logs/) for accessibility from all machines.
-    Falls back to the job output directory, then ~/.luma_tools/logs/.
-
-    Args:
-        job_name: Optional job name for log filename
-        network_output_dir: Optional network directory to write log (fallback)
-
-    Returns:
-        Path to the log file
-    """
-    # Primary: network log directory from global settings
-    log_dir = get_network_log_dir("runner")
-
-    # Fallback: job output directory (also network-accessible)
     if not log_dir and network_output_dir and os.path.isdir(network_output_dir):
         log_dir = network_output_dir
 
-    # Last resort: local user directory
     if not log_dir:
-        log_dir = get_local_log_dir()
+        log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
+        os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if job_name:
-        # Don't truncate - UUIDs can be longer than 50 chars
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
         log_filename = f"comfyui_runner_{safe_name}_{timestamp}.log"
     else:
@@ -179,10 +194,9 @@ def setup_logging(job_name: str = None, network_output_dir: str = None) -> str:
     sys.stdout = TeeWriter(sys.__stdout__, log_file)
     sys.stderr = TeeWriter(sys.__stderr__, log_file)
 
-    # Update the logging module's StreamHandler to use the tee'd stderr
     for handler in logging.getLogger().handlers:
         if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-            handler.stream = sys.stderr  # Now points to TeeWriter
+            handler.stream = sys.stderr
 
     logger.info(f"Log file: {log_path}")
     return log_path

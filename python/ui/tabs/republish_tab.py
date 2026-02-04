@@ -10,7 +10,7 @@ import logging
 from PySide6 import QtWidgets, QtCore
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
 from ui_components import StatusColors
 
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 class RePublishTab(RenderScanMixin, BaseTab):
     """Tab for republishing renders to AYON."""
+
+    TAB_CONFIG = TabConfig(ui_file="republish.ui", tab_name="rePublish", tab_id="republish")
 
     # RenderScanMixin widget configuration
     _render_list_widget = "RePublishRendersList"
@@ -33,18 +35,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
     _renders_attr = "republish_renders"
     _searchpath_attr = "republish_searchpath"
     _custom_path_attr = "republish_custom_path"
-
-    @property
-    def ui_file(self) -> str:
-        return "republish.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "rePublish"
-
-    @property
-    def tab_id(self) -> str:
-        return "republish"
 
     def connect_signals(self):
         """Connect rePublish tab signals."""
@@ -189,7 +179,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
 
         except Exception as e:
-            self.log(f"Error scanning renders for republish: {e}")
+            logging.error(f"Error scanning renders for republish: {e}")
             self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {str(e)}")
 
     def _on_render_selection_changed(self):
@@ -436,6 +426,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
             start=False
         )
 
-        self.log(f"Publish error: {error_msg}")
+        logging.error(f"Publish error: {error_msg}")
         if traceback_str:
-            logger.error(traceback_str)
+            logging.error(traceback_str)

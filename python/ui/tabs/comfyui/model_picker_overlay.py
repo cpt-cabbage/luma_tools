@@ -400,6 +400,11 @@ class ModelPickerOverlay(QWidget):
     def _refresh_all(self):
         """Refresh all sections with current data."""
         logger.debug("[Overlay] _refresh_all called")
+
+        # Refresh sidebar categories (picks up any changes from Settings)
+        if hasattr(self, '_sidebar'):
+            self._sidebar.refresh_categories()
+
         presets = get_comfyui_workflow_presets()
         username = app_state.user
 

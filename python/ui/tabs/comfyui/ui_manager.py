@@ -36,10 +36,13 @@ class ComfyUIWidgetManager:
         # Widget tracking
         self.dynamic_widgets = {}  # node_id -> widget container
         self.condition_map = {}  # Maps condition_node_name -> list of dependent widget node_ids
+        self.settings_widgets = {}  # node_id -> widget container for settings nodes
+        self.settings_section = None  # Collapsible settings section widget
 
         # Pending values (for restoration after widget recreation)
         self.pending_editable_values = {}
         self.pending_semantic_values = {}
+        self.pending_settings_values = {}  # For settings node restoration
 
     def clear_widgets(self):
         """Clear all dynamic widgets from the layout."""
@@ -57,6 +60,8 @@ class ComfyUIWidgetManager:
 
         self.dynamic_widgets = {}
         self.condition_map = {}
+        self.settings_widgets = {}
+        self.settings_section = None
 
     def capture_editable_values_by_type(self) -> Dict[str, Any]:
         """
@@ -490,10 +495,11 @@ class ComfyUIWidgetManager:
 
     def collect_editable_values(self) -> Tuple[Dict[int, Dict[str, Any]], int]:
         """
-        Collect editable values from dynamic widgets.
+        Collect editable values from dynamic widgets, including settings nodes.
 
         Returns:
             Tuple of (editable_values dict, selected_image_count)
+            The editable_values dict includes both editable nodes and settings nodes.
         """
         from comfyui.editable import extract_editable_nodes
 
@@ -521,6 +527,10 @@ class ComfyUIWidgetManager:
 
                     editable_values[node_id] = {'node': node, 'value': value}
 
+        # Also collect settings values - they use the same format for workflow modification
+        settings_values = self.collect_settings_values()
+        editable_values.update(settings_values)
+
         return editable_values, selected_image_count
 
     def get_editable_values_for_state(self) -> Dict[str, Any]:
@@ -536,4 +546,330 @@ class ComfyUIWidgetManager:
                 elif hasattr(input_widget, 'selected_files'):
                     # BatchImageSelector - save image paths
                     editable_values[str(node_id)] = input_widget.selected_files.copy()
+
+        # Also include settings values with a prefix to distinguish them
+        for node_id, container in self.settings_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            if input_widget:
+                key = f"settings_{node_id}"
+                if hasattr(input_widget, 'isChecked'):
+                    editable_values[key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'text'):
+                    editable_values[key] = input_widget.text()
         return editable_values
+
+    # =========================================================================
+    # SETTINGS NODES
+    # =========================================================================
+
+    def refresh_settings_nodes(self, workflow_path: Optional[str], node_overrides: Dict[str, Any]):
+        """
+        Refresh the settings section based on settings nodes in the workflow.
+
+        Settings nodes have '_settings' suffix and are displayed in a collapsible
+        section grouped by their base title.
+
+        Args:
+            workflow_path: Path to the workflow JSON file
+            node_overrides: Dict of node overrides (enabled/default_value)
+        """
+        from comfyui.editable import extract_settings_nodes
+
+        # Clear existing settings widgets (but keep the rest of dynamic_widgets)
+        self.settings_widgets = {}
+        if self.settings_section:
+            self.settings_section.hide()
+            self.settings_section.setParent(None)
+            self.settings_section.deleteLater()
+            self.settings_section = None
+
+        if not workflow_path:
+            return
+
+        settings_nodes = extract_settings_nodes(workflow_path)
+        if not settings_nodes:
+            return
+
+        # Filter out disabled nodes
+        enabled_nodes = []
+        for node in settings_nodes:
+            override = node_overrides.get(str(node.node_id), node_overrides.get(node.title, {}))
+            if override.get("enabled", True):
+                enabled_nodes.append(node)
+
+        if not enabled_nodes:
+            return
+
+        # Group nodes by group_name
+        groups: Dict[str, list] = {}
+        for node in enabled_nodes:
+            if node.group_name not in groups:
+                groups[node.group_name] = []
+            groups[node.group_name].append(node)
+
+        # Create collapsible settings section
+        self.settings_section = self._create_collapsible_settings_section(groups)
+        self.layout.addWidget(self.settings_section)
+
+        # Apply pending settings values
+        self._apply_pending_settings_values()
+
+    def _create_collapsible_settings_section(self, groups: Dict[str, list]) -> QWidget:
+        """
+        Create a collapsible settings section with grouped widgets.
+
+        Args:
+            groups: Dict mapping group_name -> list of SettingsNode
+
+        Returns:
+            Collapsible widget containing all settings
+        """
+        from PySide6.QtWidgets import QFrame, QToolButton
+        from PySide6.QtCore import Qt
+
+        # Main container
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 10, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Header with collapse toggle
+        header = QWidget()
+        header.setStyleSheet("background-color: #3a3a3a; border-radius: 4px;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 6, 10, 6)
+
+        toggle_btn = QToolButton()
+        toggle_btn.setArrowType(Qt.DownArrow)
+        toggle_btn.setAutoRaise(True)
+        toggle_btn.setStyleSheet("QToolButton { border: none; }")
+        header_layout.addWidget(toggle_btn)
+
+        header_label = QLabel("Workflow Settings")
+        header_label.setStyleSheet("font-weight: bold; color: #cccccc;")
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+
+        container_layout.addWidget(header)
+
+        # Content area (collapsible)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(15)
+
+        # Create group widgets
+        for group_name, nodes in groups.items():
+            group_widget = self._create_settings_group(group_name, nodes)
+            content_layout.addWidget(group_widget)
+
+        content_layout.addStretch()
+        container_layout.addWidget(content)
+
+        # Toggle functionality
+        def toggle_content():
+            is_visible = content.isVisible()
+            content.setVisible(not is_visible)
+            toggle_btn.setArrowType(Qt.RightArrow if is_visible else Qt.DownArrow)
+
+        toggle_btn.clicked.connect(toggle_content)
+        header.mousePressEvent = lambda e: toggle_content()
+
+        return container
+
+    def _create_settings_group(self, group_name: str, nodes: list) -> QWidget:
+        """
+        Create a group widget containing settings for related nodes.
+
+        Args:
+            group_name: Display name for the group
+            nodes: List of SettingsNode objects in this group
+
+        Returns:
+            Widget containing the grouped settings
+        """
+        from PySide6.QtWidgets import QFrame, QGridLayout
+        from PySide6.QtCore import Qt
+
+        group = QFrame()
+        group.setFrameShape(QFrame.StyledPanel)
+        group.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #444444;
+                border-radius: 4px;
+            }
+        """)
+
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(10, 8, 10, 8)
+        group_layout.setSpacing(8)
+
+        # Group title
+        title = QLabel(group_name)
+        title.setStyleSheet("font-weight: bold; color: #aaaaaa; border: none;")
+        group_layout.addWidget(title)
+
+        # Grid layout for settings (2 columns for compact display)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(6)
+
+        row = 0
+        col = 0
+        for node in nodes:
+            widget = self._create_settings_widget(node)
+            if widget:
+                grid.addWidget(widget, row, col)
+                self.settings_widgets[node.node_id] = widget
+                col += 1
+                if col >= 2:
+                    col = 0
+                    row += 1
+
+        group_layout.addLayout(grid)
+        return group
+
+    def _create_settings_widget(self, node) -> Optional[QWidget]:
+        """
+        Create a compact widget for a settings node.
+
+        Args:
+            node: SettingsNode object
+
+        Returns:
+            Widget or None if creation failed
+        """
+        from PySide6.QtWidgets import QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
+        from PySide6.QtCore import Qt
+
+        container = QWidget()
+        container.setStyleSheet("border: none;")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        # Label
+        label = QLabel(f"{node.widget_name}:")
+        label.setStyleSheet("color: #888888; border: none;")
+        label.setMinimumWidth(80)
+        layout.addWidget(label)
+
+        # Create appropriate input widget based on type
+        if node.widget_type == 'toggle':
+            input_widget = QCheckBox()
+            input_widget.setChecked(bool(node.current_value) if node.current_value else False)
+            layout.addWidget(input_widget)
+
+        elif node.widget_type == 'int':
+            input_widget = QSpinBox()
+            input_widget.setRange(0, 999999)
+            input_widget.setFixedWidth(80)
+            if node.current_value is not None:
+                try:
+                    input_widget.setValue(int(node.current_value))
+                except (ValueError, TypeError):
+                    pass
+            layout.addWidget(input_widget)
+
+        elif node.widget_type == 'float':
+            input_widget = QDoubleSpinBox()
+            input_widget.setRange(0.0, 999999.0)
+            input_widget.setDecimals(2)
+            input_widget.setSingleStep(0.1)
+            input_widget.setFixedWidth(80)
+            if node.current_value is not None:
+                try:
+                    input_widget.setValue(float(node.current_value))
+                except (ValueError, TypeError):
+                    pass
+            layout.addWidget(input_widget)
+
+        elif node.widget_type == 'combo':
+            input_widget = QComboBox()
+            input_widget.setFixedWidth(120)
+            # Combo options would come from the node if available
+            if node.options:
+                input_widget.addItems(node.options)
+            if node.current_value is not None:
+                idx = input_widget.findText(str(node.current_value))
+                if idx >= 0:
+                    input_widget.setCurrentIndex(idx)
+                else:
+                    input_widget.addItem(str(node.current_value))
+                    input_widget.setCurrentText(str(node.current_value))
+            layout.addWidget(input_widget)
+
+        else:
+            # Default: line edit
+            input_widget = QLineEdit()
+            input_widget.setFixedWidth(80)
+            if node.current_value is not None:
+                input_widget.setText(str(node.current_value))
+            layout.addWidget(input_widget)
+
+        layout.addStretch()
+
+        # Store references
+        container.input_widget = input_widget
+        container.settings_node = node
+
+        return container
+
+    def _apply_pending_settings_values(self):
+        """Apply pending settings values from a previous session."""
+        if not self.pending_settings_values:
+            return
+
+        for key, value in self.pending_settings_values.items():
+            # Key format: "settings_<node_id>"
+            if key.startswith("settings_"):
+                try:
+                    node_id = int(key.replace("settings_", ""))
+                    if node_id in self.settings_widgets:
+                        container = self.settings_widgets[node_id]
+                        input_widget = getattr(container, 'input_widget', None)
+                        if input_widget:
+                            if hasattr(input_widget, 'setChecked'):
+                                input_widget.setChecked(bool(value))
+                            elif hasattr(input_widget, 'setValue'):
+                                try:
+                                    input_widget.setValue(float(value) if isinstance(input_widget, QtWidgets.QDoubleSpinBox) else int(value))
+                                except (ValueError, TypeError):
+                                    pass
+                            elif hasattr(input_widget, 'setCurrentText'):
+                                input_widget.setCurrentText(str(value))
+                            elif hasattr(input_widget, 'setText'):
+                                input_widget.setText(str(value))
+                except (ValueError, AttributeError) as e:
+                    logger.debug(f"Skipped restoration of settings value for {key}: {e}")
+
+        self.pending_settings_values = {}
+
+    def collect_settings_values(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Collect settings values from settings widgets.
+
+        Returns:
+            Dict mapping node_id -> {'node': SettingsNode, 'value': Any}
+        """
+        settings_values = {}
+
+        for node_id, container in self.settings_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            node = getattr(container, 'settings_node', None)
+            if input_widget and node:
+                if hasattr(input_widget, 'isChecked'):
+                    value = input_widget.isChecked()
+                elif hasattr(input_widget, 'value'):
+                    value = input_widget.value()
+                elif hasattr(input_widget, 'currentText'):
+                    value = input_widget.currentText()
+                elif hasattr(input_widget, 'text'):
+                    value = input_widget.text()
+                else:
+                    value = node.current_value
+
+                settings_values[node_id] = {'node': node, 'value': value}
+
+        return settings_values

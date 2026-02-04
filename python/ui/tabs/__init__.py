@@ -9,7 +9,7 @@ from .logs_tab import LogsTab
 from .pass_builder_tab import PassBuilderTab
 from .mp4_maker_tab import MP4MakerTab
 from .republish_tab import RePublishTab
-from .shot_cleaner_tab import ShotCleanerTab
+from .cleaner_tab import CleanerTab
 from .comfyui import ComfyUITab
 from .gallery_tab import GalleryTab
 from .canvas_tab import CanvasTab
@@ -22,7 +22,7 @@ __all__ = [
     'PassBuilderTab',
     'MP4MakerTab',
     'RePublishTab',
-    'ShotCleanerTab',
+    'CleanerTab',
     'ComfyUITab',
     'GalleryTab',
     'CanvasTab',
@@ -35,7 +35,7 @@ TAB_CONFIG = [
     {'class': PassBuilderTab, 'restrict_key': 'passbuilder'},
     {'class': MP4MakerTab, 'restrict_key': 'mp4maker'},
     {'class': RePublishTab, 'restrict_key': 'republish'},
-    {'class': ShotCleanerTab, 'restrict_key': 'shotcleaner'},
+    {'class': CleanerTab, 'restrict_key': 'cleaner'},
     {'class': LogsTab, 'restrict_key': 'logs'},
     {'class': ComfyUITab, 'restrict_key': 'comfyui'},
     {'class': GalleryTab, 'restrict_key': 'gallery'},

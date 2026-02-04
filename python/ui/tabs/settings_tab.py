@@ -10,7 +10,7 @@ from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
 
-from .base_tab import BaseTab
+from .base_tab import BaseTab, TabConfig
 from dialog_helpers import confirm_action, show_warning, show_error, show_info
 from core.utils import ensure_directory
 from core.config import APP_VERSION, get_changelog, get_latest_changelog
@@ -29,7 +29,6 @@ _COMBOBOX = "combobox"
 # Adding a new setting only requires adding one entry here — load and save are automatic.
 _USER_SETTINGS_MAP = [
     ("auto_extract_textures", "AutoExtractTextures", _CHECKBOX),
-    ("generate_3d_thumbnails", "Generate3DThumbnails", _CHECKBOX),
     ("show_tray_notifications", "ShowTrayNotifications", _CHECKBOX),
     ("show_statusbar_log", "ShowStatusbarLog", _CHECKBOX),
     ("viewer_3d_zoom_distance", "Viewer3DZoomSpinBox", _SPINBOX),
@@ -46,7 +45,7 @@ _minutes_to_seconds = lambda m: m * 60   # noqa: E731
 _GLOBAL_SETTINGS_MAP = [
     ("comfyui_path", "ComfyUIPathEdit", _TEXT),
     ("comfyui_python_path", "ComfyUIPythonEdit", _TEXT),
-    ("comfyui_network_output_path", "ComfyUINetworkOutputEdit", _TEXT),
+    ("network_output_path", "NetworkOutputEdit", _TEXT),
     ("comfyui_fast_mode", "ComfyUIFastMode", _CHECKBOX),
     ("comfyui_fp16_accumulation", "ComfyUIFP16Accumulation", _CHECKBOX),
     ("comfyui_lowvram", "ComfyUILowVRAM", _CHECKBOX),
@@ -55,23 +54,15 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
     ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
+    # Canvas sync settings
+    ("canvas_sync_interval", "CanvasSyncIntervalSpinBox", _SPINBOX),
 ]
 
 
 class SettingsTab(BaseTab):
     """Tab for managing user and global settings."""
 
-    @property
-    def ui_file(self) -> str:
-        return "settings.ui"
-
-    @property
-    def tab_name(self) -> str:
-        return "Settings"
-
-    @property
-    def tab_id(self) -> str:
-        return "settings"
+    TAB_CONFIG = TabConfig(ui_file="settings.ui", tab_name="Settings", tab_id="settings")
 
     def connect_signals(self):
         """Connect settings tab signals."""
@@ -100,7 +91,7 @@ class SettingsTab(BaseTab):
         self.ui.BrowseGlobalSettingsPath.clicked.connect(self._on_browse_global_settings_path)
         self.ui.BrowseComfyUIPath.clicked.connect(self._on_browse_comfyui_path)
         self.ui.BrowseComfyUIPython.clicked.connect(self._on_browse_comfyui_python)
-        self.ui.BrowseComfyUINetworkOutput.clicked.connect(self._on_browse_comfyui_network_output)
+        self.ui.BrowseNetworkOutput.clicked.connect(self._on_browse_network_output)
         # ComfyUI mode button connected in initialize() via manager
         self.ui.SaveGlobalSettings.clicked.connect(self._on_save_global_settings)
         # Update Python path display when ComfyUI path or Python path changes
@@ -125,6 +116,16 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'RemoveHdriButton'):
             self.ui.RemoveHdriButton.clicked.connect(self._on_remove_hdri)
 
+        # Category management
+        if hasattr(self.ui, 'AddCategoryButton'):
+            self.ui.AddCategoryButton.clicked.connect(self._on_add_category)
+        if hasattr(self.ui, 'RemoveCategoryButton'):
+            self.ui.RemoveCategoryButton.clicked.connect(self._on_remove_category)
+        if hasattr(self.ui, 'MoveCategoryUpButton'):
+            self.ui.MoveCategoryUpButton.clicked.connect(self._on_move_category_up)
+        if hasattr(self.ui, 'MoveCategoryDownButton'):
+            self.ui.MoveCategoryDownButton.clicked.connect(self._on_move_category_down)
+
     def initialize(self):
         """Initialize settings tab."""
         from option_button import OptionButtonManager
@@ -145,6 +146,9 @@ class SettingsTab(BaseTab):
 
         # Check if user is supervisor (can see user settings but not global settings)
         is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
+
+        # Create canvas sync interval spinbox programmatically (for global settings)
+        self._setup_canvas_sync_interval_ui()
 
         # Initialize completion sound combobox with data values
         if hasattr(self.ui, 'ComfyUICompletionSoundCombo'):
@@ -167,6 +171,7 @@ class SettingsTab(BaseTab):
             self._load_sup_users_ui()
             self._load_restricted_tabs_ui()
             self._load_hdri_list_ui()
+            self._load_categories_ui()
         else:
             # Hide global settings for supervisors
             self._hide_global_settings_for_supervisor()
@@ -176,6 +181,57 @@ class SettingsTab(BaseTab):
         # Hide global settings group box
         if hasattr(self.ui, 'globalSettingsGroupBox'):
             self.ui.globalSettingsGroupBox.hide()
+
+    def _setup_canvas_sync_interval_ui(self):
+        """Create and add canvas sync interval spinbox to global settings."""
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QSpinBox, QSpacerItem, QSizePolicy
+
+        # Only add if global settings layout exists
+        if not hasattr(self.ui, 'globalSettingsLayout'):
+            return
+
+        layout = self.ui.globalSettingsLayout
+
+        # Create horizontal layout for the setting
+        row_layout = QHBoxLayout()
+
+        # Label
+        label = QLabel("Canvas Sync Interval (ms):")
+        label.setToolTip("How often the canvas syncs with other users (lower = faster, more network load)")
+        row_layout.addWidget(label)
+
+        # Spinbox
+        spinbox = QSpinBox()
+        spinbox.setMinimum(500)
+        spinbox.setMaximum(5000)
+        spinbox.setSingleStep(100)
+        spinbox.setValue(1000)
+        spinbox.setSuffix(" ms")
+        spinbox.setToolTip("Sync interval in milliseconds (500-5000ms)")
+        row_layout.addWidget(spinbox)
+
+        # Spacer
+        spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        row_layout.addItem(spacer)
+
+        # Insert after the server timeout row (find adminUsersHeader as reference)
+        insert_index = -1
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.widget():
+                widget = item.widget()
+                if widget.objectName() == 'adminUsersHeader':
+                    insert_index = i
+                    break
+
+        if insert_index >= 0:
+            layout.insertLayout(insert_index, row_layout)
+        else:
+            # Fallback: add before the last stretch
+            layout.addLayout(row_layout)
+
+        # Store reference so declarative system can find it
+        self.ui.CanvasSyncIntervalSpinBox = spinbox
 
     def _load_version_ui(self):
         """Load version information into the UI."""
@@ -503,14 +559,14 @@ class SettingsTab(BaseTab):
             pass_name = pass_name.strip()
             existing_items = self.ui.DefaultPassesList.findItems(pass_name, Qt.MatchExactly)
             if existing_items:
-                self.log(f"Pass '{pass_name}' already exists in the list")
+                logging.warning(f"Pass '{pass_name}' already exists in the list")
                 return
 
             item = QtWidgets.QListWidgetItem(pass_name)
             item.setToolTip("Select to include this pass by default")
             item.setSelected(True)
             self.ui.DefaultPassesList.addItem(item)
-            self.log(f"Added custom pass: {pass_name}")
+            logging.info(f"Added custom pass: {pass_name}")
 
     def _on_remove_pass_clicked(self):
         """Remove selected pass from the default passes list."""
@@ -518,18 +574,18 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.DefaultPassesList.selectedItems()
         if not selected_items:
-            self.log("No passes selected for removal")
+            logging.warning("No passes selected for removal")
             return
 
         for item in selected_items:
             pass_name = item.text()
             if pass_name in REQUIRED_PASSES:
-                self.log(f"Cannot remove required pass: {pass_name}")
+                logging.warning(f"Cannot remove required pass: {pass_name}")
                 continue
 
             row = self.ui.DefaultPassesList.row(item)
             self.ui.DefaultPassesList.takeItem(row)
-            self.log(f"Removed pass: {pass_name}")
+            logging.info(f"Removed pass: {pass_name}")
 
     def _on_reset_passes_clicked(self):
         """Reset default passes to system defaults."""
@@ -537,7 +593,7 @@ class SettingsTab(BaseTab):
             from core.config import DEFAULT_PASSES
             from core.user_preferences import set_default_passes
             set_default_passes(DEFAULT_PASSES.copy())
-            self.log("Reset to default passes")
+            logging.info("Reset to default passes")
             self._load_default_passes_ui()
 
     def _on_save_settings_clicked(self):
@@ -556,7 +612,7 @@ class SettingsTab(BaseTab):
                 selected_passes.append(pass_name)
 
         set_default_passes(selected_passes)
-        self.log(f"Saved default passes: {selected_passes}")
+        logging.info(f"Saved default passes: {selected_passes}")
 
         # Save all mapped user settings
         self._save_settings_from_map(_USER_SETTINGS_MAP)
@@ -581,7 +637,7 @@ class SettingsTab(BaseTab):
                 from geo.thumbnail_service import get_model_thumbnail_service
                 service = get_model_thumbnail_service()
                 service.clear_cache()
-                self.log("Cleared model thumbnail cache")
+                logging.info("Cleared model thumbnail cache")
 
                 # Clear image thumbnail cache (if it exists)
                 thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
@@ -595,7 +651,7 @@ class SettingsTab(BaseTab):
                             count += 1
                         except Exception:
                             pass
-                    self.log(f"Cleared {count} cached thumbnail files")
+                    logging.info(f"Cleared {count} cached thumbnail files")
 
                 # Notify gallery tab to refresh via event bus
                 from core.event_bus import pipeline_events
@@ -604,7 +660,7 @@ class SettingsTab(BaseTab):
                 self.show_status("Thumbnail cache cleared", "success")
 
             except Exception as e:
-                self.log(f"Error clearing thumbnails: {e}")
+                logging.error(f"Error clearing thumbnails: {e}")
                 self.show_status(f"Error: {e}", "error")
 
     def _on_browse_global_settings_path(self):
@@ -647,18 +703,18 @@ class SettingsTab(BaseTab):
         if file_path:
             self.ui.ComfyUIPythonEdit.setText(file_path)
 
-    def _on_browse_comfyui_network_output(self):
-        """Browse for ComfyUI network output directory."""
+    def _on_browse_network_output(self):
+        """Browse for network output directory."""
         from file_dialogs import browse_directory_with_memory
 
         directory = browse_directory_with_memory(
             self.main_window,
-            context="comfyui_network_output",
+            context="network_output",
             title="Select Network Output Directory",
-            fallback_path=self.ui.ComfyUINetworkOutputEdit.text()
+            fallback_path=self.ui.NetworkOutputEdit.text()
         )
         if directory:
-            self.ui.ComfyUINetworkOutputEdit.setText(directory)
+            self.ui.NetworkOutputEdit.setText(directory)
 
     def _on_save_global_settings(self):
         """Save all global settings."""
@@ -712,7 +768,7 @@ class SettingsTab(BaseTab):
             username = username.strip().lower()
             add_user_to_role(username, "admin")
             self._load_admin_users_ui()
-            self.log(f"Added admin user: {username}")
+            logging.info(f"Added admin user: {username}")
 
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
@@ -720,7 +776,7 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
-            self.log("No admin user selected for removal")
+            logging.warning("No admin user selected for removal")
             return
 
         username = selected_items[0].text()
@@ -751,7 +807,7 @@ class SettingsTab(BaseTab):
             username = username.strip().lower()
             add_user_to_role(username, "sup")
             self._load_sup_users_ui()
-            self.log(f"Added supervisor user: {username}")
+            logging.info(f"Added supervisor user: {username}")
 
     def _on_remove_sup_user(self):
         """Remove selected supervisor user."""
@@ -762,7 +818,7 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.SupUsersList.selectedItems()
         if not selected_items:
-            self.log("No supervisor user selected for removal")
+            logging.warning("No supervisor user selected for removal")
             return
 
         username = selected_items[0].text()
@@ -1013,7 +1069,7 @@ class SettingsTab(BaseTab):
         try:
             add_hdri_to_list(name, file_path)
             self._load_hdri_list_ui()
-            self.log(f"Added HDRI: {name}")
+            logging.info(f"Added HDRI: {name}")
         except Exception as e:
             show_warning("Error", f"Failed to add HDRI: {e}", self.main_window)
 
@@ -1026,7 +1082,7 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.HdriListWidget.selectedItems()
         if not selected_items:
-            self.log("No HDRI selected for removal")
+            logging.warning("No HDRI selected for removal")
             return
 
         # Confirm deletion
@@ -1045,8 +1101,125 @@ class SettingsTab(BaseTab):
                 name = hdri.get("name", "")
                 if name:
                     remove_hdri_from_list(name)
-                    self.log(f"Removed HDRI: {name}")
+                    logging.info(f"Removed HDRI: {name}")
 
             self._load_hdri_list_ui()
         except Exception as e:
             show_warning("Error", f"Failed to remove HDRI: {e}", self.main_window)
+
+    # =========================================================================
+    # COMFYUI PRESET CATEGORIES
+    # =========================================================================
+
+    def _load_categories_ui(self):
+        """Load ComfyUI preset categories list from global settings."""
+        from core.settings_manager import get_setting
+
+        if not hasattr(self.ui, 'CategoriesList'):
+            return
+
+        self.ui.CategoriesList.clear()
+        categories = get_setting("comfyui_preset_categories")
+
+        for category in categories:
+            self.ui.CategoriesList.addItem(category)
+
+    def _on_add_category(self):
+        """Add a new category to the global list."""
+        from core.settings_manager import get_setting, set_setting
+
+        name, ok = QtWidgets.QInputDialog.getText(
+            self.main_window,
+            "Add Category",
+            "Enter category name:",
+            QtWidgets.QLineEdit.Normal
+        )
+
+        if not ok or not name:
+            return
+
+        name = name.strip()
+        if not name:
+            return
+
+        categories = get_setting("comfyui_preset_categories")
+        if name in categories:
+            show_warning("Duplicate", f"Category '{name}' already exists.", self.main_window)
+            return
+
+        categories.append(name)
+        set_setting("comfyui_preset_categories", categories)
+        self._load_categories_ui()
+        self.show_status(f"Added category: {name}", "success")
+        logger.info(f"Added ComfyUI category: {name}")
+
+    def _on_remove_category(self):
+        """Remove selected category from the global list."""
+        from core.settings_manager import get_setting, set_setting
+
+        if not hasattr(self.ui, 'CategoriesList'):
+            return
+
+        selected_items = self.ui.CategoriesList.selectedItems()
+        if not selected_items:
+            logger.warning("No category selected for removal")
+            return
+
+        name = selected_items[0].text()
+
+        if not confirm_action(
+            "Remove Category",
+            f"Remove category '{name}'?",
+            self.main_window
+        ):
+            return
+
+        categories = get_setting("comfyui_preset_categories")
+        if name in categories:
+            categories.remove(name)
+            set_setting("comfyui_preset_categories", categories)
+            self._load_categories_ui()
+            self.show_status(f"Removed category: {name}", "success")
+            logger.info(f"Removed ComfyUI category: {name}")
+
+    def _on_move_category_up(self):
+        """Move selected category up in the list."""
+        self._move_category(-1)
+
+    def _on_move_category_down(self):
+        """Move selected category down in the list."""
+        self._move_category(1)
+
+    def _move_category(self, direction: int):
+        """Move selected category by direction (-1=up, +1=down)."""
+        from core.settings_manager import get_setting, set_setting
+
+        if not hasattr(self.ui, 'CategoriesList'):
+            return
+
+        selected_items = self.ui.CategoriesList.selectedItems()
+        if not selected_items:
+            return
+
+        name = selected_items[0].text()
+        categories = get_setting("comfyui_preset_categories")
+
+        if name not in categories:
+            return
+
+        idx = categories.index(name)
+        new_idx = idx + direction
+
+        if new_idx < 0 or new_idx >= len(categories):
+            return
+
+        categories[idx], categories[new_idx] = categories[new_idx], categories[idx]
+        set_setting("comfyui_preset_categories", categories)
+
+        # Reload and re-select
+        self._load_categories_ui()
+        for i in range(self.ui.CategoriesList.count()):
+            if self.ui.CategoriesList.item(i).text() == name:
+                self.ui.CategoriesList.item(i).setSelected(True)
+                self.ui.CategoriesList.setCurrentRow(i)
+                break

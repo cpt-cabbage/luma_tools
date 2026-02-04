@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QCheckBox,
     QFrame, QScrollArea, QWidget, QTabWidget, QFileDialog,
-    QDialogButtonBox, QGroupBox
+    QDialogButtonBox, QGroupBox, QComboBox
 )
 
 from core.state_manager import app_state
@@ -72,6 +72,9 @@ class ModelDialog(QDialog):
         self.result_accepted = False
         self.result_data = {}
 
+        # Multi-workflow storage
+        self._workflow_entry_widgets = {}
+
         self._setup_ui()
         self._load_data()
         self._connect_signals()
@@ -91,6 +94,9 @@ class ModelDialog(QDialog):
 
         # Basic Info tab
         self._setup_basic_tab()
+
+        # Workflows tab (for multi-workflow support)
+        self._setup_workflows_tab()
 
         # Thumbnail tab
         self._setup_thumbnail_tab()
@@ -123,6 +129,20 @@ class ModelDialog(QDialog):
         self._name_edit = QLineEdit()
         self._name_edit.setText(self.model_name)
         form.addRow("Name:", self._name_edit)
+
+        # Output type dropdown
+        self._output_type_combo = QComboBox()
+        self._output_type_combo.addItems(["Image", "Video", "3D", "Audio", "Other"])
+        self._output_type_map = {"Image": "image", "Video": "video", "3D": "3d", "Audio": "audio", "Other": "other"}
+        self._output_type_reverse = {v: k for k, v in self._output_type_map.items()}
+        current_output_type = self.preset_data.get("output_type", "image")
+        self._output_type_combo.setCurrentText(self._output_type_reverse.get(current_output_type, "Image"))
+        self._output_type_combo.setToolTip(
+            "Specify what type of content this model generates.\n\n"
+            "• Image/Video: Auto-add to Canvas option will be available\n"
+            "• 3D/Audio/Other: Canvas integration is disabled"
+        )
+        form.addRow("Output Type:", self._output_type_combo)
 
         # Workflow path
         path_layout = QHBoxLayout()
@@ -168,6 +188,203 @@ class ModelDialog(QDialog):
         layout.addStretch()
 
         self._tabs.addTab(tab, "Basic Info")
+
+    def _setup_workflows_tab(self):
+        """Set up the Workflows tab for multi-workflow support."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Multi-workflow checkbox
+        self._is_multi_check = QCheckBox("Enable Multi-Workflow Mode")
+        self._is_multi_check.setChecked(self.preset_data.get("is_multi", False))
+        self._is_multi_check.setToolTip(
+            "Enable this to add multiple workflows to a single model.\n"
+            "Each workflow can have its own settings and note.\n"
+            "A dropdown will appear in the ComfyUI tab to select which workflow to use."
+        )
+        self._is_multi_check.toggled.connect(self._on_multi_mode_toggled)
+        layout.addWidget(self._is_multi_check)
+
+        # Info label
+        info_label = QLabel(
+            "Multi-Workflow Mode allows you to bundle multiple workflows under one model.\n"
+            "Each workflow can have different settings. Users select which workflow to use from a dropdown."
+        )
+        info_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # Workflows container (scroll area)
+        self._workflows_scroll = QScrollArea()
+        self._workflows_scroll.setWidgetResizable(True)
+        self._workflows_scroll.setMinimumHeight(300)
+        self._workflows_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3c3c; }")
+
+        self._workflows_container = QWidget()
+        self._workflows_layout = QVBoxLayout(self._workflows_container)
+        self._workflows_layout.setContentsMargins(5, 5, 5, 5)
+        self._workflows_layout.setSpacing(8)
+        self._workflows_scroll.setWidget(self._workflows_container)
+        layout.addWidget(self._workflows_scroll)
+
+        # Add workflow button
+        add_btn_layout = QHBoxLayout()
+        self._add_workflow_btn = QPushButton("+ Add Workflow")
+        self._add_workflow_btn.setFixedWidth(150)
+        self._add_workflow_btn.setStyleSheet("QPushButton { color: #10b981; }")
+        self._add_workflow_btn.clicked.connect(self._on_add_workflow)
+        add_btn_layout.addWidget(self._add_workflow_btn)
+        add_btn_layout.addStretch()
+        layout.addLayout(add_btn_layout)
+
+        self._tabs.addTab(tab, "Workflows")
+
+        # Populate existing workflows
+        self._populate_workflows()
+
+        # Update visibility based on multi-workflow mode
+        self._on_multi_mode_toggled(self._is_multi_check.isChecked())
+
+    def _on_multi_mode_toggled(self, checked: bool):
+        """Handle multi-workflow mode toggle."""
+        self._workflows_scroll.setEnabled(checked)
+        self._add_workflow_btn.setEnabled(checked)
+        # Also disable the single workflow path in Basic Info when multi-mode is on
+        self._path_edit.setEnabled(not checked)
+        if checked:
+            self._path_edit.setPlaceholderText("(Using multi-workflow mode - configure in Workflows tab)")
+        else:
+            self._path_edit.setPlaceholderText("")
+
+    def _populate_workflows(self):
+        """Populate the workflows list from preset data."""
+        # Clear existing
+        while self._workflows_layout.count():
+            item = self._workflows_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._workflow_entry_widgets.clear()
+
+        # Add existing workflows
+        workflows = self.preset_data.get("workflows", {})
+        for wf_name, wf_config in workflows.items():
+            self._add_workflow_entry(wf_name, wf_config)
+
+        # Add stretch at end
+        self._workflows_layout.addStretch()
+
+    def _on_add_workflow(self):
+        """Add a new workflow entry."""
+        # Generate unique name
+        idx = len(self._workflow_entry_widgets) + 1
+        wf_name = f"workflow_{idx}"
+        while wf_name in self._workflow_entry_widgets:
+            idx += 1
+            wf_name = f"workflow_{idx}"
+
+        self._add_workflow_entry(wf_name, None)
+
+    def _add_workflow_entry(self, wf_name: str, wf_config):
+        """Create a workflow entry widget."""
+        if wf_config is None:
+            wf_config = {
+                "path": "",
+                "note": "",
+                "iteratable": False,
+                "full_restart": False,
+                "node_overrides": {}
+            }
+
+        entry_widget = QWidget()
+        entry_widget.setStyleSheet("QWidget { background-color: #2a2a2a; border-radius: 4px; }")
+        entry_layout = QVBoxLayout(entry_widget)
+        entry_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Header row with name and delete button
+        header_row = QHBoxLayout()
+        wf_name_edit = QLineEdit(wf_name)
+        wf_name_edit.setPlaceholderText("Workflow name...")
+        wf_name_edit.setFixedWidth(200)
+        header_row.addWidget(QLabel("Name:"))
+        header_row.addWidget(wf_name_edit)
+        header_row.addStretch()
+
+        delete_btn = QPushButton("Remove")
+        delete_btn.setStyleSheet("QPushButton { color: #ef4444; }")
+        delete_btn.setFixedWidth(80)
+        delete_btn.clicked.connect(lambda checked=False, w=entry_widget, n=wf_name: self._on_remove_workflow(w, n))
+        header_row.addWidget(delete_btn)
+        entry_layout.addLayout(header_row)
+
+        # Path row
+        path_row = QHBoxLayout()
+        wf_path_edit = QLineEdit(wf_config.get("path", ""))
+        wf_path_edit.setPlaceholderText("Workflow JSON file...")
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFixedWidth(90)
+        browse_btn.clicked.connect(lambda checked=False, e=wf_path_edit: self._on_browse_wf_path(e))
+        path_row.addWidget(QLabel("File:"))
+        path_row.addWidget(wf_path_edit)
+        path_row.addWidget(browse_btn)
+        entry_layout.addLayout(path_row)
+
+        # Options row
+        options_row = QHBoxLayout()
+        wf_iteratable = QCheckBox("Iterate Mode")
+        wf_iteratable.setChecked(wf_config.get("iteratable", False))
+        wf_full_restart = QCheckBox("Full Restart")
+        wf_full_restart.setChecked(wf_config.get("full_restart", False))
+        options_row.addWidget(wf_iteratable)
+        options_row.addWidget(wf_full_restart)
+        options_row.addStretch()
+        entry_layout.addLayout(options_row)
+
+        # Note row
+        note_row = QHBoxLayout()
+        wf_note_edit = QLineEdit(wf_config.get("note", ""))
+        wf_note_edit.setPlaceholderText("Note for this workflow...")
+        note_row.addWidget(QLabel("Note:"))
+        note_row.addWidget(wf_note_edit)
+        entry_layout.addLayout(note_row)
+
+        # Insert before stretch
+        count = self._workflows_layout.count()
+        if count > 0 and self._workflows_layout.itemAt(count - 1).spacerItem():
+            self._workflows_layout.insertWidget(count - 1, entry_widget)
+        else:
+            self._workflows_layout.addWidget(entry_widget)
+
+        # Store widgets
+        self._workflow_entry_widgets[wf_name] = {
+            "widget": entry_widget,
+            "name_edit": wf_name_edit,
+            "path_edit": wf_path_edit,
+            "iteratable_check": wf_iteratable,
+            "full_restart_check": wf_full_restart,
+            "note_edit": wf_note_edit,
+            "node_overrides": wf_config.get("node_overrides", {})
+        }
+
+    def _on_remove_workflow(self, widget: QWidget, original_name: str):
+        """Remove a workflow entry."""
+        if original_name in self._workflow_entry_widgets:
+            del self._workflow_entry_widgets[original_name]
+        widget.deleteLater()
+
+    def _on_browse_wf_path(self, path_edit: QLineEdit):
+        """Browse for workflow path (for multi-workflow entries)."""
+        from file_dialogs import browse_file_with_memory
+
+        file_path = browse_file_with_memory(
+            self,
+            context="comfyui_workflow",
+            title="Select ComfyUI Workflow File",
+            file_filter="JSON Files (*.json);;All Files (*)",
+            fallback_path=os.path.expanduser("~")
+        )
+        if file_path:
+            path_edit.setText(file_path)
 
     def _setup_thumbnail_tab(self):
         """Set up the Thumbnail tab."""
@@ -387,7 +604,7 @@ class ModelDialog(QDialog):
             from core.settings_manager import get_setting
             from shutil import copy2
 
-            network_path = get_setting("comfyui_network_output_path")
+            network_path = get_setting("network_output_path")
             if network_path:
                 thumb_dir = os.path.join(network_path, "_model_thumbnails")
                 ensure_directory(thumb_dir)
@@ -439,19 +656,60 @@ class ModelDialog(QDialog):
 
     def _on_save(self):
         """Save the model configuration."""
-        from comfyui.presets_manager import update_comfyui_workflow_preset
+        from comfyui.presets_manager import delete_comfyui_workflow_preset, save_comfyui_workflow_preset
+        from dialog_helpers import show_warning
 
         new_name = self._name_edit.text().strip()
         if not new_name:
-            from dialog_helpers import show_warning
             show_warning("Invalid Name", "Model name cannot be empty.", self)
             return
 
-        new_path = self._path_edit.text().strip()
-        if not new_path:
-            from dialog_helpers import show_warning
-            show_warning("Invalid Path", "Workflow path cannot be empty.", self)
-            return
+        is_multi = self._is_multi_check.isChecked()
+        output_type = self._output_type_map.get(self._output_type_combo.currentText(), "image")
+
+        if is_multi:
+            # Multi-workflow mode: collect all workflows
+            new_workflows = {}
+            for original_wf_name, wf_widgets in self._workflow_entry_widgets.items():
+                actual_wf_name = wf_widgets["name_edit"].text().strip()
+                if not actual_wf_name:
+                    show_warning("Invalid Workflow", "All workflow names must be filled.", self)
+                    return
+
+                wf_path = wf_widgets["path_edit"].text().strip()
+                if not wf_path:
+                    show_warning("Invalid Workflow", f"Workflow '{actual_wf_name}' path cannot be empty.", self)
+                    return
+
+                new_workflows[actual_wf_name] = {
+                    "path": wf_path,
+                    "note": wf_widgets["note_edit"].text().strip(),
+                    "iteratable": wf_widgets["iteratable_check"].isChecked(),
+                    "full_restart": wf_widgets["full_restart_check"].isChecked(),
+                    "node_overrides": wf_widgets.get("node_overrides", {})
+                }
+
+            if not new_workflows:
+                show_warning("No Workflows", "At least one workflow must be added in multi-workflow mode.", self)
+                return
+
+            new_path = None
+            new_iteratable = False
+            new_full_restart = False
+            new_note = ""
+            new_node_overrides = {}
+        else:
+            # Single workflow mode
+            new_path = self._path_edit.text().strip()
+            if not new_path:
+                show_warning("Invalid Path", "Workflow path cannot be empty.", self)
+                return
+
+            new_workflows = None
+            new_iteratable = self._iteratable_check.isChecked()
+            new_full_restart = self._full_restart_check.isChecked()
+            new_note = self._note_edit.toPlainText().strip()
+            new_node_overrides = self.preset_data.get("node_overrides", {})
 
         # Collect tags
         selected_tags = [
@@ -462,28 +720,23 @@ class ModelDialog(QDialog):
         # Save tags to ratings
         set_model_tags(self.model_name, selected_tags)
 
-        # Update preset
-        update_comfyui_workflow_preset(
-            self.model_name,
-            workflow_path=new_path,
-            iteratable=self._iteratable_check.isChecked(),
-            note=self._note_edit.toPlainText().strip(),
-            full_restart=self._full_restart_check.isChecked()
-        )
-
-        # Handle rename if name changed
+        # Delete old preset and save new one (handles both update and rename)
         if new_name != self.model_name:
-            from comfyui.presets_manager import delete_comfyui_workflow_preset, save_comfyui_workflow_preset
             from comfyui.ratings import rename_model_data
-
             delete_comfyui_workflow_preset(self.model_name)
-            save_comfyui_workflow_preset(
-                new_name, new_path,
-                iteratable=self._iteratable_check.isChecked(),
-                note=self._note_edit.toPlainText().strip(),
-                full_restart=self._full_restart_check.isChecked()
-            )
             rename_model_data(self.model_name, new_name)
+
+        save_comfyui_workflow_preset(
+            new_name,
+            workflow_path=new_path or "",
+            iteratable=new_iteratable,
+            note=new_note,
+            full_restart=new_full_restart,
+            node_overrides=new_node_overrides,
+            is_multi=is_multi,
+            workflows=new_workflows,
+            output_type=output_type
+        )
 
         self.result_accepted = True
         self.accept()

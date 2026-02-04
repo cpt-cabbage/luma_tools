@@ -16,6 +16,14 @@ from PySide6.QtGui import QPixmap
 from workers import Worker
 from dialog_helpers import get_active_window, show_error, show_warning, confirm_action
 
+# Import event bus for cross-tab communication
+try:
+    from core.event_bus import pipeline_events
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+    pipeline_events = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -1071,28 +1079,174 @@ class EmbeddedImageViewer(QWidget):
             return
 
         image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
         menu = QMenu(self)
 
+        # Like option (at the top for quick access)
+        if self._favorites_manager:
+            is_liked = self._favorites_manager.is_liked(image_path)
+            like_action = menu.addAction("♥ Unlike (L)" if is_liked else "♡ Like (L)")
+            like_action.triggered.connect(self._toggle_like)
+
+            # Groups submenu
+            groups_menu = menu.addMenu("Add to Group")
+            groups = self._favorites_manager.get_groups()
+            item_group_ids = set(self._favorites_manager.get_item_groups(image_path))
+
+            for group in groups:
+                action = groups_menu.addAction(f"● {group.name}")
+                action.setCheckable(True)
+                action.setChecked(group.group_id in item_group_ids)
+                action.triggered.connect(
+                    lambda checked, gid=group.group_id: self._toggle_group_membership(gid)
+                )
+
+            if groups:
+                groups_menu.addSeparator()
+
+            new_group_action = groups_menu.addAction("+ New Group...")
+            new_group_action.triggered.connect(self._create_new_group)
+
+            menu.addSeparator()
+
+        # View options
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
 
+        # Add to Canvas
+        add_to_canvas_action = menu.addAction("Add to Canvas")
+        add_to_canvas_action.triggered.connect(lambda: self._add_to_canvas(image_path))
+
+        # View Input option (for outputs that have source images)
+        metadata = self._get_metadata()
+        input_image = metadata.get('input_image')
+        input_path = os.path.join(output_dir, input_image) if input_image else None
+        has_input = bool(input_path and os.path.exists(input_path))
+        view_input_action = menu.addAction("View Input")
+        view_input_action.triggered.connect(lambda: self._view_input(input_path))
+        view_input_action.setEnabled(has_input)
+        if not has_input and input_image:
+            view_input_action.setText("View Input (not found)")
+
         menu.addSeparator()
 
+        # Properties
+        properties_action = menu.addAction("Properties")
+        properties_action.triggered.connect(self._show_properties)
+
+        menu.addSeparator()
+
+        # Copy/Apply options
+        has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
         apply_settings_action = menu.addAction("Apply Settings (S)")
         apply_settings_action.triggered.connect(self._copy_settings)
+        apply_settings_action.setEnabled(has_settings)
+        if not has_settings:
+            apply_settings_action.setText("Apply Settings (no metadata)")
 
+        prompt = metadata.get('prompt', '')
         copy_prompt_action = menu.addAction("Copy Prompt (C)")
         copy_prompt_action.triggered.connect(self._copy_prompt)
+        copy_prompt_action.setEnabled(bool(prompt))
 
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
 
+        # Publish to AYON
         menu.addSeparator()
+        publish_action = menu.addAction("Publish to AYON")
+        publish_action.triggered.connect(self._publish_to_ayon)
 
+        # Delete
+        menu.addSeparator()
         delete_action = menu.addAction("Delete (Del)")
         delete_action.triggered.connect(self._delete_current_image)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
+
+    def _get_metadata(self):
+        """Get metadata for current image."""
+        if not self.image_paths:
+            return {}
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+        try:
+            from comfyui.metadata import get_item_metadata
+            return get_item_metadata(output_dir, filename) or {}
+        except Exception as e:
+            logger.debug(f"Could not load metadata: {e}")
+            return {}
+
+    def _toggle_group_membership(self, group_id):
+        """Toggle group membership for current image."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        item_groups = set(self._favorites_manager.get_item_groups(path))
+        if group_id in item_groups:
+            self._favorites_manager.remove_from_group(path, group_id)
+        else:
+            self._favorites_manager.add_to_group(path, group_id)
+
+    def _create_new_group(self):
+        """Create a new group and add current image to it."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        try:
+            from dialogs import QuickGroupDialog
+            dialog = QuickGroupDialog(item_count=1, parent=self)
+            if dialog.exec() == dialog.Accepted:
+                name, color = dialog.get_result()
+                group = self._favorites_manager.create_group(name, color)
+                if group:
+                    self._favorites_manager.add_to_group(path, group.group_id)
+        except Exception as e:
+            logger.error(f"Error creating group: {e}")
+
+    def _add_to_canvas(self, image_path):
+        """Add image to canvas via event bus."""
+        if EVENT_BUS_AVAILABLE and pipeline_events:
+            pipeline_events.add_to_canvas.emit(image_path)
+            self.filename_label.setText(f"{os.path.basename(image_path)} - Added to canvas!")
+            QTimer.singleShot(1500, self._update_info)
+
+    def _view_input(self, input_path):
+        """View the input/source image."""
+        if not input_path or not os.path.exists(input_path):
+            return
+        # Navigate to the input image in the current viewer
+        if input_path in self.image_paths:
+            self.current_index = self.image_paths.index(input_path)
+            self._load_current_image()
+        else:
+            # Open in a new viewer if not in current list
+            if EVENT_BUS_AVAILABLE and pipeline_events:
+                pipeline_events.view_input_image.emit(input_path)
+
+    def _show_properties(self):
+        """Show properties dialog for current image."""
+        if not self.image_paths:
+            return
+        image_path = self.image_paths[self.current_index]
+        output_dir = self.output_dir or os.path.dirname(image_path)
+        try:
+            from properties_dialog import PropertiesDialog
+            from core.state_manager import app_state
+
+            metadata = self._get_metadata()
+            dialog = PropertiesDialog(
+                image_path,
+                output_dir,
+                metadata=metadata,
+                parent=self,
+                show_comfyui_features=app_state.has_elevated_access
+            )
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error showing properties: {e}")
 
     def _open_folder(self, image_path):
         import subprocess
@@ -1120,11 +1274,13 @@ class FullscreenImageViewer(QWidget):
     - C: Copy prompt to clipboard (if available)
     - S: Apply settings to ComfyUI tab (if available)
     - Delete: Delete current file
+    - L: Toggle like status
     """
     closed = Signal()
     copy_settings_requested = Signal(dict)
     image_deleted = Signal(str)  # Emitted when a file is deleted (path)
     image_viewed = Signal(str)  # Emitted when navigating to an image (path)
+    like_toggled = Signal(str, bool)  # Emitted when like status is toggled (path, is_liked)
 
     def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
@@ -1132,9 +1288,14 @@ class FullscreenImageViewer(QWidget):
         self.current_index = start_index
         self.output_dir = output_dir
         self._show_info = True
+        self._favorites_manager = None
 
         self._setup_ui()
         self._load_current_image()
+
+    def set_favorites_manager(self, manager):
+        """Set the favorites manager for like functionality."""
+        self._favorites_manager = manager
 
     def _setup_ui(self):
         """Set up the fullscreen UI."""
@@ -1377,8 +1538,22 @@ class FullscreenImageViewer(QWidget):
             self._copy_settings()
         elif key == Qt.Key_Delete:
             self._delete_current_image()
+        elif key == Qt.Key_L:
+            self._toggle_like()
         else:
             super().keyPressEvent(event)
+
+    def _toggle_like(self):
+        """Toggle like status for current image."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        is_liked = self._favorites_manager.toggle_like(path)
+        self.like_toggled.emit(path, is_liked)
+        # Show feedback in info label
+        status = "Liked" if is_liked else "Unliked"
+        self.filename_label.setText(f"{os.path.basename(path)} - {status}")
+        QTimer.singleShot(1500, self._update_info)
 
     def _delete_current_image(self):
         """Delete the current file after confirmation."""
@@ -1427,28 +1602,194 @@ class FullscreenImageViewer(QWidget):
             return
 
         image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
         menu = QMenu(self)
 
+        # Like option (at the top for quick access)
+        if self._favorites_manager:
+            is_liked = self._favorites_manager.is_liked(image_path)
+            like_action = menu.addAction("♥ Unlike (L)" if is_liked else "♡ Like (L)")
+            like_action.triggered.connect(self._toggle_like)
+
+            # Groups submenu
+            groups_menu = menu.addMenu("Add to Group")
+            groups = self._favorites_manager.get_groups()
+            item_group_ids = set(self._favorites_manager.get_item_groups(image_path))
+
+            for group in groups:
+                action = groups_menu.addAction(f"● {group.name}")
+                action.setCheckable(True)
+                action.setChecked(group.group_id in item_group_ids)
+                action.triggered.connect(
+                    lambda checked, gid=group.group_id: self._toggle_group_membership(gid)
+                )
+
+            if groups:
+                groups_menu.addSeparator()
+
+            new_group_action = groups_menu.addAction("+ New Group...")
+            new_group_action.triggered.connect(self._create_new_group)
+
+            menu.addSeparator()
+
+        # View options
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
 
+        # Add to Canvas
+        add_to_canvas_action = menu.addAction("Add to Canvas")
+        add_to_canvas_action.triggered.connect(lambda: self._add_to_canvas(image_path))
+
+        # View Input option (for outputs that have source images)
+        metadata = self._get_metadata()
+        input_image = metadata.get('input_image')
+        input_path = os.path.join(output_dir, input_image) if input_image else None
+        has_input = bool(input_path and os.path.exists(input_path))
+        view_input_action = menu.addAction("View Input")
+        view_input_action.triggered.connect(lambda: self._view_input(input_path))
+        view_input_action.setEnabled(has_input)
+        if not has_input and input_image:
+            view_input_action.setText("View Input (not found)")
+
         menu.addSeparator()
 
+        # Properties
+        properties_action = menu.addAction("Properties")
+        properties_action.triggered.connect(self._show_properties)
+
+        menu.addSeparator()
+
+        # Copy/Apply options
+        has_settings = bool(metadata.get('workflow_preset') or metadata.get('editable_values'))
         apply_settings_action = menu.addAction("Apply Settings (S)")
         apply_settings_action.triggered.connect(self._copy_settings)
+        apply_settings_action.setEnabled(has_settings)
+        if not has_settings:
+            apply_settings_action.setText("Apply Settings (no metadata)")
 
+        prompt = metadata.get('prompt', '')
         copy_prompt_action = menu.addAction("Copy Prompt (C)")
         copy_prompt_action.triggered.connect(self._copy_prompt)
+        copy_prompt_action.setEnabled(bool(prompt))
 
         copy_path_action = menu.addAction("Copy Path")
         copy_path_action.triggered.connect(lambda: self._copy_path(image_path))
 
+        # Publish to AYON
         menu.addSeparator()
+        publish_action = menu.addAction("Publish to AYON")
+        publish_action.triggered.connect(self._publish_to_ayon)
 
+        # Delete
+        menu.addSeparator()
         delete_action = menu.addAction("Delete (Del)")
         delete_action.triggered.connect(self._delete_current_image)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
+
+    def _get_metadata(self):
+        """Get metadata for current image."""
+        if not self.image_paths:
+            return {}
+        image_path = self.image_paths[self.current_index]
+        filename = os.path.basename(image_path)
+        output_dir = self.output_dir or os.path.dirname(image_path)
+        try:
+            from comfyui.metadata import get_item_metadata
+            return get_item_metadata(output_dir, filename) or {}
+        except Exception as e:
+            logger.debug(f"Could not load metadata: {e}")
+            return {}
+
+    def _toggle_group_membership(self, group_id):
+        """Toggle group membership for current image."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        item_groups = set(self._favorites_manager.get_item_groups(path))
+        if group_id in item_groups:
+            self._favorites_manager.remove_from_group(path, group_id)
+        else:
+            self._favorites_manager.add_to_group(path, group_id)
+
+    def _create_new_group(self):
+        """Create a new group and add current image to it."""
+        if not self.image_paths or not self._favorites_manager:
+            return
+        path = self.image_paths[self.current_index]
+        try:
+            from dialogs import QuickGroupDialog
+            dialog = QuickGroupDialog(item_count=1, parent=self)
+            if dialog.exec() == dialog.Accepted:
+                name, color = dialog.get_result()
+                group = self._favorites_manager.create_group(name, color)
+                if group:
+                    self._favorites_manager.add_to_group(path, group.group_id)
+        except Exception as e:
+            logger.error(f"Error creating group: {e}")
+
+    def _add_to_canvas(self, image_path):
+        """Add image to canvas via event bus."""
+        if EVENT_BUS_AVAILABLE and pipeline_events:
+            pipeline_events.add_to_canvas.emit(image_path)
+            self.filename_label.setText(f"{os.path.basename(image_path)} - Added to canvas!")
+            QTimer.singleShot(1500, self._update_info)
+
+    def _view_input(self, input_path):
+        """View the input/source image."""
+        if not input_path or not os.path.exists(input_path):
+            return
+        # Navigate to the input image in the current viewer
+        if input_path in self.image_paths:
+            self.current_index = self.image_paths.index(input_path)
+            self._load_current_image()
+        else:
+            # Open in a new viewer if not in current list
+            if EVENT_BUS_AVAILABLE and pipeline_events:
+                pipeline_events.view_input_image.emit(input_path)
+
+    def _show_properties(self):
+        """Show properties dialog for current image."""
+        if not self.image_paths:
+            return
+        image_path = self.image_paths[self.current_index]
+        output_dir = self.output_dir or os.path.dirname(image_path)
+        try:
+            from properties_dialog import PropertiesDialog
+            from core.state_manager import app_state
+
+            metadata = self._get_metadata()
+            dialog = PropertiesDialog(
+                image_path,
+                output_dir,
+                metadata=metadata,
+                parent=self,
+                show_comfyui_features=app_state.has_elevated_access
+            )
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error showing properties: {e}")
+
+    def _publish_to_ayon(self):
+        """Publish this image to AYON."""
+        parent_window = get_active_window()
+
+        try:
+            from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
+            image_path = self.image_paths[self.current_index]
+            success = publish_comfyui_asset_to_ayon(
+                file_path=image_path,
+                parent_widget=parent_window,
+                output_dir=self.output_dir
+            )
+            if success:
+                logger.info(f"Successfully published image to AYON: {image_path}")
+                self.filename_label.setText(f"{os.path.basename(image_path)} - Published!")
+                QTimer.singleShot(1500, self._update_info)
+        except Exception as e:
+            logger.error(f"Failed to publish image to AYON: {e}", exc_info=True)
+            show_error("Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}", parent_window)
 
     def _open_folder(self, image_path):
         import subprocess

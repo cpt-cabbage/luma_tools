@@ -6,13 +6,118 @@ Text presets are stored in user settings, while workflow presets are in global s
 """
 
 import logging
+import os
+import shutil
 from typing import Dict, Any, Optional
 from core.settings_manager import (
     load_user_settings, save_user_settings,
-    load_global_settings, save_global_settings
+    load_global_settings, save_global_settings,
+    safe_get_setting
 )
+from core.utils import ensure_directory, normalize_path
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# WORKFLOW FILE COPYING
+# ============================================================================
+
+DEFAULT_WORKFLOWS_DIRECTORY = "L:/tools/_studio_tools/luma_tools/comfyui/workflows"
+
+
+def get_workflows_directory() -> str:
+    """Get the centralized workflows directory path.
+
+    Returns:
+        Path to workflows directory from settings, or default.
+    """
+    return safe_get_setting("comfyui_workflows_directory", DEFAULT_WORKFLOWS_DIRECTORY)
+
+
+def _is_path_under_directory(file_path: str, directory: str) -> bool:
+    """Check if a file path is under a given directory.
+
+    Args:
+        file_path: Path to check
+        directory: Directory to check against
+
+    Returns:
+        True if file_path is under directory
+    """
+    file_path = os.path.normpath(os.path.abspath(file_path)).lower()
+    directory = os.path.normpath(os.path.abspath(directory)).lower()
+    return file_path.startswith(directory)
+
+
+def _generate_unique_filename(directory: str, filename: str) -> str:
+    """Generate a unique filename by appending version suffix if needed.
+
+    Args:
+        directory: Target directory
+        filename: Original filename
+
+    Returns:
+        Unique filename (may be modified with _v001, _v002, etc.)
+    """
+    target_path = os.path.join(directory, filename)
+    if not os.path.exists(target_path):
+        return filename
+
+    base, ext = os.path.splitext(filename)
+    version = 1
+    while True:
+        new_filename = f"{base}_v{version:03d}{ext}"
+        new_path = os.path.join(directory, new_filename)
+        if not os.path.exists(new_path):
+            return new_filename
+        version += 1
+        if version > 999:  # Safety limit
+            raise RuntimeError(f"Too many versions of {filename}")
+
+
+def copy_workflow_to_central_directory(source_path: str) -> Optional[str]:
+    """Copy a workflow file to the centralized workflows directory.
+
+    Uses flat structure - all workflows in the root directory.
+
+    Args:
+        source_path: Path to the source workflow JSON file
+
+    Returns:
+        New path to the copied workflow, or None if copy was skipped/failed
+    """
+    if not source_path or not os.path.isfile(source_path):
+        logger.warning(f"Cannot copy workflow: source does not exist: {source_path}")
+        return None
+
+    workflows_dir = get_workflows_directory()
+
+    # Check if source is already in the workflows directory
+    if _is_path_under_directory(source_path, workflows_dir):
+        logger.debug(f"Workflow already in central directory, skipping copy: {source_path}")
+        return source_path  # Return original path, no copy needed
+
+    # Ensure target directory exists
+    try:
+        ensure_directory(workflows_dir)
+    except Exception as e:
+        logger.error(f"Failed to create workflow directory {workflows_dir}: {e}")
+        return None
+
+    # Get filename and handle conflicts
+    original_filename = os.path.basename(source_path)
+    target_filename = _generate_unique_filename(workflows_dir, original_filename)
+    target_path = os.path.join(workflows_dir, target_filename)
+
+    # Copy the file
+    try:
+        shutil.copy2(source_path, target_path)
+        logger.info(f"Copied workflow to central directory: {source_path} -> {target_path}")
+        return normalize_path(target_path)
+    except Exception as e:
+        logger.error(f"Failed to copy workflow {source_path} to {target_path}: {e}")
+        return None
 
 
 # ============================================================================
@@ -115,7 +220,8 @@ def save_comfyui_workflow_preset(
     node_overrides: Optional[Dict] = None,
     is_multi: bool = False,
     workflows: Optional[Dict] = None,
-    output_type: str = "image"
+    output_type: str = "image",
+    copy_to_central: bool = True
 ):
     """Save a ComfyUI workflow preset to global settings.
 
@@ -130,7 +236,30 @@ def save_comfyui_workflow_preset(
         is_multi: Whether this is a multi-workflow preset
         workflows: Dict of workflows for multi-workflow presets
         output_type: Type of output (image, video, 3d, audio, other)
+        copy_to_central: If True, copy workflow file(s) to central directory
     """
+    # Copy main workflow to central directory if enabled
+    final_workflow_path = workflow_path
+    if copy_to_central and workflow_path:
+        copied_path = copy_workflow_to_central_directory(workflow_path)
+        if copied_path:
+            final_workflow_path = copied_path
+
+    # Handle multi-workflow presets - copy each sub-workflow
+    final_workflows = workflows
+    if copy_to_central and is_multi and workflows:
+        final_workflows = {}
+        for wf_name, wf_config in workflows.items():
+            wf_path = wf_config.get("path", "")
+            if wf_path:
+                copied_wf_path = copy_workflow_to_central_directory(wf_path)
+                if copied_wf_path:
+                    wf_path = copied_wf_path
+            final_workflows[wf_name] = {
+                **wf_config,
+                "path": wf_path
+            }
+
     settings = load_global_settings()
     if "comfyui_workflow_presets" not in settings:
         settings["comfyui_workflow_presets"] = {}
@@ -140,7 +269,7 @@ def save_comfyui_workflow_preset(
         output_type = "image"
 
     preset_data = {
-        "path": workflow_path,
+        "path": final_workflow_path,
         "description": description,
         "iteratable": iteratable,
         "note": note,
@@ -149,19 +278,28 @@ def save_comfyui_workflow_preset(
         "is_multi": is_multi,
         "output_type": output_type,
     }
-    if is_multi and workflows:
-        preset_data["workflows"] = workflows
+    if is_multi and final_workflows:
+        preset_data["workflows"] = final_workflows
 
     settings["comfyui_workflow_presets"][name] = preset_data
     save_global_settings(settings)
     if is_multi:
-        logger.info(f"Saved ComfyUI multi-workflow preset: {name} with {len(workflows or {})} workflow(s)")
+        logger.info(f"Saved ComfyUI multi-workflow preset: {name} with {len(final_workflows or {})} workflow(s)")
     else:
-        logger.info(f"Saved ComfyUI workflow preset: {name} -> {workflow_path}")
+        logger.info(f"Saved ComfyUI workflow preset: {name} -> {final_workflow_path}")
 
 
-def update_comfyui_workflow_preset(name: str, **kwargs) -> bool:
-    """Update an existing ComfyUI workflow preset."""
+def update_comfyui_workflow_preset(name: str, copy_to_central: bool = True, **kwargs) -> bool:
+    """Update an existing ComfyUI workflow preset.
+
+    Args:
+        name: Preset name
+        copy_to_central: If True, copy new workflow paths to central directory
+        **kwargs: Fields to update
+
+    Returns:
+        bool: True if update successful
+    """
     settings = load_global_settings()
     presets = settings.get("comfyui_workflow_presets", {})
     if name not in presets:
@@ -174,15 +312,39 @@ def update_comfyui_workflow_preset(name: str, **kwargs) -> bool:
                   "full_restart": False, "node_overrides": {}, "is_multi": False,
                   "output_type": "image"}
 
-    # Update only provided fields
-    for key in ["workflow_path", "description", "iteratable", "note", "full_restart",
+    # Handle workflow_path with copy
+    if "workflow_path" in kwargs and kwargs["workflow_path"] is not None:
+        new_path = kwargs["workflow_path"]
+        if copy_to_central and new_path:
+            copied_path = copy_workflow_to_central_directory(new_path)
+            if copied_path:
+                new_path = copied_path
+        preset["path"] = new_path
+        del kwargs["workflow_path"]  # Remove so we don't process it again below
+
+    # Handle multi-workflow updates with copy
+    if "workflows" in kwargs and kwargs["workflows"] is not None and copy_to_central:
+        final_workflows = {}
+        for wf_name, wf_config in kwargs["workflows"].items():
+            wf_path = wf_config.get("path", "")
+            if wf_path:
+                copied_wf_path = copy_workflow_to_central_directory(wf_path)
+                if copied_wf_path:
+                    wf_path = copied_wf_path
+            final_workflows[wf_name] = {
+                **wf_config,
+                "path": wf_path
+            }
+        kwargs["workflows"] = final_workflows
+
+    # Update remaining fields
+    for key in ["description", "iteratable", "note", "full_restart",
                 "node_overrides", "is_multi", "workflows", "output_type"]:
         if key in kwargs and kwargs[key] is not None:
-            preset_key = "path" if key == "workflow_path" else key
             # Validate output_type
             if key == "output_type" and kwargs[key] not in OUTPUT_TYPES:
                 continue
-            preset[preset_key] = kwargs[key]
+            preset[key] = kwargs[key]
 
     presets[name] = preset
     settings["comfyui_workflow_presets"] = presets

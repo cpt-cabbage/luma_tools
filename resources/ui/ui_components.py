@@ -1529,13 +1529,16 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             parent_window = get_active_window()
 
             from properties_dialog import PropertiesDialog
+            from core.state_manager import app_state
+
             metadata = self._get_metadata()
 
             dialog = PropertiesDialog(
                 self.path,
                 self.output_dir,
                 metadata=metadata,
-                parent=parent_window
+                parent=parent_window,
+                show_comfyui_features=app_state.has_elevated_access
             )
             dialog.exec()
         except Exception as e:

@@ -383,7 +383,7 @@ def copy_mp4_to_gallery(
     try:
         # Get gallery output path from settings
         try:
-            gallery_base = get_setting("comfyui_network_output_path")
+            gallery_base = get_setting("network_output_path")
         except KeyError:
             gallery_base = None
 

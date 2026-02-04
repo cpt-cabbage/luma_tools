@@ -80,7 +80,11 @@
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_temp_check.ps1\")",
       "Bash(pythonvenvScriptspython.exe -m pytest:*)",
       "Bash(pythonvenvScriptspython.exe _test_debug_filter.py)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(Select-Object -First 50)",
+      "Bash(git stash:*)",
+      "Bash(Select-Object -First 20)",
+      "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_find_phoebe_logs.ps1\")"
     ],
     "deny": [
       "Read(./python/venv/**)",

@@ -147,8 +147,8 @@ _TAB_ALIASES = {
     'mp4': 'mp4maker',
     'mp4maker': 'mp4maker',
     'republish': 'republish',
-    'shotcleaner': 'shotcleaner',
-    'cleaner': 'shotcleaner',
+    'shotcleaner': 'cleaner',
+    'cleaner': 'cleaner',
 }
 
 
@@ -882,7 +882,7 @@ class LumaShotTools(QtWidgets.QWidget):
             return
 
         # Republish tab is allowed in standalone mode (uses custom directory selection)
-        standalone_incompatible = ['passbuilder', 'shotcleaner']
+        standalone_incompatible = ['passbuilder']
 
         for i in range(self.tab_widget.count() - 1, -1, -1):
             widget = self.tab_widget.widget(i)
@@ -896,7 +896,7 @@ class LumaShotTools(QtWidgets.QWidget):
             'passbuilder': 'layers',
             'mp4maker': 'video',
             'republish': 'upload',
-            'shotcleaner': 'trash',
+            'cleaner': 'trash',
             'logs': 'terminal',
             'comfyui': 'sparkles',
             'gallery': 'image',
@@ -1170,6 +1170,13 @@ def main():
             load_global_settings()  # Populate global settings cache (may hit network)
         except Exception as e:
             logging.warning(f"Could not pre-load settings: {e}")
+
+        # Cache working tool paths for standalone mode fallback
+        try:
+            from core.config import cache_tool_paths
+            cache_tool_paths()
+        except Exception as e:
+            logging.debug(f"Could not cache tool paths: {e}")
 
         # Check for running jobs to recover (show feedback in splash)
         pending_job_recovery = None

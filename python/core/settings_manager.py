@@ -59,14 +59,17 @@ def _validate_server_behavior(v):
 def _validate_stacking_mode(v):
     return _validate_enum(v, ("job", "groups", "both", "grid"), "job")
 
+def _validate_canvas_sync_interval(v):
+    """Validate canvas sync interval (500-5000ms)."""
+    try:
+        return max(500, min(5000, int(v)))
+    except (ValueError, TypeError):
+        return 1000  # Default 1 second
+
 # Registry of all simple settings (get/set only, no complex logic)
 SETTINGS_REGISTRY: Dict[str, SettingDef] = {
-    # ComfyUI Global Settings
-    "comfyui_path": SettingDef(
-        "comfyui_path",
-        r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\ComfyUI_windows_portable\ComfyUI",
-        "global"
-    ),
+    # ComfyUI Global Settings (actual paths configured in global_settings.json)
+    "comfyui_path": SettingDef("comfyui_path", "", "global"),
     "comfyui_mode": SettingDef("comfyui_mode", "embedded", "global", _validate_comfyui_mode),
     "comfyui_python_path": SettingDef("comfyui_python_path", "", "global"),
     "comfyui_fast_mode": SettingDef("comfyui_fast_mode", False, "global"),
@@ -75,7 +78,12 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_highvram": SettingDef("comfyui_highvram", False, "global"),
     "comfyui_normalvram": SettingDef("comfyui_normalvram", False, "global"),
     "comfyui_disable_smart_memory": SettingDef("comfyui_disable_smart_memory", False, "global"),
-    "comfyui_network_output_path": SettingDef("comfyui_network_output_path", "", "global"),
+    "network_output_path": SettingDef("network_output_path", "", "global"),
+    "comfyui_workflows_directory": SettingDef(
+        "comfyui_workflows_directory",
+        "L:/tools/_studio_tools/luma_tools/comfyui/workflows",
+        "global"
+    ),
     "comfyui_timeout": SettingDef("comfyui_timeout", 3600, "global", _validate_timeout),
     "comfyui_server_not_found_behavior": SettingDef(
         "comfyui_server_not_found_behavior", "fail", "global", _validate_server_behavior
@@ -83,11 +91,23 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_server_wait_timeout": SettingDef(
         "comfyui_server_wait_timeout", 300, "global", _validate_server_wait_timeout
     ),
+    "comfyui_preset_categories": SettingDef(
+        "comfyui_preset_categories",
+        [
+            "Upscaling", "Generation", "Video", "Style Transfer",
+            "Inpainting", "3D", "Animation", "Portrait",
+            "Landscape", "Abstract", "Experimental"
+        ],
+        "global"
+    ),
+    # Canvas Settings
+    "canvas_sync_interval": SettingDef(
+        "canvas_sync_interval", 1000, "global", _validate_canvas_sync_interval
+    ),
     # User Settings
     "comfyui_tab_state": SettingDef("comfyui_tab_state", {}, "user"),
     "tab_order": SettingDef("tab_order", [], "user"),
     "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
-    "generate_3d_thumbnails": SettingDef("generate_3d_thumbnails", True, "user"),
     "show_tray_notifications": SettingDef("show_tray_notifications", True, "user"),
     "show_verbose_logs": SettingDef("show_verbose_logs", False, "user"),
     "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
@@ -131,6 +151,10 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # Canvas settings
     # Dict mapping "{jobname}" or "{jobname}_{shot}" to last opened canvas_id
     "canvas_last_opened": SettingDef("canvas_last_opened", {}, "user"),
+    # Cached tool paths (fallback for standalone mode)
+    "cached_oiio_path": SettingDef("cached_oiio_path", "", "user"),
+    "cached_oiio_info_path": SettingDef("cached_oiio_info_path", "", "user"),
+    "cached_ffmpeg_path": SettingDef("cached_ffmpeg_path", "", "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }
@@ -147,7 +171,7 @@ TAB_RESTRICTION_MAP = {
     "passbuilder": "RestrictPassBuilder",
     "mp4maker": "RestrictMP4Maker",
     "republish": "RestrictRePublish",
-    "shotcleaner": "RestrictShotCleaner"
+    "cleaner": "RestrictCleaner"
 }
 
 # ============================================================================
@@ -260,7 +284,7 @@ def load_global_settings() -> Dict[str, Any]:
 
     default_settings = {
         "comfyui_workflow_presets": {},
-        "admin_users": ["christophe.leyder"],  # Admins: full access (all tabs including Settings)
+        "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
         "sup_users": [],  # Supervisors: can see ComfyUI and Gallery tabs (not Settings)
     }
     settings_file = _get_global_settings_file()

@@ -77,6 +77,13 @@ class ViewerManager(BaseGalleryManager):
         )
         self._fullscreen_viewer.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
         self._fullscreen_viewer.image_viewed.connect(self.tab._on_item_viewed)
+
+        # Set favorites manager for like/group functionality
+        favorites_manager = getattr(self.tab, '_favorites_manager', None)
+        if favorites_manager:
+            self._fullscreen_viewer.set_favorites_manager(favorites_manager)
+            self._fullscreen_viewer.like_toggled.connect(self._on_viewer_like_toggled)
+
         self._fullscreen_viewer.show()
 
     def _show_embedded(self, image_paths, start_index):
