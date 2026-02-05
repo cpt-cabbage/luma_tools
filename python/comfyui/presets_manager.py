@@ -474,9 +474,14 @@ def save_style_preset(
 
     # Serialize editable values (exclude non-serializable data)
     serialized = {}
-    for node_id, data in editable_values.items():
-        if isinstance(data, dict):
-            serialized[str(node_id)] = {
+    for node_id, entries in editable_values.items():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            if not isinstance(data, dict):
+                continue
+            widget_name = getattr(data.get('node'), 'widget_name', '') if data.get('node') else ''
+            serial_key = f"{node_id}:{widget_name}" if widget_name else str(node_id)
+            serialized[serial_key] = {
                 "display_name": data.get('display_name', ''),
                 "node_type": data.get('node_type', ''),
                 "widget_type": data.get('widget_type', ''),
@@ -638,9 +643,14 @@ def save_session(
 
     # Serialize editable values
     serialized_values = {}
-    for node_id, data in editable_values.items():
-        if isinstance(data, dict):
-            serialized_values[str(node_id)] = {
+    for node_id, entries in editable_values.items():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            if not isinstance(data, dict):
+                continue
+            widget_name = getattr(data.get('node'), 'widget_name', '') if data.get('node') else ''
+            serial_key = f"{node_id}:{widget_name}" if widget_name else str(node_id)
+            serialized_values[serial_key] = {
                 "display_name": data.get('display_name', ''),
                 "node_type": data.get('node_type', ''),
                 "widget_type": data.get('widget_type', ''),

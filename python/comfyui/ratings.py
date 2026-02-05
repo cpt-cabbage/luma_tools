@@ -317,6 +317,7 @@ def get_sorted_models(
     sort_key: str = "recently_used",
     tag_filter: Optional[str] = None,
     search_query: Optional[str] = None,
+    username: Optional[str] = None,
 ) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
     """
     Get a sorted list of models with their preset and rating data.
@@ -325,8 +326,9 @@ def get_sorted_models(
         presets: Dict of preset_name -> preset_config from presets_manager
         sort_key: One of "name", "highest_rated", "most_used",
                   "recently_added", "recently_used"
-        tag_filter: Optional tag to filter by (None = all)
+        tag_filter: Optional tag to filter by (None = all, "favorites" for user favorites)
         search_query: Optional search string to filter by name
+        username: Username for favorites filtering
 
     Returns:
         List of (model_name, preset_config, rating_data) tuples, sorted
@@ -334,11 +336,21 @@ def get_sorted_models(
     ratings_data = get_all_ratings()
     models_ratings = ratings_data.get("models", {})
 
+    # Get user favorites if filtering by favorites
+    user_favorites = set()
+    if tag_filter == "favorites" and username:
+        user_favorites = set(get_user_favorites(username))
+
     result = []
 
     for preset_name, preset_config in presets.items():
         # Get rating data (or defaults)
         rating_data = models_ratings.get(preset_name, _get_default_model_data())
+
+        # Apply favorites filter first (if active)
+        if tag_filter == "favorites":
+            if preset_name not in user_favorites:
+                continue
 
         # Apply search filter
         if search_query:
@@ -350,8 +362,8 @@ def get_sorted_models(
             if not name_match and not tag_match:
                 continue
 
-        # Apply tag filter
-        if tag_filter and tag_filter != "all":
+        # Apply tag filter (skip if favorites, already handled)
+        if tag_filter and tag_filter not in ("all", "favorites"):
             tags = rating_data.get("tags", [])
             if tag_filter not in tags:
                 continue

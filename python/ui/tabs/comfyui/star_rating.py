@@ -274,26 +274,35 @@ class CompactStarRating(QWidget):
     Shows: ★★★★☆ (4.2) format
     """
 
+    rating_changed = Signal(int)
+
     def __init__(
         self,
         parent=None,
         rating: float = 0.0,
         show_value: bool = True,
-        size: int = 14
+        size: int = 14,
+        interactive: bool = False,
+        user_rating: Optional[int] = None
     ):
         """
         Initialize compact star rating.
 
         Args:
             parent: Parent widget
-            rating: Rating value (0.0-5.0)
+            rating: Average rating value (0.0-5.0)
             show_value: Show numeric value in parentheses
             size: Font size for stars
+            interactive: Allow clicking to rate
+            user_rating: Current user's rating (1-5 or None if not rated)
         """
         super().__init__(parent)
         self._rating = rating
         self._show_value = show_value
         self._size = size
+        self._interactive = interactive
+        self._user_rating = user_rating
+        self._hover_rating = 0
 
         self._setup_ui()
 
@@ -304,7 +313,10 @@ class CompactStarRating(QWidget):
         layout.setSpacing(2)
 
         self._stars_label = QLabel()
-        self._stars_label.setStyleSheet(f"color: #fbbf24; font-size: {self._size}px;")
+        if self._interactive:
+            self._stars_label.setCursor(Qt.PointingHandCursor)
+        self._stars_label.setStyleSheet(f"font-size: {self._size}px;")
+        self._stars_label.setMouseTracking(self._interactive)
         layout.addWidget(self._stars_label)
 
         if self._show_value:
@@ -317,30 +329,113 @@ class CompactStarRating(QWidget):
         self._update_display()
 
     def _update_display(self):
-        """Update the star display."""
-        filled = int(self._rating)
-        half = (self._rating - filled) >= 0.5
+        """Update the star display with color coding."""
+        # Show hover preview if hovering, otherwise show average rating
+        display_rating = self._hover_rating if self._hover_rating > 0 else self._rating
+
+        filled = int(display_rating)
+        half = (display_rating - filled) >= 0.5
         empty = 5 - filled - (1 if half else 0)
 
-        # Use Unicode stars: ★ (filled), ☆ (empty)
-        stars = "★" * filled
+        # Build HTML with colored stars
+        html_parts = []
+
+        # Filled stars (gold for hover, gold for rated, grey for unrated)
+        if filled > 0:
+            color = "#fcd34d" if self._hover_rating > 0 else "#fbbf24"
+            html_parts.append(f'<span style="color: {color};">{"★" * filled}</span>')
+
+        # Half star (gold)
         if half:
-            stars += "★"  # Use full star for half (simpler)
+            color = "#fcd34d" if self._hover_rating > 0 else "#fbbf24"
+            html_parts.append(f'<span style="color: {color};">★</span>')
             empty = 5 - filled - 1
-        stars += "☆" * empty
 
-        self._stars_label.setText(stars)
+        # Empty stars (grey if not rated, darker grey otherwise)
+        if empty > 0:
+            # Lighter grey if hovering (will be filled), darker grey for unrated, mid-grey for rated
+            if self._hover_rating > 0:
+                grey_color = "#fcd34d"  # Show as if they'll be filled on hover
+            elif self._rating > 0:
+                grey_color = "#4a4a4a"  # Rated by others, show darker empty
+            else:
+                grey_color = "#666666"  # Not rated at all, show grey
 
-        if self._value_label and self._rating > 0:
-            self._value_label.setText(f"({self._rating:.1f})")
-        elif self._value_label:
-            self._value_label.setText("")
+            # On hover, show remaining stars as they would be filled
+            if self._hover_rating > 0 and filled + (1 if half else 0) < self._hover_rating:
+                # Show hover-filled stars up to hover rating
+                hover_fill = self._hover_rating - filled - (1 if half else 0)
+                html_parts.append(f'<span style="color: #fcd34d;">{"★" * hover_fill}</span>')
+                remaining_empty = empty - hover_fill
+                if remaining_empty > 0:
+                    html_parts.append(f'<span style="color: #4a4a4a;">{"☆" * remaining_empty}</span>')
+            else:
+                html_parts.append(f'<span style="color: {grey_color};">{"☆" * empty}</span>')
+
+        self._stars_label.setText("".join(html_parts))
+
+        # Update value label - always show average
+        if self._value_label:
+            if self._rating > 0:
+                self._value_label.setText(f"({self._rating:.1f})")
+            else:
+                self._value_label.setText("")
 
     def set_rating(self, rating: float) -> None:
-        """Set the displayed rating."""
+        """Set the displayed average rating."""
         self._rating = max(0.0, min(5.0, rating))
         self._update_display()
 
+    def set_user_rating(self, rating: Optional[int]) -> None:
+        """Set the current user's rating."""
+        self._user_rating = rating
+        self._update_display()
+
     def get_rating(self) -> float:
-        """Get the current rating."""
+        """Get the current average rating."""
         return self._rating
+
+    def get_user_rating(self) -> Optional[int]:
+        """Get the current user's rating."""
+        return self._user_rating
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse movement for hover preview."""
+        if not self._interactive:
+            return super().mouseMoveEvent(event)
+
+        # Calculate star position from mouse X
+        label_width = self._stars_label.width()
+        star_width = label_width / 5.0
+        pos_x = event.position().x()
+        hover_rating = min(5, max(0, int(pos_x / star_width) + 1))
+
+        if hover_rating != self._hover_rating:
+            self._hover_rating = hover_rating
+            self._update_display()
+
+        return super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        """Handle click to set rating."""
+        if not self._interactive or event.button() != Qt.LeftButton:
+            return super().mousePressEvent(event)
+
+        # Calculate clicked star
+        label_width = self._stars_label.width()
+        star_width = label_width / 5.0
+        pos_x = event.position().x()
+        clicked_rating = min(5, max(1, int(pos_x / star_width) + 1))
+
+        self._user_rating = clicked_rating
+        self._update_display()
+        self.rating_changed.emit(clicked_rating)
+
+        return super().mousePressEvent(event)
+
+    def leaveEvent(self, event):
+        """Handle mouse leaving the widget."""
+        if self._interactive:
+            self._hover_rating = 0
+            self._update_display()
+        return super().leaveEvent(event)

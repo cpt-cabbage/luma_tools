@@ -104,6 +104,7 @@ class AddItemCommand(CanvasCommand):
                     self._item_data.get('y', 0),
                     text=self._item_data.get('text', ''),
                     color=self._item_data.get('color', 'yellow'),
+                    font_size=self._item_data.get('font_size', 10),
                     note_id=self._item_data.get('id')
                 )
                 self._item_id = self._item_data.get('id')

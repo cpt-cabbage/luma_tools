@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QPen, QFont, QDrag
 
 
+VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv'}
+
+
 # Global registry for tracking active drags between BatchImageSelector widgets
 # This allows the target to know which source widget to remove the image from
 _active_drag_source = None  # (BatchImageSelector instance, image_path)
@@ -76,36 +79,79 @@ class BatchImageThumbnail(QLabel):
         self._load_thumbnail()
 
     def _load_thumbnail(self):
-        """Load and display the thumbnail with gallery color border and order number."""
-        pixmap = QPixmap(self.image_path)
-        if pixmap.isNull():
-            self.setText("Invalid")
-            return
+        """Load and display the thumbnail with gallery color border and order number.
 
-        # Scale to fit while maintaining aspect ratio
-        scaled = pixmap.scaled(
-            self.thumbnail_size - 10, self.thumbnail_size - 10,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
+        For non-image files (videos etc.), shows a placeholder with play icon and filename.
+        """
+        ext = os.path.splitext(self.image_path)[1].lower()
+        is_video = ext in VIDEO_EXTENSIONS
 
-        # Create a new pixmap with border and order number
-        result = QPixmap(self.thumbnail_size, self.thumbnail_size)
-        result.fill(Qt.transparent)
+        if is_video:
+            # Video file: show placeholder with play icon and filename
+            result = QPixmap(self.thumbnail_size, self.thumbnail_size)
+            result.fill(QColor('#2c313a'))
 
-        painter = QPainter(result)
-        painter.setRenderHint(QPainter.Antialiasing)
+            painter = QPainter(result)
+            painter.setRenderHint(QPainter.Antialiasing)
 
-        # Draw gallery color border if available
-        if self.gallery_color:
-            border_color = QColor(self.gallery_color)
-            pen = QPen(border_color, 4)
-            painter.setPen(pen)
-            painter.drawRect(2, 2, self.thumbnail_size - 4, self.thumbnail_size - 4)
+            # Draw gallery color border if available
+            if self.gallery_color:
+                border_color = QColor(self.gallery_color)
+                pen = QPen(border_color, 4)
+                painter.setPen(pen)
+                painter.drawRect(2, 2, self.thumbnail_size - 4, self.thumbnail_size - 4)
 
-        # Draw thumbnail centered
-        x = (self.thumbnail_size - scaled.width()) // 2
-        y = (self.thumbnail_size - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
+            # Draw play triangle icon centered
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(200, 200, 200, 180))
+            cx, cy = self.thumbnail_size // 2, self.thumbnail_size // 2 - 10
+            from PySide6.QtGui import QPolygon
+            from PySide6.QtCore import QPoint as QP
+            triangle = QPolygon([QP(cx - 14, cy - 18), QP(cx - 14, cy + 18), QP(cx + 18, cy)])
+            painter.drawPolygon(triangle)
+
+            # Draw filename at the bottom
+            painter.setPen(QPen(QColor(180, 180, 180)))
+            font = QFont()
+            font.setPixelSize(10)
+            painter.setFont(font)
+            filename = os.path.basename(self.image_path)
+            # Truncate long filenames
+            if len(filename) > 16:
+                filename = filename[:13] + '...'
+            painter.drawText(4, self.thumbnail_size - 22, self.thumbnail_size - 8, 18,
+                             Qt.AlignCenter, filename)
+        else:
+            # Image file: load and scale
+            pixmap = QPixmap(self.image_path)
+            if pixmap.isNull():
+                self.setText("Invalid")
+                return
+
+            # Scale to fit while maintaining aspect ratio
+            scaled = pixmap.scaled(
+                self.thumbnail_size - 10, self.thumbnail_size - 10,
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+
+            # Create a new pixmap with border and order number
+            result = QPixmap(self.thumbnail_size, self.thumbnail_size)
+            result.fill(Qt.transparent)
+
+            painter = QPainter(result)
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            # Draw gallery color border if available
+            if self.gallery_color:
+                border_color = QColor(self.gallery_color)
+                pen = QPen(border_color, 4)
+                painter.setPen(pen)
+                painter.drawRect(2, 2, self.thumbnail_size - 4, self.thumbnail_size - 4)
+
+            # Draw thumbnail centered
+            x = (self.thumbnail_size - scaled.width()) // 2
+            y = (self.thumbnail_size - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
 
         # Draw order number in top-left corner (used for pairing indication)
         if self.order_num is not None:
@@ -207,15 +253,16 @@ class BatchImageSelector(QWidget):
     images_changed = Signal(list)
     THUMBNAIL_SIZE = 120
 
-    def __init__(self, supported_extensions=None, parent=None, total_image_nodes=1):
+    def __init__(self, supported_extensions=None, parent=None, total_image_nodes=1, file_type_label="images"):
         super().__init__(parent)
         self.supported_extensions = supported_extensions or ['.png', '.jpg', '.jpeg', '.exr']
         self.selected_files = []
         self._last_browse_dir = ""
         self._thumbnail_widgets = {}  # path -> BatchImageThumbnail
-        self._total_image_nodes = total_image_nodes  # Total number of LoadImage nodes
+        self._total_image_nodes = total_image_nodes  # Total number of LoadImage/LoadVideo nodes
         self._dragged_widget = None
         self._gallery_colors = {}  # path -> hex color string (from gallery likes/groups)
+        self._file_type_label = file_type_label  # "images", "videos", etc.
 
         # Set size policy to expand vertically
         from PySide6.QtWidgets import QSizePolicy
@@ -229,7 +276,7 @@ class BatchImageSelector(QWidget):
         self.toolbar_layout = QHBoxLayout(self.toolbar)
         self.toolbar_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.add_btn = QPushButton("Add Images...")
+        self.add_btn = QPushButton(f"Add {self._file_type_label.title()}...")
         self.add_btn.clicked.connect(self.browse_images)
         self.toolbar_layout.addWidget(self.add_btn)
 
@@ -237,7 +284,7 @@ class BatchImageSelector(QWidget):
         self.clear_btn.clicked.connect(self.clear_images)
         self.toolbar_layout.addWidget(self.clear_btn)
 
-        self.count_label = QLabel("No images selected")
+        self.count_label = QLabel(f"No {self._file_type_label} selected")
         self.toolbar_layout.addWidget(self.count_label)
         self.toolbar_layout.addStretch()
 
@@ -271,7 +318,8 @@ class BatchImageSelector(QWidget):
         drop_layout = QVBoxLayout(self.drop_frame)
         drop_layout.setContentsMargins(5, 5, 5, 5)
 
-        self.drop_label = QLabel("Drop images here or click 'Add Images...'\n(Drag thumbnails to reorder, double-click to remove)")
+        _label_title = self._file_type_label.title()
+        self.drop_label = QLabel(f"Drop {self._file_type_label} here or click 'Add {_label_title}...'\n(Drag thumbnails to reorder, double-click to remove)")
         self.drop_label.setAlignment(Qt.AlignCenter)
         self.drop_label.setStyleSheet("color: #888888; font-size: 11px; border: none;")
         drop_layout.addWidget(self.drop_label)
@@ -304,10 +352,11 @@ class BatchImageSelector(QWidget):
         self.setAcceptDrops(True)
 
     def browse_images(self):
-        """Open file dialog to select images."""
-        ext_filter = "Images (" + " ".join(f"*{ext}" for ext in self.supported_extensions) + ")"
+        """Open file dialog to select files."""
+        label_title = self._file_type_label.title()
+        ext_filter = f"{label_title} (" + " ".join(f"*{ext}" for ext in self.supported_extensions) + ")"
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select Images",
+            self, f"Select {label_title}",
             self._last_browse_dir or "",
             ext_filter
         )
@@ -391,26 +440,30 @@ class BatchImageSelector(QWidget):
 
     def _update_display(self):
         """Update the display based on selection count."""
+        label = self._file_type_label  # e.g. "images", "videos"
+        # Singular form: strip trailing 's' if present (images->image, videos->video)
+        label_singular = label.rstrip('s') if label.endswith('s') else label
         count = len(self.selected_files)
         if count == 0:
             if self._total_image_nodes > 1:
-                self.count_label.setText(f"No images selected ({self._total_image_nodes} load nodes detected)")
+                self.count_label.setText(f"No {label} selected ({self._total_image_nodes} load nodes detected)")
             else:
-                self.count_label.setText("No images selected")
+                self.count_label.setText(f"No {label} selected")
             self.drop_label.show()
             self.scroll_area.hide()
         else:
+            count_text = f"{count} {label_singular if count == 1 else label}"
             if self._total_image_nodes > 1:
                 # Show pairing info
-                images_per_node = count // self._total_image_nodes
+                per_node = count // self._total_image_nodes
                 remainder = count % self._total_image_nodes
                 if remainder == 0:
-                    pairing_text = f" - {images_per_node} per node"
+                    pairing_text = f" - {per_node} per node"
                 else:
-                    pairing_text = f" - {images_per_node}-{images_per_node+1} per node"
-                self.count_label.setText(f"{count} image{'s' if count != 1 else ''} selected{pairing_text}")
+                    pairing_text = f" - {per_node}-{per_node+1} per node"
+                self.count_label.setText(f"{count_text} selected{pairing_text}")
             else:
-                self.count_label.setText(f"{count} image{'s' if count != 1 else ''} selected")
+                self.count_label.setText(f"{count_text} selected")
             self.drop_label.hide()
             self.scroll_area.show()
 

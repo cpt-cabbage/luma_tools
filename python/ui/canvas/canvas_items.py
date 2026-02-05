@@ -22,7 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
     QGraphicsRectItem, QGraphicsTextItem, QGraphicsSceneMouseEvent,
-    QStyleOptionGraphicsItem, QWidget, QMenu, QInputDialog
+    QStyleOptionGraphicsItem, QWidget, QMenu, QInputDialog, QColorDialog
 )
 
 logger = logging.getLogger(__name__)
@@ -1377,17 +1377,22 @@ class StickyNote(QGraphicsItem):
         'blue': QColor(144, 202, 249),
     }
 
+    FONT_SIZES = {'Small': 8, 'Medium': 10, 'Large': 14, 'XL': 18}
+    DEFAULT_FONT_SIZE = 10
+
     MIN_SIZE = 80
     DEFAULT_WIDTH = 150
     DEFAULT_HEIGHT = 100
     HANDLE_SIZE = 8
 
     def __init__(self, x: float, y: float, text: str = '',
-                 color: str = 'yellow', parent: QGraphicsItem = None):
+                 color: str = 'yellow', font_size: int = 10,
+                 parent: QGraphicsItem = None):
         super().__init__(parent)
 
         self.text = text
         self.color_name = color
+        self.font_size = font_size
         self._width = self.DEFAULT_WIDTH
         self._height = self.DEFAULT_HEIGHT
         self._resize_handle = ResizeHandle.NONE
@@ -1427,7 +1432,12 @@ class StickyNote(QGraphicsItem):
         painter.setRenderHint(QPainter.Antialiasing)
 
         rect = QRectF(0, 0, self._width, self._height)
-        color = self.COLORS.get(self.color_name, self.COLORS['yellow'])
+
+        # Resolve color: preset name or hex string
+        if self.color_name.startswith('#'):
+            color = QColor(self.color_name)
+        else:
+            color = self.COLORS.get(self.color_name, self.COLORS['yellow'])
 
         # Draw note background
         painter.setBrush(QBrush(color))
@@ -1438,7 +1448,7 @@ class StickyNote(QGraphicsItem):
         text_rect = rect.adjusted(8, 8, -8, -8)
         painter.setPen(QColor(50, 50, 50))
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(self.font_size)
         painter.setFont(font)
         painter.drawText(text_rect, Qt.TextWordWrap, self.text)
 
@@ -1537,6 +1547,24 @@ class StickyNote(QGraphicsItem):
             if canvas and hasattr(canvas, '_editing_text'):
                 canvas._editing_text = False
 
+    def _set_font_size(self, size: int):
+        """Set the note font size and redraw."""
+        self.font_size = size
+        self.update()
+
+    def _pick_custom_color(self):
+        """Open a color picker dialog and set the note color."""
+        # Start from current color
+        if self.color_name.startswith('#'):
+            initial = QColor(self.color_name)
+        else:
+            initial = self.COLORS.get(self.color_name, self.COLORS['yellow'])
+
+        color = QColorDialog.getColor(initial, None, "Choose Note Color")
+        if color.isValid():
+            self.color_name = color.name()  # Store as hex string e.g. '#ff8800'
+            self.update()
+
     def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
         """Show context menu."""
         menu = QMenu()
@@ -1544,11 +1572,24 @@ class StickyNote(QGraphicsItem):
         edit_action = menu.addAction("Edit Text...")
         edit_action.triggered.connect(lambda: self.mouseDoubleClickEvent(event))
 
-        # Color submenu
+        # Color submenu with checkmarks and custom color option
         color_menu = menu.addMenu("Color")
         for color_name in self.COLORS.keys():
             action = color_menu.addAction(color_name.capitalize())
+            action.setCheckable(True)
+            action.setChecked(self.color_name == color_name)
             action.triggered.connect(lambda checked, c=color_name: self._set_color(c))
+        color_menu.addSeparator()
+        custom_color_action = color_menu.addAction("Custom Color...")
+        custom_color_action.triggered.connect(self._pick_custom_color)
+
+        # Text Size submenu with checkmarks
+        size_menu = menu.addMenu("Text Size")
+        for label, size in self.FONT_SIZES.items():
+            action = size_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.font_size == size)
+            action.triggered.connect(lambda checked, s=size: self._set_font_size(s))
 
         menu.addSeparator()
 

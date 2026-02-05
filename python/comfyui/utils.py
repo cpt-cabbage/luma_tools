@@ -603,6 +603,27 @@ _PREFIX_NODES = {
     'UltraShapeSaveGLB': {'filename_prefix': None},
 }
 
+# Suffix for marking the primary output node (see node_configs.py for docs)
+_OUTPUT_SUFFIX = '_output'
+
+
+def has_output_suffix_nodes(workflow: dict) -> bool:
+    """Check if any export node in the workflow has '_output' suffix in its title.
+
+    When True, only export nodes with the suffix should receive the output prefix,
+    and only their files should be moved to the output directory.
+    """
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+        class_type = node_data.get('class_type', '')
+        if class_type in _PREFIX_NODES:
+            meta = node_data.get('_meta', {})
+            title = meta.get('title', '')
+            if title.endswith(_OUTPUT_SUFFIX):
+                return True
+    return False
+
 
 def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     """Modify workflow to use a specific seed and output prefix.
@@ -610,6 +631,9 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     Handles seed nodes (KSampler, RandomNoise, etc.), export/prefix nodes
     (SaveImage, HYMotionExportFBX, etc.), and converts PreviewImage to SaveImage.
     See _SEED_NODES and _PREFIX_NODES for the full list of supported node types.
+
+    Respects '_output' suffix convention: if any export node has '_output' in its
+    title, only that node gets the prefix. Others are left with their defaults.
     """
     modified = copy.deepcopy(workflow)
 
@@ -621,6 +645,11 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             if 'inputs' not in node_data:
                 node_data['inputs'] = {}
             logger.info(f"Converted PreviewImage node {node_id} to SaveImage")
+
+    # Check if any export node has _output suffix (primary output designation)
+    has_output_nodes = has_output_suffix_nodes(modified)
+    if has_output_nodes:
+        logger.info("Detected _output suffix node(s) - only setting prefix on designated output nodes")
 
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict) or 'class_type' not in node_data:
@@ -637,6 +666,14 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
 
         # Apply output prefix to matching node types
         elif class_type in _PREFIX_NODES:
+            # If _output nodes exist, only set prefix on those
+            if has_output_nodes:
+                meta = node_data.get('_meta', {})
+                title = meta.get('title', '')
+                if not title.endswith(_OUTPUT_SUFFIX):
+                    logger.info(f"Skipping non-_output export node {node_id} ({class_type}, title='{title}')")
+                    continue
+
             overrides = _PREFIX_NODES[class_type]
             for key, value in overrides.items():
                 inputs[key] = output_prefix if value is None else value
@@ -767,7 +804,8 @@ def move_output_files(
     target_dir: str,
     filename_prefix: str,
     extensions: tuple = OUTPUT_FILE_EXTENSIONS,
-    recent_minutes: int = 10
+    recent_minutes: int = 10,
+    strict_prefix: bool = False
 ) -> List[str]:
     """Move output files from ComfyUI's output directory to target directory.
 
@@ -781,6 +819,9 @@ def move_output_files(
         filename_prefix: Prefix for renamed files
         extensions: File extensions to look for
         recent_minutes: Only move files modified within this many minutes
+        strict_prefix: If True, only move files that start with filename_prefix.
+            Used with the '_output' suffix convention to avoid moving files
+            from non-designated export nodes.
 
     Returns:
         List of moved file paths in target directory
@@ -823,6 +864,11 @@ def move_output_files(
     for src_path, mtime in recent_files:
         original_filename = os.path.basename(src_path)
         ext = os.path.splitext(original_filename)[1]
+
+        # When strict_prefix is True, only move files from _output designated nodes
+        if strict_prefix and not original_filename.startswith(filename_prefix):
+            logger.debug(f"[move_output_files] Skipping non-output file: {original_filename}")
+            continue
 
         if original_filename.startswith(filename_prefix):
             new_filename = original_filename

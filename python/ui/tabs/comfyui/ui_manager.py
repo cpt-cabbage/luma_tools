@@ -34,10 +34,10 @@ class ComfyUIWidgetManager:
         self.layout = layout
 
         # Widget tracking
-        self.dynamic_widgets = {}  # node_id -> widget container
+        self.dynamic_widgets = {}  # (node_id, widget_name) -> widget container
         self.condition_map = {}  # Maps condition_node_name -> list of dependent widget node_ids
         self.settings_widgets = {}  # node_id -> widget container for settings nodes
-        self.settings_section = None  # Collapsible settings section widget
+        self._settings_dialog = None  # Settings dialog (opened from button)
 
         # Pending values (for restoration after widget recreation)
         self.pending_editable_values = {}
@@ -74,7 +74,10 @@ class ComfyUIWidgetManager:
         self.dynamic_widgets = {}
         self.condition_map = {}
         self.settings_widgets = {}
-        self.settings_section = None
+        if self._settings_dialog:
+            self._settings_dialog.close()
+            self._settings_dialog.deleteLater()
+            self._settings_dialog = None
 
     def capture_editable_values_by_type(self) -> Dict[str, Any]:
         """
@@ -125,15 +128,18 @@ class ComfyUIWidgetManager:
 
         editable_nodes = extract_editable_nodes(workflow_path)
 
-        # Count total image nodes for pairing calculation
+        # Count total image/video nodes for pairing calculation
         total_image_nodes = sum(1 for node in editable_nodes
                                if node.widget_type == 'image'
                                and self._get_node_override(node, node_overrides).get("enabled", True))
-        logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}")
+        total_video_nodes = sum(1 for node in editable_nodes
+                               if node.widget_type == 'video'
+                               and self._get_node_override(node, node_overrides).get("enabled", True))
+        logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}, video nodes: {total_video_nodes}")
 
         # Collect widgets separately for horizontal layout
         non_image_widgets = []  # List of (widget, node) tuples for text, toggles, etc.
-        image_widgets = []  # List of (widget, node) tuples for images
+        image_widgets = []  # List of (widget, node) tuples for images and videos (file selectors)
 
         # First pass: create all widgets (skip disabled nodes)
         for node in editable_nodes:
@@ -148,14 +154,14 @@ class ComfyUIWidgetManager:
                 # Override the current_value with the default
                 node.current_value = default_value
 
-            widget = self._create_editable_node_widget(node, total_image_nodes)
+            widget = self._create_editable_node_widget(node, total_image_nodes, total_video_nodes)
             if widget:
                 # Store the node info on the widget for condition handling
                 widget.editable_node = node
-                self.dynamic_widgets[node.node_id] = widget
+                self.dynamic_widgets[(node.node_id, node.widget_name)] = widget
 
-                # Separate image widgets from non-image widgets
-                if node.widget_type == 'image':
+                # Separate file selector widgets (image/video) from non-file widgets
+                if node.widget_type in ('image', 'video'):
                     image_widgets.append((widget, node))
                 else:
                     non_image_widgets.append((widget, node))
@@ -236,10 +242,10 @@ class ComfyUIWidgetManager:
                     # Register this widget as dependent on the toggle
                     if node.condition_node not in self.condition_map:
                         self.condition_map[node.condition_node] = []
-                    self.condition_map[node.condition_node].append(node.node_id)
+                    self.condition_map[node.condition_node].append((node.node_id, node.widget_name))
 
                     # Set initial visibility based on toggle state
-                    dependent_widget = self.dynamic_widgets.get(node.node_id)
+                    dependent_widget = self.dynamic_widgets.get((node.node_id, node.widget_name))
                     if dependent_widget and hasattr(toggle_widget, 'input_widget'):
                         checkbox = toggle_widget.input_widget
                         if hasattr(checkbox, 'isChecked'):
@@ -308,18 +314,19 @@ class ComfyUIWidgetManager:
 
     def on_toggle_changed(self, checked: bool, toggle_node_name: str):
         """Handle toggle widget state change - update visibility of dependent widgets."""
-        dependent_node_ids = self.condition_map.get(toggle_node_name, [])
-        for node_id in dependent_node_ids:
-            widget = self.dynamic_widgets.get(node_id)
+        dependent_keys = self.condition_map.get(toggle_node_name, [])
+        for key in dependent_keys:
+            widget = self.dynamic_widgets.get(key)
             if widget:
                 widget.setVisible(checked)
 
-    def _create_editable_node_widget(self, node, total_image_nodes=1):
+    def _create_editable_node_widget(self, node, total_image_nodes=1, total_video_nodes=1):
         """Create a widget for an editable node.
 
         Args:
             node: EditableNode object
             total_image_nodes: Total number of image nodes in the workflow (for pairing)
+            total_video_nodes: Total number of video nodes in the workflow (for pairing)
         """
         from ui_components import BatchImageSelector
         from ui.spell_checker import SpellCheckTextEdit
@@ -415,6 +422,28 @@ class ComfyUIWidgetManager:
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
             container.input_widget = input_widget
 
+        elif node.widget_type == 'video':
+            # Create BatchImageSelector configured for video files
+            input_widget = BatchImageSelector(
+                supported_extensions=['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv'],
+                total_image_nodes=total_video_nodes,
+                file_type_label="videos",
+            )
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            # Set last browse directory for video selector
+            last_dir = get_last_browse_directory("comfyui_videos")
+            if last_dir:
+                input_widget.set_last_browse_dir(last_dir)
+
+            # Insert label at the beginning of the BatchImageSelector's toolbar
+            label = QLabel(f"{node.display_name}:")
+            label.setMinimumWidth(160)
+            label.setMaximumWidth(160)
+            input_widget.toolbar_layout.insertWidget(0, label)
+
+            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
+            container.input_widget = input_widget
+
         else:
             # Default: generic line edit for strings, ints, floats
             row = QHBoxLayout()
@@ -453,11 +482,23 @@ class ComfyUIWidgetManager:
         if not self.pending_editable_values:
             return
 
-        for node_id_str, value in self.pending_editable_values.items():
+        for key_str, value in self.pending_editable_values.items():
             try:
-                node_id = int(node_id_str)
-                if node_id in self.dynamic_widgets:
-                    container = self.dynamic_widgets[node_id]
+                # Support both new format "node_id:widget_name" and legacy "node_id"
+                container = None
+                if ':' in key_str:
+                    node_id_str, widget_name = key_str.split(':', 1)
+                    node_id = int(node_id_str)
+                    container = self.dynamic_widgets.get((node_id, widget_name))
+                else:
+                    node_id = int(key_str)
+                    # Legacy: find first widget for this node_id
+                    for (nid, wname), cont in self.dynamic_widgets.items():
+                        if nid == node_id:
+                            container = cont
+                            break
+
+                if container:
                     input_widget = getattr(container, 'input_widget', None)
                     if input_widget:
                         if hasattr(input_widget, 'setPlainText'):
@@ -468,7 +509,7 @@ class ComfyUIWidgetManager:
                             # BatchImageSelector - restore image paths
                             input_widget.set_images(value)
             except (ValueError, AttributeError) as e:
-                logger.debug(f"Skipped restoration of editable value for node {node_id}: {e}")
+                logger.debug(f"Skipped restoration of editable value for {key_str}: {e}")
 
         # Clear pending values after applying
         self.pending_editable_values = {}
@@ -503,13 +544,15 @@ class ComfyUIWidgetManager:
         # Clear pending semantic values after applying
         self.pending_semantic_values = {}
 
-    def collect_editable_values(self) -> Tuple[Dict[int, Dict[str, Any]], int]:
+    def collect_editable_values(self) -> Tuple[Dict[int, Any], int]:
         """
         Collect editable values from dynamic widgets, including settings nodes.
 
         Returns:
             Tuple of (editable_values dict, selected_image_count)
-            The editable_values dict includes both editable nodes and settings nodes.
+            The editable_values dict maps node_id -> list of {'node': EditableNode, 'value': Any}.
+            For nodes with a single widget, the list has one entry.
+            The dict also includes settings nodes (single-entry lists).
         """
         from comfyui.editable import extract_editable_nodes
 
@@ -523,39 +566,57 @@ class ComfyUIWidgetManager:
 
         for node in editable_nodes:
             node_id = node.node_id
-            if node_id in self.dynamic_widgets:
-                container = self.dynamic_widgets[node_id]
+            key = (node_id, node.widget_name)
+            if key in self.dynamic_widgets:
+                container = self.dynamic_widgets[key]
                 input_widget = getattr(container, 'input_widget', None)
                 if input_widget:
                     if node.widget_type == 'text':
                         value = input_widget.toPlainText().strip()
-                    elif node.widget_type == 'image':
+                    elif node.widget_type in ('image', 'video'):
                         value = getattr(input_widget, 'selected_files', [])
                         selected_image_count = max(selected_image_count, len(value) if value else 0)
+                    elif hasattr(input_widget, 'isChecked'):
+                        value = input_widget.isChecked()
                     else:
                         value = input_widget.text().strip() if hasattr(input_widget, 'text') else str(node.current_value)
 
-                    editable_values[node_id] = {'node': node, 'value': value}
+                    if node_id not in editable_values:
+                        editable_values[node_id] = []
+                    editable_values[node_id].append({'node': node, 'value': value})
 
-        # Also collect settings values - they use the same format for workflow modification
+        # Also collect settings values - they use list-per-node format too
         settings_values = self.collect_settings_values()
-        editable_values.update(settings_values)
+        for nid, entries in settings_values.items():
+            if nid not in editable_values:
+                editable_values[nid] = []
+            if isinstance(entries, list):
+                editable_values[nid].extend(entries)
+            else:
+                # Legacy single-entry format from settings
+                editable_values[nid].append(entries)
 
         return editable_values, selected_image_count
 
     def get_editable_values_for_state(self) -> Dict[str, Any]:
-        """Get editable values in a format suitable for state persistence."""
+        """Get editable values in a format suitable for state persistence.
+
+        Keys use "node_id:widget_name" format for multi-widget node support.
+        """
         editable_values = {}
-        for node_id, container in self.dynamic_widgets.items():
+        for (node_id, widget_name), container in self.dynamic_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if input_widget:
+                state_key = f"{node_id}:{widget_name}"
                 if hasattr(input_widget, 'toPlainText'):
-                    editable_values[str(node_id)] = input_widget.toPlainText()
+                    editable_values[state_key] = input_widget.toPlainText()
+                elif hasattr(input_widget, 'isChecked'):
+                    editable_values[state_key] = input_widget.isChecked()
                 elif hasattr(input_widget, 'text'):
-                    editable_values[str(node_id)] = input_widget.text()
+                    editable_values[state_key] = input_widget.text()
                 elif hasattr(input_widget, 'selected_files'):
                     # BatchImageSelector - save image paths
-                    editable_values[str(node_id)] = input_widget.selected_files.copy()
+                    editable_values[state_key] = input_widget.selected_files.copy()
 
         # Also include settings values with a prefix to distinguish them
         for node_id, container in self.settings_widgets.items():
@@ -574,10 +635,10 @@ class ComfyUIWidgetManager:
 
     def refresh_settings_nodes(self, workflow_path: Optional[str], node_overrides: Dict[str, Any]):
         """
-        Refresh the settings section based on settings nodes in the workflow.
+        Refresh the settings dialog based on settings nodes in the workflow.
 
-        Settings nodes have '_settings' suffix and are displayed in a collapsible
-        section grouped by their base title.
+        Settings nodes have '_settings' suffix and are displayed in a separate
+        dialog grouped by their base title.
 
         Args:
             workflow_path: Path to the workflow JSON file
@@ -585,13 +646,15 @@ class ComfyUIWidgetManager:
         """
         from comfyui.editable import extract_settings_nodes
 
-        # Clear existing settings widgets (but keep the rest of dynamic_widgets)
+        # Track if dialog was visible so we can re-show the new one
+        was_visible = self._settings_dialog and self._settings_dialog.isVisible()
+
+        # Clear existing settings widgets and dialog
         self.settings_widgets = {}
-        if self.settings_section:
-            self.settings_section.hide()
-            self.settings_section.setParent(None)
-            self.settings_section.deleteLater()
-            self.settings_section = None
+        if self._settings_dialog:
+            self._settings_dialog.close()
+            self._settings_dialog.deleteLater()
+            self._settings_dialog = None
 
         if not workflow_path:
             return
@@ -617,75 +680,69 @@ class ComfyUIWidgetManager:
                 groups[node.group_name] = []
             groups[node.group_name].append(node)
 
-        # Create collapsible settings section
-        self.settings_section = self._create_collapsible_settings_section(groups)
-        self.layout.addWidget(self.settings_section)
+        # Create settings dialog
+        self._settings_dialog = self._create_settings_dialog(groups)
 
         # Apply pending settings values
         self._apply_pending_settings_values()
 
-    def _create_collapsible_settings_section(self, groups: Dict[str, list]) -> QWidget:
+        # Re-show dialog if it was previously visible
+        if was_visible:
+            self._settings_dialog.show()
+
+    @property
+    def has_settings_nodes(self) -> bool:
+        """Whether the current workflow has settings nodes."""
+        return bool(self.settings_widgets)
+
+    def show_settings_dialog(self):
+        """Show the workflow settings dialog."""
+        if self._settings_dialog:
+            self._settings_dialog.show()
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+
+    def _create_settings_dialog(self, groups: Dict[str, list]):
         """
-        Create a collapsible settings section with grouped widgets.
+        Create a dialog containing grouped workflow settings.
 
         Args:
             groups: Dict mapping group_name -> list of SettingsNode
 
         Returns:
-            Collapsible widget containing all settings
+            QDialog containing all settings
         """
-        from PySide6.QtWidgets import QFrame, QToolButton
+        from PySide6.QtWidgets import QDialog, QFrame, QScrollArea
         from PySide6.QtCore import Qt
 
-        # Main container
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 10, 0, 0)
-        container_layout.setSpacing(0)
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Workflow Settings")
+        dialog.setMinimumWidth(450)
+        dialog.setMinimumHeight(200)
 
-        # Header with collapse toggle
-        header = QWidget()
-        header.setStyleSheet("background-color: #3a3a3a; border-radius: 4px;")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(10, 6, 10, 6)
+        main_layout = QVBoxLayout(dialog)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        toggle_btn = QToolButton()
-        toggle_btn.setArrowType(Qt.DownArrow)
-        toggle_btn.setAutoRaise(True)
-        toggle_btn.setStyleSheet("QToolButton { border: none; }")
-        header_layout.addWidget(toggle_btn)
+        # Scroll area for many settings
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
 
-        header_label = QLabel("Workflow Settings")
-        header_label.setStyleSheet("font-weight: bold; color: #cccccc;")
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-
-        container_layout.addWidget(header)
-
-        # Content area (collapsible)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(15)
 
-        # Create group widgets
         for group_name, nodes in groups.items():
             group_widget = self._create_settings_group(group_name, nodes)
             content_layout.addWidget(group_widget)
 
         content_layout.addStretch()
-        container_layout.addWidget(content)
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
 
-        # Toggle functionality
-        def toggle_content():
-            is_visible = content.isVisible()
-            content.setVisible(not is_visible)
-            toggle_btn.setArrowType(Qt.RightArrow if is_visible else Qt.DownArrow)
-
-        toggle_btn.clicked.connect(toggle_content)
-        header.mousePressEvent = lambda e: toggle_content()
-
-        return container
+        return dialog
 
     def _create_settings_group(self, group_name: str, nodes: list) -> QWidget:
         """
@@ -703,11 +760,19 @@ class ComfyUIWidgetManager:
 
         group = QFrame()
         group.setFrameShape(QFrame.StyledPanel)
+        group.setObjectName("settingsGroup")
         group.setStyleSheet("""
-            QFrame {
+            QFrame#settingsGroup {
                 background-color: #2d2d2d;
                 border: 1px solid #444444;
                 border-radius: 4px;
+            }
+            QSpinBox, QDoubleSpinBox, QComboBox {
+                color: #cccccc;
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 2px;
+                padding: 2px 4px;
             }
         """)
 
@@ -744,6 +809,9 @@ class ComfyUIWidgetManager:
         """
         Create a compact widget for a settings node.
 
+        Uses node_info cache for real min/max/step constraints when available,
+        falling back to sensible defaults.
+
         Args:
             node: SettingsNode object
 
@@ -752,6 +820,10 @@ class ComfyUIWidgetManager:
         """
         from PySide6.QtWidgets import QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
         from PySide6.QtCore import Qt
+        from comfyui.node_info import get_widget_info
+
+        # Try to get real constraints from node_info cache
+        widget_info = get_widget_info(node.node_type, node.widget_name)
 
         container = QWidget()
         container.setStyleSheet("border: none;")
@@ -773,7 +845,12 @@ class ComfyUIWidgetManager:
 
         elif node.widget_type == 'int':
             input_widget = QSpinBox()
-            input_widget.setRange(0, 999999)
+            # Use real constraints from node_info, fall back to defaults
+            min_val = int(widget_info.min_val) if widget_info and widget_info.min_val is not None else 0
+            max_val = int(widget_info.max_val) if widget_info and widget_info.max_val is not None else 999999
+            input_widget.setRange(min_val, max_val)
+            if widget_info and widget_info.step is not None:
+                input_widget.setSingleStep(int(widget_info.step))
             input_widget.setFixedWidth(80)
             if node.current_value is not None:
                 try:
@@ -784,9 +861,19 @@ class ComfyUIWidgetManager:
 
         elif node.widget_type == 'float':
             input_widget = QDoubleSpinBox()
-            input_widget.setRange(0.0, 999999.0)
-            input_widget.setDecimals(2)
-            input_widget.setSingleStep(0.1)
+            # Use real constraints from node_info, fall back to defaults
+            min_val = float(widget_info.min_val) if widget_info and widget_info.min_val is not None else 0.0
+            max_val = float(widget_info.max_val) if widget_info and widget_info.max_val is not None else 999999.0
+            step = float(widget_info.step) if widget_info and widget_info.step is not None else 0.1
+            input_widget.setRange(min_val, max_val)
+            input_widget.setSingleStep(step)
+            # Auto-detect decimal places from step size
+            if step >= 1.0:
+                input_widget.setDecimals(0)
+            elif step >= 0.1:
+                input_widget.setDecimals(2)
+            else:
+                input_widget.setDecimals(4)
             input_widget.setFixedWidth(80)
             if node.current_value is not None:
                 try:
@@ -798,9 +885,9 @@ class ComfyUIWidgetManager:
         elif node.widget_type == 'combo':
             input_widget = QComboBox()
             input_widget.setFixedWidth(120)
-            # Combo options would come from the node if available
+            # Combo options from node_info or from node extraction
             if node.options:
-                input_widget.addItems(node.options)
+                input_widget.addItems([str(o) for o in node.options])
             if node.current_value is not None:
                 idx = input_widget.findText(str(node.current_value))
                 if idx >= 0:
@@ -856,12 +943,12 @@ class ComfyUIWidgetManager:
 
         self.pending_settings_values = {}
 
-    def collect_settings_values(self) -> Dict[int, Dict[str, Any]]:
+    def collect_settings_values(self) -> Dict[int, list]:
         """
         Collect settings values from settings widgets.
 
         Returns:
-            Dict mapping node_id -> {'node': SettingsNode, 'value': Any}
+            Dict mapping node_id -> list of {'node': SettingsNode, 'value': Any}
         """
         settings_values = {}
 
@@ -880,6 +967,8 @@ class ComfyUIWidgetManager:
                 else:
                     value = node.current_value
 
-                settings_values[node_id] = {'node': node, 'value': value}
+                if node_id not in settings_values:
+                    settings_values[node_id] = []
+                settings_values[node_id].append({'node': node, 'value': value})
 
         return settings_values

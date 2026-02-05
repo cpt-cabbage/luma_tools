@@ -51,6 +51,7 @@ try:
         move_output_files,
         get_workflow_images,
         resolve_comfyui_paths,
+        has_output_suffix_nodes,
     )
 except ImportError:
     # When running standalone on farm, import from copied utils file
@@ -66,6 +67,7 @@ except ImportError:
         move_output_files,
         get_workflow_images,
         resolve_comfyui_paths,
+        has_output_suffix_nodes,
     )
 
 # Try to use centralized logging utilities, fall back to local implementations for farm execution
@@ -387,6 +389,11 @@ def main():
     with open(args.workflow, 'r', encoding='utf-8') as f:
         base_workflow = json.load(f)
 
+    # Check if workflow uses _output suffix convention for primary output designation
+    use_strict_prefix = has_output_suffix_nodes(base_workflow)
+    if use_strict_prefix:
+        logger.info("Workflow uses _output suffix - only designated output files will be moved")
+
     # Load seeds
     seeds_data = None
     if args.seeds_file:
@@ -653,7 +660,8 @@ def main():
                         args.comfyui_output_dir,
                         args.output_directory,
                         args.output_prefix,
-                        recent_minutes=30
+                        recent_minutes=30,
+                        strict_prefix=use_strict_prefix
                     )
                     if moved:
                         logger.info(f"Moved {len(moved)} output file(s)")

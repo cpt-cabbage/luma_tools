@@ -280,6 +280,12 @@ class ModelPickerPanel(QWidget):
         self._tag_row.addWidget(all_chip)
         self._tag_chips.append(all_chip)
 
+        # "Favorites" chip second
+        favorites_chip = TagFilterChip("★ Favorites")
+        favorites_chip.clicked.connect(lambda: self._on_tag_selected("favorites"))
+        self._tag_row.addWidget(favorites_chip)
+        self._tag_chips.append(favorites_chip)
+
         # Add predefined tags
         for tag in get_predefined_tags():
             chip = TagFilterChip(tag)
@@ -321,8 +327,11 @@ class ModelPickerPanel(QWidget):
     def _update_tag_selection(self):
         """Update tag chip selection states."""
         for chip in self._tag_chips:
-            if chip.tag.lower() == "all":
+            tag_lower = chip.tag.lower()
+            if tag_lower == "all":
                 chip.setChecked(self._tag_filter == "all")
+            elif "favorites" in tag_lower:
+                chip.setChecked(self._tag_filter == "favorites")
             else:
                 chip.setChecked(chip.tag == self._tag_filter)
 
@@ -403,12 +412,14 @@ class ModelPickerPanel(QWidget):
         presets = get_comfyui_workflow_presets()
 
         # Get sorted/filtered models
+        from core.state_manager import app_state
         tag_filter = None if self._tag_filter == "all" else self._tag_filter
         models = get_sorted_models(
             presets,
             sort_key=self._sort_key,
             tag_filter=tag_filter,
-            search_query=self._search_text if self._search_text else None
+            search_query=self._search_text if self._search_text else None,
+            username=app_state.user
         )
 
         if not models:

@@ -257,60 +257,66 @@ def add_item_metadata(
 
     serialized_editable = {}
     if editable_values:
-        for node_id, data in editable_values.items():
-            if not isinstance(data, dict):
-                continue
+        for node_id, entries in editable_values.items():
+            entry_list = entries if isinstance(entries, list) else [entries]
+            for data in entry_list:
+                if not isinstance(data, dict):
+                    continue
 
-            node_info = data.get('node')
-            value = data.get('value')
+                node_info = data.get('node')
+                value = data.get('value')
 
-            # Safely get widget_type
-            widget_type = None
-            if node_info and hasattr(node_info, 'widget_type'):
-                widget_type = node_info.widget_type
+                # Safely get widget_type
+                widget_type = None
+                if node_info and hasattr(node_info, 'widget_type'):
+                    widget_type = node_info.widget_type
 
-            # Collect source files
-            if widget_type == 'image':
-                # Don't serialize image widgets, but collect their paths
-                try:
-                    if isinstance(value, list):
-                        for v in value:
-                            basename = safe_basename(v)
+                widget_name = getattr(node_info, 'widget_name', '') if node_info else ''
+
+                # Collect source files
+                if widget_type == 'image':
+                    # Don't serialize image widgets, but collect their paths
+                    try:
+                        if isinstance(value, list):
+                            for v in value:
+                                basename = safe_basename(v)
+                                if basename:
+                                    source_images.append(basename)
+                        elif value:
+                            basename = safe_basename(value)
                             if basename:
                                 source_images.append(basename)
-                    elif value:
-                        basename = safe_basename(value)
-                        if basename:
-                            source_images.append(basename)
-                except Exception as e:
-                    logger.error(f"[Metadata] Error extracting image paths: {e}")
-                continue
-            elif widget_type == '3d_model':
-                # Collect 3D model paths
-                try:
-                    if isinstance(value, list):
-                        for v in value:
-                            basename = safe_basename(v)
+                    except Exception as e:
+                        logger.error(f"[Metadata] Error extracting image paths: {e}")
+                    continue
+                elif widget_type == '3d_model':
+                    # Collect 3D model paths
+                    try:
+                        if isinstance(value, list):
+                            for v in value:
+                                basename = safe_basename(v)
+                                if basename:
+                                    source_models.append(basename)
+                        elif value:
+                            basename = safe_basename(value)
                             if basename:
                                 source_models.append(basename)
-                    elif value:
-                        basename = safe_basename(value)
-                        if basename:
-                            source_models.append(basename)
-                except Exception as e:
-                    logger.error(f"[Metadata] Error extracting model paths: {e}")
+                    except Exception as e:
+                        logger.error(f"[Metadata] Error extracting model paths: {e}")
 
-            # Serialize editable value
-            try:
-                serialized_editable[str(node_id)] = {
-                    "node_id": getattr(node_info, 'node_id', node_id) if node_info else node_id,
-                    "display_name": getattr(node_info, 'display_name', "") if node_info else "",
-                    "node_type": getattr(node_info, 'node_type', "") if node_info else "",
-                    "widget_type": widget_type or "text",
-                    "value": value,
-                }
-            except Exception as e:
-                logger.error(f"[Metadata] Error serializing editable value for node {node_id}: {e}")
+                # Serialize editable value (use node_id:widget_name for uniqueness)
+                serial_key = f"{node_id}:{widget_name}" if widget_name else str(node_id)
+                try:
+                    serialized_editable[serial_key] = {
+                        "node_id": getattr(node_info, 'node_id', node_id) if node_info else node_id,
+                        "display_name": getattr(node_info, 'display_name', "") if node_info else "",
+                        "node_type": getattr(node_info, 'node_type', "") if node_info else "",
+                        "widget_type": widget_type or "text",
+                        "widget_name": widget_name,
+                        "value": value,
+                    }
+                except Exception as e:
+                    logger.error(f"[Metadata] Error serializing editable value for node {node_id}: {e}")
 
     # Deduplicate source lists while preserving order
     try:
@@ -605,18 +611,20 @@ def add_mp4_maker_metadata(
 
 
 def extract_prompts_from_editable_values(
-    editable_values: Optional[Dict[int, Dict[str, Any]]]
+    editable_values: Optional[Dict[int, list]]
 ) -> str:
     """Extract prompt text from editable values dictionary."""
     if not editable_values:
         return ""
 
     prompts = []
-    for data in editable_values.values():
-        node_info = data.get('node')
-        value = data.get('value')
-        if node_info and node_info.widget_type == 'text' and value:
-            prompts.append(str(value).strip())
+    for entries in editable_values.values():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            node_info = data.get('node')
+            value = data.get('value')
+            if node_info and node_info.widget_type == 'text' and value:
+                prompts.append(str(value).strip())
 
     return "\n---\n".join(prompts) if prompts else ""
 

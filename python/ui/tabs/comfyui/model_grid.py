@@ -5,6 +5,8 @@ A responsive grid layout that displays model cards with:
 - Auto-adjusting columns based on available width
 - Netflix-style hover effects with neighbor awareness
 - Selection highlighting
+
+Can also display as a vertical list of horizontal bars.
 """
 
 import logging
@@ -28,6 +30,9 @@ CARD_SPACING = 16
 CARD_WIDTH = 200
 CARD_HEIGHT = 260
 
+# Bar settings
+BAR_SPACING = 8
+
 
 class ModelGrid(QWidget):
     """
@@ -35,6 +40,8 @@ class ModelGrid(QWidget):
 
     The grid automatically adjusts the number of columns based on
     available width, and coordinates hover effects across neighboring cards.
+
+    Can also display as a vertical list of horizontal bars (layout_mode="bars").
     """
 
     def __init__(
@@ -42,6 +49,7 @@ class ModelGrid(QWidget):
         on_model_selected: Optional[Callable[[str], None]] = None,
         on_favorite_toggled: Optional[Callable[[str], None]] = None,
         on_context_menu: Optional[Callable[[str, QPoint], None]] = None,
+        layout_mode: str = "grid",
         parent=None
     ):
         """
@@ -51,12 +59,14 @@ class ModelGrid(QWidget):
             on_model_selected: Callback when model is double-clicked
             on_favorite_toggled: Callback when favorite is toggled
             on_context_menu: Callback for right-click context menu
+            layout_mode: "grid" for card grid, "bars" for horizontal bars
             parent: Parent widget
         """
         super().__init__(parent)
         self._on_model_selected = on_model_selected
         self._on_favorite_toggled = on_favorite_toggled
         self._on_context_menu = on_context_menu
+        self._layout_mode = layout_mode
 
         self._models: List[Tuple[str, Dict, Dict]] = []
         self._cards: Dict[str, 'OverlayModelCard'] = {}
@@ -75,15 +85,24 @@ class ModelGrid(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
 
-        # Grid container - use fixed sizing to prevent over-expansion
+        # Create container based on layout mode
         self._grid_container = QWidget()
-        self._grid_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self._grid_layout = QGridLayout(self._grid_container)
-        self._grid_layout.setSpacing(CARD_SPACING)
-        self._grid_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Add with alignment so container stays top-left even in wide parent
-        self._layout.addWidget(self._grid_container, 0, Qt.AlignTop | Qt.AlignLeft)
+        if self._layout_mode == "bars":
+            # Vertical list of bars
+            self._grid_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._grid_layout = QVBoxLayout(self._grid_container)
+            self._grid_layout.setSpacing(BAR_SPACING)
+            self._grid_layout.setContentsMargins(0, 0, 0, 0)
+            self._layout.addWidget(self._grid_container, 0, Qt.AlignTop)
+        else:
+            # Grid of cards - use fixed sizing to prevent over-expansion
+            self._grid_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self._grid_layout = QGridLayout(self._grid_container)
+            self._grid_layout.setSpacing(CARD_SPACING)
+            self._grid_layout.setContentsMargins(0, 0, 0, 0)
+            # Add with alignment so container stays top-left even in wide parent
+            self._layout.addWidget(self._grid_container, 0, Qt.AlignTop | Qt.AlignLeft)
 
         # Empty state widget
         self._empty_widget = QFrame()
@@ -180,59 +199,88 @@ class ModelGrid(QWidget):
         self._empty_widget.hide()
         self._grid_container.show()
 
-        # Calculate columns
-        self._update_columns()
+        if self._layout_mode == "bars":
+            # Build vertical list of bars
+            from .model_bar import ModelBar
 
-        # Create cards
-        from .model_card import OverlayModelCard
+            for model_name, preset_config, rating_data in self._models:
+                bar = ModelBar(
+                    model_name=model_name,
+                    preset_config=preset_config,
+                    rating_data=rating_data,
+                    username=self._username
+                )
 
-        row, col = 0, 0
-        for model_name, preset_config, rating_data in self._models:
-            card = OverlayModelCard(
-                model_name=model_name,
-                preset_config=preset_config,
-                rating_data=rating_data,
-                username=self._username,
-                grid_parent=self
-            )
+                # Connect signals
+                bar.activated.connect(self._on_card_activated)
+                bar.favorite_toggled.connect(self._on_card_favorite_toggled)
+                bar.context_menu_requested.connect(self._on_card_context_menu)
 
-            # Connect signals
-            card.activated.connect(self._on_card_activated)
-            card.favorite_toggled.connect(self._on_card_favorite_toggled)
-            card.context_menu_requested.connect(self._on_card_context_menu)
-            card.hover_started.connect(self._on_card_hover_started)
-            card.hover_ended.connect(self._on_card_hover_ended)
+                self._grid_layout.addWidget(bar)
+                self._cards[model_name] = bar
 
-            self._grid_layout.addWidget(card, row, col)
-            self._cards[model_name] = card
+                # Mark current model as selected
+                if model_name == self._current_model:
+                    bar.set_selected(True)
 
-            # Mark current model as selected
-            if model_name == self._current_model:
-                card.set_selected(True)
+            # Add stretch at the end to push bars to the top
+            self._grid_layout.addStretch()
 
-            col += 1
-            if col >= self._columns:
-                col = 0
-                row += 1
+            logger.debug(f"[ModelGrid] _rebuild_grid COMPLETE (bars): {len(self._cards)} bars")
 
-        # Calculate exact size needed for the grid
-        num_rows = (len(self._models) + self._columns - 1) // self._columns
-        grid_width = self._columns * CARD_WIDTH + (self._columns - 1) * CARD_SPACING
-        grid_height = num_rows * CARD_HEIGHT + (num_rows - 1) * CARD_SPACING
+        else:
+            # Build grid of cards
+            self._update_columns()
 
-        # Set fixed size on container to prevent layout from spreading cards
-        self._grid_container.setFixedSize(grid_width, grid_height)
+            from .model_card import OverlayModelCard
 
-        # Force layout update
-        self._grid_layout.activate()
-        for card in self._cards.values():
-            card.show()
+            row, col = 0, 0
+            for model_name, preset_config, rating_data in self._models:
+                card = OverlayModelCard(
+                    model_name=model_name,
+                    preset_config=preset_config,
+                    rating_data=rating_data,
+                    username=self._username,
+                    grid_parent=self
+                )
 
-        logger.debug(f"[ModelGrid] _rebuild_grid COMPLETE: {len(self._cards)} cards, {self._columns} cols, size={grid_width}x{grid_height}")
+                # Connect signals
+                card.activated.connect(self._on_card_activated)
+                card.favorite_toggled.connect(self._on_card_favorite_toggled)
+                card.context_menu_requested.connect(self._on_card_context_menu)
+                card.hover_started.connect(self._on_card_hover_started)
+                card.hover_ended.connect(self._on_card_hover_ended)
 
-        # Log card details for debugging
-        for name, card in self._cards.items():
-            logger.debug(f"[ModelGrid] Card '{name}': visible={card.isVisible()}, geometry={card.geometry()}, parent={card.parent()}")
+                self._grid_layout.addWidget(card, row, col)
+                self._cards[model_name] = card
+
+                # Mark current model as selected
+                if model_name == self._current_model:
+                    card.set_selected(True)
+
+                col += 1
+                if col >= self._columns:
+                    col = 0
+                    row += 1
+
+            # Calculate exact size needed for the grid
+            num_rows = (len(self._models) + self._columns - 1) // self._columns
+            grid_width = self._columns * CARD_WIDTH + (self._columns - 1) * CARD_SPACING
+            grid_height = num_rows * CARD_HEIGHT + (num_rows - 1) * CARD_SPACING
+
+            # Set fixed size on container to prevent layout from spreading cards
+            self._grid_container.setFixedSize(grid_width, grid_height)
+
+            # Force layout update
+            self._grid_layout.activate()
+            for card in self._cards.values():
+                card.show()
+
+            logger.debug(f"[ModelGrid] _rebuild_grid COMPLETE: {len(self._cards)} cards, {self._columns} cols, size={grid_width}x{grid_height}")
+
+            # Log card details for debugging
+            for name, card in self._cards.items():
+                logger.debug(f"[ModelGrid] Card '{name}': visible={card.isVisible()}, geometry={card.geometry()}, parent={card.parent()}")
 
     def _update_columns(self):
         """Calculate and update the number of columns based on width."""
@@ -261,7 +309,10 @@ class ModelGrid(QWidget):
             self._on_context_menu(model_name, pos)
 
     def _on_card_hover_started(self, model_name: str):
-        """Handle card hover start - shift neighbors."""
+        """Handle card hover start - shift neighbors (grid mode only)."""
+        if self._layout_mode == "bars":
+            return  # No neighbor shifting for bars
+
         if model_name not in self._cards:
             return
 
@@ -298,7 +349,10 @@ class ModelGrid(QWidget):
             right_neighbor.animate_shift(shift_amount)
 
     def _on_card_hover_ended(self, model_name: str):
-        """Handle card hover end - reset neighbors."""
+        """Handle card hover end - reset neighbors (grid mode only)."""
+        if self._layout_mode == "bars":
+            return  # No neighbor shifting for bars
+
         card_index = self._get_card_index(model_name)
         if card_index < 0:
             return
@@ -386,40 +440,60 @@ class ModelGrid(QWidget):
         new_index = self._focused_index
         handled = True
 
-        if key == Qt.Key_Right:
-            # Move right
-            col = self._focused_index % self._columns
-            if col < self._columns - 1 and self._focused_index + 1 < len(self._models):
-                new_index = self._focused_index + 1
-        elif key == Qt.Key_Left:
-            # Move left
-            col = self._focused_index % self._columns
-            if col > 0:
-                new_index = self._focused_index - 1
-        elif key == Qt.Key_Down:
-            # Move down
-            next_row_index = self._focused_index + self._columns
-            if next_row_index < len(self._models):
-                new_index = next_row_index
-        elif key == Qt.Key_Up:
-            # Move up
-            prev_row_index = self._focused_index - self._columns
-            if prev_row_index >= 0:
-                new_index = prev_row_index
-        elif key in (Qt.Key_Return, Qt.Key_Enter):
-            # Select focused card
-            self._activate_focused_card()
-        elif key == Qt.Key_Space:
-            # Toggle favorite on focused card
-            self._toggle_favorite_focused_card()
-        elif key == Qt.Key_Home:
-            # Go to first card
-            new_index = 0
-        elif key == Qt.Key_End:
-            # Go to last card
-            new_index = len(self._models) - 1
+        if self._layout_mode == "bars":
+            # Simple up/down navigation for bars
+            if key == Qt.Key_Down:
+                if self._focused_index + 1 < len(self._models):
+                    new_index = self._focused_index + 1
+            elif key == Qt.Key_Up:
+                if self._focused_index > 0:
+                    new_index = self._focused_index - 1
+            elif key in (Qt.Key_Return, Qt.Key_Enter):
+                self._activate_focused_card()
+            elif key == Qt.Key_Space:
+                self._toggle_favorite_focused_card()
+            elif key == Qt.Key_Home:
+                new_index = 0
+            elif key == Qt.Key_End:
+                new_index = len(self._models) - 1
+            else:
+                handled = False
         else:
-            handled = False
+            # Grid navigation
+            if key == Qt.Key_Right:
+                # Move right
+                col = self._focused_index % self._columns
+                if col < self._columns - 1 and self._focused_index + 1 < len(self._models):
+                    new_index = self._focused_index + 1
+            elif key == Qt.Key_Left:
+                # Move left
+                col = self._focused_index % self._columns
+                if col > 0:
+                    new_index = self._focused_index - 1
+            elif key == Qt.Key_Down:
+                # Move down
+                next_row_index = self._focused_index + self._columns
+                if next_row_index < len(self._models):
+                    new_index = next_row_index
+            elif key == Qt.Key_Up:
+                # Move up
+                prev_row_index = self._focused_index - self._columns
+                if prev_row_index >= 0:
+                    new_index = prev_row_index
+            elif key in (Qt.Key_Return, Qt.Key_Enter):
+                # Select focused card
+                self._activate_focused_card()
+            elif key == Qt.Key_Space:
+                # Toggle favorite on focused card
+                self._toggle_favorite_focused_card()
+            elif key == Qt.Key_Home:
+                # Go to first card
+                new_index = 0
+            elif key == Qt.Key_End:
+                # Go to last card
+                new_index = len(self._models) - 1
+            else:
+                handled = False
 
         if new_index != self._focused_index:
             self._focused_index = new_index
@@ -431,11 +505,13 @@ class ModelGrid(QWidget):
             super().keyPressEvent(event)
 
     def _update_focus(self):
-        """Update visual focus on cards."""
+        """Update visual focus on cards/bars."""
         for i, (model_name, _, _) in enumerate(self._models):
             if model_name in self._cards:
-                card = self._cards[model_name]
-                card.set_focused(i == self._focused_index)
+                item = self._cards[model_name]
+                # Only call set_focused if the item has this method (cards do, bars don't)
+                if hasattr(item, 'set_focused'):
+                    item.set_focused(i == self._focused_index)
 
         # Ensure focused card is visible in scroll area
         self._ensure_focused_visible()

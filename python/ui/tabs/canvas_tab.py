@@ -416,8 +416,10 @@ class CanvasTab(BaseTab):
             # Open the first/most recent canvas
             self._open_canvas(canvases[0].id)
         else:
-            # No canvases - prompt user for name
-            self._prompt_new_canvas_name()
+            # No canvases yet - show empty canvas, user can create via menu
+            logger.info("No canvases found - showing empty canvas")
+            self._canvas.clear()
+            self._on_canvas_loaded()
 
     def _prompt_new_canvas_name(self):
         """Prompt user to create a new canvas."""
@@ -455,7 +457,8 @@ class CanvasTab(BaseTab):
         canvas_def = self._metadata_manager.get_canvas(canvas_id)
         if not canvas_def:
             logger.error(f"Canvas not found: {canvas_id}")
-            self._prompt_new_canvas_name()
+            self._canvas.clear()
+            self._on_canvas_loaded()
             return
 
         self._current_canvas_id = canvas_id

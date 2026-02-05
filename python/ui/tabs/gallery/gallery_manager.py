@@ -1148,6 +1148,7 @@ class GalleryManager(BaseGalleryManager):
         """Hide the empty state widget."""
         if hasattr(self, '_empty_state_widget') and self._empty_state_widget:
             if isValid(self._empty_state_widget):
+                self._empty_state_widget.hide()
                 self.tab._flow_layout.removeWidget(self._empty_state_widget)
                 self._empty_state_widget.deleteLater()
             self._empty_state_widget = None

@@ -179,7 +179,7 @@ with self._cache_lock:
 
 - **User:** `~/.luma_tools/settings.json` (window state, tab order, last dirs)
 - **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs)
-- **Key global setting:** `network_output_path` — network path for outputs AND centralized logs (currently `W:/LumaRND/tmp/ComfyUI_OUT`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
+- **Key global setting:** `network_output_path` — network path for outputs AND centralized logs (currently `W:/LumaRND/luma_tools`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 
@@ -280,18 +280,18 @@ Use `logger.info()`, `logger.warning()`, `logger.error()`. Never use `print()` f
 ├── server/   # Persistent server logs: comfyui_server_<hostname>_<timestamp>.log
 ├── runner/   # Farm runner logs: comfyui_runner_<jobname>_<timestamp>.log
 ```
-Currently: `W:/LumaRND/tmp/ComfyUI_OUT/_logs/`. Falls back to `~/.luma_tools/logs/` if network unavailable.
+Currently: `W:/LumaRND/luma_tools/_logs/`. Falls back to `~/.luma_tools/logs/` if network unavailable.
 
 **Reading logs (NO SCRIPT NEEDED):**
 ```bash
 # Get latest log file path (use for Read tool)
-powershell -Command "(Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName"
+powershell -Command "(Get-ChildItem 'W:\LumaRND\luma_tools\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName"
 
 # Read last 100 lines directly
-powershell -Command "Get-Content (Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Tail 100"
+powershell -Command "Get-Content (Get-ChildItem 'W:\LumaRND\luma_tools\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Tail 100"
 
 # Search for errors across all logs
-Grep pattern="ERROR|Exception|Traceback" path="W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\" output_mode="content"
+Grep pattern="ERROR|Exception|Traceback" path="W:\LumaRND\luma_tools\_logs\users\" output_mode="content"
 
 # Read specific log with Read tool (use offset=-100 for last 100 lines)
 Read tool on log path with offset=-100
@@ -319,7 +319,7 @@ python\venv\Scripts\python.exe python\core\luma_tools.py --tab gallery --auto-cl
 
 ```powershell
 # After app closes, read the latest log from network path
-powershell -Command "Get-ChildItem 'W:\LumaRND\tmp\ComfyUI_OUT\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName }"
+powershell -Command "Get-ChildItem 'W:\LumaRND\luma_tools\_logs\users\' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName }"
 ```
 
 **Bug triage — pre-existing vs. introduced:**

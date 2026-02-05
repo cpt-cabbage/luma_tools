@@ -3,124 +3,94 @@ ComfyUI Node Configuration Module.
 
 Contains configuration dictionaries for:
 - EDITABLE_NODE_CONFIGS: Defines which widgets are exposed as editable in the UI
-- WIDGET_MAPPINGS: Maps widget_values indices to input names for API format conversion
+- SETTINGS_NODE_CONFIGS: Defines which widgets appear in the settings section
+- WIDGET_MAPPINGS: Legacy fallback for API format conversion (prefer node_info auto-discovery)
+
+Widget types and indices are auto-resolved from the node_info cache (/object_info).
+Configs only need to specify widget names. Some entries use special types that
+can't be auto-discovered (e.g., 'image', '3d_model', 'toggle' for switch nodes).
 """
 
-# Mapping of node types to their editable widget configurations
-# Format: {node_type: [(widget_index, widget_name, widget_type), ...]}
-# widget_type can be: 'text', 'image', 'int', 'float', 'combo', 'toggle', '3d_model', 'string'
+# Mapping of node types to their editable widget names
+# Simple format: {node_type: ['widget_name', ...]}
+# Override format: {node_type: [(widget_name, override_type), ...]}
+#   Use override_type when the auto-discovered type isn't what the UI needs
+#   (e.g., 'image' for LoadImage, '3d_model' for Load3D, 'toggle' for switches)
 EDITABLE_NODE_CONFIGS = {
     # Core ComfyUI nodes
-    'LoadImage': [(0, 'image', 'image')],
-    'SaveImage': [(0, 'filename_prefix', 'string')],
-    'KSampler': [
-        (0, 'seed', 'int'),
-        (2, 'steps', 'int'),
-        (3, 'cfg', 'float'),
-    ],
+    'LoadImage': [('image', 'image')],
+    'SaveImage': ['filename_prefix'],
+    'KSampler': ['seed', 'steps', 'cfg'],
 
     # Text/prompt nodes
-    'TextEncodeQwenImageEditPlus': [(0, 'prompt', 'text')],
-    'CLIPTextEncode': [(0, 'text', 'text')],
-    'HYMotionEncodeText': [(0, 'text', 'text')],
+    'TextEncodeQwenImageEditPlus': ['prompt'],
+    'CLIPTextEncode': ['text'],
+    'HYMotionEncodeText': ['text'],
 
     # SHARP 3D reconstruction nodes
-    'SharpPredict': [(1, 'output_prefix', 'string')],
+    'SharpPredict': ['output_prefix'],
 
     # HY-Motion export
-    'HYMotionExportFBX': [(1, 'filename_prefix', 'string')],
+    'HYMotionExportFBX': ['filename_prefix'],
 
     # Hunyuan Video nodes
-    'SaveVideo': [(0, 'filename_prefix', 'string')],
+    'SaveVideo': ['filename_prefix'],
 
     # TRELLIS2 nodes
-    'Trellis2ExportGLB': [(5, 'filename_prefix', 'string')],  # Old node
-    'Trellis2ExportMesh': [(0, 'filename_prefix', 'string')],  # New mesh export (glb/obj/etc) - no output_dir
-    'Trellis2LoadImageWithTransparency': [(0, 'image', 'image')],  # Load image with alpha
+    'Trellis2ExportGLB': ['filename_prefix'],
+    'Trellis2ExportMesh': ['filename_prefix'],
+    'Trellis2LoadImageWithTransparency': [('image', 'image')],
 
     # UltraShape nodes
-    'UltraShapeSaveGLB': [(2, 'filename_prefix', 'string')],
+    'UltraShapeSaveGLB': ['filename_prefix'],
 
-    # Switch nodes - used as toggle/boolean when they have exactly 2 inputs
-    'easy anythingIndexSwitch': [(0, 'index', 'toggle')],
+    # Switch nodes - 'toggle' type can't be auto-discovered (it's just INT)
+    'easy anythingIndexSwitch': [('index', 'toggle')],
 
-    # 3D model loading
-    'Load3D': [(0, 'model_file', '3d_model')],
+    # 3D model loading - '3d_model' type can't be auto-discovered
+    'Load3D': [('model_file', '3d_model')],
+
+    # Video loading nodes - 'video' type can't be auto-discovered
+    'VHS_LoadVideo': [('video', 'video')],
+    'VHS_LoadVideoPath': [('video', 'video')],
+    'LoadVideo': [('video', 'video')],
 }
 
 
 # Settings node configurations - for nodes with '_settings' suffix
 # These appear in the collapsible "Workflow Settings" section, grouped by node title
-# Format: {node_type: [(widget_index, widget_name, widget_type), ...]}
+# Format: {node_type: ['widget_name', ...]}
 SETTINGS_NODE_CONFIGS = {
     # Sampler settings
-    'KSampler': [
-        (2, 'steps', 'int'),
-        (3, 'cfg', 'float'),
-        (6, 'denoise', 'float'),
-    ],
-    'KSamplerAdvanced': [
-        (3, 'steps', 'int'),
-        (4, 'cfg', 'float'),
-    ],
+    'KSampler': ['steps', 'cfg', 'denoise'],
+    'KSamplerAdvanced': ['steps', 'cfg'],
 
     # TRELLIS2 mesh settings
     'Trellis2MeshWithVoxelAdvancedGenerator': [
-        (2, 'pipeline_type', 'combo'),
-        (3, 'sparse_structure_steps', 'int'),
-        (4, 'sparse_structure_guidance_strength', 'float'),
-        (7, 'shape_steps', 'int'),
-        (8, 'shape_guidance_strength', 'float'),
-        (11, 'texture_steps', 'int'),
-        (12, 'texture_guidance_strength', 'float'),
+        'pipeline_type', 'sparse_structure_steps', 'sparse_structure_guidance_strength',
+        'shape_steps', 'shape_guidance_strength',
+        'texture_steps', 'texture_guidance_strength',
     ],
     'Trellis2PostProcessMesh': [
-        (0, 'fill_holes', 'toggle'),
-        (5, 'remove_small_connected_components', 'toggle'),
-        (8, 'remove_floaters', 'toggle'),
+        'fill_holes', 'remove_small_connected_components', 'remove_floaters',
     ],
-    'Trellis2SimplifyMesh': [
-        (0, 'target_face_num', 'int'),
-        (1, 'method', 'combo'),
-    ],
+    'Trellis2SimplifyMesh': ['target_face_num', 'method'],
     'Trellis2PostProcessAndUnWrapAndRasterizer': [
-        (4, 'texture_size', 'int'),
-        (5, 'remesh', 'toggle'),
-        (8, 'target_face_num', 'int'),
-        (15, 'remove_floaters', 'toggle'),
+        'texture_size', 'remesh', 'target_face_num', 'remove_floaters',
     ],
 
     # UltraShape settings
-    'UltraShapeRefine': [
-        (0, 'steps', 'int'),
-        (1, 'guidance_scale', 'float'),
-        (2, 'octree_resolution', 'int'),
-    ],
+    'UltraShapeRefine': ['steps', 'guidance_scale', 'octree_resolution'],
 
     # HYMotion settings
-    'HYMotionGenerate': [
-        (0, 'duration', 'float'),
-        (2, 'cfg_scale', 'float'),
-        (3, 'num_samples', 'int'),
-    ],
+    'HYMotionGenerate': ['duration', 'cfg_scale', 'num_samples'],
 
     # Image scaling settings
-    'ImageScale': [
-        (0, 'upscale_method', 'combo'),
-        (1, 'width', 'int'),
-        (2, 'height', 'int'),
-    ],
-    'ImageScaleBy': [
-        (0, 'upscale_method', 'combo'),
-        (1, 'scale_by', 'float'),
-    ],
+    'ImageScale': ['upscale_method', 'width', 'height'],
+    'ImageScaleBy': ['upscale_method', 'scale_by'],
 
     # Latent settings
-    'EmptyLatentImage': [
-        (0, 'width', 'int'),
-        (1, 'height', 'int'),
-        (2, 'batch_size', 'int'),
-    ],
+    'EmptyLatentImage': ['width', 'height', 'batch_size'],
 }
 
 
@@ -346,6 +316,13 @@ SEED_NODE_TYPES = [
     'UltraShapeRefine',
 ]
 
+
+# Suffix convention for marking the primary output node in multi-output workflows.
+# When any export node has this suffix in its title, ONLY that node gets the
+# output prefix set — other export nodes are skipped and their files are not
+# moved to the output directory. Backwards-compatible: if no node has the suffix,
+# all export nodes are handled as before.
+OUTPUT_SUFFIX = '_output'
 
 # Node types that export files and need output prefix set
 # Nodes with 'output_dir' in WIDGET_MAPPINGS will also have output_dir set automatically

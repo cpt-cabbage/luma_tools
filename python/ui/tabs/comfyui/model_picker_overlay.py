@@ -6,8 +6,7 @@ inspired by Netflix, Spotify, and modern game launchers.
 
 Features:
 - Full-screen dark backdrop with fade animation
-- Left sidebar with categories and sort options
-- Horizontal quick-access rows (Favorites, Recently Used)
+- Left sidebar with categories (including Favorites) and sort options
 - Responsive card grid with Netflix-style hover
 - Search with instant filtering
 - Keyboard navigation (Escape to close)
@@ -16,7 +15,7 @@ Features:
 import logging
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QEvent
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
@@ -99,6 +98,10 @@ class ModelPickerOverlay(QWidget):
         self._setup_ui()
         self._setup_animations()
         self._connect_signals()
+
+        # Install event filter on parent to catch resize events
+        if parent:
+            parent.installEventFilter(self)
 
         # Start hidden
         self.hide()
@@ -255,43 +258,14 @@ class ModelPickerOverlay(QWidget):
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(32)
 
-        # Quick access rows (Favorites, Recently Used)
-        from .quick_access_rows import QuickAccessRow
-
-        self._favorites_row = QuickAccessRow(
-            title="Favorites",
-            icon="★",
-            on_card_selected=self._on_model_activated,
-            on_favorite_toggled=self._on_favorite_toggled,
-            on_context_menu=self._on_context_menu
-        )
-        scroll_layout.addWidget(self._favorites_row)
-
-        self._recents_row = QuickAccessRow(
-            title="Recently Used",
-            icon="⏱",
-            on_card_selected=self._on_model_activated,
-            on_favorite_toggled=self._on_favorite_toggled,
-            on_context_menu=self._on_context_menu
-        )
-        scroll_layout.addWidget(self._recents_row)
-
-        # All models section header
-        all_models_header = QLabel("All Models")
-        all_models_header.setStyleSheet(f"""
-            color: {TEXT_PRIMARY};
-            font-size: 16px;
-            font-weight: bold;
-        """)
-        scroll_layout.addWidget(all_models_header)
-
-        # Model grid
+        # Model grid (using bars layout for horizontal list)
         from .model_grid import ModelGrid
 
         self._model_grid = ModelGrid(
             on_model_selected=self._on_model_activated,
             on_favorite_toggled=self._on_favorite_toggled,
-            on_context_menu=self._on_context_menu
+            on_context_menu=self._on_context_menu,
+            layout_mode="bars"
         )
         scroll_layout.addWidget(self._model_grid)
 
@@ -388,11 +362,11 @@ class ModelPickerOverlay(QWidget):
         def on_done(updated):
             logger.debug(f"[Overlay] Background thumbnail refresh done: updated={updated}, type={type(updated)}")
             if updated and updated > 0:
-                logger.info(f"[Overlay] Refreshed {updated} model thumbnails, calling _refresh_grid")
-                # Refresh grid to show new thumbnails
-                self._refresh_grid()
+                logger.info(f"[Overlay] Refreshed {updated} model thumbnails, refreshing favorites")
+                # Refresh favorites to show new thumbnails
+                self._refresh_all()
             else:
-                logger.debug(f"[Overlay] No thumbnails updated, NOT refreshing grid")
+                logger.debug(f"[Overlay] No thumbnails updated, NOT refreshing")
 
         self._thumbnail_worker = Worker(do_refresh)
         self._thumbnail_worker.signals.result.connect(on_done)
@@ -405,32 +379,6 @@ class ModelPickerOverlay(QWidget):
         # Refresh sidebar categories (picks up any changes from Settings)
         if hasattr(self, '_sidebar'):
             self._sidebar.refresh_categories()
-
-        presets = get_comfyui_workflow_presets()
-        username = app_state.user
-
-        # Refresh favorites row
-        try:
-            favorites = get_user_favorites(username)
-            self._favorites_row.set_models(
-                [(name, presets.get(name, {}), get_model_rating(name))
-                 for name in favorites if name in presets],
-                username
-            )
-        except Exception:
-            # get_user_favorites may not exist yet
-            self._favorites_row.set_models([], username)
-
-        # Refresh recents row
-        try:
-            recents = get_user_recents(username)
-            self._recents_row.set_models(
-                [(name, presets.get(name, {}), get_model_rating(name))
-                 for name in recents if name in presets],
-                username
-            )
-        except Exception:
-            self._recents_row.set_models([], username)
 
         # Refresh main grid
         self._refresh_grid()
@@ -448,7 +396,8 @@ class ModelPickerOverlay(QWidget):
             presets,
             sort_key=self._sort_key,
             tag_filter=tag_filter,
-            search_query=self._search_text if self._search_text else None
+            search_query=self._search_text if self._search_text else None,
+            username=username
         )
 
         logger.debug(f"[Overlay] _refresh_grid: got {len(models)} models after filter/sort")
@@ -597,6 +546,10 @@ class ModelPickerOverlay(QWidget):
             delete_model_data(model_name)
             self._refresh_all()
 
+    def refresh(self):
+        """Public refresh method - reload all preset data."""
+        self._refresh_all()
+
     def set_current_model(self, model_name: Optional[str]):
         """Set the currently selected model (for highlighting)."""
         self._current_model = model_name
@@ -615,3 +568,24 @@ class ModelPickerOverlay(QWidget):
         super().resizeEvent(event)
         if self._is_visible:
             self._position_content()
+
+    def eventFilter(self, obj, event):
+        """Filter events from parent to catch resize events."""
+        # Cache parent reference to avoid multiple calls
+        parent = self.parent()
+
+        # If parent is resizing and overlay is visible, update overlay size
+        if obj == parent and event.type() == QEvent.Resize and self._is_visible:
+            # Update overlay geometry to match parent
+            if parent:
+                self.setGeometry(parent.rect())
+            # Content will be repositioned by our own resizeEvent
+
+        return super().eventFilter(obj, event)
+
+    def closeEvent(self, event):
+        """Clean up event filter on close."""
+        parent = self.parent()
+        if parent:
+            parent.removeEventFilter(self)
+        super().closeEvent(event)

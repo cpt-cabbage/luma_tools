@@ -210,6 +210,11 @@ class PickerSidebar(QWidget):
         self._all_models_btn.clicked.connect(lambda: self._on_category_clicked("all"))
         content_layout.addWidget(self._all_models_btn)
 
+        # Favorites button
+        self._favorites_btn = SidebarButton("★ Favorites", is_active=False)
+        self._favorites_btn.clicked.connect(lambda: self._on_category_clicked("favorites"))
+        content_layout.addWidget(self._favorites_btn)
+
         # Divider
         divider1 = QFrame()
         divider1.setFrameShape(QFrame.HLine)
@@ -282,9 +287,12 @@ class PickerSidebar(QWidget):
             main_layout.addWidget(self._add_model_btn)
 
     def _on_category_clicked(self, category: str):
-        """Handle All Models button click."""
+        """Handle All Models or Favorites button click."""
         self._current_category = category
-        self._all_models_btn.set_active(True)
+
+        # Update button states
+        self._all_models_btn.set_active(category == "all")
+        self._favorites_btn.set_active(category == "favorites")
 
         # Uncheck category radios
         checked = self._category_group.checkedButton()
@@ -300,6 +308,7 @@ class PickerSidebar(QWidget):
         if isinstance(button, SidebarRadioButton):
             self._current_category = button.value
             self._all_models_btn.set_active(False)
+            self._favorites_btn.set_active(False)
             self.category_changed.emit(button.value)
 
     def _on_sort_clicked(self, button):
@@ -343,6 +352,15 @@ class PickerSidebar(QWidget):
 
         if category == "all":
             self._all_models_btn.set_active(True)
+            self._favorites_btn.set_active(False)
+            checked = self._category_group.checkedButton()
+            if checked:
+                self._category_group.setExclusive(False)
+                checked.setChecked(False)
+                self._category_group.setExclusive(True)
+        elif category == "favorites":
+            self._all_models_btn.set_active(False)
+            self._favorites_btn.set_active(True)
             checked = self._category_group.checkedButton()
             if checked:
                 self._category_group.setExclusive(False)
@@ -350,6 +368,7 @@ class PickerSidebar(QWidget):
                 self._category_group.setExclusive(True)
         else:
             self._all_models_btn.set_active(False)
+            self._favorites_btn.set_active(False)
             if category in self._category_buttons:
                 self._category_buttons[category].setChecked(True)
 

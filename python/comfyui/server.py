@@ -34,6 +34,7 @@ import signal
 import argparse
 import threading
 import subprocess
+import json
 import logging
 import urllib.request
 import urllib.error
@@ -538,6 +539,10 @@ def restart_comfyui(reason: str = "manual"):
             logger.info("COMFYUI RESTART COMPLETE")
             logger.info(f"ComfyUI API: http://127.0.0.1:{config['port']}")
             logger.info("=" * 60 + "\n")
+
+            # Refresh node definitions on network after restart
+            _save_node_info_to_network(config['port'])
+
             return True
         else:
             logger.error("ComfyUI failed to restart")
@@ -669,6 +674,42 @@ def load_global_settings() -> dict:
     except Exception as e:
         logger.warning(f"Error loading global settings: {e}")
         return {}
+
+
+def _save_node_info_to_network(port: int, global_settings: dict = None):
+    """Fetch /object_info from ComfyUI and save to network path.
+
+    This makes node definitions available to all luma_tools instances
+    on the network, so artist workstations don't need direct access
+    to the ComfyUI server.
+    """
+    try:
+        from comfyui.node_info import fetch_object_info, save_cache_to_network, _cache
+
+        server_url = f"http://127.0.0.1:{port}"
+        raw_data = fetch_object_info(server_url, timeout=60)
+        if not raw_data:
+            logger.warning("Failed to fetch /object_info for network cache")
+            return
+
+        count = _cache.update_from_server(raw_data)
+        logger.info(f"Fetched {count} node definitions from ComfyUI")
+
+        # Save to network path
+        if global_settings is None:
+            global_settings = load_global_settings()
+
+        network_path = global_settings.get('network_output_path', '')
+        if network_path and os.path.isdir(network_path):
+            if save_cache_to_network(network_path):
+                logger.info("Node info saved to network for all clients")
+            else:
+                logger.warning("Failed to save node info to network path")
+        else:
+            logger.warning(f"Network output path not available: {network_path}")
+
+    except Exception as e:
+        logger.error(f"Error saving node info to network: {e}")
 
 
 def main():
@@ -822,6 +863,9 @@ def main():
     logger.info("SERVER READY")
     logger.info(f"ComfyUI API: http://127.0.0.1:{args.port}")
     logger.info("=" * 60 + "\n")
+
+    # Save node definitions to network path for client machines
+    _save_node_info_to_network(args.port, global_settings)
 
     health_thread = threading.Thread(target=health_monitor_thread, args=(args.port,), daemon=True)
     health_thread.start()

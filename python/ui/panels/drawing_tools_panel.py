@@ -42,9 +42,11 @@ class DrawingToolsPanel(QWidget):
         self._dragging = False
         self._drag_offset = None
 
-        # Float above other widgets
-        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
+        # Float above other widgets without stealing keyboard focus
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.NoFocus)
 
     def _setup_ui(self):
         """Setup the panel UI."""
@@ -84,6 +86,7 @@ class DrawingToolsPanel(QWidget):
         header_layout.addStretch()
 
         close_btn = QPushButton("×")
+        close_btn.setFocusPolicy(Qt.NoFocus)
         close_btn.setFixedSize(18, 18)
         close_btn.setStyleSheet("""
             QPushButton {
@@ -151,6 +154,7 @@ class DrawingToolsPanel(QWidget):
         size_row.addWidget(size_label)
 
         self._size_slider = QSlider(Qt.Horizontal)
+        self._size_slider.setFocusPolicy(Qt.NoFocus)
         self._size_slider.setMinimum(1)
         self._size_slider.setMaximum(50)
         self._size_slider.setValue(self._brush_size)
@@ -171,6 +175,7 @@ class DrawingToolsPanel(QWidget):
         size_row.addWidget(self._size_slider)
 
         self._size_spin = QSpinBox()
+        self._size_spin.setFocusPolicy(Qt.NoFocus)
         self._size_spin.setMinimum(1)
         self._size_spin.setMaximum(50)
         self._size_spin.setValue(self._brush_size)
@@ -199,6 +204,7 @@ class DrawingToolsPanel(QWidget):
         color_row.addWidget(color_label)
 
         self._color_btn = QPushButton()
+        self._color_btn.setFocusPolicy(Qt.NoFocus)
         self._color_btn.setFixedSize(60, 24)
         self._update_color_button()
         self._color_btn.clicked.connect(self._on_color_click)
@@ -238,6 +244,7 @@ class DrawingToolsPanel(QWidget):
                 border-color: #4a9eff;
             }
         """)
+        btn.setFocusPolicy(Qt.NoFocus)
         btn.clicked.connect(lambda checked, t=tool_id: self._on_tool_clicked(t))
         layout.addWidget(btn)
         self._tool_buttons[tool_id] = btn

@@ -1,53 +1,198 @@
 {
   "comfyui_workflow_presets": {
-    "Animation/Hy-Motion": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Animation/la_Hy_Motion.json",
+    "Trellis 2": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_2_v003.json",
       "description": "",
       "iteratable": false,
-      "note": "Text to Anmation",
+      "note": "Image to Model",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": false,
+      "output_type": "3d"
+    },
+    "Qwen image 2512 Turbo": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_2512_with_2steps_lora_v001.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Text to Image",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": false,
+      "output_type": "image"
+    },
+    "LTX2 Video": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/video_ltx2_i2v.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Image to Video",
       "full_restart": false,
       "node_overrides": {
-        "HY-Motion Export FBX_editable": {
+        "92:noise_seed": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:ckpt_name": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:text_encoder": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:lora_name": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:model_name": {
           "enabled": false,
           "default_value": ""
         }
       },
-      "is_multi": false
+      "is_multi": false,
+      "output_type": "video"
     },
-    "Qwen Image Edit 2511": {
-      "path": "",
+    "Audio Ace Step 1.5": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/audio_ace_step_1_5.json",
       "description": "",
       "iteratable": false,
-      "note": "",
+      "note": "Text to Music",
+      "full_restart": false,
+      "node_overrides": {
+        "94:seed": {
+          "enabled": false,
+          "default_value": ""
+        }
+      },
+      "is_multi": false,
+      "output_type": "audio"
+    },
+    "Qwen Image Layered Control": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_layered_control.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Image to Layers (seperate images)",
+      "full_restart": false,
+      "node_overrides": {
+        "83:steps": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:cfg": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:unet_name": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:weight_dtype": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:clip_name": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:vae_name": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "83:seed": {
+          "enabled": false,
+          "default_value": ""
+        }
+      },
+      "is_multi": false,
+      "output_type": "image"
+    },
+    "MMAudio": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/mmaudio_v001.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Video to Audo",
+      "full_restart": false,
+      "node_overrides": {
+        "92:steps": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:cfg": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:seed": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:negative_prompt": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:mask_away_clip": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "92:force_offload": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:force_rate": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:custom_width": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:custom_height": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:frame_load_cap": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:skip_first_frames": {
+          "enabled": false,
+          "default_value": ""
+        },
+        "91:select_every_nth": {
+          "enabled": false,
+          "default_value": ""
+        }
+      },
+      "is_multi": false,
+      "output_type": "audio"
+    },
+    "Sharp": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/sharp_basic_v001.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Image To Gaussian Splat",
       "full_restart": false,
       "node_overrides": {},
-      "is_multi": true,
-      "output_type": "image",
-      "workflows": {
-        "Single Input": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
-          "note": "",
-          "iteratable": true,
-          "full_restart": false,
-          "node_overrides": {
-            "218": {
-              "enabled": false,
-              "default_value": ""
-            },
-            "217": {
-              "enabled": false,
-              "default_value": ""
-            }
-          }
-        },
-        "Multi Input": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Image Editing/qwen-image-edit-2511-8stepsv5.json",
-          "note": "",
-          "iteratable": true,
-          "full_restart": false,
-          "node_overrides": {}
-        }
-      }
+      "is_multi": false,
+      "output_type": "3d"
+    },
+    "Stable Audio": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/audio_stable_audio.json",
+      "description": "",
+      "iteratable": false,
+      "note": "Text to Audio",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": false,
+      "output_type": "audio"
+    },
+    "Qwen Image Edit 2511": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_edit_2511_v001.json",
+      "description": "",
+      "iteratable": true,
+      "note": "Image Edting",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": false,
+      "output_type": "image"
     }
   },
   "comfyui_path": "D:\\ComfyUI\\",
@@ -58,7 +203,7 @@
     "mark.zimmer",
     "christophe.leyder"
   ],
-  "network_output_path": "W:/LumaRND/tmp/ComfyUI_OUT",
+  "network_output_path": "W:/LumaRND/luma_tools",
   "comfyui_use_user_subfolder": true,
   "comfyui_fast_mode": true,
   "comfyui_fp16_accumulation": true,
@@ -104,8 +249,9 @@
     "3D",
     "Animation",
     "Portrait",
-    "Landscape",
-    "Experimental",
-    "Image Editing"
+    "Audio",
+    "Gaussian Splats",
+    "Music",
+    "Images"
   ]
 }

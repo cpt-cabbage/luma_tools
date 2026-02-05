@@ -588,33 +588,106 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                     break
 
         # Handle widgets_values from the subgraph node
-        # These need to be applied to the appropriate internal nodes
+        # These need to be applied to the appropriate internal nodes via _input_overrides
         sg_widgets_values = sg_node.get('widgets_values', [])
-        if sg_widgets_values and sg_inputs:
-            # Map widget values to internal nodes via subgraph inputs
+        sg_properties = sg_node.get('properties', {})
+        sg_proxy_widgets = sg_properties.get('proxyWidgets', [])
+
+        if sg_widgets_values and sg_proxy_widgets:
+            # Use proxyWidgets for precise mapping:
+            # Each entry is [node_id_str, widget_name] mapping to widgets_values[idx]
+            for idx, proxy_entry in enumerate(sg_proxy_widgets):
+                if not isinstance(proxy_entry, (list, tuple)) or len(proxy_entry) < 2:
+                    continue
+                if idx >= len(sg_widgets_values):
+                    break
+
+                proxy_node_id_str, widget_name = proxy_entry[0], proxy_entry[1]
+                widget_value = sg_widgets_values[idx]
+
+                # Skip phantom widgets
+                if widget_name == 'control_after_generate':
+                    continue
+
+                if proxy_node_id_str == "-1":
+                    # Boundary input — find target via internal links from this input
+                    # Match by input name in subgraph definition inputs
+                    for sg_inp in sg_inputs:
+                        if sg_inp.get('name') != widget_name:
+                            continue
+                        internal_link_id = sg_inp.get('link')
+                        if internal_link_id is None:
+                            continue
+                        # Follow the internal link to find the target node and slot
+                        for il in sg_internal_links:
+                            if il[0] == internal_link_id:
+                                target_remapped = node_id_map.get(il[3])
+                                target_slot = il[4]
+                                if target_remapped is not None:
+                                    for new_node in new_nodes:
+                                        if new_node['id'] == target_remapped:
+                                            # Determine the input name on the target node
+                                            target_inputs = new_node.get('inputs', [])
+                                            input_name = None
+                                            for ti_idx, ti in enumerate(target_inputs):
+                                                slot_idx = ti.get('slot_index', ti_idx)
+                                                if slot_idx == target_slot:
+                                                    input_name = ti.get('name', widget_name)
+                                                    break
+                                            if input_name is None:
+                                                input_name = widget_name
+                                            overrides = new_node.setdefault('_input_overrides', {})
+                                            overrides[input_name] = widget_value
+                                            logger.debug(f"    Override: node {target_remapped} input '{input_name}' = {repr(widget_value)[:60]}")
+                                            break
+                                break
+                        break
+                else:
+                    # Internal node widget — find the expanded node by original ID
+                    try:
+                        internal_id = int(proxy_node_id_str)
+                    except (ValueError, TypeError):
+                        continue
+                    target_remapped = node_id_map.get(internal_id)
+                    if target_remapped is not None:
+                        for new_node in new_nodes:
+                            if new_node['id'] == target_remapped:
+                                overrides = new_node.setdefault('_input_overrides', {})
+                                overrides[widget_name] = widget_value
+                                logger.debug(f"    Override (internal): node {target_remapped} widget '{widget_name}' = {repr(widget_value)[:60]}")
+                                break
+
+        elif sg_widgets_values and sg_inputs:
+            # Fallback: no proxyWidgets — map via subgraph input definitions
             for i, sg_input_def in enumerate(sg_inputs):
                 if i >= len(sg_widgets_values):
                     break
 
                 widget_value = sg_widgets_values[i]
                 internal_link_id = sg_input_def.get('link')
+                input_name = sg_input_def.get('name', f'input_{i}')
 
                 if internal_link_id is None:
                     continue
 
-                # Find the internal link
                 for il in sg_internal_links:
                     if il[0] == internal_link_id:
-                        target_node_id = node_id_map.get(il[3])
-                        # Find the target node and set widget value
-                        for new_node in new_nodes:
-                            if new_node['id'] == target_node_id:
-                                # Try to set in widgets_values if it exists
-                                if 'widgets_values' not in new_node:
-                                    new_node['widgets_values'] = []
-                                # This is a simplification - proper handling would
-                                # require knowing which widget index to use
-                                break
+                        target_remapped = node_id_map.get(il[3])
+                        if target_remapped is not None:
+                            for new_node in new_nodes:
+                                if new_node['id'] == target_remapped:
+                                    overrides = new_node.setdefault('_input_overrides', {})
+                                    # Use the subgraph input name as override key
+                                    target_inputs = new_node.get('inputs', [])
+                                    target_slot = il[4]
+                                    override_name = input_name
+                                    for ti_idx, ti in enumerate(target_inputs):
+                                        slot_idx = ti.get('slot_index', ti_idx)
+                                        if slot_idx == target_slot:
+                                            override_name = ti.get('name', input_name)
+                                            break
+                                    overrides[override_name] = widget_value
+                                    break
                         break
 
     # Remove subgraph nodes and add expanded nodes
@@ -698,6 +771,7 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             link_map[link_id] = (from_node, from_slot)
 
     api_workflow = {}
+    from comfyui.node_info import get_widget_names as _get_ni_widget_names
 
     for node in nodes:
         node_id = str(node.get('id'))
@@ -745,7 +819,13 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 while len(widget_names) < len(widgets_values):
                     widget_names = [None] + widget_names  # Prepend None for linked inputs
 
-            # Tier 3: Fall back to manual mappings if auto-extraction failed
+            # Tier 3: Try node_info cache (auto-discovered from /object_info)
+            if widget_names is None:
+                widget_names = _get_ni_widget_names(node_type)
+                if widget_names is not None:
+                    logger.info(f"Using node_info cache for '{node_type}'")
+
+            # Tier 4: Fall back to manual mappings if auto-extraction failed
             if widget_names is None:
                 widget_names = WIDGET_MAPPINGS.get(node_type, None)
                 if widget_names is not None:
@@ -760,8 +840,15 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     if i < len(widgets_values) and widget_name not in inputs:
                         inputs[widget_name] = widgets_values[i]
             else:
-                # Tier 3: No widget info available - warn but continue
+                # No widget info from any source - warn but continue
                 logger.warning(f"Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
+
+        # Apply _input_overrides from subgraph expansion (widget values propagated
+        # from the parent subgraph node to its expanded internal nodes)
+        overrides = node.get('_input_overrides', {})
+        for key, val in overrides.items():
+            if key not in inputs:  # Don't override connected inputs
+                inputs[key] = val
 
         api_workflow[node_id] = {
             'class_type': node_type,

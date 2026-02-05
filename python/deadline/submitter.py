@@ -211,7 +211,7 @@ ExitCodeTreatedAsFailure=1-255
     return job_id
 
 
-def _collect_batch_images(editable_values: Optional[Dict[int, Dict[str, Any]]]) -> Tuple[List[str], int]:
+def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[List[str], int]:
     """
     Collect all batch input files (images, 3D models, etc.) from editable values.
 
@@ -221,18 +221,20 @@ def _collect_batch_images(editable_values: Optional[Dict[int, Dict[str, Any]]]) 
     if not editable_values:
         return [], -1
 
-    # Priority order: images first, then 3D models
-    input_types = ['image', '3d_model']
+    # Priority order: images first, then videos, then 3D models
+    input_types = ['image', 'video', '3d_model']
 
     for input_type in input_types:
-        for node_id, data in editable_values.items():
-            node_info = data.get('node')
-            value = data.get('value')
-            if node_info and node_info.widget_type == input_type:
-                if isinstance(value, list):
-                    return [p for p in value if os.path.exists(p)], node_id
-                elif value and os.path.exists(value):
-                    return [value], node_id
+        for node_id, entries in editable_values.items():
+            entry_list = entries if isinstance(entries, list) else [entries]
+            for data in entry_list:
+                node_info = data.get('node')
+                value = data.get('value')
+                if node_info and node_info.widget_type == input_type:
+                    if isinstance(value, list):
+                        return [p for p in value if os.path.exists(p)], node_id
+                    elif value and os.path.exists(value):
+                        return [value], node_id
 
     return [], -1
 
@@ -338,7 +340,14 @@ def submit_comfyui_job(
         if editable_values:
             current_editable_values = copy.deepcopy(editable_values)
             if input_node_id >= 0 and input_node_id in current_editable_values:
-                current_editable_values[input_node_id]['value'] = current_file
+                # Update the image/3d_model entry's value to the current batch file
+                entries = current_editable_values[input_node_id]
+                entry_list = entries if isinstance(entries, list) else [entries]
+                for data in entry_list:
+                    node_info = data.get('node')
+                    if node_info and node_info.widget_type in ('image', 'video', '3d_model'):
+                        data['value'] = current_file
+                        break
 
         modified, found_editable = modify_workflow(
             workflow,
@@ -393,12 +402,15 @@ def submit_comfyui_job(
 
         # Copy additional files (images, 3D models) from editable values
         if current_editable_values:
-            for _, data in current_editable_values.items():
-                node_info = data.get('node')
-                value = data.get('value')
+            for _, entries in current_editable_values.items():
+                entry_list = entries if isinstance(entries, list) else [entries]
+                for data in entry_list:
+                    node_info = data.get('node')
+                    value = data.get('value')
 
-                # Handle both image and 3D model widgets
-                if node_info and node_info.widget_type in ('image', '3d_model'):
+                    # Handle image, video, and 3D model widgets
+                    if not (node_info and node_info.widget_type in ('image', 'video', '3d_model')):
+                        continue
                     # Value might be a string or a list
                     files_to_copy = []
                     if isinstance(value, list):

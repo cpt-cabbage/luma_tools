@@ -75,6 +75,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Setup model picker (inline expandable panel)
         self._setup_model_picker()
 
+        # Setup workflow settings button (next to model button)
+        self._setup_workflow_settings_button()
+
+        # Setup rating widget below model button
+        self._setup_rating_widget()
+
         # Create workflow selector dropdown (will be added to UI dynamically)
         self._setup_workflow_selector()
         self._setup_note_display()
@@ -103,9 +109,42 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Subscribe to event bus for cross-tab communication
         self._setup_event_bus_subscriptions()
 
+        # Deferred node_info cache check (give server time to start)
+        QTimer.singleShot(5000, self._check_node_info_cache)
+
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         self._validate_inputs()
+
+    # =========================================================================
+    # NODE INFO CACHE
+    # =========================================================================
+
+    def _check_node_info_cache(self):
+        """Check if node_info cache needs refresh from network."""
+        from comfyui.node_info import is_cache_available, is_cache_stale, load_cache_from_network
+
+        if not is_cache_available() or is_cache_stale():
+            logger.info("Node info cache is stale or missing, checking network cache...")
+            self.start_worker(
+                load_cache_from_network,
+                on_result=self._on_node_info_refreshed,
+                on_error=self._on_node_info_error,
+            )
+        else:
+            from comfyui.node_info import get_cache_node_count
+            logger.info(f"Node info cache OK ({get_cache_node_count()} node types)")
+
+    def _on_node_info_refreshed(self, count):
+        """Handle successful node info cache load."""
+        if count > 0:
+            logger.info(f"Node info cache refreshed: {count} node types loaded from network")
+        else:
+            logger.warning("Node info not available (farm server may not have run yet)")
+
+    def _on_node_info_error(self, error):
+        """Handle node info refresh failure."""
+        logger.warning(f"Failed to refresh node info cache: {error}")
 
     # =========================================================================
     # CONTEXTUAL TOOLTIPS & GUIDANCE
@@ -173,6 +212,133 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Connect signals
         self._model_picker.model_selected.connect(self._on_model_selected)
         self._model_picker.add_model_requested.connect(self._on_add_preset_clicked)
+
+    def _setup_workflow_settings_button(self):
+        """Set up the workflow settings button next to the model button."""
+        from icons import IconManager, DEFAULT_ICON_COLOR
+
+        self._workflow_settings_btn = QPushButton()
+        self._workflow_settings_btn.setFixedWidth(40)
+        self._workflow_settings_btn.setFixedHeight(32)
+        self._workflow_settings_btn.setToolTip(
+            "Workflow settings\n\n"
+            "Adjust workflow-specific parameters like\n"
+            "steps, guidance, denoise, etc."
+        )
+        self._workflow_settings_btn.setVisible(False)
+
+        try:
+            self._workflow_settings_btn.setIcon(
+                IconManager.get_icon("settings", DEFAULT_ICON_COLOR, 16)
+            )
+        except Exception:
+            self._workflow_settings_btn.setText("\u2699")
+
+        self._workflow_settings_btn.clicked.connect(self._on_workflow_settings_clicked)
+
+        # Insert after the model button (index 1 in preset buttons layout)
+        self.ui.comfyuiPresetButtonsLayout.insertWidget(1, self._workflow_settings_btn, 0)
+
+    def _setup_rating_widget(self):
+        """Set up the interactive rating widget below the model button."""
+        from .star_rating import StarRatingWidget
+
+        # Create container widget for rating
+        self._rating_container = QWidget()
+        rating_layout = QHBoxLayout(self._rating_container)
+        rating_layout.setContentsMargins(0, 4, 0, 4)
+        rating_layout.setSpacing(8)
+
+        # Label
+        rating_label = QLabel("Your rating:")
+        rating_label.setStyleSheet("color: #888; font-size: 11px;")
+        rating_layout.addWidget(rating_label)
+
+        # Star rating widget
+        self._rating_widget = StarRatingWidget(
+            rating=0.0,
+            interactive=True,
+            show_count=True,
+            size=18
+        )
+        self._rating_widget.rating_changed.connect(self._on_model_rated)
+        rating_layout.addWidget(self._rating_widget)
+
+        rating_layout.addStretch()
+
+        # Hide initially until a model is selected
+        self._rating_container.setVisible(False)
+
+        # Insert into workflow layout after the buttons (index 1, after comfyuiPresetButtonsLayout)
+        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
+            self.ui.comfyuiWorkflowLayout.insertWidget(1, self._rating_container)
+
+    def _on_model_rated(self, rating: int):
+        """Handle user rating a model."""
+        from comfyui.ratings import rate_model, get_model_rating
+
+        if not self.state_manager.current_preset_name:
+            return
+
+        model_name = self.state_manager.current_preset_name
+        username = self.app_state.user
+
+        # Save rating
+        if rate_model(model_name, username, rating):
+            # Update rating widget with new average
+            updated_data = get_model_rating(model_name)
+            new_average = updated_data.get("average", 0.0)
+            new_count = updated_data.get("rating_count", 0)
+
+            self._rating_widget.set_rating(new_average)
+            self._rating_widget.set_rating_count(new_count)
+
+            # Update preset button display
+            self._update_model_button_with_rating()
+
+            self.show_status(f"Rated '{model_name}' {rating}/5 stars", "success")
+            logger.info(f"[ComfyUITab] User rated '{model_name}': {rating}/5 (new avg: {new_average:.1f})")
+
+    def _update_rating_widget(self):
+        """Update the rating widget for the currently selected model."""
+        from comfyui.ratings import get_model_rating
+
+        if not self.state_manager.current_preset_name:
+            self._rating_container.setVisible(False)
+            return
+
+        model_name = self.state_manager.current_preset_name
+        username = self.app_state.user
+
+        # Get rating data
+        rating_data = get_model_rating(model_name)
+        average = rating_data.get("average", 0.0)
+        rating_count = rating_data.get("rating_count", 0)
+        user_rating = rating_data.get("ratings", {}).get(username)
+
+        # Update widget
+        self._rating_widget.set_rating(average)
+        self._rating_widget.set_rating_count(rating_count)
+
+        # If user has already rated, set that as the displayed rating
+        if user_rating:
+            # Set the widget to show the user's rating
+            # (the widget will update to show user rating visually)
+            from .star_rating import StarRatingWidget
+            # Update the internal stars to reflect user rating
+            for i, star in enumerate(self._rating_widget._stars):
+                star.set_fill_amount(1.0 if i < user_rating else 0.0)
+
+        self._rating_container.setVisible(True)
+
+    def _on_workflow_settings_clicked(self):
+        """Show the workflow settings dialog."""
+        self.widget_manager.show_settings_dialog()
+
+    def _update_workflow_settings_button_visibility(self):
+        """Show/hide the settings button based on whether settings nodes exist."""
+        if hasattr(self, '_workflow_settings_btn'):
+            self._workflow_settings_btn.setVisible(self.widget_manager.has_settings_nodes)
 
     def _on_model_selected(self, model_name: str, workflow_name: str):
         """Handle model selection from the overlay.
@@ -494,6 +660,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Update button text with rating
         self._update_model_button_with_rating()
 
+        # Update rating widget
+        self._update_rating_widget()
+
         # Check if this is a multi-workflow model
         is_multi = is_workflow_preset_multi(preset_name)
 
@@ -632,11 +801,14 @@ class ComfyUITab(PollingMixin, BaseTab):
             node_overrides
         )
 
-        # Also refresh settings nodes (collapsible section)
+        # Also refresh settings nodes (dialog)
         self.widget_manager.refresh_settings_nodes(
             self.app_state.comfyui_workflow_path,
             node_overrides
         )
+
+        # Update settings button visibility
+        self._update_workflow_settings_button_visibility()
 
         # Connect signals for newly created widgets
         self._connect_widget_signals()

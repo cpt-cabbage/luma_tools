@@ -150,7 +150,9 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Brush size indicator (circle following cursor in pen/eraser mode)
         self._brush_indicator = QGraphicsEllipseItem()
-        self._brush_indicator.setPen(QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine))
+        indicator_pen = QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine)
+        indicator_pen.setCosmetic(True)  # Keep outline visible at all zoom levels
+        self._brush_indicator.setPen(indicator_pen)
         self._brush_indicator.setBrush(Qt.NoBrush)
         self._brush_indicator.setZValue(9999)  # Always on top
         self._brush_indicator.setFlag(QGraphicsItem.ItemIsSelectable, False)
@@ -627,20 +629,22 @@ class CollaborativeCanvas(QGraphicsView):
         return connection
 
     def add_sticky_note(self, x: float, y: float, text: str = '',
-                        color: str = 'yellow', note_id: str = None) -> StickyNote:
+                        color: str = 'yellow', font_size: int = 10,
+                        note_id: str = None) -> StickyNote:
         """
         Add a sticky note to the canvas.
 
         Args:
             x, y: Position
             text: Note text
-            color: One of 'yellow', 'green', 'red', 'blue'
+            color: One of 'yellow', 'green', 'red', 'blue' or hex string
+            font_size: Font size in points (default 10)
             note_id: Optional ID for sync
 
         Returns:
             The created StickyNote
         """
-        note = StickyNote(x, y, text, color)
+        note = StickyNote(x, y, text, color, font_size=font_size)
         self._scene.addItem(note)
 
         # Track by ID
@@ -652,7 +656,8 @@ class CollaborativeCanvas(QGraphicsView):
             'id': note_id,
             'x': x, 'y': y,
             'text': text,
-            'color': color
+            'color': color,
+            'font_size': font_size
         })
         self._emit_modified()
 
@@ -776,6 +781,9 @@ class CollaborativeCanvas(QGraphicsView):
             self.zoom_changed.emit(self._current_zoom)
             self.minimap_trigger.emit()
 
+        # Update brush indicator size to maintain screen-space appearance
+        self._update_brush_indicator_for_zoom()
+
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -868,7 +876,8 @@ class CollaborativeCanvas(QGraphicsView):
         # Update brush indicator position when in brush tool mode
         if self._current_tool in ('pen', 'eraser'):
             indicator = self._ensure_brush_indicator()
-            size = self._drawing_width
+            # Screen-space size: divide by zoom so indicator stays constant on screen
+            size = self._drawing_width / self._current_zoom if self._current_zoom > 0 else self._drawing_width
             indicator.setRect(
                 scene_pos.x() - size / 2, scene_pos.y() - size / 2, size, size
             )
@@ -1367,7 +1376,9 @@ class CollaborativeCanvas(QGraphicsView):
 
         if need_recreate:
             self._brush_indicator = QGraphicsEllipseItem()
-            self._brush_indicator.setPen(QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine))
+            indicator_pen = QPen(QColor(100, 100, 100, 150), 1, Qt.DashLine)
+            indicator_pen.setCosmetic(True)  # Keep outline visible at all zoom levels
+            self._brush_indicator.setPen(indicator_pen)
             self._brush_indicator.setBrush(Qt.NoBrush)
             self._brush_indicator.setZValue(9999)  # Always on top
             self._brush_indicator.setFlag(QGraphicsItem.ItemIsSelectable, False)
@@ -1378,19 +1389,35 @@ class CollaborativeCanvas(QGraphicsView):
 
         return self._brush_indicator
 
-    def set_drawing_width(self, width: int):
-        """Set the drawing width for new drawings."""
-        self._drawing_width = max(1, width)
-
-        # Update brush indicator size if visible
+    def _update_brush_indicator_for_zoom(self):
+        """Rescale the brush indicator after zoom changes to keep screen-space size."""
         try:
             indicator = self._ensure_brush_indicator()
             if indicator.isVisible():
                 rect = indicator.rect()
                 center_x = rect.center().x()
                 center_y = rect.center().y()
+                size = self._drawing_width / self._current_zoom if self._current_zoom > 0 else self._drawing_width
                 indicator.setRect(
-                    center_x - width / 2, center_y - width / 2, width, width
+                    center_x - size / 2, center_y - size / 2, size, size
+                )
+        except RuntimeError:
+            pass
+
+    def set_drawing_width(self, width: int):
+        """Set the drawing width for new drawings."""
+        self._drawing_width = max(1, width)
+
+        # Update brush indicator size if visible (screen-space)
+        try:
+            indicator = self._ensure_brush_indicator()
+            if indicator.isVisible():
+                rect = indicator.rect()
+                center_x = rect.center().x()
+                center_y = rect.center().y()
+                size = width / self._current_zoom if self._current_zoom > 0 else width
+                indicator.setRect(
+                    center_x - size / 2, center_y - size / 2, size, size
                 )
         except RuntimeError:
             # C++ object deleted mid-operation, ignore
@@ -1424,6 +1451,7 @@ class CollaborativeCanvas(QGraphicsView):
             elif self._current_zoom > self.MAX_ZOOM:
                 self.set_zoom_level(self.MAX_ZOOM)
             self.zoom_changed.emit(self._current_zoom)
+            self._update_brush_indicator_for_zoom()
 
     def reset_view(self):
         """Reset view to origin at 100% zoom."""
@@ -1431,6 +1459,7 @@ class CollaborativeCanvas(QGraphicsView):
         self._current_zoom = 1.0
         self.centerOn(0, 0)
         self.zoom_changed.emit(self._current_zoom)
+        self._update_brush_indicator_for_zoom()
 
     def center_on_origin(self):
         """Center view on the origin (0, 0) without changing zoom."""
@@ -1756,6 +1785,7 @@ class CollaborativeCanvas(QGraphicsView):
                 self.fitInView(rect.adjusted(-50, -50, 50, 50), Qt.KeepAspectRatio)
                 self._current_zoom = self.transform().m11()
                 self.zoom_changed.emit(self._current_zoom)
+                self._update_brush_indicator_for_zoom()
 
     def center_on_item(self, item_id: str):
         """Center view on a specific item."""
@@ -1992,6 +2022,21 @@ class CollaborativeCanvas(QGraphicsView):
             # Ellipse/Oval tool
             self.set_tool('ellipse')
             return
+
+        # Brush size shortcuts ([ / ] like Photoshop) when in drawing mode
+        if self._current_tool in ('pen', 'eraser'):
+            if key == Qt.Key_BracketLeft:
+                new_size = max(1, self._drawing_width - 1)
+                self.set_drawing_width(new_size)
+                if self._drawing_toolbar:
+                    self._drawing_toolbar.set_brush_size(new_size)
+                return
+            if key == Qt.Key_BracketRight:
+                new_size = min(50, self._drawing_width + 1)
+                self.set_drawing_width(new_size)
+                if self._drawing_toolbar:
+                    self._drawing_toolbar.set_brush_size(new_size)
+                return
 
         # Image manipulation shortcuts (when images selected)
         selected_images = self.get_selected_images()
@@ -2484,7 +2529,8 @@ class CollaborativeCanvas(QGraphicsView):
                 'x': note.x(),
                 'y': note.y(),
                 'text': note.text,
-                'color': note.color_name
+                'color': note.color_name,
+                'font_size': note.font_size
             })
 
         # Groups
@@ -2598,6 +2644,7 @@ class CollaborativeCanvas(QGraphicsView):
                         ann_data.get('y', 0),
                         text=ann_data.get('text', ''),
                         color=ann_data.get('color', 'yellow'),
+                        font_size=ann_data.get('font_size', 10),
                         note_id=ann_data.get('id')
                     )
 
@@ -2693,6 +2740,7 @@ class CollaborativeCanvas(QGraphicsView):
                         ann_data.get('y', 0),
                         text=ann_data.get('text', ''),
                         color=ann_data.get('color', 'yellow'),
+                        font_size=ann_data.get('font_size', 10),
                         note_id=ann_data.get('id')
                     )
 
@@ -2782,6 +2830,7 @@ class CollaborativeCanvas(QGraphicsView):
         self.scale(zoom, zoom)
         self._current_zoom = zoom
         self.zoom_changed.emit(self._current_zoom)
+        self._update_brush_indicator_for_zoom()
 
     def set_zoom(self, zoom: float):
         """
