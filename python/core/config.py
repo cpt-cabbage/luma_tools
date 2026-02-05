@@ -274,7 +274,7 @@ COMPOSITING_SUBPATH = "Compositing"
 COMP_EXTENSIONS = [".nk", ".comp"]
 HIP_EXTENSION = ".hip"
 EXR_EXTENSION = ".exr"
-COMFYUI_SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr"]
+COMFYUI_SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr", ".hdr", ".dpx", ".tga"]
 # Output file extensions that ComfyUI workflows can generate (images, models, etc.)
 COMFYUI_OUTPUT_EXTENSIONS = [
     # Images

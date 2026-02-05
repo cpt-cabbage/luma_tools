@@ -90,7 +90,9 @@
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_check_alignment.ps1\")",
       "Bash(del \"l:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_swap_files.ps1\")",
       "Bash(pythonvenvScriptspython.exe -c \"import json; wf = json.load\\(open\\(r''W:\\\\LumaRND\\\\tmp\\\\workflows\\\\workflows\\\\mmaudio.json''\\)\\); node91 = next\\(n for n in wf[''nodes''] if n[''id'']==91\\); print\\(''Node 91 widgets_values type:'', type\\(node91.get\\(''widgets_values''\\)\\)\\); print\\(''Keys:'', list\\(node91[''widgets_values''].keys\\(\\)\\) if isinstance\\(node91[''widgets_values''], dict\\) else ''N/A''\\)\")",
-      "Bash(Select-String -Pattern \"ERROR|Exception|Traceback\" -Context 3)"
+      "Bash(Select-String -Pattern \"ERROR|Exception|Traceback\" -Context 3)",
+      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_run_test.ps1\")",
+      "Bash(git status:*)"
     ],
     "deny": [
       "Read(./python/venv/**)",

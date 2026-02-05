@@ -990,20 +990,33 @@ def get_workflow_images(workflow: dict) -> List[str]:
 
 
 def copy_inputs_to_server(input_files: list, server_input_dir: str):
-    """Copy input files to server's input directory."""
+    """Copy input files to server's input directory, converting unsupported formats to PNG."""
     if not input_files:
         return
 
     os.makedirs(server_input_dir, exist_ok=True)
+
+    # Lazy import to avoid circular deps (utils.py is used by runner.py on farm)
+    try:
+        from comfyui.image_convert import copy_or_convert
+        from core.settings_manager import safe_get_setting
+        apply_cs = safe_get_setting("comfyui_convert_colorspace", True)
+        has_convert = True
+    except ImportError:
+        has_convert = False
 
     for src_file in input_files:
         if not os.path.exists(src_file):
             logger.warning(f"Warning: Input file not found: {src_file}")
             continue
 
-        filename = os.path.basename(src_file)
-        dst_file = os.path.join(server_input_dir, filename)
-
-        if not os.path.exists(dst_file) or os.path.getmtime(src_file) > os.path.getmtime(dst_file):
-            shutil.copy2(src_file, dst_file)
-            logger.info(f"Copied: {filename}")
+        if has_convert:
+            result = copy_or_convert(src_file, server_input_dir, apply_colorspace=apply_cs)
+            if result:
+                logger.info(f"Copied/converted: {os.path.basename(result)}")
+        else:
+            filename = os.path.basename(src_file)
+            dst_file = os.path.join(server_input_dir, filename)
+            if not os.path.exists(dst_file) or os.path.getmtime(src_file) > os.path.getmtime(dst_file):
+                shutil.copy2(src_file, dst_file)
+                logger.info(f"Copied: {filename}")

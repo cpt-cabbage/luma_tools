@@ -157,6 +157,8 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # Prompt Builder Settings
     "prompt_builder_presets": SettingDef("prompt_builder_presets", {}, "user"),
     "prompt_builder_last_template": SettingDef("prompt_builder_last_template", "Natural Language", "user"),
+    # Image conversion settings
+    "comfyui_convert_colorspace": SettingDef("comfyui_convert_colorspace", True, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }

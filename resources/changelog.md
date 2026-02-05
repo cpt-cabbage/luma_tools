@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.1.4
+- Fix Jobname not appending to filenames
+
 ## Version 0.6.1.3
 - UI Fixes
 

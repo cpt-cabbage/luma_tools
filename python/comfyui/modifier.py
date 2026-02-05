@@ -45,6 +45,8 @@ def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]
 
     Returns dict mapping original full paths to basenames for file copying.
     """
+    from comfyui.image_convert import needs_conversion, get_png_basename
+
     files_to_copy = {}  # full_path -> basename
 
     for node_id, node_data in workflow.items():
@@ -61,9 +63,15 @@ def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]
                 basename = os.path.basename(input_value)
                 # Only convert if it looks like an absolute/relative path (has separators)
                 if '/' in input_value or '\\' in input_value:
-                    files_to_copy[input_value] = basename
-                    inputs[input_name] = basename
-                    logger.info(f"  Normalized file path in node {node_id}.{input_name}: {basename}")
+                    # Rewrite basename to .png if format needs conversion
+                    if needs_conversion(input_value):
+                        dest_basename = get_png_basename(basename)
+                        logger.info(f"  Will convert {basename} → {dest_basename}")
+                    else:
+                        dest_basename = basename
+                    files_to_copy[input_value] = dest_basename
+                    inputs[input_name] = dest_basename
+                    logger.info(f"  Normalized file path in node {node_id}.{input_name}: {dest_basename}")
 
     return files_to_copy
 
@@ -97,8 +105,15 @@ def modify_workflow_api_format(
         Tuple of (modified_workflow, found_editable_prompt_node, files_to_copy)
         - files_to_copy: Dict mapping full paths to basenames for file copying
     """
+    from comfyui.image_convert import needs_conversion, get_png_basename
+
     modified = copy.deepcopy(workflow)
-    image_basename = os.path.basename(input_image) if input_image else None
+    if input_image:
+        image_basename = os.path.basename(input_image)
+        if needs_conversion(input_image):
+            image_basename = get_png_basename(image_basename)
+    else:
+        image_basename = None
     found_editable_prompt = False
 
     # Convert PreviewImage nodes to SaveImage nodes so we can control the output filename
@@ -188,8 +203,13 @@ def modify_workflow_api_format(
                             image_path = value
 
                         if image_path:
-                            inputs['image'] = os.path.basename(image_path)
-                            logger.info(f"  Set image node {node_id} ({node_type}): {os.path.basename(image_path)}")
+                            basename = os.path.basename(image_path)
+                            # Rewrite to .png if format needs conversion
+                            if needs_conversion(image_path):
+                                basename = get_png_basename(basename)
+                                logger.info(f"  Image {os.path.basename(image_path)} will be converted to {basename}")
+                            inputs['image'] = basename
+                            logger.info(f"  Set image node {node_id} ({node_type}): {basename}")
                     else:
                         # No image provided - bypass this loader node
                         node_data['mode'] = 4  # 4 = bypassed

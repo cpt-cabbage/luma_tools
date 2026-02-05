@@ -66,6 +66,13 @@ try:
 except ImportError:
     _USE_CENTRAL_LOGGING = False
 
+# Try to import image conversion (available when running with full package)
+try:
+    from comfyui.image_convert import needs_conversion, copy_or_convert
+    _HAS_IMAGE_CONVERT = True
+except ImportError:
+    _HAS_IMAGE_CONVERT = False
+
 
 # =============================================================================
 # LOGGING SETUP - Uses centralized module when available, falls back for farm
@@ -358,11 +365,19 @@ def main():
             logger.info(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
             for image_name in images_to_upload:
                 src_path = os.path.join(args.input_directory, image_name)
-                dst_path = os.path.join(comfyui_input_dir, image_name)
                 if os.path.exists(src_path):
                     try:
-                        shutil.copy2(src_path, dst_path)
-                        logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
+                        if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
+                            result = copy_or_convert(src_path, comfyui_input_dir)
+                            if result:
+                                logger.info(f"  Converted: {image_name} -> {os.path.basename(result)}")
+                            else:
+                                shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
+                                logger.info(f"  Copied (conversion failed): {image_name}")
+                        else:
+                            dst_path = os.path.join(comfyui_input_dir, image_name)
+                            shutil.copy2(src_path, dst_path)
+                            logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
                     except Exception as e:
                         logger.warning(f"Failed to copy {image_name}: {e}")
                 else:
@@ -381,10 +396,13 @@ def main():
                 logger.info(f"\nRe-copying {len(images_to_upload)} input image(s) after restart...")
                 for image_name in images_to_upload:
                     src_path = os.path.join(args.input_directory, image_name)
-                    dst_path = os.path.join(comfyui_input_dir, image_name)
                     if os.path.exists(src_path):
                         try:
-                            shutil.copy2(src_path, dst_path)
+                            if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
+                                copy_or_convert(src_path, comfyui_input_dir)
+                            else:
+                                dst_path = os.path.join(comfyui_input_dir, image_name)
+                                shutil.copy2(src_path, dst_path)
                             logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
                         except Exception as e:
                             logger.warning(f"Failed to copy {image_name}: {e}")

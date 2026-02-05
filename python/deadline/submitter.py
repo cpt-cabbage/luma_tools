@@ -18,9 +18,10 @@ from core.config import (
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
 )
-from core.settings_manager import get_setting
+from core.settings_manager import get_setting, safe_get_setting
 from core.utils import ensure_directory, save_json
 from comfyui.utils import resolve_comfyui_paths
+from comfyui.image_convert import needs_conversion, copy_or_convert
 
 logger = logging.getLogger(__name__)
 
@@ -368,11 +369,10 @@ def submit_comfyui_job(
                 output_type=output_type,
             )
 
-        # Copy input file to working directory for farm access
+        # Copy input file to working directory for farm access (convert if needed)
+        apply_cs = safe_get_setting("comfyui_convert_colorspace", True)
         if current_file and os.path.exists(current_file):
-            file_dest = os.path.join(current_working_dir, file_basename)
-            if not os.path.exists(file_dest) or os.path.getmtime(current_file) > os.path.getmtime(file_dest):
-                shutil.copy2(current_file, file_dest)
+            copy_or_convert(current_file, current_working_dir, apply_colorspace=apply_cs)
 
         # Copy additional files (images, 3D models) from editable values
         if current_editable_values:
@@ -395,11 +395,9 @@ def submit_comfyui_job(
                     for file_path in files_to_copy:
                         # Skip the primary input file (already copied above)
                         if file_path and file_path != current_file and os.path.exists(file_path):
-                            file_base = os.path.basename(file_path)
-                            file_dest = os.path.join(current_working_dir, file_base)
-                            if not os.path.exists(file_dest) or os.path.getmtime(file_path) > os.path.getmtime(file_dest):
-                                shutil.copy2(file_path, file_dest)
-                                logger.info(f"Copied {node_info.widget_type} file: {file_base}")
+                            result_path = copy_or_convert(file_path, current_working_dir, apply_colorspace=apply_cs)
+                            if result_path:
+                                logger.info(f"Copied/converted {node_info.widget_type} file: {os.path.basename(result_path)}")
 
         # Copy all files detected in workflow (from automatic path normalization)
         if workflow_files_to_copy:
@@ -409,10 +407,9 @@ def submit_comfyui_job(
                 if full_path == current_file:
                     continue
                 if os.path.exists(full_path):
-                    file_dest = os.path.join(current_working_dir, basename)
-                    if not os.path.exists(file_dest) or os.path.getmtime(full_path) > os.path.getmtime(file_dest):
-                        shutil.copy2(full_path, file_dest)
-                        logger.info(f"Copied workflow file: {basename}")
+                    result_path = copy_or_convert(full_path, current_working_dir, apply_colorspace=apply_cs)
+                    if result_path:
+                        logger.info(f"Copied/converted workflow file: {os.path.basename(result_path)}")
                 else:
                     logger.warning(f"File not found (skipping): {full_path}")
 
