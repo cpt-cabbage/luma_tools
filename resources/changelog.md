@@ -1,5 +1,25 @@
 # Luma Tools Changelog
 
+## Version 0.6.1.2
+ComfyUI Editable Nodes:
+  - Add new 'directory' widget type for folder selection
+  - Configure VHS_LoadImagesPath to use directory browser instead of plain text input
+  - Add directory widget UI with Browse button and placeholder text
+  - Add _browse_directory() method using browse_directory_with_memory for persistence
+
+  ComfyUI Workflow Modifier:
+  - Add directory widget type handling in modify_workflow_api_format()
+  - Set directory path in workflow inputs using widget_name or 'directory' fallback
+  - Add logging for directory value assignments
+
+  ComfyUI Server:
+  - Refresh node definitions on network after ComfyUI self-restart
+  - Ensure node info cache stays in sync after server restarts
+
+  Presets:
+  - Add "Normal Crafter" multi-workflow preset with Video and Image Sequence inputs
+  - Configure as image output type with non-iteratable workflows
+
 ## Version 0.6.1.1
   Gallery User Discovery:                                                                                                                    
   - Remove restrictive filtering that only showed admin/sup users

@@ -166,7 +166,6 @@ class GalleryEmptyState(EmptyStateWidget):
     """Empty state guidance for the gallery tab."""
 
     get_started_clicked = Signal()
-    browse_folder_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -174,28 +173,18 @@ class GalleryEmptyState(EmptyStateWidget):
 
     def _configure(self):
         """Configure the gallery empty state."""
-        self.set_icon("🖼️")
-        self.set_title("No generations yet")
-        self.set_description(
-            "Your AI-generated images, videos, and 3D models will appear here. "
-            "Start creating to build your gallery!"
-        )
+        self.set_title("No Generations Yet")
 
-        self.add_step(1, "Go to the ComfyUI tab")
-        self.add_step(2, "Select a workflow preset")
-        self.add_step(3, "Add input images (if needed)")
-        self.add_step(4, "Click Generate")
+        # Hide icon, description, and steps frame
+        self._icon_label.hide()
+        self._desc_label.hide()
+        self._steps_frame.hide()
 
         self.add_action_button("Go to ComfyUI", self._on_get_started)
-        self.add_action_button("Browse Folder", self._on_browse, primary=False)
 
     def _on_get_started(self):
         """Handle get started button click."""
         self.get_started_clicked.emit()
-
-    def _on_browse(self):
-        """Handle browse folder button click."""
-        self.browse_folder_clicked.emit()
 
 
 class ComfyUIEmptyState(EmptyStateWidget):

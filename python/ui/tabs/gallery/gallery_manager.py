@@ -1193,7 +1193,6 @@ class GalleryManager(BaseGalleryManager):
 
             self._empty_state_widget = GalleryEmptyState()
             self._empty_state_widget.get_started_clicked.connect(self._on_empty_state_get_started)
-            self._empty_state_widget.browse_folder_clicked.connect(self._on_empty_state_browse)
 
         # Add to flow layout
         self.tab._flow_layout.addWidget(self._empty_state_widget)
@@ -1212,11 +1211,6 @@ class GalleryManager(BaseGalleryManager):
         """Handle click on 'Go to ComfyUI' button in empty state."""
         if hasattr(self.tab, 'main_window') and self.tab.main_window:
             self.tab.main_window.select_tab_by_name("comfyui")
-
-    def _on_empty_state_browse(self):
-        """Handle click on 'Browse Folder' button in empty state."""
-        if hasattr(self.tab, '_browse_custom_folder'):
-            self.tab._browse_custom_folder()
 
     # =========================================================================
     # EXTERNAL LOOKUPS

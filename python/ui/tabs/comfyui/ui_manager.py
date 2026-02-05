@@ -393,7 +393,7 @@ class ComfyUIWidgetManager:
             file_row.addWidget(file_path_edit, 1)
 
             browse_btn = QPushButton("Browse...")
-            browse_btn.setFixedWidth(80)
+            browse_btn.setFixedWidth(100)
             browse_btn.clicked.connect(
                 lambda checked=False, edit=file_path_edit: self._browse_3d_model(edit)
             )
@@ -417,7 +417,7 @@ class ComfyUIWidgetManager:
             dir_row.addWidget(dir_path_edit, 1)
 
             browse_btn = QPushButton("Browse...")
-            browse_btn.setFixedWidth(80)
+            browse_btn.setFixedWidth(100)
             browse_btn.clicked.connect(
                 lambda checked=False, edit=dir_path_edit: self._browse_directory(edit)
             )

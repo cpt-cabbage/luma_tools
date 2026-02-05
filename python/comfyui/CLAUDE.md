@@ -29,6 +29,30 @@ ComfyUI AI workflow management — loading, modifying, submitting, and executing
 ### Editable Nodes
 Nodes with `_editable` suffix in their title are extracted and presented as dynamic UI. Configuration in `EDITABLE_NODE_CONFIGS` (in `node_configs.py`) maps node types to their editable parameters and widget types.
 
+**Widget Types:**
+- `text` - Multiline text input with spell checking (for prompts)
+- `string` - Single-line text input
+- `int` / `float` - Numeric inputs
+- `combo` - Dropdown selection
+- `toggle` - Checkbox for boolean values
+- `image` - Batch image selector with preview
+- `video` - Batch video selector
+- `3d_model` - File browser for 3D models (GLB, OBJ, FBX, USD)
+- `directory` - Folder browser for directory selection
+
+**Adding New Widget Types:**
+1. Add widget type to `EditableNode.widget_type` docstring in `editable.py`
+2. Add UI rendering case in `ui_manager.py` → `_create_editable_node_widget()`
+3. Add workflow modification handling in `modifier.py` → `modify_workflow_api_format()`
+4. Configure node in `node_configs.py` → `EDITABLE_NODE_CONFIGS` with format: `'NodeType': [('widget_name', 'widget_type')]`
+
+Example configuration for directory widget:
+```python
+EDITABLE_NODE_CONFIGS = {
+    'VHS_LoadImagesPath': [('directory', 'directory')],  # (widget_name, widget_type_override)
+}
+```
+
 ### Subgraph Expansion
 `expand_subgraphs()` expands UUID component nodes into concrete nodes before submission.
 

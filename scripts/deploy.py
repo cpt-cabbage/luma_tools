@@ -74,10 +74,15 @@ def update_changelog(new_version: str, custom_msg: str | None = None) -> None:
     if custom_msg:
         commit_msg = custom_msg
     else:
-        commit_msg = run_git_command(["log", "-1", "--pretty=%s"])
+        # Use %B to get full commit body with newlines preserved (not just subject %s)
+        commit_msg = run_git_command(["log", "-1", "--pretty=%B"])
 
-    # Format: replace " -" with newline + "-"
-    formatted_msg = commit_msg.replace(" -", "\n-")
+    # Format: replace " -" with newline + "-" for custom messages
+    # Git messages already have proper newlines, so only apply to custom input
+    if custom_msg:
+        formatted_msg = commit_msg.replace(" -", "\n-")
+    else:
+        formatted_msg = commit_msg
 
     changelog_path = SOURCE / "resources" / "changelog.md"
     content = changelog_path.read_text(encoding="utf-8")
@@ -381,9 +386,9 @@ def main():
         with open(version_file, "w") as f:
             json.dump({"version": new_version}, f, indent=4)
 
-        # Show last commit
-        commit_msg = run_git_command(["log", "-1", "--pretty=%s"])
-        print(f"\nLast git commit: {commit_msg}")
+        # Show last commit (full body with newlines)
+        commit_msg = run_git_command(["log", "-1", "--pretty=%B"])
+        print(f"\nLast git commit:\n{commit_msg}")
 
         print("\nChangelog options:")
         print("  g = Use git commit message")
