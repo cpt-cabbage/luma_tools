@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.1.3
+- UI Fixes
+
 ## Version 0.6.1.2
 ComfyUI Editable Nodes:
   - Add new 'directory' widget type for folder selection

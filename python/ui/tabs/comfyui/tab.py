@@ -1090,7 +1090,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             logger.debug(f"[ComfyUI] Batch mode ({selected_image_count} images selected)")
 
         # Build job name from shot/project
-        if self.app_state.shot:
+        if self.app_state.shot and self.app_state.jobname:
+            job_name = f"{self.app_state.jobname}_{self.app_state.shot}_luma_tools"
+        elif self.app_state.shot:
             job_name = f"{self.app_state.shot}_luma_tools"
         elif self.app_state.jobname:
             job_name = f"{self.app_state.jobname}_luma_tools"
