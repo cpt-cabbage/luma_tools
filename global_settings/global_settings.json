@@ -165,6 +165,32 @@
       "node_overrides": {},
       "is_multi": false,
       "output_type": "audio"
+    },
+    "Normal Crafter": {
+      "path": "",
+      "description": "Image/Video to Normals",
+      "iteratable": false,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": true,
+      "output_type": "image",
+      "workflows": {
+        "Video Input": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/NormalCrafter_Video.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": false,
+          "node_overrides": {}
+        },
+        "Image Sequence Input": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/NormalCrafter_ImageSequence_v001.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": false,
+          "node_overrides": {}
+        }
+      }
     }
   },
   "comfyui_path": "D:\\ComfyUI\\",

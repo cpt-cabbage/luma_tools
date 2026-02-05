@@ -54,6 +54,9 @@ EDITABLE_NODE_CONFIGS = {
     'VHS_LoadVideo': [('video', 'video')],
     'VHS_LoadVideoPath': [('video', 'video')],
     'LoadVideo': [('video', 'video')],
+
+    # Image path loading nodes - 'directory' type can't be auto-discovered
+    'VHS_LoadImagesPath': [('directory', 'directory')],
 }
 
 

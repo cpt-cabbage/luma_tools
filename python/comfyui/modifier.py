@@ -274,6 +274,17 @@ def modify_workflow_api_format(
                         # No video provided - bypass this loader node
                         node_data['mode'] = 4  # 4 = bypassed
                         logger.info(f"  Bypassed video loader node {node_id} ({node_type}) - no video provided")
+                elif widget_type == 'directory':
+                    # Directory path
+                    if value:
+                        # Use the widget_name to set the correct input field
+                        if widget_name:
+                            inputs[widget_name] = str(value)
+                            logger.info(f"  Set directory on node {node_id} ({node_type}): {widget_name} = {value}")
+                        else:
+                            # Fallback to 'directory' if no specific widget name
+                            inputs['directory'] = str(value)
+                            logger.info(f"  Set directory on node {node_id} ({node_type}): {value}")
 
     # Build a map of toggle node names to their values (True/False)
     # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name

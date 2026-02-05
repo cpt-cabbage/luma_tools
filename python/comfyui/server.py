@@ -966,6 +966,10 @@ def main():
                         logger.info("ComfyUI self-restart complete, new instance is ready")
                         server_state['is_ready'] = True
                         last_stable_check = time.time()
+
+                        # Refresh node definitions on network after self-restart
+                        _save_node_info_to_network(port)
+
                         # Note: We don't have a process handle for the new instance
                         # but we can still monitor via health checks
                     else:

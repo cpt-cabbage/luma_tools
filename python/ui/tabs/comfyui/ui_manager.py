@@ -402,6 +402,30 @@ class ComfyUIWidgetManager:
 
             container.input_widget = file_path_edit
 
+        elif node.widget_type == 'directory':
+            # Directory selector - folder browser
+            dir_row = QHBoxLayout()
+
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            dir_row.addWidget(label)
+
+            dir_path_edit = QLineEdit()
+            dir_path_edit.setPlaceholderText("Select a directory...")
+            dir_path_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            if node.current_value:
+                dir_path_edit.setText(str(node.current_value))
+            dir_row.addWidget(dir_path_edit, 1)
+
+            browse_btn = QPushButton("Browse...")
+            browse_btn.setFixedWidth(80)
+            browse_btn.clicked.connect(
+                lambda checked=False, edit=dir_path_edit: self._browse_directory(edit)
+            )
+            dir_row.addWidget(browse_btn)
+            layout.addLayout(dir_row)
+
+            container.input_widget = dir_path_edit
+
         elif node.widget_type == 'text':
             # Top row: Label and Presets button
             top_row = QHBoxLayout()
@@ -491,6 +515,19 @@ class ComfyUIWidgetManager:
         )
         if file_path:
             line_edit.setText(file_path)
+
+    def _browse_directory(self, line_edit):
+        """Open directory browser for folder selection."""
+        from file_dialogs import browse_directory_with_memory
+
+        dir_path = browse_directory_with_memory(
+            self.main_window,
+            context="comfyui_directories",
+            title="Select Directory",
+            fallback_path=""
+        )
+        if dir_path:
+            line_edit.setText(dir_path)
 
     def _apply_pending_editable_values(self):
         """Apply pending editable values that were saved from a previous session."""

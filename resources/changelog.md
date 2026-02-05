@@ -1,5 +1,25 @@
 # Luma Tools Changelog
 
+## Version 0.6.1.1
+  Gallery User Discovery:                                                                                                                    
+  - Remove restrictive filtering that only showed admin/sup users
+  - Discover all user directories in network gallery path for public browsing
+  - Get base path directly from settings instead of via _get_network_user_path
+  - Skip hidden/system directories (starting with . or _)
+  - Add comprehensive logging for discovery process (base path, items found, users added)
+
+  Gallery Empty State:
+  - Fix bug where switching to user with no items left previous thumbnails visible
+  - Add _clear_gallery_widgets() method to properly clear all widget types
+  - Clear flow layout, widget cache, stacked widgets, section tracking, and group colors
+  - Reset empty state widget reference after clearing to prevent "already deleted" errors
+  - Show simple "{username}'s gallery is empty" message for other users
+  - Show full guidance widget (ComfyUI buttons) only for own empty gallery
+
+  Logging:
+  - Add detailed logging to user discovery and visibility update methods
+  - Log discovered users list and button visibility decisions for debugging
+
 ## Version 0.6.1
 
   ComfyUITab:                                                                                                                
