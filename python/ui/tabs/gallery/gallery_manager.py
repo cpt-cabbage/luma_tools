@@ -107,6 +107,8 @@ class GalleryManager(BaseGalleryManager):
 
         # Handle empty state
         if not items:
+            # Clear existing widgets before showing empty state
+            self._clear_gallery_widgets()
             self._show_empty_state()
             self.update_status_count([])
             return
@@ -1124,6 +1126,46 @@ class GalleryManager(BaseGalleryManager):
             self.tab.ui.GalleryStatus.setText(" • ".join(parts) if parts else f"{total_count} files")
 
     # =========================================================================
+    # WIDGET CLEARING
+    # =========================================================================
+
+    def _clear_gallery_widgets(self):
+        """Clear all gallery widgets (both grid thumbnails and stacked widgets)."""
+        from shiboken6 import isValid
+
+        # Clear flow layout
+        while self.tab._flow_layout.count():
+            item = self.tab._flow_layout.takeAt(0)
+            widget = item.widget()
+            if widget and isValid(widget):
+                widget.setParent(None)
+                widget.deleteLater()
+
+        # Clear widget cache
+        if hasattr(self.tab, '_widget_cache'):
+            self.tab._widget_cache = {}
+
+        # Clear stacked widgets
+        if hasattr(self, '_stack_widgets'):
+            for stack in self._stack_widgets.values():
+                if isValid(stack):
+                    stack.setParent(None)
+                    stack.deleteLater()
+            self._stack_widgets = {}
+
+        # Clear section tracking
+        if hasattr(self.tab, '_section_items'):
+            self.tab._section_items = {}
+
+        # Clear group colors
+        if hasattr(self, '_group_colors'):
+            self._group_colors = {}
+
+        # Reset empty state widget reference (it was deleted above)
+        if hasattr(self, '_empty_state_widget'):
+            self._empty_state_widget = None
+
+    # =========================================================================
     # EMPTY STATE GUIDANCE
     # =========================================================================
 
@@ -1133,12 +1175,25 @@ class GalleryManager(BaseGalleryManager):
             self._empty_state_widget.show()
             return
 
-        # Create empty state widget
-        from empty_states import GalleryEmptyState
+        # Check if viewing another user's gallery
+        is_own_gallery = self.tab._is_own_gallery()
 
-        self._empty_state_widget = GalleryEmptyState()
-        self._empty_state_widget.get_started_clicked.connect(self._on_empty_state_get_started)
-        self._empty_state_widget.browse_folder_clicked.connect(self._on_empty_state_browse)
+        if not is_own_gallery:
+            # Show simple message for other users' empty galleries
+            from PySide6.QtWidgets import QLabel
+            from PySide6.QtCore import Qt
+
+            username = self.tab._selected_user
+            self._empty_state_widget = QLabel(f"<b>{username}'s gallery is empty</b>")
+            self._empty_state_widget.setAlignment(Qt.AlignCenter)
+            self._empty_state_widget.setStyleSheet("color: #888888; font-size: 14pt; padding: 50px;")
+        else:
+            # Show full guidance for own gallery
+            from empty_states import GalleryEmptyState
+
+            self._empty_state_widget = GalleryEmptyState()
+            self._empty_state_widget.get_started_clicked.connect(self._on_empty_state_get_started)
+            self._empty_state_widget.browse_folder_clicked.connect(self._on_empty_state_browse)
 
         # Add to flow layout
         self.tab._flow_layout.addWidget(self._empty_state_widget)

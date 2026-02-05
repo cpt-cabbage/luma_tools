@@ -528,40 +528,58 @@ class UIManager(BaseGalleryManager):
     def _discover_users_sync(self):
         """Discover available users from the network gallery path.
 
-        Uses inclusive approach: only shows directories that match known users
-        from the admin_users and sup_users lists in global settings.
+        Lists all user directories found in the network gallery path.
+        This allows users to browse each other's public galleries (read-only).
         """
+        import logging
+        from core.settings_manager import get_setting
+
+        logger = logging.getLogger(__name__)
+
         users = []
-        base_path = self.tab._get_network_user_path(username="")
 
-        # Get known users from global settings (admins and supervisors)
-        from core.settings_manager import get_users_with_role
-        known_users = set()
-        for user in get_users_with_role("admin"):
-            known_users.add(user.lower())
-        for user in get_users_with_role("sup"):
-            known_users.add(user.lower())
+        # Get base path directly from settings (not via _get_network_user_path which requires a username)
+        base_path = get_setting("network_output_path")
+        if base_path:
+            base_path = base_path.strip()
 
-        # Always include current user
-        current_user = self.tab.app_state.user
-        if current_user:
-            known_users.add(current_user.lower())
+        logger.info(f"[Gallery] User discovery - base path: {base_path}")
 
         if base_path and os.path.exists(base_path):
             try:
-                # List directories that match known users
-                for name in os.listdir(base_path):
-                    full_path = os.path.join(base_path, name)
-                    if os.path.isdir(full_path) and name.lower() in known_users:
-                        users.append(name)
-            except Exception as e:
-                self.tab.log(f"[Gallery] Error discovering users: {e}")
+                # List all directories as potential users
+                all_items = os.listdir(base_path)
+                logger.info(f"[Gallery] User discovery - found {len(all_items)} items in base path")
 
+                for name in all_items:
+                    full_path = os.path.join(base_path, name)
+                    if os.path.isdir(full_path):
+                        # Skip hidden/system directories
+                        if not name.startswith('.') and not name.startswith('_'):
+                            users.append(name)
+                            logger.debug(f"[Gallery] User discovery - added user: {name}")
+                        else:
+                            logger.debug(f"[Gallery] User discovery - skipped hidden/system dir: {name}")
+                    else:
+                        logger.debug(f"[Gallery] User discovery - skipped non-directory: {name}")
+            except Exception as e:
+                logger.error(f"[Gallery] Error discovering users: {e}")
+        else:
+            if not base_path:
+                logger.warning("[Gallery] User discovery - network_output_path not configured")
+            else:
+                logger.warning(f"[Gallery] User discovery - path does not exist: {base_path}")
+
+        logger.info(f"[Gallery] User discovery complete - found {len(users)} users: {users}")
         return sorted(users, key=str.lower)
 
     def _on_users_discovered(self, users):
         """Handle user discovery completion."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         self.tab._available_users = users
+        logger.info(f"[Gallery] Users discovered: {users}")
         self._update_user_button_visibility()
 
     def update_user_button_text(self):
@@ -573,8 +591,12 @@ class UIManager(BaseGalleryManager):
 
     def _update_user_button_visibility(self):
         """Show/hide user button based on available users."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Show if there are other users
         has_other_users = len(self.tab._available_users) > 1
+        logger.info(f"[Gallery] User button visibility - {len(self.tab._available_users)} users, showing button: {has_other_users}")
         self.tab.ui.GalleryUserButton.setVisible(has_other_users)
 
     def on_user_button_clicked(self):

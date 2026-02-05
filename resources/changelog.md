@@ -1,5 +1,49 @@
 # Luma Tools Changelog
 
+## Version 0.6.1
+
+  ComfyUITab:                                                                                                                
+  - Fix excessive vertical spacing between editable node widgets in UI manager
+  - Only text widgets (multiline) now expand vertically with stretch factor
+  - Line edits, spinboxes, and checkboxes use default stretch (0) for compact layout
+  - Add final stretch to push non-expanding widgets to top
+
+  ComfyUI Workflow Pipeline:
+  - Add automatic file path normalization: convert full paths to basenames in workflows
+  - Add file copying system for all file types (images, videos, 3D models, audio)
+  - Skip connected inputs when extracting editable nodes 
+  - Add support for dict-format widgets_values in subgraph nodes 
+  - Fix toggle node logging (indentation issue)
+
+  Node Configs:
+  - Add PrimitiveNode widget mappings for value and control mode
+  - Add ACE Step 1.5 Audio node support (SaveAudioMP3, SaveAudioOpus, TextEncodeAceStepAudio1.5, EmptyAceStep1.5LatentAudio)
+  - Add MISSING_WIDGETS system for widgets /object_info doesn't report correctly
+  - Add quality widget mapping for audio save nodes
+  - Add audio export nodes to EXPORT_NODE_TYPES
+
+  Runner & Server:
+  - Simplify runner.py: remove local ComfyUI management, always use persistent server
+  - Remove start_comfyui_server(), stream_output() functions (now in server.py)
+  - Deprecate --persistent, --mode, --python-path, --lowvram args (kept for backward compat)
+  - Update server behavior documentation for persistent mode
+
+  Image Viewers:
+  - Major refactoring of image viewer widgets 
+  - Add click-to-cycle behavior for multi-image thumbnails
+  - Add viewer state persistence across sessions
+
+  Settings:
+  - Swap workflow preset description/note fields for better UX
+  - Update MMAudio preset
+  - Add Stable Audio preset with new workflow path
+  - Reorder presets for better organization
+
+  Core Utils:
+  - Add centralized path resolution utilities
+  - Improve subprocess management for Windows compatibility
+  - Add logging utilities with network path support
+
 ## Version 0.6
 
 ### New Canvas Tab 
