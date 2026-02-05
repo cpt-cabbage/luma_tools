@@ -601,6 +601,8 @@ _PREFIX_NODES = {
     'Trellis2ExportMesh': {'filename_prefix': None},
     'Trellis2ExportGLB': {'filename_prefix': None},
     'UltraShapeSaveGLB': {'filename_prefix': None},
+    'SaveAudioMP3': {'filename_prefix': None},
+    'SaveAudioOpus': {'filename_prefix': None},
 }
 
 # Suffix for marking the primary output node (see node_configs.py for docs)
@@ -903,22 +905,39 @@ def move_output_files(
     return moved_files
 
 
-# Known image loading node types used for input image detection
-_IMAGE_LOADER_TYPES = frozenset([
+# Known file loading node types used for input file detection
+_FILE_LOADER_TYPES = frozenset([
+    # Images
     'LoadImage',
     'Trellis2LoadImageWithTransparency',
     'LoadImageMask',
     'LoadImageBatch',
+    # Videos
+    'VHS_LoadVideo',
+    'VHS_LoadVideoPath',
+    'LoadVideo',
+    # 3D Models
+    'Load3D',
+    # Audio
+    'LoadAudio',
+])
+
+# Input parameter names that indicate file inputs
+_FILE_INPUT_NAMES = frozenset([
+    'image', 'video', 'model_file', 'audio', 'file', 'path'
 ])
 
 
 def _find_workflow_image_names(workflow: dict) -> List[str]:
-    """Extract image filenames from all image loading nodes in a workflow.
+    """Extract file names from all file loading nodes in a workflow.
 
-    Returns raw image name strings (not resolved paths). Used internally
+    Returns raw file name strings (not resolved paths). Used internally
     by collect_input_images() and get_workflow_images().
+
+    Note: Despite the name 'image_names', this now returns ALL file types
+    (images, videos, models, audio) for backwards compatibility.
     """
-    images = []
+    files = []
     for node_id, node_data in workflow.items():
         if not isinstance(node_data, dict):
             continue
@@ -926,12 +945,23 @@ def _find_workflow_image_names(workflow: dict) -> List[str]:
         class_type = node_data.get('class_type', '')
         inputs = node_data.get('inputs', {})
 
-        # Check known image loader types, then fallback to any node with 'image' input
-        if class_type in _IMAGE_LOADER_TYPES or 'image' in inputs:
-            image = inputs.get('image')
-            if image and isinstance(image, str) and not image.startswith('['):
-                images.append(image)
-    return images
+        # Check known file loader types
+        if class_type in _FILE_LOADER_TYPES:
+            # Try all possible input parameter names
+            for input_name in _FILE_INPUT_NAMES:
+                file_value = inputs.get(input_name)
+                if file_value and isinstance(file_value, str) and not file_value.startswith('['):
+                    files.append(file_value)
+                    break  # Only add one file per node
+        else:
+            # Fallback: check if any input name matches file parameter names
+            for input_name in _FILE_INPUT_NAMES:
+                if input_name in inputs:
+                    file_value = inputs.get(input_name)
+                    if file_value and isinstance(file_value, str) and not file_value.startswith('['):
+                        files.append(file_value)
+                        break  # Only add one file per node
+    return files
 
 
 def collect_input_images(workflow: dict, workflow_dir: str) -> List[str]:

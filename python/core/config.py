@@ -207,6 +207,9 @@ AYON_DEFAULT_HEIGHT = 1080
 APP_ID = u'luma.tools.shotbuilder.001'
 APP_TITLE = "Luma Tools"
 
+# Dev mode detection - check if running from _dev directory
+IS_DEV_MODE = "_dev" in _ROOT_DIR.lower()
+
 # Load version from resources/version.json
 def _load_version():
     """Load version from resources/version.json."""

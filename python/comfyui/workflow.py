@@ -593,7 +593,16 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
         sg_properties = sg_node.get('properties', {})
         sg_proxy_widgets = sg_properties.get('proxyWidgets', [])
 
-        if sg_widgets_values and sg_proxy_widgets:
+        # Check if widgets_values is dict format (for subgraphs, list format is standard)
+        sg_widgets_values_is_dict = isinstance(sg_widgets_values, dict)
+        if sg_widgets_values_is_dict:
+            logger.info(f"Subgraph node {sg_id} uses dict widgets_values format")
+            # For dict format, we'll handle it differently below
+        elif not isinstance(sg_widgets_values, list):
+            logger.warning(f"Subgraph node {sg_id} has unexpected widgets_values type: {type(sg_widgets_values)} - resetting to empty list")
+            sg_widgets_values = []
+
+        if sg_widgets_values and sg_proxy_widgets and not sg_widgets_values_is_dict:
             # Use proxyWidgets for precise mapping:
             # Each entry is [node_id_str, widget_name] mapping to widgets_values[idx]
             for idx, proxy_entry in enumerate(sg_proxy_widgets):
@@ -690,6 +699,47 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                     break
                         break
 
+        elif sg_widgets_values_is_dict:
+            # Dict format: use proxyWidgets to map widget names to internal nodes
+            if sg_proxy_widgets:
+                for proxy_entry in sg_proxy_widgets:
+                    if not isinstance(proxy_entry, (list, tuple)) or len(proxy_entry) < 2:
+                        continue
+                    proxy_node_id_str, widget_name = proxy_entry[0], proxy_entry[1]
+
+                    # Look up value by widget name in dict
+                    if widget_name not in sg_widgets_values:
+                        continue
+                    widget_value = sg_widgets_values[widget_name]
+
+                    # Skip phantom widgets
+                    if widget_name == 'control_after_generate':
+                        continue
+
+                    # Apply to internal node
+                    if proxy_node_id_str != "-1":
+                        try:
+                            internal_id = int(proxy_node_id_str)
+                        except (ValueError, TypeError):
+                            continue
+                        target_remapped = node_id_map.get(internal_id)
+                        if target_remapped is not None:
+                            for new_node in new_nodes:
+                                if new_node['id'] == target_remapped:
+                                    overrides = new_node.setdefault('_input_overrides', {})
+                                    overrides[widget_name] = widget_value
+                                    logger.debug(f"    Override (dict): node {target_remapped} widget '{widget_name}' = {repr(widget_value)[:60]}")
+                                    break
+            else:
+                # No proxyWidgets - apply dict values directly to matching widget names in internal nodes
+                for new_node in new_nodes:
+                    for widget_name, widget_value in sg_widgets_values.items():
+                        if widget_name in ('videopreview', 'audiopreview'):
+                            continue
+                        overrides = new_node.setdefault('_input_overrides', {})
+                        if widget_name not in overrides:
+                            overrides[widget_name] = widget_value
+
     # Remove subgraph nodes and add expanded nodes
     expanded['nodes'] = [n for n in expanded_nodes if n.get('id') not in nodes_to_remove]
     expanded['nodes'].extend(new_nodes)
@@ -779,6 +829,13 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         widgets_values = node.get('widgets_values', [])
         inputs_spec = node.get('inputs', [])  # Input slot definitions
 
+        # Detect widgets_values format: dict (named) or list (indexed)
+        widgets_values_is_dict = isinstance(widgets_values, dict)
+        if not widgets_values_is_dict and not isinstance(widgets_values, list):
+            logger.warning(f"Node {node_id} ({node_type}) has unexpected widgets_values type: {type(widgets_values)} - resetting to empty list")
+            widgets_values = []
+            widgets_values_is_dict = False
+
         # Skip nodes already identified in first pass (muted/bypassed/skip types)
         if node.get('id') in skipped_node_ids:
             continue
@@ -808,40 +865,52 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         # 3. Warn if both fail
 
         if widgets_values:
-            # Tier 1: Try to extract widget names from the node's inputs array
-            widget_names = _extract_widget_names_from_node(node)
-
-            # Tier 2: Check if this is a subgraph node (UUID type) with definition
-            if widget_names is None and node_type in subgraph_widgets:
-                widget_names = subgraph_widgets[node_type]
-                # Subgraph widgets might have extra None values for connected inputs
-                # Pad with None if needed
-                while len(widget_names) < len(widgets_values):
-                    widget_names = [None] + widget_names  # Prepend None for linked inputs
-
-            # Tier 3: Try node_info cache (auto-discovered from /object_info)
-            if widget_names is None:
-                widget_names = _get_ni_widget_names(node_type)
-                if widget_names is not None:
-                    logger.info(f"Using node_info cache for '{node_type}'")
-
-            # Tier 4: Fall back to manual mappings if auto-extraction failed
-            if widget_names is None:
-                widget_names = WIDGET_MAPPINGS.get(node_type, None)
-                if widget_names is not None:
-                    logger.info(f"Using manual mapping for '{node_type}' (no widget info in workflow)")
-
-            # Apply widget values using discovered names
-            if widget_names is not None:
-                for i, widget_name in enumerate(widget_names):
-                    # Skip None entries (placeholder for control_after_generate or button widgets)
-                    if widget_name is None:
+            if widgets_values_is_dict:
+                # Dict format: keys are widget names, values are widget values
+                # Apply directly to inputs (skip keys that are internal/hidden)
+                for widget_name, widget_value in widgets_values.items():
+                    # Skip internal keys like videopreview/audiopreview (UI state, not actual inputs)
+                    if widget_name in ('videopreview', 'audiopreview'):
                         continue
-                    if i < len(widgets_values) and widget_name not in inputs:
-                        inputs[widget_name] = widgets_values[i]
+                    # Only add if not already connected via link
+                    if widget_name not in inputs:
+                        inputs[widget_name] = widget_value
             else:
-                # No widget info from any source - warn but continue
-                logger.warning(f"Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
+                # List format: need to map indices to widget names
+                # Tier 1: Try to extract widget names from the node's inputs array
+                widget_names = _extract_widget_names_from_node(node)
+
+                # Tier 2: Check if this is a subgraph node (UUID type) with definition
+                if widget_names is None and node_type in subgraph_widgets:
+                    widget_names = subgraph_widgets[node_type]
+                    # Subgraph widgets might have extra None values for connected inputs
+                    # Pad with None if needed
+                    while len(widget_names) < len(widgets_values):
+                        widget_names = [None] + widget_names  # Prepend None for linked inputs
+
+                # Tier 3: Try node_info cache (auto-discovered from /object_info)
+                if widget_names is None:
+                    widget_names = _get_ni_widget_names(node_type)
+                    if widget_names is not None:
+                        logger.info(f"Using node_info cache for '{node_type}'")
+
+                # Tier 4: Fall back to manual mappings if auto-extraction failed
+                if widget_names is None:
+                    widget_names = WIDGET_MAPPINGS.get(node_type, None)
+                    if widget_names is not None:
+                        logger.info(f"Using manual mapping for '{node_type}' (no widget info in workflow)")
+
+                # Apply widget values using discovered names
+                if widget_names is not None:
+                    for i, widget_name in enumerate(widget_names):
+                        # Skip None entries (placeholder for control_after_generate or button widgets)
+                        if widget_name is None:
+                            continue
+                        if i < len(widgets_values) and widget_name not in inputs:
+                            inputs[widget_name] = widgets_values[i]
+                else:
+                    # No widget info from any source - warn but continue
+                    logger.warning(f"Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
 
         # Apply _input_overrides from subgraph expansion (widget values propagated
         # from the parent subgraph node to its expanded internal nodes)

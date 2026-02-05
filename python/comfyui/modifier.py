@@ -16,6 +16,57 @@ from comfyui.node_configs import WIDGET_MAPPINGS, EXPORT_NODE_TYPES, OUTPUT_SUFF
 
 logger = logging.getLogger(__name__)
 
+# File extensions that indicate a file path input
+FILE_EXTENSIONS = {
+    # Images
+    '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.exr',
+    # Videos
+    '.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v',
+    # 3D Models
+    '.obj', '.fbx', '.glb', '.gltf', '.usd', '.usda', '.usdc', '.usdz', '.ply', '.stl',
+    # Audio
+    '.wav', '.mp3', '.ogg', '.flac', '.m4a', '.aac',
+    # Other
+    '.json', '.txt', '.safetensors', '.pt', '.pth', '.ckpt', '.bin'
+}
+
+
+def _is_file_path(value: Any) -> bool:
+    """Check if a value looks like a file path."""
+    if not isinstance(value, str):
+        return False
+    # Check if it has a file extension
+    return any(value.lower().endswith(ext) for ext in FILE_EXTENSIONS)
+
+
+def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Scan API format workflow and convert all file paths to basenames.
+
+    Returns dict mapping original full paths to basenames for file copying.
+    """
+    files_to_copy = {}  # full_path -> basename
+
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+
+        inputs = node_data.get('inputs', {})
+        if not isinstance(inputs, dict):
+            continue
+
+        for input_name, input_value in inputs.items():
+            # Check if this input looks like a file path
+            if _is_file_path(input_value):
+                basename = os.path.basename(input_value)
+                # Only convert if it looks like an absolute/relative path (has separators)
+                if '/' in input_value or '\\' in input_value:
+                    files_to_copy[input_value] = basename
+                    inputs[input_name] = basename
+                    logger.info(f"  Normalized file path in node {node_id}.{input_name}: {basename}")
+
+    return files_to_copy
+
 
 def modify_workflow_api_format(
     workflow: Dict[str, Any],
@@ -25,7 +76,7 @@ def modify_workflow_api_format(
     seed: int,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
     output_dir: Optional[str] = None
-) -> Tuple[Dict[str, Any], bool]:
+) -> Tuple[Dict[str, Any], bool, Dict[str, str]]:
     """
     Modify workflow in API format (node IDs as keys with 'inputs' dict).
 
@@ -43,7 +94,8 @@ def modify_workflow_api_format(
         output_dir: Output directory for export nodes (FBX, GLB, etc.)
 
     Returns:
-        Tuple of (modified_workflow, found_editable_prompt_node)
+        Tuple of (modified_workflow, found_editable_prompt_node, files_to_copy)
+        - files_to_copy: Dict mapping full paths to basenames for file copying
     """
     modified = copy.deepcopy(workflow)
     image_basename = os.path.basename(input_image) if input_image else None
@@ -236,7 +288,7 @@ def modify_workflow_api_format(
                 base_name = title.replace('_editable', '').strip()
                 value = bool(data.get('value'))
                 toggle_values[base_name.lower()] = value
-            logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
+                logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
 
     # Process nodes with @if_ conditional in their title
     # Format: "Node Name_editable&if_ToggleName" or "Node Name&if_ToggleName"
@@ -352,6 +404,12 @@ def modify_workflow_api_format(
             inputs['noise_seed'] = seed
             logger.info(f"Set {class_type} node {node_id} noise_seed to: {seed}")
 
+    # Normalize all file paths in workflow to basenames
+    logger.info("Scanning workflow for file paths to normalize...")
+    files_to_copy = normalize_file_paths_in_workflow(modified)
+    if files_to_copy:
+        logger.info(f"Found {len(files_to_copy)} file path(s) to copy and normalize")
+
     # Summary
     logger.info(f"=== Workflow Modification Summary ===")
     logger.info(f"Input image: {image_basename or '(from editable values)'}")
@@ -359,9 +417,10 @@ def modify_workflow_api_format(
     logger.info(f"Editable values provided: {len(editable_values) if editable_values else 0}")
     logger.info(f"Found editable prompt node: {found_editable_prompt}")
     logger.info(f"Output prefix: {output_prefix}")
+    logger.info(f"Files to copy: {len(files_to_copy)}")
     logger.info(f"=====================================")
 
-    return modified, found_editable_prompt
+    return modified, found_editable_prompt, files_to_copy
 
 
 def modify_workflow(
@@ -372,7 +431,7 @@ def modify_workflow(
     seed: Optional[int] = None,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
     output_dir: Optional[str] = None
-) -> Tuple[Dict[str, Any], bool]:
+) -> Tuple[Dict[str, Any], bool, Dict[str, str]]:
     """
     Modify Qwen image edit workflow with user inputs.
 
@@ -389,9 +448,10 @@ def modify_workflow(
         output_dir: Output directory for export nodes (FBX, GLB, etc.)
 
     Returns:
-        Tuple of (modified_workflow, found_editable_prompt_node)
+        Tuple of (modified_workflow, found_editable_prompt_node, files_to_copy)
         - modified_workflow: Modified workflow dictionary in API format
         - found_editable_prompt_node: True if a prompt node with "_editable" suffix was found
+        - files_to_copy: Dict mapping full paths to basenames for file copying
     """
     # Generate random seed if not provided
     if seed is None:
@@ -422,6 +482,13 @@ def modify_workflow(
                 # This is a subgraph node — update its widgets_values
                 proxy_widgets = raw_node.get('properties', {}).get('proxyWidgets', [])
                 widgets_values = raw_node.get('widgets_values', [])
+
+                # Check if widgets_values is dict or list format
+                widgets_values_is_dict = isinstance(widgets_values, dict)
+                if not widgets_values_is_dict and not isinstance(widgets_values, list):
+                    logger.warning(f"Subgraph node {node_id} has unexpected widgets_values type: {type(widgets_values)} - skipping")
+                    continue
+
                 if not proxy_widgets or not widgets_values:
                     continue
 
@@ -432,14 +499,21 @@ def modify_workflow(
                     if not widget_name:
                         continue
 
-                    # Find the proxyWidgets index for this widget_name
-                    for pw_idx, pw_entry in enumerate(proxy_widgets):
-                        if (isinstance(pw_entry, (list, tuple)) and len(pw_entry) >= 2
-                                and pw_entry[1] == widget_name and pw_idx < len(widgets_values)):
-                            widgets_values[pw_idx] = value
+                    if widgets_values_is_dict:
+                        # Dict format: set value by widget name directly
+                        if widget_name in widgets_values:
+                            widgets_values[widget_name] = value
                             logger.info(f"  Pre-expansion: set subgraph node {node_id} "
-                                        f"widget '{widget_name}' [idx {pw_idx}] = {repr(value)[:60]}")
-                            break
+                                        f"widget '{widget_name}' = {repr(value)[:60]}")
+                    else:
+                        # List format: find the proxyWidgets index for this widget_name
+                        for pw_idx, pw_entry in enumerate(proxy_widgets):
+                            if (isinstance(pw_entry, (list, tuple)) and len(pw_entry) >= 2
+                                    and pw_entry[1] == widget_name and pw_idx < len(widgets_values)):
+                                widgets_values[pw_idx] = value
+                                logger.info(f"  Pre-expansion: set subgraph node {node_id} "
+                                            f"widget '{widget_name}' [idx {pw_idx}] = {repr(value)[:60]}")
+                                break
 
         logger.info("Detected UI/nodes format workflow - converting to API format...")
         api_workflow = convert_to_api_format(workflow)

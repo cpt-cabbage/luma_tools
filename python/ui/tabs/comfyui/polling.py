@@ -52,6 +52,37 @@ def format_elapsed_time(seconds):
         return f"{hours}h {mins}m"
 
 
+def pluralize_output_type(output_type: str, count: int = 2) -> str:
+    """Convert output type to plural form for notifications.
+
+    Args:
+        output_type: Output type ("image", "video", "3d", "audio", "other")
+        count: Number of items (for singular vs plural)
+
+    Returns:
+        Pluralized string like "images", "videos", "models", etc.
+    """
+    if count == 1:
+        if output_type == "3d":
+            return "model"
+        elif output_type == "audio":
+            return "audio file"
+        else:
+            return output_type
+
+    # Plural forms
+    if output_type == "image":
+        return "images"
+    elif output_type == "video":
+        return "videos"
+    elif output_type == "3d":
+        return "models"
+    elif output_type == "audio":
+        return "audio files"
+    else:
+        return "outputs"
+
+
 def estimate_remaining_time(completed, total, elapsed_seconds):
     """Estimate remaining time based on progress."""
     if completed <= 0 or elapsed_seconds <= 0:
@@ -88,6 +119,7 @@ class PollingMixin:
         self._iterate_total_tasks = 1
         self._iterate_start_time = None
         self._iterate_rendering_start_time = None  # Track when rendering actually started
+        self._iterate_output_type = "image"  # Track output type for notifications
 
         # Batch mode state
         self._batch_poll_timer = None
@@ -98,6 +130,7 @@ class PollingMixin:
         self._batch_total_tasks = {}
         self._batch_job_statuses = {}
         self._batch_network_output_dir = ""
+        self._batch_output_type = "image"  # Track output type for notifications
         self._batch_poll_count = 0
         self._batch_start_time = None
         self._batch_generation_count = 1
@@ -158,12 +191,19 @@ class PollingMixin:
     # ITERATE MODE POLLING
     # =========================================================================
 
-    def _start_iterate_polling(self, job_id, network_output_dir):
-        """Start polling for iterate mode job completion."""
+    def _start_iterate_polling(self, job_id, network_output_dir, output_type="image"):
+        """Start polling for iterate mode job completion.
+
+        Args:
+            job_id: The Deadline job ID to poll
+            network_output_dir: Path where outputs will be saved
+            output_type: Type of output ("image", "video", "3d", "audio", "other")
+        """
         from ui_components import StatusColors
 
         self.app_state.comfyui_current_job_id = job_id
         self._iterate_network_output_dir = network_output_dir
+        self._iterate_output_type = output_type
         self._iterate_poll_count = 0
         self._iterate_completed_tasks = 0
         self._iterate_total_tasks = self.ui.ComfyUIGenerationCount.value()
@@ -412,9 +452,10 @@ class PollingMixin:
         # Show system tray notification (if enabled)
         from core.settings_manager import get_setting
         if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+            output_type_str = pluralize_output_type(self._iterate_output_type, frames)
             self.main_window.show_system_notification(
                 "ComfyUI Complete",
-                f"{frames} image(s) generated in {elapsed_str}",
+                f"{frames} {output_type_str} generated in {elapsed_str}",
                 "success"
             )
 
@@ -543,8 +584,14 @@ class PollingMixin:
     # BATCH MODE POLLING
     # =========================================================================
 
-    def _start_batch_polling(self, job_ids, network_output_dir):
-        """Start polling for batch job completion."""
+    def _start_batch_polling(self, job_ids, network_output_dir, output_type="image"):
+        """Start polling for batch job completion.
+
+        Args:
+            job_ids: List of Deadline job IDs to poll
+            network_output_dir: Path where outputs will be saved
+            output_type: Type of output ("image", "video", "3d", "audio", "other")
+        """
         from ui_components import StatusColors
 
         self._batch_job_ids = list(job_ids)
@@ -554,6 +601,7 @@ class PollingMixin:
         self._batch_total_tasks = {job_id: self.ui.ComfyUIGenerationCount.value() for job_id in job_ids}
         self._batch_job_statuses = {job_id: "Pending" for job_id in job_ids}
         self._batch_network_output_dir = network_output_dir
+        self._batch_output_type = output_type
         self._batch_poll_count = 0
         self._batch_start_time = time.time()
         self._batch_generation_count = self.ui.ComfyUIGenerationCount.value()
@@ -907,9 +955,10 @@ class PollingMixin:
             # Show system tray notification for success (if enabled)
             from core.settings_manager import get_setting
             if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                output_type_str = pluralize_output_type(self._batch_output_type, total_frames)
                 self.main_window.show_system_notification(
                     "ComfyUI Complete",
-                    f"All {total_count} job(s) completed! {total_frames} images generated in {elapsed_str}",
+                    f"All {total_count} job(s) completed! {total_frames} {output_type_str} generated in {elapsed_str}",
                     "success"
                 )
             # Play completion sound (if enabled)
@@ -1079,6 +1128,7 @@ class PollingMixin:
                 "total_tasks": self._iterate_total_tasks,
                 "generation_count": self._iterate_total_tasks,
                 "start_time": self._iterate_start_time,
+                "output_type": self._iterate_output_type,
             }
             save_comfyui_running_jobs(job_state)
             logger.info("[Recovery] Saved iterate mode job state for recovery")
@@ -1092,6 +1142,7 @@ class PollingMixin:
                 "total_tasks": self._batch_total_tasks,
                 "generation_count": self._batch_generation_count,
                 "start_time": self._batch_start_time,
+                "output_type": self._batch_output_type,
             }
             save_comfyui_running_jobs(job_state)
             logger.info("[Recovery] Saved batch mode job state for recovery")
@@ -1336,6 +1387,7 @@ class PollingMixin:
             self._iterate_start_time = time.time()
             self._iterate_completed_tasks = 0
             self._iterate_poll_count = 0
+            self._iterate_output_type = persisted_state.get("output_type", "image") if persisted_state else "image"
             self.app_state.comfyui_current_job_id = job_id
 
             if self._iterate_poll_timer is None:
@@ -1379,6 +1431,7 @@ class PollingMixin:
             self._batch_total_tasks = total_tasks
             self._batch_job_statuses = {job["job_id"]: job["status"] for job in running_jobs}
             self._batch_network_output_dir = network_output_dir
+            self._batch_output_type = persisted_state.get("output_type", "image") if persisted_state else "image"
             self._batch_poll_count = 0
             self._batch_start_time = time.time()
             self._batch_generation_count = generation_count
@@ -1484,6 +1537,7 @@ class PollingMixin:
                 self._batch_total_tasks = {job_id: total_tasks.get(job_id, generation_count) for job_id in job_ids}
                 self._batch_job_statuses = {job_id: "Recovering" for job_id in job_ids}
                 self._batch_network_output_dir = network_output_dir
+                self._batch_output_type = job_state.get("output_type", "image")
                 self._batch_poll_count = 0
                 self._batch_start_time = job_state.get("start_time", time.time())
                 self._batch_generation_count = generation_count
@@ -1531,6 +1585,7 @@ class PollingMixin:
             self._iterate_network_output_dir = network_output_dir
             self._iterate_total_tasks = total_tasks
             self._iterate_start_time = job_state.get("start_time", time.time())
+            self._iterate_output_type = job_state.get("output_type", "image")
             self._iterate_completed_tasks = 0
             self._iterate_poll_count = 0
             self.app_state.comfyui_current_job_id = job_id

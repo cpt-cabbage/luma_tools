@@ -8,7 +8,6 @@ for faster model loading between jobs.
 
 import os
 import copy
-import random
 import logging
 from typing import Optional, Callable, List, Dict, Any, Tuple
 
@@ -39,31 +38,13 @@ def _get_comfyui_config() -> Tuple[str, str, str, str]:
     return comfyui_path, comfyui_mode, comfyui_python, python_exe
 
 
-def _build_runner_performance_flags() -> str:
-    """Build runner performance flags from global settings.
+def _build_server_mode_flags() -> str:
+    """Build server connection flags from settings.
 
     Returns:
-        String of flags to append to runner command (e.g., " --lowvram")
+        String of flags for server connection behavior
     """
-    flags = []
-    if get_setting("comfyui_lowvram"):
-        flags.append("--lowvram")
-    return " " + " ".join(flags) if flags else ""
-
-
-def _build_server_mode_flags(use_server_mode: bool) -> str:
-    """Build server mode flags based on settings.
-
-    Args:
-        use_server_mode: Whether server mode is enabled
-
-    Returns:
-        String of flags for server mode
-    """
-    if not use_server_mode:
-        return ""
-
-    flags = " --persistent"
+    flags = ""
     server_behavior = get_setting("comfyui_server_not_found_behavior")
     flags += f" --server-not-found {server_behavior}"
 
@@ -136,7 +117,7 @@ def submit_comfyui_to_deadline(
         logger.info(f"Copied {os.path.basename(src)} to: {dst}")
 
     input_dir = output_dir
-    port = 8188 if use_server_mode else random.randint(8200, 8299)
+    port = 8188
 
     comfyui_path_clean = comfyui_path.rstrip('/\\')
     timeout = get_setting("comfyui_timeout")
@@ -150,24 +131,17 @@ def submit_comfyui_to_deadline(
         f'--output-prefix "{render_name}" '
         f'--frame <STARTFRAME> '
         f'--port {port} '
-        f'--timeout {timeout} '
-        f'--mode {comfyui_mode}'
+        f'--timeout {timeout}'
     )
 
-    if comfyui_mode == "standalone" and comfyui_python:
-        runner_args += f' --python-path "{comfyui_python}"'
-
-    # Server mode flags
-    runner_args += _build_server_mode_flags(use_server_mode)
+    # Server connection flags
+    runner_args += _build_server_mode_flags()
 
     if full_restart:
         runner_args += ' --full-restart'
 
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
-
-    # Performance flags from settings
-    runner_args += _build_runner_performance_flags()
 
     job_info_path = os.path.join(output_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine
@@ -349,7 +323,7 @@ def submit_comfyui_job(
                         data['value'] = current_file
                         break
 
-        modified, found_editable = modify_workflow(
+        modified, found_editable, workflow_files_to_copy = modify_workflow(
             workflow,
             current_file,
             prompt,
@@ -426,6 +400,21 @@ def submit_comfyui_job(
                             if not os.path.exists(file_dest) or os.path.getmtime(file_path) > os.path.getmtime(file_dest):
                                 shutil.copy2(file_path, file_dest)
                                 logger.info(f"Copied {node_info.widget_type} file: {file_base}")
+
+        # Copy all files detected in workflow (from automatic path normalization)
+        if workflow_files_to_copy:
+            logger.info(f"Copying {len(workflow_files_to_copy)} file(s) from workflow...")
+            for full_path, basename in workflow_files_to_copy.items():
+                # Skip if already copied (from current_file or editable values)
+                if full_path == current_file:
+                    continue
+                if os.path.exists(full_path):
+                    file_dest = os.path.join(current_working_dir, basename)
+                    if not os.path.exists(file_dest) or os.path.getmtime(full_path) > os.path.getmtime(file_dest):
+                        shutil.copy2(full_path, file_dest)
+                        logger.info(f"Copied workflow file: {basename}")
+                else:
+                    logger.warning(f"File not found (skipping): {full_path}")
 
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,

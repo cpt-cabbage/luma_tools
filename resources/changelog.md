@@ -2,85 +2,103 @@
 
 ## Version 0.6
 
-### Major Reorganization
-- Relocate `python/tabs/` → `python/ui/tabs/` for cleaner UI separation
-- Relocate `python/models/` → `python/geo/` to better reflect 3D geometry purpose
-- Extract `python/comfyui/deadline_*.py` → `python/deadline/` as dedicated package with submitter.py, poller.py, parser.py, utils.py modules
-- Rename comfyui_gallery → gallery throughout codebase
-- Move changelog.md and version.json to resources/
-- Move install.bat/install.py to scripts/ with new deploy_production.bat
+### New Canvas Tab 
+A new collaborative workspace for image comparison and annotation:
+- **Visual Comparison**: Drag and drop images onto an infinite canvas for side-by-side comparison
+- **Drawing Tools**: Add annotations with pen, eraser, arrows, rectangles, ellipses, and text
+- **Multiple Canvases**: Create separate canvases for different projects or shots
+- **Scope Options**: Choose between job-wide canvases (shared across all shots) or shot-specific canvases
+- **Navigation**: Pan and zoom with mouse/touchpad, or use Space+drag for Photoshop-style temporary panning
+- **Minimap**: Quick navigation overview of your entire canvas
+- **Brush Size Indicator**: Visual cursor feedback shows pen/eraser size as you work
+- **Undo/Redo**: Full history system for all canvas operations
+- **Export**: Save your annotated canvas as an image
+- **Gallery Integration**: Right-click images in Gallery to "Add to Canvas" or enable auto-add for new ComfyUI outputs, Canvas and Gallery are fully linked.
+- **Multi-User Sync**: Real-time collaboration with network sync and timeline scrubbing
 
-### New Core Utilities
-- Add `core/event_bus.py`: Qt signal-based pipeline event bus for decoupled cross-tab communication
-- Add `core/logging_utils.py`: Centralized logging with TeeStream, file setup, network path resolution
-- Add `core/subprocess_utils.py`: Windows-compatible subprocess handling with hidden console windows
-- Add `core/progress_utils.py`: Progress callback handling utilities
-- Add `resources/ui/drag_drop.py`: DraggableMixin and utilities for drag-and-drop
-- Add `resources/ui/empty_states.py`: Consistent empty state displays
-- Add `resources/ui/loading_widgets.py`: Consolidated loading overlay widget (replaces spinners.py)
+### New ComfyUI Prompt Builder
+New interactive prompt building tool for creating complex AI prompts:
+- **Category-Based Selection**: Choose from Camera, Style, Filters, Effects, and Movement options inspired by video generation tools
+- **Weighted Tags**: Adjust importance of each element with weight sliders (0.1-3.0x)
+- **Live Preview**: Real-time preview of formatted prompt as you make selections
+- **Template System**: Multiple built-in templates (Natural Language, Keyword List, Weighted Tags, ComfyUI Format, Simple List)
+- **Negative Prompts**: Separate builder for negative prompt generation
+- **Preset Management**: Save and load your favorite prompt configurations
+- **Randomization**: Generate random prompt combinations for creative exploration
+- **Multiple Formats**: Support for Automatic1111 `(text:1.2)` and NovelAI `{text}` weight formats
+- **Keyboard Shortcuts**: Escape to close, Ctrl+R to randomize, Ctrl+Enter to insert
+- **Seamless Integration**: Access via "Use Prompt Builder..." in preset dropdown on any ComfyUI text input
 
-### Gallery Enhancements
-- Add drag-to-group functionality - create groups by dragging items onto thumbnails
-- Add sort direction toggle button to switch between ascending/descending
-- Convert stacking mode controls from checkboxes to floating StacksDialog
-- Add staggered fade-in animation for new gallery items
-- Add slide and fade animations for stack expand/collapse
-- Add panel collapse/expand with smooth width animation
-- Add loading overlay for user feedback during gallery switching
-- Add file type filter dialog with persistence
-- Replace GallerySectionHeader with cleaner StackedThumbnailWidget
-- Optimize widget creation and thumbnail loading
+### ComfyUI Workflow Enhancements 
+Major improvements to AI workflow management:
+- **Component/Subgraph Support**: Full support for advanced ComfyUI nodes that contain sub-workflows
+- **Settings Nodes**: Adjustable parameters like KSampler settings, motion controls, and more are now organized in collapsible groups
+- **Output Type System**: Workflows are now categorized (Image/Video/3D/Audio/Other) for better organization
+- **Category Filtering**: Filter workflow presets by custom categories for easier browsing
+- **Exposed Parameters Tab**: Quick access to all editable workflow parameters in one place
+- **Comparison Dialog**: Select two gallery items to compare their settings and prompts side-by-side
+- **Rating Breakdown**: Visual chart showing rating distribution for presets
+- **Multi-Workflow Management**: Add, edit, and remove workflows within presets via improved dialog
+- **Centralized Storage**: Workflows are now auto-copied to a shared directory for team access
+- **Video Node Support**: Better handling of video loader and export nodes
 
-### Metadata System
-- Add explicit input tracking with `_input_` prefixed entries for source images
-- Implement `is_known_input_file()` and `mark_as_input_file()` functions
-- Add per-file metadata with file_id and parent_id for lineage tracking
-- Add `establish_lineage()` for iteration parent-child relationships
-- Add `get_metadata_level()` to detect full/partial/none metadata coverage
-- Add conditional reverse matching to prevent input files from incorrectly matching output job metadata
-- Store detailed per-file metadata including node execution timing and seed values
+### Gallery Improvements (Previously ComfyUI Gallery) 
+Enhanced browsing and organization:
+- **Media Player**: Full media player for Video and Audio playback
+- **Groups**: Create groups by dragging thumbnails onto each other  
+- **Sort Direction Toggle**: Quickly reverse sort order with a single click 
+- **Loading Overlay**: Clear visual feedback when switching galleries or loading content
+- **File Type Filters**: Filter by image, video, 3D model, or audio files with persistent settings
+- **Better Support**: Storing and playback fully added for audio and video
+- **"Show in Gallery"**: Navigate from Canvas directly to an item's location in the Gallery
+- **Better Thumbnails**: Optimized loading and cleaner visual design
 
-### ComfyUI Improvements
-- Add comparison dialog for comparing two selected gallery items
-- Add style preset controls with save/load/undo functionality
-- Add MetadataDiffDialog for side-by-side parameter comparison
-- Add session resume banner and contextual tooltips
-- Add node configs for SHARP 3D, Hunyuan Video 1.5, SaveVideo, Any Switch
-- Update Trellis2 configs for v2 HQ nodes with additional parameters
-- Show task-level counts and step progress (Step 3/12) in batch status
+### MP4 Maker Integration 
+- **Add to Gallery**: Generated MP4s can now be automatically added to your Gallery
+- **Metadata Tracking**: MP4s store source file info and quality settings for reference
+- **User Setting**: Toggle the "Add to Gallery" feature on/off per your preference
 
-### Cross-Tab Integration
-- Extend state_manager.py with job tracking properties
-- Add drag-and-drop from gallery thumbnails to ComfyUI inputs
-- Add hover-to-switch-tab during drag (500ms delay)
-- Add settings for cross-tab integration (completion sound, job status, quick actions)
-- Add window title progress updates via event bus subscription
+### Metadata & Iteration Tracking 
+- **Input File Tracking**: System now reliably identifies source images vs. generated outputs
+- **Lineage System**: Track parent-child relationships when iterating on previous generations
+- **Per-File Details**: Each output stores node execution timing, seed values, and full workflow info
+- **Metadata Levels**: Visual indicators show full metadata (blue), partial metadata, or legacy files (gray)
+- **Comparison Tools**: Side-by-side parameter comparison to see exactly what changed between iterations
 
-### Thread Safety (Critical)
-- Add threading locks to image thumbnail cache (ui_components.py)
-- Add threading locks to placeholder cache (thumbnail_base.py)
-- Add RLock to _active_jobs dictionary (event_bus.py)
-- Add threading locks to gallery metadata cache (metadata.py)
-- Implement atomic JSON writes in feature_requests.py
+### Shot Cleanup Tab (formerly Shot Cleaner)
+- **Renamed**: "Shot Cleaner" is now "Cleaner" with expanded gallery cleanup functionality
+- **Same Features**: All existing cleanup capabilities remain unchanged
 
-### Bug Fixes
-- Fix Worker GC risk in splash_screen.py (store on self)
-- Fix lambda closure bug in comfyui_polling.py (capture by value)
-- Fix IndexError in get_trailing_number() when string has no digits
-- Fix pattern matching logic to correctly identify input files that look like outputs
-- Fix QEvent enum usage in effects.py
-- Stabilize drag-and-drop operations with widget validity checks
-- Suppress QtWebEngineProcess sandbox warnings
-- Fix mouse move event coordinates in main() function
+### Settings & Configuration 
+- **Improved Settings Access**: New safe accessors prevent errors when reading/writing settings
+- **Canvas Sync Interval**: Adjustable network sync timing (500-5000ms) for Canvas collaboration
+- **Category Management**: Create and organize custom categories for ComfyUI presets
+- **Better Logging**: All system messages now use standardized logging for easier troubleshooting
+- **Network Path Updates**: Unified network output path setting across all tools
 
-### Code Quality
-- Add logger to all modules, convert print() → logger
-- Centralized network logging for debugging
-- Add --tab and --auto-close CLI flags for automated testing
-- Consolidate user role functions from 12 to 4 parameterized functions
-- Add safe_get_setting() and safe_set_setting() for exception-free settings access
-- Add type hints to base_tab.start_worker() method
-- Remove dead code and unused imports throughout codebase
+### User Experience Improvements 
+- **Cross-Tab Drag-and-Drop**: Drag Gallery items to ComfyUI inputs, auto-switch tabs by hovering
+- **Better Feedback**: Loading overlays, progress indicators, and status messages throughout the app
+- **Cleaner UI**: Streamlined layouts, improved button alignment, and consistent widget spacing
+- **Keyboard Shortcuts**: Enhanced shortcut handling in Gallery and Canvas tabs
+- **Empty States**: Helpful messages when no content is available
+
+### Performance & Stability 
+- **Thread Safety**: Critical fixes to prevent crashes during multi-threaded operations
+- **Memory Management**: Improved caching for thumbnails, metadata, and other resources
+- **Worker Lifecycle**: Fixed garbage collection issues that could cause background tasks to fail
+- **Drag-and-Drop Stability**: Robust widget validity checks prevent crashes during drag operations
+- **Optimized Loading**: Faster thumbnail generation and gallery switching
+
+### Code Architecture (Internal)
+For developers and technically-inclined users:
+- **Reorganized Structure**: Cleaner separation of UI code (python/ui/tabs/), 3D geometry (python/geo/), and Deadline integration (python/deadline/)
+- **New Utilities**: Caching framework, validators, file scanners, metadata file handling, subprocess utilities
+- **Event Bus**: Signal-based communication between tabs for better modularity
+- **Consolidated Logging**: Centralized network logging with proper rotation and exception handling
+- **Removed Dead Code**: Cleanup of unused imports, functions, and legacy code paths
+- **Better Type Safety**: Type hints added throughout worker code and settings management
+- **Testing Support**: CLI flags (--tab, --auto-close) for automated testing and debugging
 
 ## Version 0.5.4.1
 - Morning coffee bugfixes and UI updates

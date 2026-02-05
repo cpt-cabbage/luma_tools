@@ -171,38 +171,62 @@ class RefreshController(BaseGalleryManager):
         from ui.gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
         from PySide6.QtCore import QTimer
 
-        prewarm_cache = get_prewarm_cache()
-        if prewarm_cache is not None and prewarm_cache.get('items'):
-            prewarm_items = prewarm_cache['items']
-            self.tab.log(f"[Gallery] Using pre-warmed cache: {len(prewarm_items)} items")
+        try:
+            prewarm_cache = get_prewarm_cache()
+            if prewarm_cache is not None and prewarm_cache.get('items'):
+                # THREAD-SAFE: Lock during validation to prevent race conditions
+                with self.tab._cache_lock:
+                    # Normalize usernames: treat None and "" consistently
+                    cached_username = prewarm_cache.get('username')
+                    cached_username = cached_username.strip() if cached_username else None
 
-            # Mark initial scan as done IMMEDIATELY to prevent race condition
-            # with on_tab_activated() triggering a duplicate refresh
-            self.tab._initial_scan_done = True
+                    current_username = self.tab._selected_user
+                    current_username = current_username.strip() if current_username else None
 
-            # First real scan after prewarm should replace (not add incrementally)
-            # to avoid duplicates from any prewarm/full-scan output differences
-            self.tab._first_scan_after_prewarm = True
+                    # SECURITY: Validate that cache is for current user
+                    if cached_username != current_username:
+                        logger.warning(
+                            f"[Gallery] Prewarm cache mismatch: cached for '{cached_username}', "
+                            f"but current user is '{current_username}'. Discarding cache."
+                        )
+                        clear_prewarm_cache()
+                        # Don't use the cache - let the gallery do a fresh scan
+                        return
 
-            # Skip the next automatic refresh (network polling) since we have prewarm data
-            # This prevents the full scan from running and causing items to "pop up"
-            self._skip_next_auto_refresh = True
+                    prewarm_items = prewarm_cache['items']
+                    logger.info(f"[Gallery] Using pre-warmed cache for '{current_username}': {len(prewarm_items)} items")
 
-            # Enrich items with additional data if needed
-            items = self._enrich_prewarm_items(prewarm_items)
+                    # Mark initial scan as done IMMEDIATELY to prevent race condition
+                    # with on_tab_activated() triggering a duplicate refresh
+                    self.tab._initial_scan_done = True
 
-            # Store items for deferred processing after window is shown
-            # This prevents blocking the splash screen
-            self._deferred_prewarm_items = items
+                    # First real scan after prewarm should replace (not add incrementally)
+                    # to avoid duplicates from any prewarm/full-scan output differences
+                    self.tab._first_scan_after_prewarm = True
 
-            # Clear the prewarm cache (one-time use)
+                    # Skip the next automatic refresh (network polling) since we have prewarm data
+                    # This prevents the full scan from running and causing items to "pop up"
+                    self._skip_next_auto_refresh = True
+
+                    # Enrich items with additional data if needed
+                    items = self._enrich_prewarm_items(prewarm_items)
+
+                    # Store items for deferred processing after window is shown
+                    # This prevents blocking the splash screen
+                    self._deferred_prewarm_items = items
+
+                    # Clear the prewarm cache (one-time use)
+                    clear_prewarm_cache()
+
+                    # Schedule display for after splash screen closes (100ms delay)
+                    # This allows the main window to show first
+                    QTimer.singleShot(100, self._process_deferred_prewarm)
+            else:
+                logger.info("[Gallery] No pre-warmed cache available, will scan on tab activation")
+        except Exception as e:
+            logger.error(f"[Gallery] Error processing prewarm cache: {e}", exc_info=True)
+            # CRITICAL: Always clear cache on error to prevent stale data reuse
             clear_prewarm_cache()
-
-            # Schedule display for after splash screen closes (100ms delay)
-            # This allows the main window to show first
-            QTimer.singleShot(100, self._process_deferred_prewarm)
-        else:
-            self.tab.log("[Gallery] No pre-warmed cache available, will scan on tab activation")
 
     def _process_deferred_prewarm(self):
         """Process deferred prewarm items (called after splash screen closes)."""

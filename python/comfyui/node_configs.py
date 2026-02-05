@@ -61,6 +61,9 @@ EDITABLE_NODE_CONFIGS = {
 # These appear in the collapsible "Workflow Settings" section, grouped by node title
 # Format: {node_type: ['widget_name', ...]}
 SETTINGS_NODE_CONFIGS = {
+    # Core ComfyUI utility nodes
+    'PrimitiveNode': ['value', None],  # Value + control mode (None = skip control mode)
+
     # Sampler settings
     'KSampler': ['steps', 'cfg', 'denoise'],
     'KSamplerAdvanced': ['steps', 'cfg'],
@@ -271,6 +274,12 @@ WIDGET_MAPPINGS = {
     'DisableNoise': [],
     'VAEDecodeTiled': ['tile_size', 'overlap', 'temporal_size', 'temporal_overlap'],
 
+    # ACE Step 1.5 Audio nodes
+    'SaveAudioMP3': ['filename_prefix', 'quality'],
+    'VAEDecodeAudio': [],
+    'TextEncodeAceStepAudio1.5': ['tags', 'lyrics', 'seed', None, 'bpm', 'duration', 'timesignature', 'language', 'keyscale'],
+    'EmptyAceStep1.5LatentAudio': ['seconds', 'batch_size'],
+
     # Qwen Image Edit nodes
     'TorchCompileModelQwenImage': [],  # No widgets, just compiles model
     'ReferenceLatent': [],  # No widgets, passes through
@@ -281,6 +290,15 @@ WIDGET_MAPPINGS = {
     # [4]: extra, [5]: width, [6]: height
     # We need to map all positions even for button widgets to get correct offsets
     'Load3D': ['model_file', None, None, None, None, 'width', 'height'],
+
+    # ACE Step 1.5 Audio nodes
+    # NOTE: Also defined in node_info.py MISSING_WIDGETS for programmatic patching.
+    # This manual entry serves as a fallback when node_info cache is unavailable.
+    'SaveAudioMP3': ['filename_prefix', 'quality'],  # audioUI widget not in widgets_values
+    'SaveAudioOpus': ['filename_prefix', 'quality'],  # same as MP3
+
+    # Core ComfyUI utility nodes
+    'PrimitiveNode': ['value', None],  # Value + control mode (None = skip control mode)
 
     # Nodes that need manual mapping (auto-discovery doesn't work)
     'ImageBatchMulti': ['inputcount', None],  # count widget + internal state
@@ -336,4 +354,7 @@ EXPORT_NODE_TYPES = {
     'SharpPredict': 'output_prefix',
     # Hunyuan Video
     'SaveVideo': 'filename_prefix',
+    # ACE Step Audio
+    'SaveAudioMP3': 'filename_prefix',
+    'SaveAudioOpus': 'filename_prefix',
 }

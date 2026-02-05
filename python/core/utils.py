@@ -592,3 +592,99 @@ def nested_delete(d, keys):
         del current[keys[-1]]
         return True
     return False
+
+
+# ============================================================================
+# Media Duration Utilities
+# ============================================================================
+
+def get_media_duration(file_path):
+    """
+    Extract duration from video or audio file using FFprobe or FFmpeg.
+
+    Args:
+        file_path: Path to video or audio file
+
+    Returns:
+        float: Duration in seconds, or None if duration cannot be determined
+
+    Example:
+        >>> duration = get_media_duration("video.mp4")
+        >>> duration
+        125.5
+        >>> format_duration(duration)
+        '2:05'
+    """
+    from core.config import FFMPEG_PATH
+    import subprocess
+
+    if not FFMPEG_PATH or not os.path.exists(file_path):
+        return None
+
+    # Try FFprobe first (cleaner output)
+    ffprobe_path = FFMPEG_PATH.replace('ffmpeg.exe', 'ffprobe.exe')
+    if os.path.exists(ffprobe_path):
+        try:
+            cmd = [
+                ffprobe_path,
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                file_path
+            ]
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=creationflags)
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+        except (subprocess.TimeoutExpired, ValueError, Exception) as e:
+            logger.debug(f"FFprobe duration extraction failed: {e}")
+
+    # Fallback to FFmpeg
+    try:
+        cmd = [FFMPEG_PATH, '-i', file_path]
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=creationflags)
+        # FFmpeg outputs duration in stderr
+        output = result.stderr
+        # Parse "Duration: HH:MM:SS.ms" format
+        import re
+        match = re.search(r'Duration:\s*(\d+):(\d+):(\d+)\.(\d+)', output)
+        if match:
+            hours, minutes, seconds, centiseconds = map(int, match.groups())
+            return hours * 3600 + minutes * 60 + seconds + centiseconds / 100.0
+    except (subprocess.TimeoutExpired, Exception) as e:
+        logger.debug(f"FFmpeg duration extraction failed: {e}")
+
+    return None
+
+
+def format_duration(seconds):
+    """
+    Format duration in seconds to human-readable string.
+
+    Args:
+        seconds: Duration in seconds (float or int)
+
+    Returns:
+        str: Formatted duration ("MM:SS" for < 1 hour, "H:MM:SS" for >= 1 hour)
+
+    Example:
+        >>> format_duration(125.5)
+        '2:05'
+        >>> format_duration(3725)
+        '1:02:05'
+        >>> format_duration(45)
+        '0:45'
+    """
+    if seconds is None or seconds < 0:
+        return "0:00"
+
+    total_seconds = int(seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{minutes}:{secs:02d}"

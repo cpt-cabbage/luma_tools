@@ -19,6 +19,7 @@ Cross-tab communication:
 import os
 import logging
 import threading
+import re
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt, QTimer, QThreadPool
@@ -31,6 +32,33 @@ from .gallery.groups_panel import GroupsFilterPanel
 from .gallery.job_status_bar import JobStatusBar
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_username(username: str) -> bool:
+    """
+    Validate username contains only safe characters.
+
+    Args:
+        username: Username to validate
+
+    Returns:
+        True if username is valid, False otherwise
+    """
+    if not username or not isinstance(username, str):
+        return False
+
+    # Strip whitespace and check if empty
+    username = username.strip()
+    if not username:
+        return False
+
+    # Only allow alphanumeric, underscore, hyphen, and period
+    # This prevents path traversal attacks like "../other_user"
+    if not re.match(r'^[a-zA-Z0-9._-]+$', username):
+        logger.error(f"[Gallery] Invalid username characters: {username}")
+        return False
+
+    return True
 
 from core.import_utils import get_event_bus
 pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
@@ -98,7 +126,9 @@ class GalleryTab(BaseTab):
         self._widget_cache = {}
 
         # User selection for multi-user gallery viewing
-        self._selected_user = self.app_state.user
+        # Normalize username: strip whitespace, treat empty as None
+        raw_user = self.app_state.user
+        self._selected_user = raw_user.strip() if raw_user else None
         self._available_users = []
         self._user_cache = {}
         self._precache_in_progress = set()
@@ -410,16 +440,41 @@ class GalleryTab(BaseTab):
         """Get the network gallery path for a user."""
         from core.settings_manager import get_setting
 
+        # Validate network_output_path setting
         base_path = get_setting("network_output_path")
+        if not base_path or not isinstance(base_path, str):
+            logger.error("[Gallery] network_output_path not configured or invalid")
+            return None
+
+        # Strip whitespace
+        base_path = base_path.strip()
         if not base_path:
+            logger.error("[Gallery] network_output_path is empty")
+            return None
+
+        # Verify it's an absolute path
+        if not os.path.isabs(base_path):
+            logger.error(f"[Gallery] network_output_path must be absolute: {base_path}")
             return None
 
         if username is None:
             username = self._selected_user
 
-        if username:
-            return os.path.join(base_path, username)
-        return base_path
+        # Normalize username: strip whitespace, treat empty as None
+        username = username.strip() if username else None
+
+        # SECURITY: Reject empty username - don't fall back to base path
+        # This prevents showing all users' files when username is missing
+        if not username:
+            logger.error("[Gallery] Cannot show gallery without username")
+            return None
+
+        # SECURITY: Validate username to prevent path traversal attacks
+        if not _validate_username(username):
+            logger.error(f"[Gallery] Username validation failed: {username}")
+            return None
+
+        return os.path.join(base_path, username)
 
     def _update_gallery_path(self, reset_tracking=True):
         """Update the gallery path based on source mode and selected user."""
@@ -452,9 +507,11 @@ class GalleryTab(BaseTab):
             if system == "Windows":
                 os.startfile(self._current_path)
             elif system == "Darwin":
-                subprocess.run(["open", self._current_path])
+                creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                subprocess.run(["open", self._current_path], creationflags=creationflags)
             else:
-                subprocess.run(["xdg-open", self._current_path])
+                creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                subprocess.run(["xdg-open", self._current_path], creationflags=creationflags)
             # Show success status
             self.show_status("Opened gallery folder", "info")
         except Exception as e:

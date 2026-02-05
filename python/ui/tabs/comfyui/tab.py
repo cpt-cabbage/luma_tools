@@ -881,6 +881,13 @@ class ComfyUITab(PollingMixin, BaseTab):
             no_presets.setEnabled(False)
             menu.addSeparator()
 
+        # Add prompt builder option
+        builder_action = menu.addAction("Use Prompt Builder...")
+        builder_action.triggered.connect(
+            lambda checked=False, w=text_widget, nt=node_type: self._on_prompt_builder_clicked(w, nt)
+        )
+        menu.addSeparator()
+
         # Add save/delete options
         save_action = menu.addAction("Save Current...")
         save_action.triggered.connect(
@@ -945,6 +952,50 @@ class ComfyUITab(PollingMixin, BaseTab):
         ):
             delete_comfyui_prompt_preset_for_node_type(node_type, preset_name)
             self.show_status(f"Preset '{preset_name}' deleted", "info")
+
+    def _on_prompt_builder_clicked(self, text_widget, node_type):
+        """Show the prompt builder overlay."""
+        # Lazy-create overlay if not exists
+        if not hasattr(self, '_prompt_builder_overlay') or self._prompt_builder_overlay is None:
+            from .prompt_builder_overlay import PromptBuilderOverlay
+            self._prompt_builder_overlay = PromptBuilderOverlay(self.main_window)
+            self._prompt_builder_overlay.prompt_generated.connect(self._on_prompt_generated)
+
+        # Store current text widget for later
+        self._current_prompt_widget = text_widget
+
+        # Pre-populate with current text
+        current_text = text_widget.toPlainText()
+
+        # Pass model and workflow names for context (filename generation)
+        model_name = self.state_manager.current_preset_name
+        workflow_name = getattr(self.state_manager, 'current_selected_workflow', None)
+
+        self._prompt_builder_overlay.show_overlay(
+            initial_text=current_text,
+            model_name=model_name,
+            workflow_name=workflow_name
+        )
+
+    def _on_prompt_generated(self, positive_prompt, negative_prompt, json_output):
+        """Handle prompt generated from builder."""
+        # Use the stored text widget
+        if not hasattr(self, '_current_prompt_widget') or self._current_prompt_widget is None:
+            logger.warning("No text widget stored for prompt insertion")
+            return
+
+        # Set positive prompt
+        self._current_prompt_widget.setPlainText(positive_prompt)
+
+        # Store JSON output for potential later use
+        self._last_prompt_json = json_output
+        logger.info(f"Prompt generated with JSON settings: {json_output.get('settings', {})}")
+
+        # TODO: Handle negative prompt if negative text widget exists
+        # For now, we only update the positive prompt that was clicked
+
+        self.show_status("Prompt inserted from builder", "success")
+        logger.info(f"Inserted prompt from builder: {len(positive_prompt)} chars")
 
     # =========================================================================
     # TEXT/IMAGE CHANGE HANDLERS
@@ -1039,7 +1090,12 @@ class ComfyUITab(PollingMixin, BaseTab):
             logger.debug(f"[ComfyUI] Batch mode ({selected_image_count} images selected)")
 
         # Build job name from shot/project
-        job_name = f"{self.app_state.shot}_luma_tools" if self.app_state.shot else "luma_tools_job"
+        if self.app_state.shot:
+            job_name = f"{self.app_state.shot}_luma_tools"
+        elif self.app_state.jobname:
+            job_name = f"{self.app_state.jobname}_luma_tools"
+        else:
+            job_name = "luma_tools_job"
 
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
@@ -1067,6 +1123,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         self._submit_context = {
             "network_output_dir": network_output_dir,
             "generation_count": generation_count,
+            "output_type": output_type,
         }
 
         # Use start_worker helper for cleaner code
@@ -1119,9 +1176,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                 # Start polling for job completion
                 logger.info(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
                 if self.app_state.comfyui_iterate_mode and len(job_ids) == 1:
-                    self._start_iterate_polling(job_ids[0], ctx["network_output_dir"])
+                    self._start_iterate_polling(job_ids[0], ctx["network_output_dir"], ctx["output_type"])
                 else:
-                    self._start_batch_polling(job_ids, ctx["network_output_dir"])
+                    self._start_batch_polling(job_ids, ctx["network_output_dir"], ctx["output_type"])
             else:
                 self.main_window.stop_status_spinner()
                 self.show_status(f"Submission failed: {error_msg}", "error")

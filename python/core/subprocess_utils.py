@@ -114,6 +114,7 @@ def start_process(
     encoding: str = 'utf-8',
     env: Optional[dict] = None,
     bufsize: int = 1,
+    hide_window: bool = True,
 ) -> subprocess.Popen:
     """
     Start a long-running process with Windows-compatible console hiding.
@@ -130,6 +131,10 @@ def start_process(
         encoding: Text encoding (default: utf-8)
         env: Optional environment dict (if None, uses os.environ.copy())
         bufsize: Buffer size for I/O (default: 1 for line buffered)
+        hide_window: Whether to hide the console window (default: True).
+            Set to False for processes that load large files via mmap
+            (e.g. ComfyUI), as CREATE_NO_WINDOW can interfere with
+            memory-mapped file alignment on Windows.
 
     Returns:
         subprocess.Popen instance
@@ -148,5 +153,5 @@ def start_process(
         bufsize=bufsize,
         cwd=cwd,
         env=process_env,
-        creationflags=WINDOWS_NO_WINDOW,
+        creationflags=WINDOWS_NO_WINDOW if hide_window else 0,
     )

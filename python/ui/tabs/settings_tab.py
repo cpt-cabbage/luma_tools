@@ -47,7 +47,6 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_python_path", "ComfyUIPythonEdit", _TEXT),
     ("network_output_path", "NetworkOutputEdit", _TEXT),
     ("comfyui_fast_mode", "ComfyUIFastMode", _CHECKBOX),
-    ("comfyui_fp16_accumulation", "ComfyUIFP16Accumulation", _CHECKBOX),
     ("comfyui_lowvram", "ComfyUILowVRAM", _CHECKBOX),
     ("comfyui_highvram", "ComfyUIHighVRAM", _CHECKBOX),
     ("comfyui_normalvram", "ComfyUINormalVRAM", _CHECKBOX),

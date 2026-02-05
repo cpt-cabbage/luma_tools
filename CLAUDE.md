@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Deferring to a new task on task list so compact threshold can be hit.
 **Do not silently drop items, cut corners, or produce partial implementations. Every todo item created must be completed or explicitly handed off. "Good enough" is not acceptable when the full scope was requested.**
 **When adding new features or doing any larger changes, always ask clarifying questions to the user to create absolute certainty in task planning**
+Do not update changelog and version, user does that.
 
 ## Multi-File Implementation Discipline
 
@@ -42,7 +43,7 @@ This project has skills in `.claude/skills/`.
 
 | Skill | When to Apply | Invocation |
 |-------|---------------|------------|
-| **check-code** | **After writing any code that affects:** - threading, imports, settings patterns before presenting. MANDATORY. | Auto |
+| **check-code** | **After writing larger code changes that affects:** - threading, imports, settings patterns before presenting. | Auto |
 | **commit-message** | Generate well-formatted commit messages from staged/unstaged changes | `/commit-message` |
 
 ## Per-Module Documentation

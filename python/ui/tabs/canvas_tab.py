@@ -816,7 +816,8 @@ class CanvasTab(BaseTab):
         """Open current directory in file explorer."""
         if self._current_path and os.path.exists(self._current_path):
             import subprocess
-            subprocess.Popen(f'explorer "{self._current_path}"')
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'explorer "{self._current_path}"', creationflags=creationflags)
 
     def _set_tool(self, tool: str):
         """Set the current canvas tool."""

@@ -82,6 +82,15 @@ PHANTOM_WIDGETS = {
     'GeomPackPreviewMeshVTK': {'end': 1},       # internal state
 }
 
+# Nodes with missing widgets that /object_info doesn't report correctly.
+# These are real widgets that appear in widgets_values but ComfyUI doesn't
+# include them in the input definitions (display widgets, dynamic combos, etc.).
+# Format: {node_type: [(position, widget_name)]} where position is 'after:<widget_name>' or 'end'.
+MISSING_WIDGETS = {
+    'SaveAudioMP3': {'after:filename_prefix': ['quality']},  # quality combo not reported by /object_info
+    'SaveAudioOpus': {'after:filename_prefix': ['quality']},  # same issue as MP3
+}
+
 DEFAULT_SERVER_URL = "http://127.0.0.1:8188"
 CACHE_FILENAME = "comfyui_node_info.json"
 CACHE_MAX_AGE_HOURS = 168  # 7 days
@@ -208,9 +217,10 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
             widget = _parse_widget_type(input_name, input_spec)
             widgets.append(widget)
 
-    # Build widget_names_for_values with phantom widget placeholders
+    # Build widget_names_for_values with phantom widget placeholders and missing widgets
     widget_names = []
     phantom_config = PHANTOM_WIDGETS.get(class_type, {})
+    missing_config = MISSING_WIDGETS.get(class_type, {})
 
     for widget in widgets:
         widget_names.append(widget.name)
@@ -219,16 +229,26 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
         if widget.name in SEED_INPUT_NAMES:
             widget_names.append(None)
 
-        # Insert node-specific phantom widgets
+        # Insert node-specific phantom widgets (buttons, internal state)
         key = f'after:{widget.name}'
         if key in phantom_config:
             for _ in range(phantom_config[key]):
                 widget_names.append(None)
 
+        # Insert missing widgets that /object_info doesn't report
+        if key in missing_config:
+            for missing_name in missing_config[key]:
+                widget_names.append(missing_name)
+
     # Append end-of-list phantoms
     if 'end' in phantom_config:
         for _ in range(phantom_config['end']):
             widget_names.append(None)
+
+    # Append end-of-list missing widgets
+    if 'end' in missing_config:
+        for missing_name in missing_config['end']:
+            widget_names.append(missing_name)
 
     return NodeTypeInfo(
         class_type=class_type,
@@ -311,12 +331,30 @@ class NodeInfoCache:
                 widgets = [
                     WidgetInfo(**w) for w in node_data.get('widgets', [])
                 ]
+                widget_names = node_data.get('widget_names_for_values', [])
+
+                # Apply MISSING_WIDGETS patches to fix incomplete cached data
+                missing_config = MISSING_WIDGETS.get(class_type, {})
+                if missing_config:
+                    # Rebuild widget_names with missing widgets inserted
+                    patched_names = []
+                    for name in widget_names:
+                        patched_names.append(name)
+                        # Check if we need to insert missing widgets after this one
+                        key = f'after:{name}'
+                        if key in missing_config:
+                            patched_names.extend(missing_config[key])
+                    # Append end-of-list missing widgets
+                    if 'end' in missing_config:
+                        patched_names.extend(missing_config['end'])
+                    widget_names = patched_names
+
                 self._node_types[class_type] = NodeTypeInfo(
                     class_type=class_type,
                     display_name=node_data.get('display_name', class_type),
                     category=node_data.get('category', ''),
                     widgets=widgets,
-                    widget_names_for_values=node_data.get('widget_names_for_values', []),
+                    widget_names_for_values=widget_names,
                 )
             except Exception as e:
                 logger.debug(f"Skipping cached node '{class_type}': {e}")

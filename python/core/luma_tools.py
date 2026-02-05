@@ -12,7 +12,7 @@ import sys
 import os
 import logging
 
-from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH
+from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH, IS_DEV_MODE
 from core.logging_utils import setup_file_logging, cleanup_old_logs, setup_exception_hook, get_network_log_dir, get_local_log_dir
 
 
@@ -404,10 +404,11 @@ class LumaShotTools(QtWidgets.QWidget):
         self._load_tabs()
 
         # Set window title based on mode
+        dev_suffix = " - DEV" if IS_DEV_MODE else ""
         if app_state.standalone_mode:
-            self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}")
+            self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}{dev_suffix}")
         else:
-            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}")
+            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}{dev_suffix}")
         self.setWindowIcon(QIcon(ICON_PATH))
 
         # Setup log redirection (deferred until after window is shown)
@@ -1042,10 +1043,11 @@ class LumaShotTools(QtWidgets.QWidget):
         """
         if progress_info is None or progress_info.get('total_jobs', 0) == 0:
             # Reset to normal title
+            dev_suffix = " - DEV" if IS_DEV_MODE else ""
             if app_state.standalone_mode:
-                self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}")
+                self.setWindowTitle(f"{APP_TITLE} - Standalone Mode - v{APP_VERSION}{dev_suffix}")
             else:
-                self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}")
+                self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} - {app_state.shot} - v{APP_VERSION}{dev_suffix}")
             return
 
         # Build progress string
@@ -1065,10 +1067,11 @@ class LumaShotTools(QtWidgets.QWidget):
             progress_str = f"{completed} jobs done"
 
         # Update title with progress
+        dev_suffix = " - DEV" if IS_DEV_MODE else ""
         if app_state.standalone_mode:
-            self.setWindowTitle(f"{APP_TITLE} ({progress_str}) - v{APP_VERSION}")
+            self.setWindowTitle(f"{APP_TITLE} ({progress_str}) - v{APP_VERSION}{dev_suffix}")
         else:
-            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} ({progress_str}) - v{APP_VERSION}")
+            self.setWindowTitle(f"{APP_TITLE} - {app_state.jobname} ({progress_str}) - v{APP_VERSION}{dev_suffix}")
 
     def showEvent(self, event):
         """Override show event to force cursor update when window is first shown."""
@@ -1266,10 +1269,15 @@ def main():
                 splash.update_progress(75, "Loading", f"Found {item_count} items")
             app.processEvents()
 
-        # Store gallery data for the gallery tab to use
+        # Store gallery data for the gallery tab to use (include username for validation)
         try:
             from ui.gallery_prewarm import set_prewarm_cache
-            set_prewarm_cache({'items': gallery_data['items']})
+            # Get the username used during prewarm from app_state (matches prewarm logic)
+            prewarm_username = app_state.user
+            set_prewarm_cache({
+                'items': gallery_data['items'],
+                'username': prewarm_username
+            })
         except Exception as e:
             logging.warning(f"Could not set prewarm cache: {e}")
 

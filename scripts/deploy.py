@@ -18,16 +18,8 @@ TARGET = Path(r"L:\tools\_studio_tools\luma_tools")
 DEV_PATH = "L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools"
 PROD_PATH = "L:/tools/_studio_tools/luma_tools"
 
-# Python modules to copy (will recursively copy all .py files including subdirectories)
-PYTHON_MODULES = [
-    "core",
-    "ayon",
-    "comfyui",
-    "models",
-    "services",
-    "tabs",
-    "ui",
-]
+# Directories to exclude from auto-discovery (venv and libs handled separately)
+EXCLUDE_PYTHON_DIRS = {"venv", "__pycache__", "libs", ".pytest_cache"}
 
 
 def get_input(prompt: str, valid_options: list[str] | None = None) -> str:
@@ -98,41 +90,72 @@ def update_changelog(new_version: str, custom_msg: str | None = None) -> None:
     print("Changelog updated.")
 
 
-def clean_python_modules() -> None:
-    """Remove all Python modules from target for fresh install."""
+def discover_python_modules() -> list[str]:
+    """Auto-discover all Python modules in python/ directory."""
+    python_dir = SOURCE / "python"
+    if not python_dir.exists():
+        return []
+
+    modules = []
+    for item in python_dir.iterdir():
+        # Skip excluded directories
+        if item.name in EXCLUDE_PYTHON_DIRS:
+            continue
+
+        # Include if it's a directory with Python files
+        if item.is_dir() and list(item.rglob("*.py")):
+            modules.append(item.name)
+
+    return sorted(modules)
+
+
+def clean_python_modules(modules: list[str]) -> None:
+    """Remove all Python modules from target for fresh install.
+
+    Removes ALL directories in TARGET/python/ except venv.
+    Cache files are deleted to force fresh bytecode compilation.
+    This ensures orphaned modules are cleaned up if they were removed from source.
+    """
     print("\nCleaning Python modules from production...")
 
-    for module in PYTHON_MODULES:
-        module_path = TARGET / "python" / module
-        if module_path.exists():
-            print(f"  Removing {module}/")
-            shutil.rmtree(module_path)
-
-    # Also clean libs directory
-    libs_path = TARGET / "python" / "libs"
-    if libs_path.exists():
-        print("  Removing libs/")
-        shutil.rmtree(libs_path)
-
-    # Remove stray files in python root
     python_root = TARGET / "python"
-    if python_root.exists():
-        for f in python_root.glob("*.py"):
-            f.unlink()
-        for f in python_root.glob("*.pyc"):
-            f.unlink()
-        pycache = python_root / "__pycache__"
-        if pycache.exists():
-            shutil.rmtree(pycache)
+    if not python_root.exists():
+        print("  Production python/ directory doesn't exist yet (first deploy)")
+        return
 
-    print("Python modules cleaned.")
+    # Only protect venv - everything else gets deleted and re-copied fresh
+    protected = {"venv"}
+
+    # Remove all subdirectories except venv
+    for item in python_root.iterdir():
+        if not item.is_dir():
+            continue
+
+        if item.name in protected:
+            print(f"  Preserving {item.name}/")
+            continue
+
+        # Remove everything else (including __pycache__, libs, all modules)
+        print(f"  Removing {item.name}/")
+        shutil.rmtree(item)
+
+    # Remove stray .py/.pyc files in python root
+    for f in python_root.glob("*.py"):
+        print(f"  Removing {f.name}")
+        f.unlink()
+    for f in python_root.glob("*.pyc"):
+        print(f"  Removing {f.name}")
+        f.unlink()
+
+    print(f"Python modules cleaned (cache files will be regenerated on first run)")
 
 
-def copy_python_modules() -> None:
-    """Copy all Python modules recursively."""
+def copy_python_modules(modules: list[str]) -> None:
+    """Copy all Python modules recursively, excluding cache files."""
     print("\nCopying Python modules...")
+    print(f"Auto-discovered {len(modules)} modules: {', '.join(modules)}\n")
 
-    for module in PYTHON_MODULES:
+    for module in modules:
         src_module = SOURCE / "python" / module
         dst_module = TARGET / "python" / module
 
@@ -140,8 +163,9 @@ def copy_python_modules() -> None:
             print(f"  WARNING: Source module {module}/ not found, skipping")
             continue
 
-        # Find all .py files recursively
-        py_files = list(src_module.rglob("*.py"))
+        # Find all .py files recursively, excluding __pycache__ directories
+        all_py_files = src_module.rglob("*.py")
+        py_files = [f for f in all_py_files if "__pycache__" not in f.parts]
 
         # Count subdirectories for info
         subdirs = set(f.parent.relative_to(src_module) for f in py_files if f.parent != src_module)
@@ -161,13 +185,19 @@ def copy_python_modules() -> None:
             shutil.copy2(src_file, dst_file)
 
     # Copy libs directory (external binaries like Assimp DLL)
+    # Exclude __pycache__ if it exists
     src_libs = SOURCE / "python" / "libs"
     if src_libs.exists():
         dst_libs = TARGET / "python" / "libs"
         print(f"  Copying libs/")
         if dst_libs.exists():
             shutil.rmtree(dst_libs)
-        shutil.copytree(src_libs, dst_libs)
+
+        # Copy libs but ignore __pycache__ directories
+        def ignore_cache(dir, files):
+            return ['__pycache__'] if '__pycache__' in files else []
+
+        shutil.copytree(src_libs, dst_libs, ignore=ignore_cache)
 
 
 def copy_resources() -> None:
@@ -263,7 +293,7 @@ def copy_version_files(new_version: str) -> None:
 
 
 def copy_venv(update: bool) -> None:
-    """Optionally copy virtual environment."""
+    """Optionally copy virtual environment with progress indication."""
     if not update:
         print("\nSkipping virtual environment update.")
         return
@@ -275,12 +305,40 @@ def copy_venv(update: bool) -> None:
         print(f"WARNING: Source venv not found at {src_venv}")
         return
 
-    print("\nCopying virtual environment (this may take a while)...")
+    print("\nCopying virtual environment...")
 
-    # Use shutil.copytree with dirs_exist_ok for incremental update
-    shutil.copytree(src_venv, dst_venv, dirs_exist_ok=True)
+    # Remove existing venv for clean install
+    if dst_venv.exists():
+        print("  Removing existing venv for clean install...")
+        shutil.rmtree(dst_venv)
 
-    print("Virtual environment copied.")
+    # Count total files for progress tracking
+    print("  Scanning files...")
+    all_files = list(src_venv.rglob("*"))
+    total_files = len([f for f in all_files if f.is_file()])
+    print(f"  Found {total_files} files to copy")
+
+    # Copy with progress
+    copied = 0
+    last_percent = -1
+
+    for src_path in all_files:
+        dst_path = dst_venv / src_path.relative_to(src_venv)
+
+        if src_path.is_dir():
+            dst_path.mkdir(parents=True, exist_ok=True)
+        else:
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_path, dst_path)
+            copied += 1
+
+            # Show progress every 5%
+            percent = int((copied / total_files) * 100)
+            if percent != last_percent and percent % 5 == 0:
+                print(f"  Progress: {percent}% ({copied}/{total_files} files)")
+                last_percent = percent
+
+    print(f"  Virtual environment copied ({copied} files)")
 
 
 def main():
@@ -342,10 +400,17 @@ def main():
     # Ask about venv upfront
     update_venv = get_input("\nUpdate virtual environment? (y/n): ", ["y", "n"]) == "y"
 
+    # Auto-discover Python modules
+    print("\nDiscovering Python modules...")
+    modules = discover_python_modules()
+    if not modules:
+        print("ERROR: No Python modules found to deploy!")
+        sys.exit(1)
+
     # --- Copy Files ---
     copy_launcher()
-    clean_python_modules()
-    copy_python_modules()
+    clean_python_modules(modules)
+    copy_python_modules(modules)
     copy_venv(update_venv)
     copy_resources()
     copy_global_settings()

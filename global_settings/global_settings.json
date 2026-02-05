@@ -2,9 +2,9 @@
   "comfyui_workflow_presets": {
     "Trellis 2": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_2_v003.json",
-      "description": "",
+      "description": "Image to Model",
       "iteratable": false,
-      "note": "Image to Model",
+      "note": "",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": false,
@@ -12,9 +12,9 @@
     },
     "Qwen image 2512 Turbo": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_2512_with_2steps_lora_v001.json",
-      "description": "",
+      "description": "Text to Image",
       "iteratable": false,
-      "note": "Text to Image",
+      "note": "",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": false,
@@ -22,9 +22,9 @@
     },
     "LTX2 Video": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/video_ltx2_i2v.json",
-      "description": "",
+      "description": "Image to Video",
       "iteratable": false,
-      "note": "Image to Video",
+      "note": "",
       "full_restart": false,
       "node_overrides": {
         "92:noise_seed": {
@@ -53,9 +53,9 @@
     },
     "Audio Ace Step 1.5": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/audio_ace_step_1_5.json",
-      "description": "",
+      "description": "Text to Music",
       "iteratable": false,
-      "note": "Text to Music",
+      "note": "",
       "full_restart": false,
       "node_overrides": {
         "94:seed": {
@@ -68,9 +68,9 @@
     },
     "Qwen Image Layered Control": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_layered_control.json",
-      "description": "",
+      "description": "Image to Layers (seperate images)",
       "iteratable": false,
-      "note": "Image to Layers (seperate images)",
+      "note": "",
       "full_restart": false,
       "node_overrides": {
         "83:steps": {
@@ -107,15 +107,11 @@
     },
     "MMAudio": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/mmaudio_v001.json",
-      "description": "",
+      "description": "Video to Audo",
       "iteratable": false,
-      "note": "Video to Audo",
+      "note": "Prompt is Optional",
       "full_restart": false,
       "node_overrides": {
-        "92:steps": {
-          "enabled": false,
-          "default_value": ""
-        },
         "92:cfg": {
           "enabled": false,
           "default_value": ""
@@ -135,30 +131,6 @@
         "92:force_offload": {
           "enabled": false,
           "default_value": ""
-        },
-        "91:force_rate": {
-          "enabled": false,
-          "default_value": ""
-        },
-        "91:custom_width": {
-          "enabled": false,
-          "default_value": ""
-        },
-        "91:custom_height": {
-          "enabled": false,
-          "default_value": ""
-        },
-        "91:frame_load_cap": {
-          "enabled": false,
-          "default_value": ""
-        },
-        "91:skip_first_frames": {
-          "enabled": false,
-          "default_value": ""
-        },
-        "91:select_every_nth": {
-          "enabled": false,
-          "default_value": ""
         }
       },
       "is_multi": false,
@@ -166,33 +138,33 @@
     },
     "Sharp": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/sharp_basic_v001.json",
-      "description": "",
+      "description": "Image To Gaussian Splat",
       "iteratable": false,
-      "note": "Image To Gaussian Splat",
+      "note": "",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": false,
       "output_type": "3d"
     },
-    "Stable Audio": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/audio_stable_audio.json",
-      "description": "",
-      "iteratable": false,
-      "note": "Text to Audio",
-      "full_restart": false,
-      "node_overrides": {},
-      "is_multi": false,
-      "output_type": "audio"
-    },
     "Qwen Image Edit 2511": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_edit_2511_v001.json",
-      "description": "",
+      "description": "Image Edting",
       "iteratable": true,
-      "note": "Image Edting",
+      "note": "",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": false,
       "output_type": "image"
+    },
+    "Stable Audio": {
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/audio_stable_audio_v001.json",
+      "description": "Text to Audio",
+      "iteratable": false,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": false,
+      "output_type": "audio"
     }
   },
   "comfyui_path": "D:\\ComfyUI\\",

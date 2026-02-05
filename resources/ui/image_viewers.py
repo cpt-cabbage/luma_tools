@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
-from workers import Worker
 from dialog_helpers import get_active_window, show_error, show_warning, confirm_action
 
 # Import event bus for cross-tab communication
@@ -149,6 +148,583 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
             self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
 
 
+class VideoControlBar(QWidget):
+    """
+    Video/audio playback control bar with play/pause, seek, volume, and time display.
+
+    Features:
+    - Play/pause button
+    - Timeline scrubber (seek bar)
+    - Volume control (button + slider)
+    - Time display (current / total)
+    - Loop toggle
+    - Auto-hide after inactivity
+    """
+
+    def __init__(self, media_player, parent=None):
+        super().__init__(parent)
+        self.media_player = media_player
+        self._is_playing = False
+        self._duration = 0
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self._fade_out)
+        self._hide_delay = 3000  # 3 seconds
+
+        # Enable mouse tracking and ensure widget accepts events
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+
+        self._setup_ui()
+        self._connect_signals()
+        self.setStyleSheet("""
+            QWidget {
+                background-color: rgba(0, 0, 0, 180);
+                border-radius: 5px;
+            }
+        """)
+
+    def _setup_ui(self):
+        """Set up the control bar UI."""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(10)
+        # Ensure layout doesn't constrain child widgets
+        layout.setAlignment(Qt.AlignVCenter)
+
+        # Play/Pause button
+        self.play_button = QPushButton()
+        self.play_button.setText("\u25B6")  # Play symbol ▶
+        self.play_button.setFixedSize(36, 36)  # Larger for easier clicking
+        self.play_button.setCursor(Qt.PointingHandCursor)
+        self.play_button.setFocusPolicy(Qt.ClickFocus)
+        # Ensure button gets all mouse events
+        self.play_button.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4a9eff;
+                color: white;
+                border: none;
+                border-radius: 18px;
+                font-size: 18px;
+                font-weight: bold;
+                font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Arial Unicode MS", Arial, sans-serif;
+                padding: 0px;
+                margin: 0px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #5aa9ff;
+            }
+            QPushButton:pressed {
+                background-color: #3a8eef;
+            }
+        """)
+        self.play_button.clicked.connect(self._toggle_play)
+        layout.addWidget(self.play_button)
+
+        # Current time label
+        self.time_label = QLabel("0:00")
+        self.time_label.setStyleSheet("color: white; font-size: 11px;")
+        self.time_label.setFixedWidth(45)
+        layout.addWidget(self.time_label)
+
+        # Timeline scrubber (seek bar)
+        self.timeline_slider = QSlider(Qt.Horizontal)
+        self.timeline_slider.setRange(0, 1000)
+        self.timeline_slider.setValue(0)
+        self.timeline_slider.setCursor(Qt.PointingHandCursor)
+        self.timeline_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #444444;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9eff;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #e0e0e0;
+            }
+        """)
+        self.timeline_slider.sliderPressed.connect(self._on_seek_start)
+        self.timeline_slider.sliderMoved.connect(self._on_seek_move)
+        self.timeline_slider.sliderReleased.connect(self._on_seek_end)
+        layout.addWidget(self.timeline_slider, stretch=1)
+
+        # Duration label
+        self.duration_label = QLabel("0:00")
+        self.duration_label.setStyleSheet("color: white; font-size: 11px;")
+        self.duration_label.setFixedWidth(45)
+        layout.addWidget(self.duration_label)
+
+        # Volume button
+        self.volume_button = QPushButton("🔊")
+        self.volume_button.setFixedSize(28, 28)
+        self.volume_button.setCursor(Qt.PointingHandCursor)
+        self.volume_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: white;
+                border: none;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 14px;
+            }
+        """)
+        self.volume_button.clicked.connect(self._toggle_mute)
+        layout.addWidget(self.volume_button)
+
+        # Volume slider (initially hidden)
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setCursor(Qt.PointingHandCursor)
+        self.volume_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #444444;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9eff;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 5px;
+            }
+        """)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        layout.addWidget(self.volume_slider)
+
+        # Loop toggle button
+        self.loop_button = QPushButton("🔁")
+        self.loop_button.setCheckable(True)
+        self.loop_button.setChecked(False)
+        self.loop_button.setFixedSize(28, 28)
+        self.loop_button.setCursor(Qt.PointingHandCursor)
+        self.loop_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 14px;
+            }
+            QPushButton:checked {
+                color: #4a9eff;
+            }
+        """)
+        layout.addWidget(self.loop_button)
+
+    def _connect_signals(self):
+        """Connect media player signals."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            self.media_player.positionChanged.connect(self._on_position_changed)
+            self.media_player.durationChanged.connect(self._on_duration_changed)
+            self.media_player.playbackStateChanged.connect(self._on_playback_state_changed)
+
+            # Loop support
+            self.media_player.mediaStatusChanged.connect(self._on_media_status_changed)
+        except Exception as e:
+            logger.warning(f"Failed to connect media player signals: {e}")
+
+    def _toggle_play(self):
+        """Toggle play/pause."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            # Provide immediate visual feedback
+            self.play_button.setDown(True)
+            QTimer.singleShot(100, lambda: self.play_button.setDown(False))
+
+            if self.media_player.playbackState() == QMediaPlayer.PlayingState:
+                self.media_player.pause()
+            else:
+                self.media_player.play()
+        except Exception as e:
+            logger.error(f"Error toggling playback: {e}")
+
+    def _on_playback_state_changed(self, state):
+        """Handle playback state changes."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            self._is_playing = (state == QMediaPlayer.PlayingState)
+            # Update button icon based on state
+            if self._is_playing:
+                self.play_button.setText("\u23F8")  # Pause symbol ⏸
+            else:
+                self.play_button.setText("\u25B6")  # Play symbol ▶
+        except Exception:
+            pass
+
+    def _on_position_changed(self, position):
+        """Update timeline and time label when position changes."""
+        if not self.timeline_slider.isSliderDown():
+            if self._duration > 0:
+                self.timeline_slider.setValue(int((position / self._duration) * 1000))
+
+            # Format and update time label
+            from core.utils import format_duration
+            self.time_label.setText(format_duration(position / 1000))
+
+    def _on_duration_changed(self, duration):
+        """Update duration label when media duration is known."""
+        self._duration = duration
+        from core.utils import format_duration
+        self.duration_label.setText(format_duration(duration / 1000))
+
+    def _on_seek_start(self):
+        """Pause updates while seeking."""
+        pass
+
+    def _on_seek_move(self, value):
+        """Show time preview while scrubbing."""
+        if self._duration > 0:
+            position = int((value / 1000) * self._duration)
+            from core.utils import format_duration
+            self.time_label.setText(format_duration(position / 1000))
+
+    def _on_seek_end(self):
+        """Seek to new position when slider is released."""
+        if self._duration > 0:
+            position = int((self.timeline_slider.value() / 1000) * self._duration)
+            self.media_player.setPosition(position)
+
+    def _on_volume_changed(self, value):
+        """Update volume."""
+        try:
+            from PySide6.QtMultimedia import QAudioOutput
+            # Qt6 uses QAudioOutput for volume control
+            audio_output = self.media_player.audioOutput()
+            if audio_output:
+                audio_output.setVolume(value / 100.0)
+
+                # Update volume icon
+                if value == 0:
+                    self.volume_button.setText("🔇")
+                elif value < 50:
+                    self.volume_button.setText("🔉")
+                else:
+                    self.volume_button.setText("🔊")
+        except Exception as e:
+            logger.debug(f"Error setting volume: {e}")
+
+    def _toggle_mute(self):
+        """Toggle mute."""
+        if self.volume_slider.value() > 0:
+            self._saved_volume = self.volume_slider.value()
+            self.volume_slider.setValue(0)
+        else:
+            self.volume_slider.setValue(self._saved_volume if hasattr(self, '_saved_volume') else 100)
+
+    def _on_media_status_changed(self, status):
+        """Handle media status changes for looping."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if status == QMediaPlayer.EndOfMedia and self.loop_button.isChecked():
+                self.media_player.setPosition(0)
+                self.media_player.play()
+        except Exception:
+            pass
+
+    def show_controls(self):
+        """Show controls and restart auto-hide timer."""
+        self.show()
+        self.raise_()  # Ensure controls are on top
+        self.setFocus()  # Give focus to controls for interaction
+        self._auto_hide_timer.start(self._hide_delay)
+
+    def _fade_out(self):
+        """Hide controls after inactivity."""
+        if self._is_playing:
+            self.hide()
+
+    def enterEvent(self, event):
+        """Show controls on mouse enter."""
+        super().enterEvent(event)
+        self.show_controls()
+        # Stop auto-hide while hovering over controls
+        self._auto_hide_timer.stop()
+
+    def leaveEvent(self, event):
+        """Start hide timer on mouse leave."""
+        super().leaveEvent(event)
+        self._auto_hide_timer.start(self._hide_delay)
+
+
+class WaveformWidget(QWidget):
+    """Custom widget for drawing audio waveform."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.waveform_data = None
+        self.play_position = 0.0
+        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setMinimumHeight(200)
+
+    def paintEvent(self, event):
+        """Draw the waveform."""
+        super().paintEvent(event)
+
+        if not self.waveform_data:
+            return
+
+        from PySide6.QtGui import QPainter, QPen, QColor
+        from PySide6.QtCore import QPointF
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        width = self.width()
+        height = self.height()
+        center_y = height / 2
+
+        # Draw center line
+        painter.setPen(QPen(QColor("#333333")))
+        painter.drawLine(QPointF(0, center_y), QPointF(width, center_y))
+
+        # Draw waveform
+        pen = QPen(QColor("#4a9eff"))
+        pen.setWidth(1)
+        painter.setPen(pen)
+
+        points = len(self.waveform_data)
+        x_step = width / points
+
+        for i in range(points):
+            x = i * x_step
+            sample = self.waveform_data[i]
+            y = center_y - (sample * center_y * 0.9)
+            painter.drawLine(QPointF(x, center_y), QPointF(x, y))
+
+        # Draw playback cursor
+        cursor_x = self.play_position * width
+        cursor_pen = QPen(QColor("#ef4444"))
+        cursor_pen.setWidth(2)
+        painter.setPen(cursor_pen)
+        painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))
+
+        painter.end()
+
+
+class AudioPlayerWidget(QWidget):
+    """
+    Audio player with waveform visualization.
+
+    Features:
+    - Audio playback using QMediaPlayer
+    - Animated waveform display
+    - Same playback controls as video
+    - Waveform data extraction and caching
+    """
+
+    def __init__(self, audio_path, parent=None):
+        super().__init__(parent)
+        self.audio_path = audio_path
+
+        self._setup_ui()
+        self._setup_media_player()
+        self._load_waveform_async()
+
+    def _setup_ui(self):
+        """Set up the audio player UI."""
+        self.setStyleSheet("background-color: #1a1a1a;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Waveform widget
+        self.waveform_widget = WaveformWidget(self)
+        layout.addWidget(self.waveform_widget, stretch=1)
+
+        # Status label (shown while loading)
+        self.status_label = QLabel("Loading audio...")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("color: #888888; font-size: 14px;")
+        self.status_label.setAttribute(Qt.WA_TranslucentBackground)
+        self.status_label.setParent(self.waveform_widget)
+
+    def _setup_media_player(self):
+        """Set up the media player for audio playback."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtCore import QUrl
+
+            self.media_player = QMediaPlayer(self)
+            self.audio_output = QAudioOutput(self)
+            self.media_player.setAudioOutput(self.audio_output)
+
+            # Connect signals
+            self.media_player.positionChanged.connect(self._on_position_changed)
+            self.media_player.durationChanged.connect(self._on_duration_changed)
+
+            # Load audio file
+            self.media_player.setSource(QUrl.fromLocalFile(self.audio_path))
+
+            # Create control bar as overlay
+            self.controls = VideoControlBar(self.media_player, parent=self)
+            self.controls.show()
+        except Exception as e:
+            logger.error(f"Failed to set up audio player: {e}")
+            self.status_label.setText(f"Audio Player Not Available\n\n{str(e)}")
+
+    def _load_waveform_async(self):
+        """Load waveform data in background thread."""
+        from workers import Worker
+        self._waveform_loading = True
+        self._waveform_worker = Worker(self._extract_waveform_data, self.audio_path)
+        self._waveform_worker.signals.result.connect(self._on_waveform_loaded)
+        self._waveform_worker.signals.error.connect(self._on_waveform_error)
+        QThreadPool.globalInstance().start(self._waveform_worker)
+
+    @staticmethod
+    def _extract_waveform_data(audio_path):
+        """
+        Extract waveform data from audio file using FFmpeg.
+
+        Returns:
+            list: Normalized waveform samples (values between -1.0 and 1.0)
+        """
+        import subprocess
+        import tempfile
+        import struct
+        from core.config import FFMPEG_PATH
+
+        if not FFMPEG_PATH:
+            return None
+
+        try:
+            # Extract audio to raw PCM format
+            with tempfile.NamedTemporaryFile(suffix='.raw', delete=False) as tmp:
+                tmp_path = tmp.name
+
+            # Extract mono 16-bit PCM at 8kHz (good for visualization, fast to process)
+            cmd = [
+                FFMPEG_PATH,
+                '-i', audio_path,
+                '-f', 's16le',  # 16-bit signed little-endian PCM
+                '-ac', '1',     # Mono
+                '-ar', '8000',  # 8kHz sample rate
+                '-y', tmp_path
+            ]
+
+            import os
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            result = subprocess.run(cmd, capture_output=True, timeout=30, creationflags=creationflags)
+            if result.returncode != 0:
+                logger.warning(f"FFmpeg waveform extraction failed: {result.stderr.decode()}")
+                return None
+
+            # Read PCM data
+            with open(tmp_path, 'rb') as f:
+                pcm_data = f.read()
+
+            os.remove(tmp_path)
+
+            if not pcm_data:
+                return None
+
+            # Convert to list of normalized samples
+            sample_count = len(pcm_data) // 2
+            samples = struct.unpack(f'<{sample_count}h', pcm_data)
+
+            # Normalize to -1.0 to 1.0 range
+            max_value = 32768.0
+            normalized = [s / max_value for s in samples]
+
+            # Downsample to max 2000 points for rendering performance
+            target_points = min(2000, len(normalized))
+            if len(normalized) > target_points:
+                step = len(normalized) / target_points
+                downsampled = []
+                for i in range(target_points):
+                    idx = int(i * step)
+                    # Use RMS of nearby samples for better visual representation
+                    window_start = max(0, idx - 5)
+                    window_end = min(len(normalized), idx + 5)
+                    window = normalized[window_start:window_end]
+                    rms = (sum(s * s for s in window) / len(window)) ** 0.5
+                    # Preserve sign
+                    downsampled.append(rms if sum(window) >= 0 else -rms)
+                normalized = downsampled
+
+            return normalized
+
+        except Exception as e:
+            logger.error(f"Error extracting waveform: {e}")
+            return None
+
+    def _on_waveform_loaded(self, waveform_data):
+        """Handle waveform data loaded."""
+        self.waveform_widget.waveform_data = waveform_data
+        self.status_label.hide()
+        self.waveform_widget.update()
+
+    def _on_waveform_error(self, error_msg, traceback):
+        """Handle waveform loading error."""
+        self.status_label.setText("Waveform visualization unavailable")
+        logger.warning(f"Waveform loading error: {error_msg}")
+
+    def _on_position_changed(self, position):
+        """Update playback cursor position."""
+        try:
+            duration = self.media_player.duration()
+            if duration > 0:
+                self.waveform_widget.play_position = position / duration
+                self.waveform_widget.update()
+        except Exception:
+            pass
+
+    def _on_duration_changed(self, duration):
+        """Handle duration change."""
+        pass
+
+    def resizeEvent(self, event):
+        """Handle resize to reposition controls."""
+        super().resizeEvent(event)
+
+        # Position control bar at bottom
+        if hasattr(self, 'controls'):
+            controls_height = 50
+            controls_margin = 10
+            self.controls.setGeometry(
+                controls_margin,
+                self.height() - controls_height - controls_margin,
+                self.width() - 2 * controls_margin,
+                controls_height
+            )
+            self.controls.raise_()
+
+        # Center status label
+        if hasattr(self, 'status_label'):
+            self.status_label.setGeometry(0, 0, self.waveform_widget.width(), self.waveform_widget.height())
+
+    def cleanup(self):
+        """Clean up resources."""
+        if hasattr(self, 'media_player') and self.media_player:
+            self.media_player.stop()
+
+
 class EmbeddedImageViewer(QWidget):
     """
     Embedded image viewer with keyboard navigation for use within the gallery tab.
@@ -187,6 +763,9 @@ class EmbeddedImageViewer(QWidget):
     def _setup_ui(self):
         """Set up the embedded viewer UI."""
         self.setStyleSheet("background-color: #1a1a1a;")
+
+        # Enable mouse tracking to show video controls on mouse movement
+        self.setMouseTracking(True)
 
         # Set size policy to expand and fill available space
         from PySide6.QtWidgets import QSizePolicy
@@ -236,21 +815,35 @@ class EmbeddedImageViewer(QWidget):
 
         # 3. Video Player
         try:
-            from PySide6.QtMultimedia import QMediaPlayer
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             from PySide6.QtMultimediaWidgets import QVideoWidget
 
             self.video_widget = QVideoWidget()
             self.video_widget.setStyleSheet("background-color: #000000;")
             # Qt6: QMediaPlayer constructor changed, no flags needed
             self.media_player = QMediaPlayer(self)
+
+            # Qt6 requires QAudioOutput for volume control
+            self.audio_output = QAudioOutput(self)
+            self.media_player.setAudioOutput(self.audio_output)
             self.media_player.setVideoOutput(self.video_widget)
+
+            # Enable mouse tracking on video widget to show controls
+            self.video_widget.setMouseTracking(True)
+            self.video_widget.installEventFilter(self)
+
             self.image_stack.addWidget(self.video_widget)
             self._has_video_player = True
+
+            # Create video control bar (overlay widget)
+            self.video_controls = VideoControlBar(self.media_player, parent=self.image_container)
+            self.video_controls.hide()  # Hidden by default, shown for video playback
         except Exception as e:
             logger.warning(f"Video player not available: {e}")
             self._has_video_player = False
             self.video_widget = None
             self.media_player = None
+            self.video_controls = None
 
         # 4. Message Label
         self.message_label = QLabel()
@@ -272,7 +865,7 @@ class EmbeddedImageViewer(QWidget):
         # Top bar - overlay widget (child of image_container, not in layout)
         self.top_bar = QWidget(self.image_container)
         self.top_bar.setStyleSheet("background-color: transparent;")
-        self.top_bar.setFixedHeight(75)
+        self.top_bar.setFixedHeight(50)
 
         top_layout = QHBoxLayout(self.top_bar)
         top_layout.setContentsMargins(10, 10, 10, 10)
@@ -315,62 +908,53 @@ class EmbeddedImageViewer(QWidget):
         self.fullscreen_btn.clicked.connect(self._on_fullscreen)
         top_layout.addWidget(self.fullscreen_btn)
 
-        # Bottom info bar - overlay widget (child of image_container, not in layout)
-        self.info_bar = QWidget(self.image_container)
-        self.info_bar.setStyleSheet("background-color: transparent;")
-        self.info_bar.setFixedHeight(120)
+        # Add separator
+        top_layout.addSpacing(10)
 
-        info_layout = QHBoxLayout(self.info_bar)
-        info_layout.setContentsMargins(1, 10, 10, 75)
-
-        self.filename_label = QLabel()
-        self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        info_layout.addWidget(self.filename_label)
-
-        # Like button
+        # Like button (moved from bottom)
         self.like_btn = QPushButton("♡")
-        self.like_btn.setFixedSize(32, 32)
+        self.like_btn.setFixedSize(28, 28)
         self.like_btn.setToolTip("Like (L)")
         self.like_btn.setCursor(Qt.PointingHandCursor)
         self.like_btn.clicked.connect(self._toggle_like)
         self._update_like_button_style(False)
-        info_layout.addWidget(self.like_btn)
+        top_layout.addWidget(self.like_btn)
 
-        # 3D Model controls (hidden by default)
+        # 3D Model controls (hidden by default, moved from bottom)
         # Shading Mode dropdown
         self.shading_btn = QPushButton("Textured")
-        self.shading_btn.setFixedHeight(10)
+        self.shading_btn.setFixedHeight(28)
         self.shading_btn.setStyleSheet("""
             QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
             QPushButton:hover { background-color: #5aa9ff; }
         """)
         self.shading_btn.clicked.connect(self._show_shading_menu)
         self.shading_btn.hide()
-        info_layout.addWidget(self.shading_btn)
+        top_layout.addWidget(self.shading_btn)
 
         # Lighting Mode dropdown
         self.lighting_btn = QPushButton("Studio")
-        self.lighting_btn.setFixedHeight(10)
+        self.lighting_btn.setFixedHeight(28)
         self.lighting_btn.setStyleSheet("""
             QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
             QPushButton:hover { background-color: #7c8596; }
         """)
         self.lighting_btn.clicked.connect(self._show_lighting_menu)
         self.lighting_btn.hide()
-        info_layout.addWidget(self.lighting_btn)
+        top_layout.addWidget(self.lighting_btn)
 
         # Light strength label
         self.light_label = QLabel("Light:")
         self.light_label.setStyleSheet("color: #888888; font-size: 11px;")
         self.light_label.hide()
-        info_layout.addWidget(self.light_label)
+        top_layout.addWidget(self.light_label)
 
         # Light strength slider
         self.light_slider = QSlider(Qt.Horizontal)
         self.light_slider.setMinimum(10)  # 0.1x
         self.light_slider.setMaximum(300)  # 3.0x
         self.light_slider.setValue(100)  # 1.0x default
-        self.light_slider.setFixedWidth(100)
+        self.light_slider.setFixedWidth(80)
         self.light_slider.setFixedHeight(20)
         self.light_slider.setStyleSheet("""
             QSlider::groove:horizontal {
@@ -390,18 +974,18 @@ class EmbeddedImageViewer(QWidget):
         """)
         self.light_slider.valueChanged.connect(self._on_light_strength_changed)
         self.light_slider.hide()
-        info_layout.addWidget(self.light_slider)
+        top_layout.addWidget(self.light_slider)
 
         # Light strength value label
         self.light_value_label = QLabel("1.0x")
         self.light_value_label.setFixedWidth(35)
         self.light_value_label.setStyleSheet("color: #888888; font-size: 11px;")
         self.light_value_label.hide()
-        info_layout.addWidget(self.light_value_label)
+        top_layout.addWidget(self.light_value_label)
 
         # Publish to AYON button
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
-        self.publish_to_ayon_btn.setFixedHeight(10)
+        self.publish_to_ayon_btn.setFixedHeight(28)
         self.publish_to_ayon_btn.setStyleSheet("""
             QPushButton { background-color: #10b981; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; font-weight: bold; }
             QPushButton:hover { background-color: #14ce94; }
@@ -425,18 +1009,30 @@ class EmbeddedImageViewer(QWidget):
             self.publish_to_ayon_btn.setEnabled(False)
             self.publish_to_ayon_btn.setToolTip("AYON is not available")
 
-        info_layout.addWidget(self.publish_to_ayon_btn)
+        top_layout.addWidget(self.publish_to_ayon_btn)
 
         # Delete button
         self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setFixedHeight(10)
+        self.delete_btn.setFixedHeight(28)
         self.delete_btn.setStyleSheet("""
             QPushButton { background-color: #dc2626; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; }
             QPushButton:hover { background-color: #ef4444; }
         """)
         self.delete_btn.setToolTip("Delete current file (Del)")
         self.delete_btn.clicked.connect(self._delete_current_image)
-        info_layout.addWidget(self.delete_btn)
+        top_layout.addWidget(self.delete_btn)
+
+        # Bottom info bar - overlay widget (simplified, just shows filename)
+        self.info_bar = QWidget(self.image_container)
+        self.info_bar.setStyleSheet("background-color: transparent;")
+        self.info_bar.setFixedHeight(40)
+
+        info_layout = QHBoxLayout(self.info_bar)
+        info_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.filename_label = QLabel()
+        self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        info_layout.addWidget(self.filename_label)
 
         self._current_3d_path = None
         self._saved_camera_state = None
@@ -485,17 +1081,48 @@ class EmbeddedImageViewer(QWidget):
 
         # Top bar at top of image_container
         if hasattr(self, 'top_bar'):
-            top_height = 40
+            top_height = 50
             self.top_bar.setGeometry(0, 0, w, top_height)
             self.top_bar.raise_()
             self.top_bar.show()
 
-        # Info bar at bottom of image_container
+        # Info bar at bottom of image_container (now smaller - just filename)
         if hasattr(self, 'info_bar'):
-            bar_height = 75
+            bar_height = 40
             self.info_bar.setGeometry(0, h - bar_height, w, bar_height)
             self.info_bar.raise_()
             self.info_bar.show()
+
+        # Video controls bar (above info bar when playing video)
+        if hasattr(self, 'video_controls') and self.video_controls:
+            controls_height = 50
+            controls_margin = 10
+            # Position just above info bar (40px from bottom)
+            self.video_controls.setGeometry(
+                controls_margin,
+                h - bar_height - controls_height - controls_margin,
+                w - 2 * controls_margin,
+                controls_height
+            )
+            self.video_controls.raise_()
+            # Visibility is managed by video playback state
+
+    def eventFilter(self, obj, event):
+        """Event filter to show video controls on mouse movement."""
+        from PySide6.QtCore import QEvent
+        if obj == self.video_widget and event.type() == QEvent.MouseMove:
+            if hasattr(self, 'video_controls') and self.video_controls:
+                self.video_controls.show_controls()
+        return super().eventFilter(obj, event)
+
+    def mouseMoveEvent(self, event):
+        """Show video controls on any mouse movement in viewer."""
+        super().mouseMoveEvent(event)
+        # Show controls if video is currently playing
+        if hasattr(self, 'video_controls') and self.video_controls:
+            if hasattr(self, 'video_widget') and self.video_widget:
+                if self.image_stack.currentWidget() == self.video_widget:
+                    self.video_controls.show_controls()
 
     def _init_glb_viewer_async(self, callback=None):
         """Initialize the GLB viewer widget asynchronously."""
@@ -562,8 +1189,13 @@ class EmbeddedImageViewer(QWidget):
         try:
             ext = os.path.splitext(media_path)[1].lower()
 
+            # Stop any playing media
             if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player:
                 self.media_player.stop()
+
+            # Hide video controls by default (will be shown for video files)
+            if hasattr(self, 'video_controls') and self.video_controls:
+                self.video_controls.hide()
 
             MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae', '.stl', '.ply'}
             if ext in MODEL_EXTENSIONS:
@@ -618,15 +1250,56 @@ class EmbeddedImageViewer(QWidget):
                 self.light_value_label.hide()
                 self._current_3d_path = None
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
-                    from PySide6.QtMultimedia import QMediaContent
                     from PySide6.QtCore import QUrl
 
-                    media_content = QMediaContent(QUrl.fromLocalFile(media_path))
-                    self.media_player.setMedia(media_content)
+                    # Qt6 API: use setSource instead of setMedia
+                    self.media_player.setSource(QUrl.fromLocalFile(media_path))
                     self.image_stack.setCurrentWidget(self.video_widget)
                     self.media_player.play()
+
+                    # Show video controls
+                    if hasattr(self, 'video_controls') and self.video_controls:
+                        self.video_controls.show_controls()
                 else:
                     self.message_label.setText("Video Player Not Available")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+            elif ext in ('.wav', '.mp3', '.flac', '.ogg'):
+                # Audio file
+                self.shading_btn.hide()
+                self.lighting_btn.hide()
+                self.light_label.hide()
+                self.light_slider.hide()
+                self.light_value_label.hide()
+                self._current_3d_path = None
+
+                try:
+                    # Check if we already have an audio player for this file
+                    if (not hasattr(self, '_current_audio_player') or
+                        not self._current_audio_player or
+                        getattr(self._current_audio_player, 'audio_path', None) != media_path):
+
+                        # Stop and clean up old audio player
+                        if hasattr(self, '_current_audio_player') and self._current_audio_player:
+                            old_player = self._current_audio_player
+                            if hasattr(old_player, 'cleanup'):
+                                old_player.cleanup()
+                            # Remove from stack if present
+                            stack_index = self.image_stack.indexOf(old_player)
+                            if stack_index >= 0:
+                                self.image_stack.removeWidget(old_player)
+                            old_player.deleteLater()
+
+                        # Create new audio player
+                        self._current_audio_player = AudioPlayerWidget(media_path, parent=self)
+                        self.image_stack.addWidget(self._current_audio_player)
+
+                    # Show the audio player
+                    self.image_stack.setCurrentWidget(self._current_audio_player)
+
+                except Exception as e:
+                    logger.error(f"Error loading audio player: {e}")
+                    self.message_label.setText(f"Audio Player Error\n\n{str(e)}")
                     self.image_stack.setCurrentWidget(self.message_label)
 
             elif ext == '.exr':
@@ -1250,8 +1923,10 @@ class EmbeddedImageViewer(QWidget):
 
     def _open_folder(self, image_path):
         import subprocess
+        import os
         try:
-            subprocess.Popen(f'explorer /select,"{image_path}"')
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'explorer /select,"{image_path}"', creationflags=creationflags)
         except Exception as e:
             logger.error(f"Error opening folder: {e}")
 
@@ -1303,6 +1978,9 @@ class FullscreenImageViewer(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setStyleSheet("background-color: #1a1a1a;")
 
+        # Enable mouse tracking to show video controls on mouse movement
+        self.setMouseTracking(True)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1320,6 +1998,35 @@ class FullscreenImageViewer(QWidget):
         self.message_label.setAlignment(Qt.AlignCenter)
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
         self.image_stack.addWidget(self.message_label)
+
+        # Video Player
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtMultimediaWidgets import QVideoWidget
+
+            self.video_widget = QVideoWidget()
+            self.video_widget.setStyleSheet("background-color: #000000;")
+            self.media_player = QMediaPlayer(self)
+            self.audio_output = QAudioOutput(self)
+            self.media_player.setAudioOutput(self.audio_output)
+            self.media_player.setVideoOutput(self.video_widget)
+
+            # Enable mouse tracking
+            self.video_widget.setMouseTracking(True)
+            self.video_widget.installEventFilter(self)
+
+            self.image_stack.addWidget(self.video_widget)
+            self._has_video_player = True
+
+            # Create video control bar (overlay widget)
+            self.video_controls = VideoControlBar(self.media_player, parent=self)
+            self.video_controls.hide()
+        except Exception as e:
+            logger.warning(f"Video player not available: {e}")
+            self._has_video_player = False
+            self.video_widget = None
+            self.media_player = None
+            self.video_controls = None
 
         # Info bar - overlays on content
         self.info_bar = QWidget(self)  # Child of self for overlay
@@ -1388,14 +2095,44 @@ class FullscreenImageViewer(QWidget):
         super().resizeEvent(event)
         self._position_overlays()
 
+    def eventFilter(self, obj, event):
+        """Event filter to show video controls on mouse movement."""
+        from PySide6.QtCore import QEvent
+        if hasattr(self, 'video_widget') and obj == self.video_widget and event.type() == QEvent.MouseMove:
+            if hasattr(self, 'video_controls') and self.video_controls:
+                self.video_controls.show_controls()
+        return super().eventFilter(obj, event)
+
+    def mouseMoveEvent(self, event):
+        """Show video controls on any mouse movement in viewer."""
+        super().mouseMoveEvent(event)
+        # Show controls if video is currently playing
+        if hasattr(self, 'video_controls') and self.video_controls:
+            if hasattr(self, 'video_widget') and self.video_widget:
+                if self.image_stack.currentWidget() == self.video_widget:
+                    self.video_controls.show_controls()
+
     def _position_overlays(self):
         """Position info bar and nav buttons as overlays."""
         # Lower the content first
         if hasattr(self, 'image_stack'):
             self.image_stack.lower()
 
-        # Position info_bar at bottom
+        # Video controls bar (above info bar when playing video)
         bar_height = self.info_bar.height()
+        if hasattr(self, 'video_controls') and self.video_controls:
+            controls_height = 50
+            controls_margin = 20
+            # Position just above info bar
+            self.video_controls.setGeometry(
+                controls_margin,
+                self.height() - bar_height - controls_height - controls_margin,
+                self.width() - 2 * controls_margin,
+                controls_height
+            )
+            self.video_controls.raise_()
+
+        # Position info_bar at bottom
         self.info_bar.setGeometry(0, self.height() - bar_height, self.width(), bar_height)
         self.info_bar.raise_()
         self.info_bar.show()
@@ -1416,16 +2153,71 @@ class FullscreenImageViewer(QWidget):
         if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
             return
 
-        image_path = self.image_paths[self.current_index]
+        media_path = self.image_paths[self.current_index]
 
         try:
-            ext = os.path.splitext(image_path)[1].lower()
+            ext = os.path.splitext(media_path)[1].lower()
 
-            if ext == '.exr':
+            # Stop any playing media
+            if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player:
+                self.media_player.stop()
+
+            # Hide video controls by default
+            if hasattr(self, 'video_controls') and self.video_controls:
+                self.video_controls.hide()
+
+            if ext in ('.mp4', '.mov', '.avi', '.webm'):
+                # Video file
+                if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
+                    from PySide6.QtCore import QUrl
+                    self.media_player.setSource(QUrl.fromLocalFile(media_path))
+                    self.image_stack.setCurrentWidget(self.video_widget)
+                    self.media_player.play()
+
+                    # Show video controls
+                    if hasattr(self, 'video_controls') and self.video_controls:
+                        self.video_controls.show_controls()
+                else:
+                    self.message_label.setText("Video Player Not Available")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+            elif ext in ('.wav', '.mp3', '.flac', '.ogg'):
+                # Audio file
+                try:
+                    # Check if we already have an audio player for this file
+                    if (not hasattr(self, '_current_audio_player') or
+                        not self._current_audio_player or
+                        getattr(self._current_audio_player, 'audio_path', None) != media_path):
+
+                        # Stop and clean up old audio player
+                        if hasattr(self, '_current_audio_player') and self._current_audio_player:
+                            old_player = self._current_audio_player
+                            if hasattr(old_player, 'cleanup'):
+                                old_player.cleanup()
+                            stack_index = self.image_stack.indexOf(old_player)
+                            if stack_index >= 0:
+                                self.image_stack.removeWidget(old_player)
+                            old_player.deleteLater()
+
+                        # Create new audio player
+                        self._current_audio_player = AudioPlayerWidget(media_path, parent=self)
+                        self.image_stack.addWidget(self._current_audio_player)
+
+                    # Show the audio player
+                    self.image_stack.setCurrentWidget(self._current_audio_player)
+
+                except Exception as e:
+                    logger.error(f"Error loading audio player: {e}")
+                    self.message_label.setText(f"Audio Player Error\n\n{str(e)}")
+                    self.image_stack.setCurrentWidget(self.message_label)
+
+            elif ext == '.exr':
                 self.message_label.setText("EXR Preview Not Available")
                 self.image_stack.setCurrentWidget(self.message_label)
+
             else:
-                pixmap = QPixmap(image_path)
+                # Regular image
+                pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
                     self.image_view.setPixmap(pixmap)
                     self.image_stack.setCurrentWidget(self.image_view)
@@ -1793,8 +2585,10 @@ class FullscreenImageViewer(QWidget):
 
     def _open_folder(self, image_path):
         import subprocess
+        import os
         try:
-            subprocess.Popen(f'explorer /select,"{image_path}"')
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'explorer /select,"{image_path}"', creationflags=creationflags)
         except Exception as e:
             logger.error(f"Error opening folder: {e}")
 

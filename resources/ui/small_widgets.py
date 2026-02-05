@@ -501,6 +501,12 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         if file_type == 'model':
             # For 3D models, try to get cached thumbnail
             self._load_model_thumbnail(path)
+        elif file_type == 'video':
+            # For videos, extract first frame
+            self._load_video_thumbnail(path)
+        elif file_type == 'audio':
+            # For audio, show placeholder with duration
+            self._load_audio_placeholder(path)
         else:
             # For images, load scaled version
             self._load_image_thumbnail(path)
@@ -708,6 +714,263 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
         if self.thumbnail_label:
             self.thumbnail_label.setPixmap(pixmap)
+
+    def _load_video_thumbnail(self, path):
+        """Load video thumbnail by extracting first frame."""
+        # Show video placeholder immediately
+        self._show_video_placeholder()
+
+        # Extract first frame and duration in background
+        from PySide6.QtCore import QThreadPool
+        from workers import Worker
+        self._load_worker = Worker(self._extract_video_frame_with_duration, path)
+        self._load_worker.signals.result.connect(self._on_video_thumbnail_loaded)
+        self._load_worker.signals.error.connect(lambda msg, tb: None)  # Keep placeholder on error
+        QThreadPool.globalInstance().start(self._load_worker)
+
+    @staticmethod
+    def _extract_video_frame_with_duration(video_path):
+        """Extract first frame and duration from video using FFmpeg.
+
+        Returns:
+            tuple: (image_data: bytes, duration: float) or None on error
+        """
+        import subprocess
+        import tempfile
+        import os
+        from core.config import FFMPEG_PATH
+        from core.utils import get_media_duration
+
+        if not FFMPEG_PATH:
+            return None
+
+        try:
+            # Extract duration
+            duration = get_media_duration(video_path)
+
+            # Extract first frame
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp_path = tmp.name
+            cmd = [
+                FFMPEG_PATH, '-i', video_path,
+                '-vframes', '1', '-y', tmp_path
+            ]
+            import os
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.run(cmd, capture_output=True, timeout=10, creationflags=creationflags)
+            from PySide6.QtGui import QImage
+            from PySide6.QtCore import QBuffer, QIODevice, Qt
+            image = QImage(tmp_path)
+            os.remove(tmp_path)
+            if image.isNull():
+                return None
+
+            scaled = image.scaled(
+                150, 150,  # THUMBNAIL_SIZE
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            scaled.save(buffer, "PNG")
+            return (buffer.data().data(), duration)
+        except Exception:
+            return None
+
+    def _on_video_thumbnail_loaded(self, result):
+        """Handle video thumbnail and duration loaded."""
+        from shiboken6 import isValid
+        from PySide6.QtGui import QPixmap
+
+        if not isValid(self):
+            return
+        if result is None:
+            return  # Keep the video placeholder
+
+        image_data, duration = result
+        pixmap = QPixmap()
+        pixmap.loadFromData(image_data)
+        if not pixmap.isNull():
+            # Add duration badge overlay
+            pixmap = self._add_duration_badge(pixmap, duration)
+            self._on_thumbnail_loaded(pixmap)
+
+    def _show_video_placeholder(self):
+        """Show a video placeholder with modern styling."""
+        from PySide6.QtGui import QPainter, QColor, QPixmap, QPainterPath, QBrush, QPolygon
+        from PySide6.QtCore import QPoint
+
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw rounded rectangle background
+        bg_color = "#1e3a5f" if self._has_metadata else "#2d3139"
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
+        painter.fillPath(path, QBrush(QColor(bg_color)))
+
+        # Draw play button icon (triangle)
+        icon_color = "#4a9eff"
+        painter.setBrush(QColor(icon_color))
+        painter.setPen(QColor(icon_color))
+        center_x, center_y = 75, 65
+        triangle = QPolygon([
+            QPoint(center_x - 12, center_y - 18),
+            QPoint(center_x - 12, center_y + 18),
+            QPoint(center_x + 18, center_y)
+        ])
+        painter.drawPolygon(triangle)
+
+        # Draw "VIDEO" text
+        painter.setPen(QColor("#666666"))
+        font = painter.font()
+        font.setPointSize(10)
+        painter.setFont(font)
+        painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 25, Qt.AlignCenter, "VIDEO")
+        painter.end()
+
+        if self.thumbnail_label:
+            self.thumbnail_label.setPixmap(pixmap)
+
+    def _load_audio_placeholder(self, path):
+        """Show audio placeholder and load duration."""
+        # Show audio placeholder immediately
+        self._show_audio_placeholder()
+
+        # Extract duration in background
+        from PySide6.QtCore import QThreadPool
+        from workers import Worker
+        self._load_worker = Worker(self._extract_audio_duration, path)
+        self._load_worker.signals.result.connect(self._on_audio_duration_loaded)
+        self._load_worker.signals.error.connect(lambda msg, tb: None)  # Keep placeholder on error
+        QThreadPool.globalInstance().start(self._load_worker)
+
+    @staticmethod
+    def _extract_audio_duration(audio_path):
+        """Extract duration from audio file."""
+        from core.utils import get_media_duration
+        return get_media_duration(audio_path)
+
+    def _on_audio_duration_loaded(self, duration):
+        """Handle audio duration loaded - redraw placeholder with duration."""
+        from shiboken6 import isValid
+        if not isValid(self) or not self.thumbnail_label:
+            return
+
+        # Redraw placeholder with duration badge
+        pixmap = self._create_audio_placeholder_with_duration(duration)
+        self.thumbnail_label.setPixmap(pixmap)
+
+    def _show_audio_placeholder(self):
+        """Show audio placeholder without duration (will be updated when loaded)."""
+        if self.thumbnail_label:
+            pixmap = self._create_audio_placeholder_with_duration(None)
+            self.thumbnail_label.setPixmap(pixmap)
+
+    def _create_audio_placeholder_with_duration(self, duration):
+        """Create an audio placeholder with music note icon and optional duration.
+
+        Args:
+            duration: Duration in seconds (float) or None
+
+        Returns:
+            QPixmap: Audio placeholder with music note icon
+        """
+        from PySide6.QtGui import QPainter, QColor, QPixmap, QPainterPath, QBrush, QPen
+
+        pixmap = QPixmap(*self.THUMBNAIL_SIZE)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw rounded rectangle background
+        bg_color = "#1e3a5f" if self._has_metadata else "#2d3139"
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
+        painter.fillPath(path, QBrush(QColor(bg_color)))
+
+        # Draw music note icon
+        icon_color = "#4a9eff"
+        painter.setPen(QPen(QColor(icon_color), 3))
+        center_x, center_y = 75, 60
+        # Stem
+        painter.drawLine(center_x + 8, center_y - 20, center_x + 8, center_y + 10)
+        # Note head (ellipse)
+        painter.setBrush(QColor(icon_color))
+        painter.drawEllipse(center_x - 8, center_y + 5, 16, 10)
+
+        # Draw "AUDIO" text
+        painter.setPen(QColor("#666666"))
+        font = painter.font()
+        font.setPointSize(10)
+        painter.setFont(font)
+        painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "AUDIO")
+
+        # Add duration badge if available
+        if duration is not None and duration > 0:
+            pixmap = self._add_duration_badge(pixmap, duration)
+
+        painter.end()
+        return pixmap
+
+    def _add_duration_badge(self, pixmap, duration):
+        """Add duration badge overlay to thumbnail pixmap.
+
+        Args:
+            pixmap: Original thumbnail pixmap
+            duration: Duration in seconds (float)
+
+        Returns:
+            QPixmap: Pixmap with duration badge overlay
+        """
+        if duration is None or duration <= 0:
+            return pixmap
+
+        from core.utils import format_duration
+        from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+        from PySide6.QtCore import QRect
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Format duration
+        duration_text = format_duration(duration)
+
+        # Badge dimensions and position (bottom-right corner)
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        metrics = painter.fontMetrics()
+        text_width = metrics.horizontalAdvance(duration_text)
+        text_height = metrics.height()
+
+        padding = 4
+        badge_width = text_width + padding * 2
+        badge_height = text_height + padding
+
+        # Position at bottom-right with small margin
+        margin = 4
+        badge_x = self.THUMBNAIL_SIZE[0] - badge_width - margin
+        badge_y = self.THUMBNAIL_SIZE[1] - badge_height - margin
+
+        # Draw badge background (semi-transparent black)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+        painter.setPen(Qt.NoPen)
+        badge_rect = QRect(badge_x, badge_y, badge_width, badge_height)
+        painter.drawRoundedRect(badge_rect, 2, 2)
+
+        # Draw duration text (white)
+        painter.setPen(QPen(QColor(255, 255, 255, 255)))
+        painter.drawText(badge_rect, Qt.AlignCenter, duration_text)
+
+        painter.end()
+        return pixmap
 
     def _on_thumbnail_loaded(self, pixmap):
         """Handle thumbnail load completion."""

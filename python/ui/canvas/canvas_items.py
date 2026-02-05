@@ -1132,7 +1132,8 @@ class ImageNode(QGraphicsItem):
         import subprocess
         folder = os.path.dirname(self.image_path)
         if os.path.exists(folder):
-            subprocess.Popen(f'explorer /select,"{self.image_path}"')
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'explorer /select,"{self.image_path}"', creationflags=creationflags)
 
     def _show_properties(self):
         """Show properties dialog for this image."""

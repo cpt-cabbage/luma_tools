@@ -796,20 +796,10 @@
             <item>
              <widget class="QCheckBox" name="ComfyUIFastMode">
               <property name="text">
-               <string>Fast Mode (--fast)</string>
+               <string>Fast Mode (--fast fp16_accumulation)</string>
               </property>
               <property name="toolTip">
-               <string>Enable --fast flag for faster execution. May slightly reduce quality for some models.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="ComfyUIFP16Accumulation">
-              <property name="text">
-               <string>FP16 Accumulation (--fp16-accumulation)</string>
-              </property>
-              <property name="toolTip">
-               <string>Enable --fp16-accumulation for faster FP16 math operations. Requires compatible GPU.</string>
+               <string>Enable --fast with fp16 accumulation for faster execution. May slightly reduce quality for some models.</string>
               </property>
              </widget>
             </item>

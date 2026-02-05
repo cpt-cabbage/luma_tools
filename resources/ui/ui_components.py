@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
     QMenu, QDialog, QComboBox, QApplication
 )
-from PySide6.QtGui import QPainter, QColor, QPen, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPen, QPixmap, QBrush
 from shiboken6 import isValid
 from dialog_helpers import get_active_window, confirm_action, show_error
 
@@ -932,33 +932,48 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _load_video_thumbnail(self):
         """Load video thumbnail by extracting first frame."""
         self.thumbnail_label.setPixmap(self._create_video_placeholder())
-        self._load_worker = Worker(self._extract_video_frame, self.path)
+        self._load_worker = Worker(self._extract_video_frame_with_duration, self.path)
         self._load_worker.signals.result.connect(self._on_video_thumbnail_loaded)
         self._load_worker.signals.error.connect(lambda msg, tb: None)  # Keep placeholder on error
         QThreadPool.globalInstance().start(self._load_worker)
 
     @staticmethod
-    def _extract_video_frame(video_path):
-        """Extract first frame from video using FFmpeg."""
+    def _extract_video_frame_with_duration(video_path):
+        """
+        Extract first frame and duration from video using FFmpeg.
+
+        Returns:
+            tuple: (image_data: bytes, duration: float) or None on error
+        """
         import subprocess
         import tempfile
         from core.config import FFMPEG_PATH
+        from core.utils import get_media_duration
+
         if not FFMPEG_PATH:
             return None
+
         try:
+            # Extract duration
+            duration = get_media_duration(video_path)
+
+            # Extract first frame
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
                 tmp_path = tmp.name
             cmd = [
                 FFMPEG_PATH, '-i', video_path,
                 '-vframes', '1', '-y', tmp_path
             ]
-            subprocess.run(cmd, capture_output=True, timeout=10)
+            import os
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.run(cmd, capture_output=True, timeout=10, creationflags=creationflags)
             from PySide6.QtGui import QImage
             from PySide6.QtCore import QBuffer, QIODevice
             image = QImage(tmp_path)
             os.remove(tmp_path)
             if image.isNull():
                 return None
+
             scaled = image.scaled(
                 ThumbnailWidget.THUMBNAIL_SIZE[0],
                 ThumbnailWidget.THUMBNAIL_SIZE[1],
@@ -968,19 +983,75 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             buffer = QBuffer()
             buffer.open(QIODevice.WriteOnly)
             scaled.save(buffer, "PNG")
-            return buffer.data().data()
+            return (buffer.data().data(), duration)
         except Exception:
             return None
 
-    def _on_video_thumbnail_loaded(self, image_data):
+    def _on_video_thumbnail_loaded(self, result):
+        """Handle video thumbnail and duration loaded."""
         if not isValid(self):
             return
-        if image_data is None:
+        if result is None:
             return  # Keep the video placeholder
+
+        image_data, duration = result
         pixmap = QPixmap()
         pixmap.loadFromData(image_data)
         if not pixmap.isNull():
+            # Draw duration badge on thumbnail
+            pixmap = self._add_duration_badge(pixmap, duration)
             self.thumbnail_label.setPixmap(pixmap)
+
+    def _add_duration_badge(self, pixmap, duration):
+        """
+        Add duration badge overlay to thumbnail pixmap.
+
+        Args:
+            pixmap: Original thumbnail pixmap
+            duration: Duration in seconds (float)
+
+        Returns:
+            QPixmap: Pixmap with duration badge overlay
+        """
+        if duration is None or duration <= 0:
+            return pixmap
+
+        from core.utils import format_duration
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Format duration
+        duration_text = format_duration(duration)
+
+        # Badge dimensions and position (bottom-right corner)
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        fm = painter.fontMetrics()
+        text_width = fm.horizontalAdvance(duration_text)
+        text_height = fm.height()
+
+        padding = 4
+        badge_width = text_width + 2 * padding
+        badge_height = text_height + padding
+
+        x = pixmap.width() - badge_width - 5
+        y = pixmap.height() - badge_height - 5
+
+        # Draw semi-transparent background
+        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(x, y, badge_width, badge_height, 3, 3)
+
+        # Draw text
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(x + padding, y + text_height - 2, duration_text)
+
+        painter.end()
+        return pixmap
 
     def _create_video_placeholder(self):
         """Create a video placeholder with play icon."""
@@ -1021,8 +1092,33 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     # --- Audio placeholder ---
     def _load_audio_placeholder(self):
-        """Show audio placeholder (no thumbnail extraction for audio)."""
+        """Show audio placeholder and load duration."""
         self.thumbnail_label.setPixmap(self._create_audio_placeholder())
+        # Load duration in background
+        self._load_worker = Worker(self._extract_audio_duration, self.path)
+        self._load_worker.signals.result.connect(self._on_audio_duration_loaded)
+        self._load_worker.signals.error.connect(lambda msg, tb: None)
+        QThreadPool.globalInstance().start(self._load_worker)
+
+    @staticmethod
+    def _extract_audio_duration(audio_path):
+        """Extract duration from audio file."""
+        from core.utils import get_media_duration
+        return get_media_duration(audio_path)
+
+    def _on_audio_duration_loaded(self, duration):
+        """Handle audio duration loaded."""
+        if not isValid(self):
+            return
+        if duration is None:
+            return
+
+        # Get current pixmap and add duration badge
+        pixmap = self.thumbnail_label.pixmap()
+        if pixmap and not pixmap.isNull():
+            pixmap = pixmap.copy()  # Make a copy to modify
+            pixmap = self._add_duration_badge(pixmap, duration)
+            self.thumbnail_label.setPixmap(pixmap)
 
     def _create_audio_placeholder(self):
         """Create an audio placeholder with music note icon."""
@@ -1461,8 +1557,10 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     def _open_folder(self):
         import subprocess
+        import os
         try:
-            subprocess.Popen(f'explorer /select,"{self.path}"')
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'explorer /select,"{self.path}"', creationflags=creationflags)
         except Exception as e:
             logger.error(f"Error opening folder: {e}")
 

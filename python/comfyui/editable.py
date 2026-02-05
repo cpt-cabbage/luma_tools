@@ -204,6 +204,11 @@ def _extract_subgraph_widgets(
             if widget_name in _PHANTOM_WIDGET_NAMES:
                 continue
 
+            # Skip widgets that have a connection (link) - they're not user-editable
+            inp_info = input_lookup.get(widget_name)
+            if inp_info and inp_info.get('link') is not None:
+                continue
+
             # Get value from widgets_values
             value = widgets_values[idx] if idx < len(widgets_values) else None
 
@@ -398,8 +403,16 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         # Get widget configuration for this node type
         config = EDITABLE_NODE_CONFIGS.get(node_type)
         if config:
+            # Build lookup of connected inputs (those with links)
+            node_inputs = node.get('inputs', [])
+            connected_inputs = {inp.get('name') for inp in node_inputs if inp.get('link') is not None}
+
             resolved = _resolve_config_entries(node_type, config)
             for widget_idx, widget_name, widget_type in resolved:
+                # Skip widgets that are connected to other nodes (not user-editable)
+                if widget_name in connected_inputs:
+                    continue
+
                 current_value = None
                 if widget_idx is not None and widget_idx < len(widgets_values):
                     current_value = widgets_values[widget_idx]
@@ -423,7 +436,18 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
             from comfyui.node_info import get_node_info, get_widget_index
             info = get_node_info(node_type)
             if info and info.widgets:
+                # Build lookup of connected inputs (those with links)
+                node_inputs = node.get('inputs', [])
+                connected_inputs = {inp.get('name') for inp in node_inputs if inp.get('link') is not None}
+                logger.info(f"Node {node_id} ({node_type}): total widgets={len(info.widgets)}, connected_inputs={connected_inputs}")
+
                 for widget in info.widgets:
+                    # Skip widgets that are connected to other nodes (not user-editable)
+                    if widget.name in connected_inputs:
+                        logger.info(f"  Skipping connected widget: {widget.name}")
+                        continue
+                    logger.info(f"  Adding editable widget: {widget.name}")
+
                     widget_idx = get_widget_index(node_type, widget.name)
                     current_value = None
                     if widget_idx is not None and widget_idx < len(widgets_values):

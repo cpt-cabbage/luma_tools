@@ -73,7 +73,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_mode": SettingDef("comfyui_mode", "embedded", "global", _validate_comfyui_mode),
     "comfyui_python_path": SettingDef("comfyui_python_path", "", "global"),
     "comfyui_fast_mode": SettingDef("comfyui_fast_mode", False, "global"),
-    "comfyui_fp16_accumulation": SettingDef("comfyui_fp16_accumulation", False, "global"),
     "comfyui_lowvram": SettingDef("comfyui_lowvram", False, "global"),
     "comfyui_highvram": SettingDef("comfyui_highvram", False, "global"),
     "comfyui_normalvram": SettingDef("comfyui_normalvram", False, "global"),
@@ -155,6 +154,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "cached_oiio_path": SettingDef("cached_oiio_path", "", "user"),
     "cached_oiio_info_path": SettingDef("cached_oiio_info_path", "", "user"),
     "cached_ffmpeg_path": SettingDef("cached_ffmpeg_path", "", "user"),
+    # Prompt Builder Settings
+    "prompt_builder_presets": SettingDef("prompt_builder_presets", {}, "user"),
+    "prompt_builder_last_template": SettingDef("prompt_builder_last_template", "Natural Language", "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }

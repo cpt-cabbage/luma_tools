@@ -245,12 +245,8 @@ class ModelBar(QFrame):
         return self._model_name
 
     def _get_description(self) -> str:
-        """Get description from preset config."""
-        # Try description field first, then note field
-        desc = self._preset_config.get("description", "").strip()
-        if not desc:
-            desc = self._preset_config.get("note", "").strip()
-        return desc
+        """Get description from preset config (shown in model browser)."""
+        return self._preset_config.get("description", "").strip()
 
     def _apply_style(self):
         """Apply current style based on state."""

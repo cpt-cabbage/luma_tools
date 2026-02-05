@@ -97,6 +97,12 @@ class ViewerManager(BaseGalleryManager):
             if hasattr(self.tab, '_groups_panel'):
                 self.tab._groups_panel.hide()
 
+        # Hide gallery header and footer (sort, filters, status)
+        if hasattr(self.tab.ui, 'galleryHeaderLayout'):
+            self._set_layout_visible(self.tab.ui.galleryHeaderLayout, False)
+        if hasattr(self.tab.ui, 'galleryFooterLayout'):
+            self._set_layout_visible(self.tab.ui.galleryFooterLayout, False)
+
         # Check if viewer creation is already in progress
         if self._viewer_creation_pending:
             # Update the pending parameters for when creation completes
@@ -251,6 +257,12 @@ class ViewerManager(BaseGalleryManager):
             if hasattr(self.tab, '_groups_panel'):
                 self.tab._groups_panel.show()
 
+        # Show gallery header and footer again
+        if hasattr(self.tab.ui, 'galleryHeaderLayout'):
+            self._set_layout_visible(self.tab.ui.galleryHeaderLayout, True)
+        if hasattr(self.tab.ui, 'galleryFooterLayout'):
+            self._set_layout_visible(self.tab.ui.galleryFooterLayout, True)
+
     def _on_view_fullscreen(self, image_path, index):
         """Handle request to view in fullscreen from embedded viewer."""
         self.open_viewer(image_path, fullscreen=True)
@@ -286,3 +298,15 @@ class ViewerManager(BaseGalleryManager):
 
         # Open viewer with filtered list
         self.open_viewer(start_image=selected_paths[0], image_paths=selected_paths)
+
+    def _set_layout_visible(self, layout, visible):
+        """Set visibility of all widgets in a layout."""
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setVisible(visible)
+                # Handle nested layouts
+                elif item.layout():
+                    self._set_layout_visible(item.layout(), visible)

@@ -184,7 +184,9 @@ class ComfyUIWidgetManager:
             left_layout.setContentsMargins(0, 0, 0, 0)
             left_layout.setSpacing(5)
             for widget, node in non_image_widgets:
-                left_layout.addWidget(widget, 1)  # Add stretch factor to expand
+                # Only text widgets (multiline) should expand vertically
+                stretch = 1 if node.widget_type == 'text' else 0
+                left_layout.addWidget(widget, stretch)
             left_layout.addStretch()
             horizontal_layout.addWidget(left_container)
 
@@ -226,7 +228,11 @@ class ComfyUIWidgetManager:
 
         elif non_image_widgets and not image_widgets:
             for widget, node in non_image_widgets:
-                self.layout.addWidget(widget, 1)  # Add stretch factor for each widget
+                # Only text widgets (multiline) should expand vertically
+                stretch = 1 if node.widget_type == 'text' else 0
+                self.layout.addWidget(widget, stretch)
+            # Add final stretch to push non-expanding widgets to the top
+            self.layout.addStretch()
 
         # Second pass: set up conditional visibility connections
         for node in editable_nodes:
@@ -277,6 +283,25 @@ class ComfyUIWidgetManager:
                 parent.layout().invalidate()
                 parent.layout().activate()
             parent = parent.parentWidget()
+
+    def _create_label_with_tooltip(self, text: str, min_width: int = 160) -> QLabel:
+        """Create a label that expands to show full text.
+
+        Args:
+            text: Label text
+            min_width: Minimum width in pixels
+
+        Returns:
+            QLabel configured to expand and show full text
+        """
+        from PySide6.QtCore import Qt
+        label = QLabel(text)
+        label.setMinimumWidth(min_width)
+        # Allow label to expand horizontally to show full text
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        label.setWordWrap(False)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        return label
 
     def _find_toggle_widget_by_name(self, condition_name):
         """Find a toggle widget by the condition node name."""
@@ -357,9 +382,7 @@ class ComfyUIWidgetManager:
             # 3D model selector - file browser for GLB/OBJ/FBX files
             file_row = QHBoxLayout()
 
-            label = QLabel(f"{node.display_name}:")
-            label.setMinimumWidth(160)
-            label.setMaximumWidth(160)
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
             file_row.addWidget(label)
 
             file_path_edit = QLineEdit()
@@ -382,9 +405,7 @@ class ComfyUIWidgetManager:
         elif node.widget_type == 'text':
             # Top row: Label and Presets button
             top_row = QHBoxLayout()
-            label = QLabel(f"{node.display_name}:")
-            label.setMinimumWidth(160)
-            label.setMaximumWidth(160)
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
             top_row.addWidget(label)
             top_row.addStretch()
 
@@ -414,9 +435,7 @@ class ComfyUIWidgetManager:
                 input_widget.set_last_browse_dir(last_dir)
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
-            label = QLabel(f"{node.display_name}:")
-            label.setMinimumWidth(160)
-            label.setMaximumWidth(160)
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
             input_widget.toolbar_layout.insertWidget(0, label)
 
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
@@ -436,9 +455,7 @@ class ComfyUIWidgetManager:
                 input_widget.set_last_browse_dir(last_dir)
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
-            label = QLabel(f"{node.display_name}:")
-            label.setMinimumWidth(160)
-            label.setMaximumWidth(160)
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
             input_widget.toolbar_layout.insertWidget(0, label)
 
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
@@ -448,9 +465,7 @@ class ComfyUIWidgetManager:
             # Default: generic line edit for strings, ints, floats
             row = QHBoxLayout()
 
-            label = QLabel(f"{node.display_name}:")
-            label.setMinimumWidth(160)
-            label.setMaximumWidth(160)
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
             row.addWidget(label)
 
             input_widget = QLineEdit()

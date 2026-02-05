@@ -8,6 +8,8 @@ Scans directories, pre-generates GLB thumbnails, and caches results.
 import os
 import sys
 import logging
+import re
+import threading
 from typing import Optional, List, Dict, Callable
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,33 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # GALLERY PRE-WARMING
 # ============================================================================
+
+def validate_username(username: str) -> bool:
+    """
+    Validate username contains only safe characters.
+
+    Args:
+        username: Username to validate
+
+    Returns:
+        True if username is valid, False otherwise
+    """
+    if not username or not isinstance(username, str):
+        return False
+
+    # Strip whitespace and check if empty
+    username = username.strip()
+    if not username:
+        return False
+
+    # Only allow alphanumeric, underscore, hyphen, and period
+    # This prevents path traversal attacks like "../other_user"
+    if not re.match(r'^[a-zA-Z0-9._-]+$', username):
+        logger.error(f"[PreWarm] Invalid username characters: {username}")
+        return False
+
+    return True
+
 
 def get_gallery_output_path() -> Optional[str]:
     """
@@ -28,12 +57,42 @@ def get_gallery_output_path() -> Optional[str]:
         from core.settings_manager import get_setting
         from core.state_manager import app_state
 
+        # Validate network_output_path setting
         network_path = get_setting("network_output_path")
+        if not network_path or not isinstance(network_path, str):
+            logger.error("[PreWarm] network_output_path not configured or invalid")
+            return None
+
+        # Strip whitespace from network path
+        network_path = network_path.strip()
         if not network_path:
+            logger.error("[PreWarm] network_output_path is empty")
+            return None
+
+        # Verify it's an absolute path
+        if not os.path.isabs(network_path):
+            logger.error(f"[PreWarm] network_output_path must be absolute: {network_path}")
+            return None
+
+        # Get username (already set by app_state.initialize_from_args)
+        # Don't fall back to os.environ - app_state.user is set in both shot and standalone modes
+        username = app_state.user
+
+        # Normalize username: strip whitespace, treat empty as None
+        username = username.strip() if username else None
+
+        # SECURITY: Reject empty username - don't fall back to base path
+        # This prevents showing all users' files when username is missing
+        if not username:
+            logger.error("[PreWarm] Cannot create user gallery path without username")
+            return None
+
+        # SECURITY: Validate username to prevent path traversal attacks
+        if not validate_username(username):
+            logger.error(f"[PreWarm] Username validation failed: {username}")
             return None
 
         # Add user subfolder
-        username = app_state.user or os.environ.get('USERNAME', 'unknown')
         user_path = os.path.join(network_path, username)
 
         # Create user's gallery folder if it doesn't exist
@@ -43,10 +102,8 @@ def get_gallery_output_path() -> Optional[str]:
                 ensure_directory(user_path)
                 logger.info(f"[PreWarm] Created gallery directory: {user_path}")
             except Exception as e:
-                logger.warning(f"[PreWarm] Could not create gallery directory: {user_path} - {e}")
-                # Fall back to network_path if user folder creation failed
-                if os.path.isdir(network_path):
-                    return network_path
+                # SECURITY: Don't fall back to base path - this breaks user isolation
+                logger.error(f"[PreWarm] Could not create gallery directory for user '{username}': {e}")
                 return None
 
         return user_path
@@ -203,19 +260,29 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
     Returns:
         Dict with results: {
             'output_dir': str or None,
+            'username': str or None,  # Username this cache is for
             'items': list of item dicts,
             'thumbnails_generated': int
         }
     """
     result = {
         'output_dir': None,
+        'username': None,
         'items': [],
         'thumbnails_generated': 0
     }
 
-    # Step 1: Get gallery path
+    # Step 1: Get gallery path and username
     if progress_callback:
         progress_callback(10, "Locating gallery folder...")
+
+    # Get the username that will be used for this scan
+    # (matches the logic in get_gallery_output_path)
+    from core.state_manager import app_state
+    raw_username = app_state.user
+    # Normalize username: strip whitespace, treat empty as None
+    username = raw_username.strip() if raw_username else None
+    result['username'] = username
 
     output_dir = get_gallery_output_path()
     if not output_dir:
@@ -225,7 +292,10 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
         return result
 
     result['output_dir'] = output_dir
-    logger.info(f"[PreWarm] Gallery path: {output_dir}")
+    if username:
+        logger.info(f"[PreWarm] Gallery path for user '{username}': {output_dir}")
+    else:
+        logger.info(f"[PreWarm] Gallery path (no user): {output_dir}")
 
     # Step 2: Scan directory
     if progress_callback:
@@ -250,20 +320,24 @@ def prewarm_gallery(progress_callback: Optional[Callable] = None) -> Dict:
 # ============================================================================
 
 _prewarm_cache: Optional[Dict] = None
+_prewarm_cache_lock = threading.RLock()
 
 
 def get_prewarm_cache() -> Optional[Dict]:
-    """Get the cached pre-warm results, if available."""
-    return _prewarm_cache
+    """Get the cached pre-warm results, if available. Thread-safe."""
+    with _prewarm_cache_lock:
+        return _prewarm_cache
 
 
 def set_prewarm_cache(cache: Dict):
-    """Store pre-warm results for later use by gallery tab."""
+    """Store pre-warm results for later use by gallery tab. Thread-safe."""
     global _prewarm_cache
-    _prewarm_cache = cache
+    with _prewarm_cache_lock:
+        _prewarm_cache = cache
 
 
 def clear_prewarm_cache():
-    """Clear the pre-warm cache."""
+    """Clear the pre-warm cache. Thread-safe."""
     global _prewarm_cache
-    _prewarm_cache = None
+    with _prewarm_cache_lock:
+        _prewarm_cache = None

@@ -164,12 +164,18 @@ class ModelDialog(QDialog):
         path_layout.addWidget(browse_btn)
         form.addRow("Workflow File:", path_layout)
 
-        # Note/description
-        self._note_edit = QPlainTextEdit()
-        self._note_edit.setPlaceholderText("Add a description or note for this model...")
-        self._note_edit.setPlainText(self.preset_data.get("note", ""))
-        self._note_edit.setMaximumHeight(100)
-        form.addRow("Description:", self._note_edit)
+        # Description (single-line, shown in model browser)
+        self._description_edit = QLineEdit()
+        self._description_edit.setPlaceholderText("Brief description for model browser...")
+        self._description_edit.setText(self.preset_data.get("description", ""))
+        form.addRow("Description:", self._description_edit)
+
+        # Notes (multi-line, shown in model group box for workflow instructions)
+        self._notes_edit = QPlainTextEdit()
+        self._notes_edit.setPlaceholderText("Workflow notes, settings, or restrictions...")
+        self._notes_edit.setPlainText(self.preset_data.get("note", ""))
+        self._notes_edit.setMaximumHeight(100)
+        form.addRow("Notes:", self._notes_edit)
 
         layout.addLayout(form)
 
@@ -920,6 +926,12 @@ class ModelDialog(QDialog):
         is_multi = self._is_multi_check.isChecked()
         output_type = self._output_type_map.get(self._output_type_combo.currentText(), "image")
 
+        # Collect fields - save to CORRECT semantic keys (migration happens on save)
+        # Description field → "description" key (correct semantic name)
+        new_description = self._description_edit.text().strip()
+        # Notes field → "note" key (correct semantic name)
+        new_note = self._notes_edit.toPlainText().strip()
+
         # Save any in-progress exposed param edits before collecting
         self._save_current_exposed_overrides()
 
@@ -955,11 +967,12 @@ class ModelDialog(QDialog):
                 show_warning("No Workflows", "At least one workflow must be added in multi-workflow mode.", self)
                 return
 
+            # In multi-workflow mode, these are not used (each workflow has its own)
             new_path = None
             new_iteratable = False
             new_full_restart = False
-            new_note = ""
             new_node_overrides = {}
+            # But description and note apply to the overall model
         else:
             # Single workflow mode
             new_path = self._path_edit.text().strip()
@@ -970,7 +983,6 @@ class ModelDialog(QDialog):
             new_workflows = None
             new_iteratable = self._iteratable_check.isChecked()
             new_full_restart = self._full_restart_check.isChecked()
-            new_note = self._note_edit.toPlainText().strip()
             # Use exposed param overrides if the tab was visited, otherwise keep existing
             if self._exposed_param_widgets:
                 new_node_overrides = self._collect_exposed_param_overrides()
@@ -995,6 +1007,7 @@ class ModelDialog(QDialog):
         save_comfyui_workflow_preset(
             new_name,
             workflow_path=new_path or "",
+            description=new_description,
             iteratable=new_iteratable,
             note=new_note,
             full_restart=new_full_restart,

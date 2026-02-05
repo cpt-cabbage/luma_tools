@@ -405,10 +405,16 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
 
     cmd = [
         python_exe,
+        '-s',
         main_py,
         '--port', str(port),
         '--disable-auto-launch',
     ]
+
+    # Embedded mode uses ComfyUI's bundled Python and expects this flag
+    # (matches the included run_nvidia_gpu.bat / run_cpu.bat behavior)
+    if mode == "embedded":
+        cmd.append('--windows-standalone-build')
 
     if extra_args:
         cmd.extend(extra_args)
@@ -418,11 +424,35 @@ def start_comfyui(comfyui_path: str, port: int, extra_args: list = None,
     logger.info(f"Starting ComfyUI ({mode} mode): {' '.join(cmd)}")
     logger.info(f"Working directory: {working_dir}")
 
-    # Set up environment with UTF-8 encoding for proper Unicode handling
+    # Set up clean environment to avoid interference with ComfyUI's embedded Python
     env = os.environ.copy()
+
+    # Remove Python-related variables that could cause package conflicts
+    # when server.py is launched from a different Python environment
+    python_vars_to_remove = [
+        'PYTHONPATH',      # Can cause wrong packages to be imported
+        'PYTHONHOME',      # Can override Python installation location
+        'VIRTUAL_ENV',     # Indicates venv is active
+        'CONDA_PREFIX',    # Conda environment path
+        'CONDA_DEFAULT_ENV',  # Conda environment name
+        'CONDA_SHLVL',     # Conda shell level
+        'PYTHONSTARTUP',   # Python startup script
+        'PYTHONEXECUTABLE',  # Override Python executable
+    ]
+
+    removed_vars = []
+    for var in python_vars_to_remove:
+        if var in env:
+            del env[var]
+            removed_vars.append(var)
+
+    if removed_vars:
+        logger.debug(f"Cleaned environment variables: {', '.join(removed_vars)}")
+
+    # Set UTF-8 encoding for proper Unicode handling
     env['PYTHONIOENCODING'] = 'utf-8'
 
-    process = start_process(cmd, cwd=working_dir, env=env)
+    process = start_process(cmd, cwd=working_dir, env=env, hide_window=False)
 
     return process
 
@@ -447,8 +477,7 @@ def stream_comfyui_output(process: subprocess.Popen):
         for line in process.stdout:
             line = line.rstrip()
             if line:
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                logger.info(f"[{timestamp}] [ComfyUI] {line}")
+                logger.info(f"[ComfyUI] {line}")
 
                 if "Prompt executed in" in line:
                     server_state['jobs_completed'] += 1
@@ -741,7 +770,7 @@ def main():
     parser.add_argument('--gpu-only', action='store_true', help='Run everything on GPU')
     parser.add_argument('--fast', action='store_true',
                         default=global_settings.get('comfyui_fast_mode', False),
-                        help='Enable --fast flag (default from global settings)')
+                        help='Enable --fast fp16_accumulation (default from global settings)')
     parser.add_argument('--mode', choices=['embedded', 'portable', 'standalone'],
                         default=global_settings.get('comfyui_mode', 'embedded'),
                         help='ComfyUI installation mode (default from global settings)')
@@ -787,7 +816,10 @@ def main():
     if args.gpu_only:
         extra_args.append('--gpu-only')
     if args.fast:
-        extra_args.append('--fast')
+        # Pass --fast fp16_accumulation (NOT bare --fast which also enables
+        # dynamic_vram/aimdo — that forces a custom mmap safetensors loader
+        # that can't handle misaligned model files like t5-base.safetensors)
+        extra_args.extend(['--fast', 'fp16_accumulation'])
 
     if args.mode == "standalone" and not args.python_path:
         logger.error("--python-path is required for standalone mode")
@@ -818,7 +850,7 @@ def main():
     if args.disable_smart_memory:
         flags_enabled.append("--disable-smart-memory")
     if args.fast:
-        flags_enabled.append("--fast")
+        flags_enabled.append("--fast fp16_accumulation")
     if args.gpu_only:
         flags_enabled.append("--gpu-only")
     if flags_enabled:
