@@ -650,10 +650,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
         # Check if widgets_values is dict format (for subgraphs, list format is standard)
         sg_widgets_values_is_dict = isinstance(sg_widgets_values, dict)
         if sg_widgets_values_is_dict:
-            logger.info(f"Subgraph node {sg_id} uses dict widgets_values format")
+            logger.info(f"Subgraph node {sg_node_id} uses dict widgets_values format")
             # For dict format, we'll handle it differently below
         elif not isinstance(sg_widgets_values, list):
-            logger.warning(f"Subgraph node {sg_id} has unexpected widgets_values type: {type(sg_widgets_values)} - resetting to empty list")
+            logger.warning(f"Subgraph node {sg_node_id} has unexpected widgets_values type: {type(sg_widgets_values)} - resetting to empty list")
             sg_widgets_values = []
 
         if sg_widgets_values and sg_proxy_widgets and not sg_widgets_values_is_dict:
@@ -703,7 +703,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                 logger.debug(f"    Override (internal): node {target_remapped} widget '{widget_name}' = {repr(widget_value)[:60]}")
                                 break
 
-        elif sg_widgets_values and sg_inputs:
+        elif sg_widgets_values and sg_inputs and not sg_widgets_values_is_dict:
             # Fallback: no proxyWidgets — map via subgraph input definitions
             for i, sg_input_def in enumerate(sg_inputs):
                 if i >= len(sg_widgets_values):
@@ -721,25 +721,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     continue
 
-                for il in sg_internal_links:
-                    if il[0] == internal_link_id:
-                        target_remapped = node_id_map.get(il[3])
-                        if target_remapped is not None:
-                            for new_node in new_nodes:
-                                if new_node['id'] == target_remapped:
-                                    overrides = new_node.setdefault('_input_overrides', {})
-                                    # Use the subgraph input name as override key
-                                    target_inputs = new_node.get('inputs', [])
-                                    target_slot = il[4]
-                                    override_name = input_name
-                                    for ti_idx, ti in enumerate(target_inputs):
-                                        slot_idx = ti.get('slot_index', ti_idx)
-                                        if slot_idx == target_slot:
-                                            override_name = ti.get('name', input_name)
-                                            break
-                                    overrides[override_name] = widget_value
-                                    break
-                        break
+                _apply_boundary_overrides(
+                    input_name, widget_value, i,
+                    boundary_input_map, node_id_map, new_nodes,
+                )
 
         elif sg_widgets_values_is_dict:
             # Dict format: use proxyWidgets to map widget names to internal nodes
