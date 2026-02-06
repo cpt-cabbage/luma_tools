@@ -362,15 +362,25 @@ class GalleryTab(BaseTab):
     def _set_gallery_drop_enabled(self, enabled):
         """Enable or disable drop targets on gallery widgets."""
         try:
-            # Disable drops on the scroll area content
             if hasattr(self, '_gallery_manager') and self._gallery_manager:
                 content = self._gallery_manager._scroll_content
                 if content:
-                    # Find all widgets that accept drops
                     from PySide6.QtWidgets import QWidget
-                    for child in content.findChildren(QWidget):
-                        if child.acceptDrops():
-                            child.setAcceptDrops(enabled)
+                    if not enabled:
+                        # Remember which widgets had drops enabled, then disable
+                        self._drop_enabled_widgets = set()
+                        for child in content.findChildren(QWidget):
+                            if child.acceptDrops():
+                                self._drop_enabled_widgets.add(id(child))
+                                child.setAcceptDrops(False)
+                    else:
+                        # Re-enable drops on the widgets that previously had them
+                        saved = getattr(self, '_drop_enabled_widgets', None)
+                        if saved:
+                            for child in content.findChildren(QWidget):
+                                if id(child) in saved:
+                                    child.setAcceptDrops(True)
+                            self._drop_enabled_widgets = None
             logging.debug(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
         except Exception as e:
             logging.debug(f"[Gallery] Error setting drop enabled: {e}")

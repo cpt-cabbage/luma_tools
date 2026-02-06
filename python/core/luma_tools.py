@@ -693,6 +693,9 @@ class LumaShotTools(QtWidgets.QWidget):
 
         save_tab_order(tab_names)
 
+        # Replay the tab activation that was suppressed during reorder
+        self._on_tab_changed(self.tab_widget.currentIndex())
+
     def select_tab_by_name(self, restrict_key):
         """Select a tab by its restrict_key name (e.g. 'gallery').
 

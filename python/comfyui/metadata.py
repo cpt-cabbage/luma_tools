@@ -455,25 +455,43 @@ def _lookup_file_metadata(
         return None
 
     # Look for matching prefix entries (for output files)
+    # Use longest-prefix-wins to avoid short prefixes (e.g. "LumaRND_luma_tools")
+    # incorrectly matching files that belong to a more specific prefix
+    # (e.g. "LumaRND_luma_tools_Screenshot 2025-06-06 083801")
     try:
+        best_match = None
+        best_prefix_len = -1
+
         for key, value in metadata.items():
             if not isinstance(key, str) or not key.startswith("_prefix_"):
                 continue
+            if not isinstance(value, dict):
+                continue
 
             prefix = key[8:]  # Remove "_prefix_" prefix
-            # Check if basename starts with prefix (normal case for outputs)
-            if basename.startswith(prefix):
-                if isinstance(value, dict):
-                    return value
 
-            # Reverse match: prefix ends with basename (for recreate settings only)
-            # e.g., prefix="luma_tools_job_filename" matches basename="filename"
-            # IMPORTANT: Only use this when explicitly requested, otherwise input
-            # files may incorrectly match output job metadata
-            if allow_reverse_match:
+            # Check if basename starts with prefix (normal case for outputs)
+            if basename.startswith(prefix) and len(prefix) > best_prefix_len:
+                best_match = value
+                best_prefix_len = len(prefix)
+
+        if best_match is not None:
+            return best_match
+
+        # Reverse match: prefix ends with basename (for recreate settings only)
+        # e.g., prefix="luma_tools_job_filename" matches basename="filename"
+        # IMPORTANT: Only use this when explicitly requested, otherwise input
+        # files may incorrectly match output job metadata
+        if allow_reverse_match:
+            for key, value in metadata.items():
+                if not isinstance(key, str) or not key.startswith("_prefix_"):
+                    continue
+                if not isinstance(value, dict):
+                    continue
+
+                prefix = key[8:]
                 if prefix.endswith(basename) or prefix.endswith(f"_{basename}"):
-                    if isinstance(value, dict):
-                        return value
+                    return value
     except Exception as e:
         logger.error(f"[Metadata] Error during prefix lookup for {filename}: {e}")
 

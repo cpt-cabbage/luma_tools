@@ -1,5 +1,13 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.8
+Fix muted nodes breaking model chain in subgraph expansion
+
+  ComfyUI Workflow:
+  - Fix muted/bypassed nodes (mode 2/4) inside subgraphs severing link chains during API conversion — downstream nodes lost required inputs
+  - Add pass-through resolution: trace links upstream through muted nodes (output slot N  → input slot N) to find the real source node
+- Handle chains of multiple consecutive muted  nodes via recursive resolution
+
 ## Version 0.6.2.7
 Fix values not being set by user not falling back to values in comfyui workflow files
 
