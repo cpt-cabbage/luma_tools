@@ -6,6 +6,7 @@ suffix in their title) and extracting their configuration for dynamic UI generat
 """
 
 import os
+import re
 import logging
 from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass, field
@@ -485,6 +486,13 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     current_value=str(widgets_values[0]) if widgets_values else '',
                     condition_node=condition_node_name,
                 ))
+
+    # Sort by display_name using natural sort so "Image 2" < "Image 10"
+    def _natural_sort_key(node):
+        return [int(c) if c.isdigit() else c.lower()
+                for c in re.split(r'(\d+)', node.display_name)]
+
+    editable_nodes.sort(key=_natural_sort_key)
 
     logger.info(f"Found {len(editable_nodes)} editable nodes in workflow")
     for node in editable_nodes:

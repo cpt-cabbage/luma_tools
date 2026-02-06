@@ -215,13 +215,14 @@
   ],
   "comfyui_timeout": 3600,
   "comfyui_server_not_found_behavior": "wait",
-  "comfyui_server_wait_timeout": 3360,
+  "comfyui_server_wait_timeout": 3120,
   "sup_users": [
     "bruce.mclaren",
     "craig.portnoy",
     "phoebe.redelinghuys",
     "mia.bermanlevy",
-    "andre.heyneke"
+    "andre.heyneke",
+    "isabel.heyneke"
   ],
   "hdri_list": [
     {

@@ -1,5 +1,20 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.1
+Clean up unused Gallery job status bar and stale settings
+                                                                                                                       Gallery:
+  - Remove JobStatusBar widget and all job event subscriptions (submitted, progress, completed, failed,
+  all_completed)
+  - Keep only job_output_ready subscription for refresh triggers
+  - Delete job_status_bar.py module entirely
+
+  Settings:
+  - Remove unused settings: auto_extract_textures, comfyui_show_recent_outputs, gallery_show_job_status,
+  gallery_show_quick_actions
+  - Remove OverrideHou and AutoExtractTextures checkboxes from settings.ui
+  - Add comfyui_convert_colorspace setting and checkbox for ACES→sRGB image conversion
+  - Replace removed gallery checkboxes with new ComfyUIConvertColorspace checkbox
+
 ## Version 0.6.2
 Auto-convert unsupported image formats to PNG for ComfyUI
 
