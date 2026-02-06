@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.3
+- Change runner logs to be stored in /logs dir instead of directly in user folder
+
 ## Version 0.6.2.2
 - Improve node sorting
 

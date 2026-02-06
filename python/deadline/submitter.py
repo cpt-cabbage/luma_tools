@@ -104,12 +104,15 @@ def submit_comfyui_to_deadline(
     # Get settings needed for this function
     comfyui_path, comfyui_mode, comfyui_python, python_exe = _get_comfyui_config()
 
-    # Scripts are in comfyui package
+    # Scripts are in comfyui package — copy to _job_data/ subdirectory to keep output dir clean
+    job_data_dir = os.path.join(output_dir, "_job_data")
+    ensure_directory(job_data_dir)
+
     comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
     runner_script_source = os.path.join(comfyui_package_dir, "runner.py")
     utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
-    runner_script = os.path.join(output_dir, "comfyui_runner.py")
-    utils_script = os.path.join(output_dir, "comfyui_utils.py")
+    runner_script = os.path.join(job_data_dir, "comfyui_runner.py")
+    utils_script = os.path.join(job_data_dir, "comfyui_utils.py")
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
@@ -144,7 +147,7 @@ def submit_comfyui_to_deadline(
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
-    job_info_path = os.path.join(output_dir, "comfyui_job_info.txt")
+    job_info_path = os.path.join(job_data_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine
 Name=LUMA TOOLS - {render_name}
 Department={DEADLINE_DEPARTMENT}
@@ -160,10 +163,10 @@ OverrideTaskFailureDetection=True
 FailureDetectionTaskErrors=1
 """
 
-    plugin_info_path = os.path.join(output_dir, "comfyui_plugin_info.txt")
+    plugin_info_path = os.path.join(job_data_dir, "comfyui_plugin_info.txt")
     plugin_info_content = f"""Executable={python_exe}
 Arguments={runner_args}
-StartupDirectory={output_dir}
+StartupDirectory={job_data_dir}
 ExitCodeTreatedAsFailure=1-255
 """
 
@@ -343,7 +346,11 @@ def submit_comfyui_job(
             logger.error(error_msg)
             return [], error_msg
 
-        workflow_file = save_workflow(modified, current_working_dir)
+        # Save workflow and seeds to _job_data/ subdirectory to keep output dir clean
+        job_data_dir = os.path.join(current_working_dir, "_job_data")
+        ensure_directory(job_data_dir)
+
+        workflow_file = save_workflow(modified, job_data_dir)
 
         if base_seed is not None:
             seeds = [base_seed + i for i in range(generation_count)]
@@ -351,7 +358,7 @@ def submit_comfyui_job(
             seeds = [random.randint(0, 2**63 - 1) for _ in range(generation_count)]
         seeds_data = {"seeds": seeds, "count": generation_count}
 
-        seeds_file = os.path.join(current_working_dir, "comfyui_seeds.json")
+        seeds_file = os.path.join(job_data_dir, "comfyui_seeds.json")
         save_json(seeds_file, seeds_data)
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)

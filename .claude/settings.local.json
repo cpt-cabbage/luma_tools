@@ -101,5 +101,6 @@
       "Read(./.git/**)"
     ],
     "ask": []
-  }
+  },
+  "outputStyle": "default"
 }
