@@ -32,13 +32,13 @@ __all__ = [
 # Tab configuration for dynamic loading
 # Order determines default tab order in the UI
 TAB_CONFIG = [
-    {'class': PassBuilderTab, 'restrict_key': 'passbuilder'},
-    {'class': MP4MakerTab, 'restrict_key': 'mp4maker'},
-    {'class': RePublishTab, 'restrict_key': 'republish'},
-    {'class': CleanerTab, 'restrict_key': 'cleaner'},
-    {'class': LogsTab, 'restrict_key': 'logs'},
     {'class': ComfyUITab, 'restrict_key': 'comfyui'},
     {'class': GalleryTab, 'restrict_key': 'gallery'},
     {'class': CanvasTab, 'restrict_key': 'canvas'},
+    {'class': PassBuilderTab, 'restrict_key': 'passbuilder'},
+    {'class': RePublishTab, 'restrict_key': 'republish'},
+    {'class': MP4MakerTab, 'restrict_key': 'mp4maker'},
+    {'class': CleanerTab, 'restrict_key': 'cleaner'},
     {'class': SettingsTab, 'restrict_key': 'settings'},
+    {'class': LogsTab, 'restrict_key': 'logs'},
 ]

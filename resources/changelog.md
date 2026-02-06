@@ -1,5 +1,18 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.4
+
+Deadline Submitter:
+    - Create _job_data/ subdirectory under output dir for all submission artifacts                                       
+    - Move runner/utils scripts, job_info, plugin_info, workflow JSON, and seeds JSON into _job_data/
+    - Update StartupDirectory to _job_data/ so runner can still import comfyui_utils
+    - Gallery metadata (add_item_metadata) stays in output root as before
+
+  ComfyUI Metadata:
+
+    - Update cleanup_job_temp_files() to remove _job_data/ directory via shutil.rmtree
+    - Keep backward-compat cleanup of root-level files for old jobs
+
 ## Version 0.6.2.3
 - Change runner logs to be stored in /logs dir instead of directly in user folder
 
@@ -7,8 +20,7 @@
 - Improve node sorting
 
 ## Version 0.6.2.1
-Clean up unused Gallery job status bar and stale settings
-                                                                                                                       Gallery:
+  Gallery:
   - Remove JobStatusBar widget and all job event subscriptions (submitted, progress, completed, failed,
   all_completed)
   - Keep only job_output_ready subscription for refresh triggers

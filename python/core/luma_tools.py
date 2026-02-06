@@ -461,6 +461,14 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.tabBar().tabMoved.connect(self._on_tab_moved)
 
+        # Debounce timer for tab order saving (avoids disk I/O on every
+        # intermediate position while dragging a tab)
+        self._tab_reorder_timer = QtCore.QTimer(self)
+        self._tab_reorder_timer.setSingleShot(True)
+        self._tab_reorder_timer.setInterval(500)
+        self._tab_reorder_timer.timeout.connect(self._save_tab_order)
+        self._is_reordering_tabs = False
+
         # Setup periodic version check (every 2 minutes)
         self._version_check_timer = QtCore.QTimer(self)
         self._version_check_timer.timeout.connect(self._check_deployed_version)
@@ -648,6 +656,9 @@ class LumaShotTools(QtWidgets.QWidget):
 
     def _on_tab_changed(self, index):
         """Handle tab change - notify tabs."""
+        # Skip activation/deactivation while user is dragging tabs around
+        if self._is_reordering_tabs:
+            return
         logging.debug(f"[MainWindow] _on_tab_changed START index={index}")
         try:
             # Get previous and current tab
@@ -666,7 +677,13 @@ class LumaShotTools(QtWidgets.QWidget):
             logging.error(f"[MainWindow] _on_tab_changed error: {e}", exc_info=True)
 
     def _on_tab_moved(self, _from_index, _to_index):
-        """Save tab order when user reorders tabs."""
+        """Debounce tab order save when user drags tabs."""
+        self._is_reordering_tabs = True
+        self._tab_reorder_timer.start()  # restart the 500ms timer
+
+    def _save_tab_order(self):
+        """Actually save tab order after drag settles."""
+        self._is_reordering_tabs = False
         from core.user_preferences import save_tab_order
 
         tab_names = []
