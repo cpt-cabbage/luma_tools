@@ -264,7 +264,8 @@ def setup_file_logging(
     # Get log directory (network with fallback to local)
     log_dir = get_network_log_dir(subdirectory)
     if not log_dir and fallback_dir and os.path.isdir(fallback_dir):
-        log_dir = fallback_dir
+        log_dir = os.path.join(fallback_dir, "logs")
+        ensure_directory(log_dir)
     if not log_dir:
         log_dir = get_local_log_dir()
 

@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.2
+- Improve node sorting
+
 ## Version 0.6.2.1
 Clean up unused Gallery job status bar and stale settings
                                                                                                                        Gallery:

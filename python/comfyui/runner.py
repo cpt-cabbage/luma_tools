@@ -168,7 +168,8 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
     log_dir = get_network_log_dir_local("runner")
 
     if not log_dir and network_output_dir and os.path.isdir(network_output_dir):
-        log_dir = network_output_dir
+        log_dir = os.path.join(network_output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
 
     if not log_dir:
         log_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "logs")
