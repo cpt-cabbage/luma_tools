@@ -148,6 +148,49 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
             self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
 
 
+class VideoSinkWidget(QWidget):
+    """Video display using QVideoSink for software rendering.
+
+    Replaces QVideoWidget to avoid its native rendering surface painting
+    over Qt overlay widgets (controls, info bars) on Windows.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PySide6.QtMultimedia import QVideoSink
+        self.setStyleSheet("background-color: #000000;")
+        self._video_sink = QVideoSink(self)
+        self._video_sink.videoFrameChanged.connect(self._on_frame_changed)
+        self._current_image = None
+
+    @property
+    def videoSink(self):
+        return self._video_sink
+
+    def _on_frame_changed(self, frame):
+        if frame.isValid():
+            self._current_image = frame.toImage()
+        else:
+            self._current_image = None
+        self.update()
+
+    def paintEvent(self, event):
+        if self._current_image and not self._current_image.isNull():
+            from PySide6.QtGui import QPainter
+            from PySide6.QtCore import QRect
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            # Scale to fit while keeping aspect ratio, centered
+            img_size = self._current_image.size()
+            scaled = img_size.scaled(self.size(), Qt.KeepAspectRatio)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawImage(QRect(x, y, scaled.width(), scaled.height()), self._current_image)
+            painter.end()
+        else:
+            super().paintEvent(event)
+
+
 class VideoControlBar(QWidget):
     """
     Video/audio playback control bar with play/pause, seek, volume, and time display.
@@ -813,20 +856,17 @@ class EmbeddedImageViewer(QWidget):
         self.glb_viewer = None
         self._glb_viewer_initialized = False
 
-        # 3. Video Player
+        # 3. Video Player (uses VideoSinkWidget for software rendering
+        #    so overlay controls can draw on top of the video)
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-            from PySide6.QtMultimediaWidgets import QVideoWidget
 
-            self.video_widget = QVideoWidget()
-            self.video_widget.setStyleSheet("background-color: #000000;")
-            # Qt6: QMediaPlayer constructor changed, no flags needed
+            self.video_widget = VideoSinkWidget()
             self.media_player = QMediaPlayer(self)
 
-            # Qt6 requires QAudioOutput for volume control
             self.audio_output = QAudioOutput(self)
             self.media_player.setAudioOutput(self.audio_output)
-            self.media_player.setVideoOutput(self.video_widget)
+            self.media_player.setVideoSink(self.video_widget.videoSink)
 
             # Enable mouse tracking on video widget to show controls
             self.video_widget.setMouseTracking(True)
@@ -1999,17 +2039,16 @@ class FullscreenImageViewer(QWidget):
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
         self.image_stack.addWidget(self.message_label)
 
-        # Video Player
+        # Video Player (uses VideoSinkWidget for software rendering
+        #    so overlay controls can draw on top of the video)
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-            from PySide6.QtMultimediaWidgets import QVideoWidget
 
-            self.video_widget = QVideoWidget()
-            self.video_widget.setStyleSheet("background-color: #000000;")
+            self.video_widget = VideoSinkWidget()
             self.media_player = QMediaPlayer(self)
             self.audio_output = QAudioOutput(self)
             self.media_player.setAudioOutput(self.audio_output)
-            self.media_player.setVideoOutput(self.video_widget)
+            self.media_player.setVideoSink(self.video_widget.videoSink)
 
             # Enable mouse tracking
             self.video_widget.setMouseTracking(True)

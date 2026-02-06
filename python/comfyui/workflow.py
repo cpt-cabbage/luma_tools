@@ -1011,11 +1011,16 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     logger.warning(f"Unknown node type '{node_type}' with {len(widgets_values)} widget values - widget names could not be auto-discovered")
 
         # Apply _input_overrides from subgraph expansion (widget values propagated
-        # from the parent subgraph node to its expanded internal nodes)
+        # from the parent subgraph node to its expanded internal nodes).
+        # Overrides take precedence over widget values (which are stale defaults
+        # from the subgraph definition) but must NOT replace link connections.
         overrides = node.get('_input_overrides', {})
         for key, val in overrides.items():
-            if key not in inputs:  # Don't override connected inputs
-                inputs[key] = val
+            existing = inputs.get(key)
+            # Skip if the existing value is a link reference [node_id_str, slot_index]
+            if isinstance(existing, list):
+                continue
+            inputs[key] = val
 
         api_workflow[node_id] = {
             'class_type': node_type,

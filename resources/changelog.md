@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.9
+- Changed metadata matching to use longest-prefix-wins to fix some gallery items not finding links correctly
+
 ## Version 0.6.2.8
 Fix muted nodes breaking model chain in subgraph expansion
 
