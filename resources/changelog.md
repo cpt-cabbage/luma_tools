@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.5
+- Improve tab re-ordering performance
+- Change default tab order
+
 ## Version 0.6.2.4
 
 Deadline Submitter:

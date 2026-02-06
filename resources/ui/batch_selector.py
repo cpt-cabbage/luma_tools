@@ -263,6 +263,7 @@ class BatchImageSelector(QWidget):
         self._dragged_widget = None
         self._gallery_colors = {}  # path -> hex color string (from gallery likes/groups)
         self._file_type_label = file_type_label  # "images", "videos", etc.
+        self._compact = total_image_nodes >= 3  # Compact toolbar when many nodes
 
         # Set size policy to expand vertically
         from PySide6.QtWidgets import QSizePolicy
@@ -276,15 +277,20 @@ class BatchImageSelector(QWidget):
         self.toolbar_layout = QHBoxLayout(self.toolbar)
         self.toolbar_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.add_btn = QPushButton(f"Add {self._file_type_label.title()}...")
+        if self._compact:
+            self.add_btn = QPushButton("Add...")
+            self.clear_btn = QPushButton("Clear")
+        else:
+            self.add_btn = QPushButton(f"Add {self._file_type_label.title()}...")
+            self.clear_btn = QPushButton("Clear All")
         self.add_btn.clicked.connect(self.browse_images)
         self.toolbar_layout.addWidget(self.add_btn)
 
-        self.clear_btn = QPushButton("Clear All")
         self.clear_btn.clicked.connect(self.clear_images)
         self.toolbar_layout.addWidget(self.clear_btn)
 
         self.count_label = QLabel(f"No {self._file_type_label} selected")
+        self.count_label.setMinimumWidth(0)
         self.toolbar_layout.addWidget(self.count_label)
         self.toolbar_layout.addStretch()
 
@@ -445,7 +451,9 @@ class BatchImageSelector(QWidget):
         label_singular = label.rstrip('s') if label.endswith('s') else label
         count = len(self.selected_files)
         if count == 0:
-            if self._total_image_nodes > 1:
+            if self._compact:
+                self.count_label.setText(f"None ({self._total_image_nodes} nodes)")
+            elif self._total_image_nodes > 1:
                 self.count_label.setText(f"No {label} selected ({self._total_image_nodes} load nodes detected)")
             else:
                 self.count_label.setText(f"No {label} selected")
@@ -458,9 +466,9 @@ class BatchImageSelector(QWidget):
                 per_node = count // self._total_image_nodes
                 remainder = count % self._total_image_nodes
                 if remainder == 0:
-                    pairing_text = f" - {per_node} per node"
+                    pairing_text = f" - {per_node}/node" if self._compact else f" - {per_node} per node"
                 else:
-                    pairing_text = f" - {per_node}-{per_node+1} per node"
+                    pairing_text = f" - {per_node}-{per_node+1}/node" if self._compact else f" - {per_node}-{per_node+1} per node"
                 self.count_label.setText(f"{count_text} selected{pairing_text}")
             else:
                 self.count_label.setText(f"{count_text} selected")

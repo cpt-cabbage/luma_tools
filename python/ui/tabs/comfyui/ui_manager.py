@@ -166,49 +166,16 @@ class ComfyUIWidgetManager:
                 else:
                     non_image_widgets.append((widget, node))
 
-        # Layout strategy: if we have both non-image and image widgets, arrange horizontally
-        # (non-image on left, images on right). Otherwise, arrange vertically.
-        if non_image_widgets and image_widgets:
-            horizontal_container = QWidget()
-            # Ignored horizontal policy forces the container to accept whatever
-            # width the parent gives it, preventing overflow from children's
-            # accumulated minimum widths (e.g. 3 image selectors with 160px labels).
-            horizontal_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            horizontal_layout = QHBoxLayout(horizontal_container)
-            horizontal_layout.setContentsMargins(0, 0, 0, 0)
-            horizontal_layout.setSpacing(15)
-
-            # Left section: non-image widgets stacked vertically
-            left_container = QWidget()
-            left_layout = QVBoxLayout(left_container)
-            left_layout.setContentsMargins(0, 0, 0, 0)
-            left_layout.setSpacing(5)
+        # Layout strategy: non-image widgets on top, image widgets below in a
+        # horizontal row.  This prevents text inputs from competing for width
+        # with image selectors and gives images the full available width.
+        if non_image_widgets:
             for widget, node in non_image_widgets:
                 # Only text widgets (multiline) should expand vertically
                 stretch = 1 if node.widget_type == 'text' else 0
-                left_layout.addWidget(widget, stretch)
-            left_layout.addStretch()
-            horizontal_layout.addWidget(left_container)
+                self.layout.addWidget(widget, stretch)
 
-            # Right section: image widgets stacked horizontally
-            right_container = QWidget()
-            right_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            right_layout = QHBoxLayout(right_container)
-            right_layout.setContentsMargins(0, 0, 0, 0)
-            right_layout.setSpacing(10)
-            for widget, node in image_widgets:
-                right_layout.addWidget(widget, 1)  # Add stretch factor to expand
-            horizontal_layout.addWidget(right_container)
-
-            # Give images proportionally more space based on count
-            horizontal_layout.setStretch(0, 1)  # Left section (non-image)
-            horizontal_layout.setStretch(1, max(1, len(image_widgets)))  # Right section
-
-            self.layout.addWidget(horizontal_container)
-            horizontal_container.is_mixed_layout = True
-
-        elif image_widgets and not non_image_widgets:
-            # Only image widgets: arrange horizontally if multiple, vertically if single
+        if image_widgets:
             if len(image_widgets) > 1:
                 image_row_container = QWidget()
                 image_row_container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -226,11 +193,7 @@ class ComfyUIWidgetManager:
                 widget.setVisible(True)
                 self.layout.addWidget(widget, 1)  # Add stretch factor
 
-        elif non_image_widgets and not image_widgets:
-            for widget, node in non_image_widgets:
-                # Only text widgets (multiline) should expand vertically
-                stretch = 1 if node.widget_type == 'text' else 0
-                self.layout.addWidget(widget, stretch)
+        if not image_widgets and non_image_widgets:
             # Add final stretch to push non-expanding widgets to the top
             self.layout.addStretch()
 
@@ -459,7 +422,9 @@ class ComfyUIWidgetManager:
                 input_widget.set_last_browse_dir(last_dir)
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
-            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            # Use smaller min-width when many image nodes to prevent toolbar truncation
+            label_min_w = 0 if total_image_nodes >= 3 else 160
+            label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
             input_widget.toolbar_layout.insertWidget(0, label)
 
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
@@ -479,7 +444,8 @@ class ComfyUIWidgetManager:
                 input_widget.set_last_browse_dir(last_dir)
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
-            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            label_min_w = 0 if total_video_nodes >= 3 else 160
+            label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
             input_widget.toolbar_layout.insertWidget(0, label)
 
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand

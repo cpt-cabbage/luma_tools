@@ -147,12 +147,17 @@
       "output_type": "3d"
     },
     "Qwen Image Edit 2511": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_edit_2511_v001.json",
+      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_edit_2511_v002.json",
       "description": "Image Edting",
       "iteratable": true,
       "note": "",
       "full_restart": false,
-      "node_overrides": {},
+      "node_overrides": {
+        "89:seed": {
+          "enabled": false,
+          "default_value": ""
+        }
+      },
       "is_multi": false,
       "output_type": "image"
     },
