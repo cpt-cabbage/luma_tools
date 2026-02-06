@@ -93,7 +93,9 @@
       "Bash(Select-String -Pattern \"ERROR|Exception|Traceback\" -Context 3)",
       "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_run_test.ps1\")",
       "Bash(git status:*)",
-      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ui\\\\tabs\\\\gallery\\\\job_status_bar.py\")"
+      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ui\\\\tabs\\\\gallery\\\\job_status_bar.py\")",
+      "Bash(cmd /c:*)",
+      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe -m pytest:*)"
     ],
     "deny": [
       "Read(./python/venv/**)",

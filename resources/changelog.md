@@ -1,5 +1,15 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.6
+UI Improvements:
+ - Vertical separation: Non-image widgets (text, toggles, combos) are now stacked on top, image widgets are arranged horizontally below  instead of the old left/right horizontal split
+  - Compact labels: Image/video node labels use min_width=0 instead of 160 when there are 3+ nodes
+  - Simplified the 3-branch layout logic (mixed / image-only / non-image-only) into a cleaner 2-step approach (add non-image widgets, then add image widgets)
+- Added _compact flag when total_image_nodes >= 3
+- Compact mode uses shorter button text: "Add..." / "Clear" instead of "Add Images..." / "Clear All"
+- Compact count labels: "None (3 nodes)" instead of "No images selected (3 load nodes detected)", and "2/node"  instead of "2 per node"
+- Set count_label.setMinimumWidth(0) so it can shrink
+
 ## Version 0.6.2.5
 - Improve tab re-ordering performance
 - Change default tab order

@@ -243,6 +243,60 @@ def _normalize_link(link: Any) -> Optional[List]:
     return None
 
 
+def _apply_boundary_overrides(
+    widget_name: str,
+    widget_value: Any,
+    sg_input_idx: int,
+    boundary_input_map: Dict[int, List],
+    node_id_map: Dict[int, int],
+    new_nodes: List[Dict[str, Any]],
+) -> int:
+    """
+    Apply _input_overrides to all internal target nodes for a boundary input.
+
+    When a subgraph boundary input has a widget value (from the parent node's
+    widgets_values), this propagates it to every internal node that receives
+    that boundary input — not just one.
+
+    Args:
+        widget_name: Fallback name for the override key
+        widget_value: The value to set
+        sg_input_idx: The subgraph input slot index (key into boundary_input_map)
+        boundary_input_map: slot -> list of (internal_node, internal_slot, link)
+        node_id_map: old internal node ID -> remapped node ID
+        new_nodes: The list of remapped internal nodes being built
+
+    Returns:
+        Number of overrides applied
+    """
+    targets = boundary_input_map.get(sg_input_idx, [])
+    applied = 0
+    for int_to_node, int_to_slot, _il in targets:
+        target_remapped = node_id_map.get(int_to_node)
+        if target_remapped is None:
+            continue
+        for new_node in new_nodes:
+            if new_node['id'] == target_remapped:
+                target_inputs = new_node.get('inputs', [])
+                input_name = None
+                for ti_idx, ti in enumerate(target_inputs):
+                    slot_idx = ti.get('slot_index', ti_idx)
+                    if slot_idx == int_to_slot:
+                        input_name = ti.get('name', widget_name)
+                        break
+                if input_name is None:
+                    input_name = widget_name
+                overrides = new_node.setdefault('_input_overrides', {})
+                overrides[input_name] = widget_value
+                applied += 1
+                logger.debug(
+                    f"    Override (boundary): node {target_remapped} "
+                    f"input '{input_name}' = {repr(widget_value)[:60]}"
+                )
+                break
+    return applied
+
+
 def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
     """
     Expand all subgraph/component nodes into their constituent nodes.
@@ -619,38 +673,21 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                     continue
 
                 if proxy_node_id_str == "-1":
-                    # Boundary input — find target via internal links from this input
-                    # Match by input name in subgraph definition inputs
-                    for sg_inp in sg_inputs:
-                        if sg_inp.get('name') != widget_name:
-                            continue
-                        internal_link_id = sg_inp.get('link')
-                        if internal_link_id is None:
-                            continue
-                        # Follow the internal link to find the target node and slot
-                        for il in sg_internal_links:
-                            if il[0] == internal_link_id:
-                                target_remapped = node_id_map.get(il[3])
-                                target_slot = il[4]
-                                if target_remapped is not None:
-                                    for new_node in new_nodes:
-                                        if new_node['id'] == target_remapped:
-                                            # Determine the input name on the target node
-                                            target_inputs = new_node.get('inputs', [])
-                                            input_name = None
-                                            for ti_idx, ti in enumerate(target_inputs):
-                                                slot_idx = ti.get('slot_index', ti_idx)
-                                                if slot_idx == target_slot:
-                                                    input_name = ti.get('name', widget_name)
-                                                    break
-                                            if input_name is None:
-                                                input_name = widget_name
-                                            overrides = new_node.setdefault('_input_overrides', {})
-                                            overrides[input_name] = widget_value
-                                            logger.debug(f"    Override: node {target_remapped} input '{input_name}' = {repr(widget_value)[:60]}")
-                                            break
-                                break
-                        break
+                    # Boundary input — find the sg_input index by name, then
+                    # use boundary_input_map to propagate to ALL target nodes
+                    sg_input_idx = None
+                    for si_idx, sg_inp in enumerate(sg_inputs):
+                        if sg_inp.get('name') == widget_name:
+                            sg_input_idx = si_idx
+                            break
+
+                    if sg_input_idx is not None:
+                        _apply_boundary_overrides(
+                            widget_name, widget_value, sg_input_idx,
+                            boundary_input_map, node_id_map, new_nodes,
+                        )
+                    else:
+                        logger.debug(f"    Boundary widget '{widget_name}': no matching sg_input found")
                 else:
                     # Internal node widget — find the expanded node by original ID
                     try:
@@ -677,6 +714,11 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 input_name = sg_input_def.get('name', f'input_{i}')
 
                 if internal_link_id is None:
+                    # link field is null — use boundary_input_map to find targets
+                    _apply_boundary_overrides(
+                        input_name, widget_value, i,
+                        boundary_input_map, node_id_map, new_nodes,
+                    )
                     continue
 
                 for il in sg_internal_links:
@@ -730,6 +772,18 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                                     overrides[widget_name] = widget_value
                                     logger.debug(f"    Override (dict): node {target_remapped} widget '{widget_name}' = {repr(widget_value)[:60]}")
                                     break
+                    else:
+                        # Boundary input (dict format) — find sg_input index by name
+                        sg_input_idx = None
+                        for si_idx, sg_inp in enumerate(sg_inputs):
+                            if sg_inp.get('name') == widget_name:
+                                sg_input_idx = si_idx
+                                break
+                        if sg_input_idx is not None:
+                            _apply_boundary_overrides(
+                                widget_name, widget_value, sg_input_idx,
+                                boundary_input_map, node_id_map, new_nodes,
+                            )
             else:
                 # No proxyWidgets - apply dict values directly to matching widget names in internal nodes
                 for new_node in new_nodes:
