@@ -12,7 +12,6 @@ This tab uses a manager-based architecture for better maintainability:
 
 Cross-tab communication:
 - Subscribes to job events from ComfyUI via PipelineEventBus
-- Shows job status bar when jobs are running
 - Emits context events when selection/visibility changes
 """
 
@@ -29,7 +28,6 @@ from .gallery_loader import GalleryLoader
 from .gallery import SelectionManager, ViewerManager, OperationsManager, RefreshController, UIManager, GalleryManager
 from .gallery.favorites_manager import FavoritesManager
 from .gallery.groups_panel import GroupsFilterPanel
-from .gallery.job_status_bar import JobStatusBar
 
 logger = logging.getLogger(__name__)
 
@@ -160,9 +158,6 @@ class GalleryTab(BaseTab):
 
         # Setup groups filter panel (collapsible sidebar)
         self._setup_groups_panel()
-
-        # Setup job status bar (shows when ComfyUI jobs are running)
-        self._setup_job_status_bar()
 
         # Setup loading overlay for gallery switching
         self._setup_loading_overlay()
@@ -552,19 +547,6 @@ class GalleryTab(BaseTab):
     # =========================================================================
     # GROUPS & LIKES FILTERING
     # =========================================================================
-
-    def _setup_job_status_bar(self):
-        """Set up the job status bar at the top of the gallery."""
-        self._job_status_bar = JobStatusBar()
-        self._job_status_bar.view_in_comfyui_clicked.connect(self._on_view_in_comfyui)
-
-        # Insert at the top of the main layout (before toolbar)
-        if hasattr(self.ui, 'galleryMainLayout'):
-            self.ui.galleryMainLayout.insertWidget(0, self._job_status_bar)
-
-    def _on_view_in_comfyui(self):
-        """Handle click on 'View in ComfyUI' button."""
-        self.main_window.select_tab_by_name("comfyui")
 
     def _on_use_in_comfyui(self, paths: list):
         """Handle 'Use in ComfyUI' action from quick actions bar."""
@@ -994,13 +976,8 @@ class GalleryTab(BaseTab):
         if not EVENT_BUS_AVAILABLE:
             return
 
-        # Subscribe to job events from ComfyUI
-        pipeline_events.job_submitted.connect(self._on_job_submitted)
-        pipeline_events.job_progress.connect(self._on_job_progress)
+        # Subscribe to job output ready for refresh triggers
         pipeline_events.job_output_ready.connect(self._on_job_output_ready)
-        pipeline_events.job_completed.connect(self._on_job_completed)
-        pipeline_events.job_failed.connect(self._on_job_failed)
-        pipeline_events.all_jobs_completed.connect(self._on_all_jobs_completed)
 
         # Subscribe to "use as input" from ourselves (for consistency)
         pipeline_events.use_as_input.connect(self._on_use_as_input_requested)
@@ -1023,55 +1000,17 @@ class GalleryTab(BaseTab):
 
         logger.debug("Gallery tab subscribed to event bus")
 
-    def _on_job_submitted(self, job_id: str, expected_count: int, job_prefix: str):
-        """Handle job submitted event from ComfyUI."""
-        logger.debug(f"[Gallery] Job submitted: {job_id}, expecting {expected_count} outputs")
-        # Update job status bar (if we have one)
-        self._update_job_status_bar()
-
-    def _on_job_progress(self, job_id: str, progress: int, status_message: str):
-        """Handle job progress event from ComfyUI."""
-        # Update job status bar with progress
-        self._update_job_status_bar()
-
     def _on_job_output_ready(self, job_id: str, output_path: str):
         """Handle single output ready event - animate new item arrival."""
         logger.debug(f"[Gallery] Output ready: {output_path}")
         # The refresh is already triggered by polling, but we could add
         # special handling here for immediate item highlighting
 
-    def _on_job_completed(self, job_id: str, output_paths: list):
-        """Handle job completion event."""
-        logger.debug(f"[Gallery] Job completed: {job_id}, {len(output_paths)} outputs")
-        self._update_job_status_bar()
-
-    def _on_job_failed(self, job_id: str, error_message: str):
-        """Handle job failure event."""
-        logger.warning(f"[Gallery] Job failed: {job_id}: {error_message}")
-        self._update_job_status_bar()
-
-    def _on_all_jobs_completed(self, total_outputs: int, elapsed_seconds: float):
-        """Handle all jobs completed event - hide job status bar."""
-        logger.info(f"[Gallery] All jobs completed: {total_outputs} outputs in {elapsed_seconds:.1f}s")
-        self._update_job_status_bar()
-
     def _on_use_as_input_requested(self, paths: list):
         """Handle request to use gallery images as ComfyUI inputs."""
         # This is handled by operations_manager, but we could add logic here
         # to switch tabs or show confirmation
         pass
-
-    def _update_job_status_bar(self):
-        """Update the job status bar based on current active jobs."""
-        if not EVENT_BUS_AVAILABLE:
-            return
-
-        if not hasattr(self, '_job_status_bar'):
-            return
-
-        # Get aggregate progress from event bus
-        progress = pipeline_events.get_aggregate_progress()
-        self._job_status_bar.update_from_progress(progress)
 
     def _emit_selection_changed(self):
         """Emit selection changed event to event bus."""
@@ -1388,12 +1327,7 @@ class GalleryTab(BaseTab):
         # Disconnect event bus subscriptions
         if EVENT_BUS_AVAILABLE:
             try:
-                pipeline_events.job_submitted.disconnect(self._on_job_submitted)
-                pipeline_events.job_progress.disconnect(self._on_job_progress)
                 pipeline_events.job_output_ready.disconnect(self._on_job_output_ready)
-                pipeline_events.job_completed.disconnect(self._on_job_completed)
-                pipeline_events.job_failed.disconnect(self._on_job_failed)
-                pipeline_events.all_jobs_completed.disconnect(self._on_all_jobs_completed)
                 pipeline_events.use_as_input.disconnect(self._on_use_as_input_requested)
                 pipeline_events.gallery_refresh_requested.disconnect(self._on_refresh_requested)
                 pipeline_events.gallery_navigate_to.disconnect(self._on_navigate_to_requested)

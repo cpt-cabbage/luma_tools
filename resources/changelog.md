@@ -1,5 +1,20 @@
 # Luma Tools Changelog
 
+## Version 0.6.2
+Auto-convert unsupported image formats to PNG for ComfyUI
+
+  ComfyUI Image Conversion:
+  - Add image_convert.py module with OIIO-based format conversion (EXR, HDR, DPX, TGA → PNG)
+  - Support ACES→sRGB colorspace conversion via OCIO with gamma 2.2 fallback
+  - Add comfyui_convert_colorspace user setting (default: True)
+  - Extend COMFYUI_SUPPORTED_EXTENSIONS to allow browsing EXR, HDR, DPX, TGA files
+
+  Workflow Integration:
+  - Rewrite image basenames to .png in modifier.py (both editable and legacy handlers)
+  - Replace shutil.copy2 with copy_or_convert in submitter.py (all 3 file copy loops)
+  - Add conversion support to copy_inputs_to_server in utils.py
+  - Add conversion safety net in runner.py for farm execution (graceful fallback)
+
 ## Version 0.6.1.4
 - Fix Jobname not appending to filenames
 

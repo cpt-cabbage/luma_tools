@@ -267,32 +267,6 @@
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="OverrideHou">
-            <property name="toolTip">
-             <string>If enabled, your settings will override the 3D Artist's Houdini settings</string>
-            </property>
-            <property name="text">
-             <string>Override Houdini Settings</string>
-            </property>
-            <property name="checked">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="AutoExtractTextures">
-            <property name="toolTip">
-             <string>Automatically extract textures to a 'textures' folder when exporting 3D models from the gallery</string>
-            </property>
-            <property name="text">
-             <string>Auto-extract textures on model export</string>
-            </property>
-            <property name="checked">
-             <bool>false</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
            <widget class="QCheckBox" name="ShowTrayNotifications">
             <property name="toolTip">
              <string>Show Windows system tray notifications when ComfyUI jobs complete</string>
@@ -372,38 +346,12 @@
            </layout>
           </item>
           <item>
-           <widget class="QCheckBox" name="ComfyUIShowRecentOutputs">
+           <widget class="QCheckBox" name="ComfyUIConvertColorspace">
             <property name="toolTip">
-             <string>Show a preview panel of recent outputs at the bottom of the ComfyUI tab</string>
+             <string>When converting EXR/HDR/DPX/TGA images to PNG for ComfyUI, apply ACES to sRGB color conversion. Disable for simple format conversion without colorspace changes.</string>
             </property>
             <property name="text">
-             <string>Show recent outputs panel in ComfyUI tab</string>
-            </property>
-            <property name="checked">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="GalleryShowJobStatus">
-            <property name="toolTip">
-             <string>Show a status bar in Gallery when ComfyUI jobs are running</string>
-            </property>
-            <property name="text">
-             <string>Show job status bar in Gallery</string>
-            </property>
-            <property name="checked">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="GalleryShowQuickActions">
-            <property name="toolTip">
-             <string>Show quick action bar when images are selected in Gallery (Use in ComfyUI, Copy Prompt, etc.)</string>
-            </property>
-            <property name="text">
-             <string>Show quick actions bar for gallery selection</string>
+             <string>Apply ACES → sRGB when converting images for ComfyUI</string>
             </property>
             <property name="checked">
              <bool>true</bool>

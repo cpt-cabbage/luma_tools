@@ -106,7 +106,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # User Settings
     "comfyui_tab_state": SettingDef("comfyui_tab_state", {}, "user"),
     "tab_order": SettingDef("tab_order", [], "user"),
-    "auto_extract_textures": SettingDef("auto_extract_textures", False, "user"),
     "show_tray_notifications": SettingDef("show_tray_notifications", True, "user"),
     "show_verbose_logs": SettingDef("show_verbose_logs", False, "user"),
     "viewer_3d_zoom_distance": SettingDef("viewer_3d_zoom_distance", 3.5, "user"),
@@ -141,12 +140,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "mp4_maker_add_to_gallery": SettingDef("mp4_maker_add_to_gallery", True, "user"),
     # ComfyUI-Gallery integration settings
     "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
-    "comfyui_show_recent_outputs": SettingDef("comfyui_show_recent_outputs", True, "user"),
     # ComfyUI Model Picker settings
     "comfyui_model_sort": SettingDef("comfyui_model_sort", "recently_used", "user"),
     "comfyui_model_filter": SettingDef("comfyui_model_filter", "all", "user"),
-    "gallery_show_job_status": SettingDef("gallery_show_job_status", True, "user"),
-    "gallery_show_quick_actions": SettingDef("gallery_show_quick_actions", True, "user"),
     # Canvas settings
     # Dict mapping "{jobname}" or "{jobname}_{shot}" to last opened canvas_id
     "canvas_last_opened": SettingDef("canvas_last_opened", {}, "user"),

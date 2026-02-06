@@ -28,15 +28,12 @@ _COMBOBOX = "combobox"
 # Declarative settings mappings: (setting_key, widget_name, widget_type[, load_converter, save_converter])
 # Adding a new setting only requires adding one entry here — load and save are automatic.
 _USER_SETTINGS_MAP = [
-    ("auto_extract_textures", "AutoExtractTextures", _CHECKBOX),
     ("show_tray_notifications", "ShowTrayNotifications", _CHECKBOX),
     ("show_statusbar_log", "ShowStatusbarLog", _CHECKBOX),
     ("viewer_3d_zoom_distance", "Viewer3DZoomSpinBox", _SPINBOX),
     # ComfyUI-Gallery integration settings
     ("comfyui_completion_sound", "ComfyUICompletionSoundCombo", _COMBOBOX),
-    ("comfyui_show_recent_outputs", "ComfyUIShowRecentOutputs", _CHECKBOX),
-    ("gallery_show_job_status", "GalleryShowJobStatus", _CHECKBOX),
-    ("gallery_show_quick_actions", "GalleryShowQuickActions", _CHECKBOX),
+    ("comfyui_convert_colorspace", "ComfyUIConvertColorspace", _CHECKBOX),
 ]
 
 _seconds_to_minutes = lambda s: s // 60  # noqa: E731

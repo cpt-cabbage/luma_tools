@@ -170,7 +170,7 @@
       "path": "",
       "description": "Image/Video to Normals",
       "iteratable": false,
-      "note": "Doesn't support exrs, convert to PNG first",
+      "note": "exrs will be converted to png",
       "full_restart": false,
       "node_overrides": {},
       "is_multi": true,

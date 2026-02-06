@@ -45,6 +45,7 @@ This project has skills in `.claude/skills/`.
 |-------|---------------|------------|
 | **check-code** | **After writing larger code changes that affects:** - threading, imports, settings patterns before presenting. | Auto |
 | **commit-message** | Generate well-formatted commit messages from staged/unstaged changes | `/commit-message` |
+| **feature-dev** | Guided feature development with codebase understanding and architecture focus | `/feature-dev` |
 
 ## Per-Module Documentation
 
@@ -52,7 +53,7 @@ Detailed architecture and API reference for each module lives in CLAUDE.md files
 
 | Module CLAUDE.md | Contents |
 |------------------|----------|
-| `python/core/CLAUDE.md` | utils, error_handling, validators, caching, metadata_file, config, logging_utils, subprocess_utils |
+| `python/core/CLAUDE.md` | utils, error_handling, validators, caching, metadata_file, config, logging_utils, subprocess_utils, event_bus |
 | `python/comfyui/CLAUDE.md` | Workflow pipeline, editable nodes, export nodes, subgraphs, metadata, Deadline integration |
 | `python/ui/canvas/CLAUDE.md` | Canvas architecture, multi-canvas system, network sync, items, drawing, undo, export |
 | `python/ui/tabs/CLAUDE.md` | BaseTab pattern, helpers, PollingMixin, RenderScanMixin, tab registration |
@@ -115,6 +116,8 @@ from core.utils import ensure_directory, load_json, save_json, normalize_path
 from core.state_manager import app_state  # app_state.has_shot_context(), .has_elevated_access, .refresh_admin_status()
 from core.settings_manager import get_setting, set_setting
 from core.error_handling import safe_operation, handle_errors, log_error
+from core.event_bus import pipeline_events  # Cross-tab communication singleton
+from core.user_preferences import get_window_state, save_gallery_settings  # High-level settings API
 from deadline.submitter import submit_comfyui_to_deadline
 from comfyui.utils import resolve_comfyui_paths
 from geo.loaders.factory import load_model
@@ -135,6 +138,25 @@ from ui_components import Worker  # resources/ui/ in PYTHONPATH
 
 ### Tabs (BaseTab)
 Inherit from `ui/tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`ui/tabs/__init__.py`) with `restrict_key` for access control. See `python/ui/tabs/CLAUDE.md` for BaseTab helpers and mixin patterns.
+
+**Key BaseTab helpers beyond `start_worker`:**
+- `spinner_context(message, success_msg, error_msg)` — context manager for automatic spinner lifecycle
+- `on_worker_success(message, status_message, log_message)` — standard success handler
+- `on_worker_error(error_tuple, status_prefix, show_dialog)` — standard error handler
+- `unpack_worker_error(error_tuple)` — extract message from worker error signal
+
+**OptionButtonManager** — widely used for dropdown-style toggle buttons:
+```python
+from option_button import OptionButtonManager
+self._source_manager = OptionButtonManager(
+    button=self.ui.SourceButton,
+    options=[("For Comp", "for_comp"), ("Raw", "raw")],
+    initial_value="for_comp",
+    on_changed=self._on_source_changed,
+    label_prefix="Source: ",
+)
+# self._source_manager.value / .set_value("raw")
+```
 
 ### Threading (CRITICAL)
 
@@ -234,6 +256,54 @@ if app_state.has_shot_context():   # True when launched with AYON context
 
 State groups: command line args (jobname, shot, task, shotpath, user), Pass Builder (renders, channels, searchpath, frames), MP4 (mp4_renders, mp4_searchpath), rePublish (republish_renders), ComfyUI (comfyui_workflow_path, comfyui_iterate_mode), standalone_mode.
 
+### Event Bus (Cross-Tab Communication)
+`core/event_bus.py`: Central signal hub (`pipeline_events` singleton) for decoupled cross-tab communication. Used by ComfyUI, Gallery, Canvas, and Settings tabs.
+
+```python
+from core.event_bus import pipeline_events
+
+# Emit events
+pipeline_events.job_submitted.emit(job_id, expected_count, prefix)
+pipeline_events.job_completed.emit(job_id, output_paths)
+
+# Listen to events (connect in initialize(), not in methods called repeatedly)
+pipeline_events.job_completed.connect(self._on_job_completed)
+```
+
+**Key signal groups:**
+- **ComfyUI → Gallery:** `job_submitted`, `job_progress`, `job_output_ready`, `job_completed`, `job_failed`, `all_jobs_completed`
+- **Gallery → ComfyUI:** `use_as_input`, `copy_settings`, `selection_changed`
+- **Canvas:** `add_to_canvas`, `canvas_image_added`, `gallery_navigate_to`
+- **Viewer:** `toggle_item_like`, `add_item_to_group`, `show_item_properties`
+
+Includes thread-safe job tracking via `JobInfo` dataclass and `GalleryContext` for state sharing.
+
+### User Preferences (High-Level Settings API)
+`core/user_preferences.py` provides typed wrappers over raw settings for common preferences. **Prefer these over direct `get_setting`/`set_setting` for standard preferences:**
+
+```python
+from core.user_preferences import (
+    get_window_state, save_window_state,
+    get_tab_order, save_tab_order,
+    get_gallery_settings, save_gallery_settings,
+    is_new_version, set_last_opened_version,
+    record_workflow_execution_time, get_workflow_estimated_time_per_frame,
+    save_comfyui_running_jobs, get_comfyui_running_jobs,  # Crash recovery
+)
+```
+
+### Main Window API
+`core/luma_tools.py` exposes `get_main_window()` for tabs that need main window interaction:
+
+```python
+from core.luma_tools import get_main_window
+main = get_main_window()
+if main:
+    main.show_system_notification(title, message, icon_type)
+    main.select_tab_by_name(restrict_key)
+    main.get_tab(tab_id)
+```
+
 ### Domain-Specific Architecture
 - **ComfyUI:** Workflow load/modify/submit pipeline. See `python/comfyui/CLAUDE.md`
 - **Canvas:** Collaborative infinite canvas with network sync. See `python/ui/canvas/CLAUDE.md`
@@ -301,10 +371,10 @@ Read tool on log path with offset=-100
 
 **Debug CLI Arguments:** The app supports debug flags that can be appended after the normal positional arguments:
 ```
---tab <name>       Select a tab on startup (passbuilder, mp4maker, republish, shotcleaner, logs, comfyui, gallery, settings)
+--tab <name>       Select a tab on startup (passbuilder, mp4maker, republish, shotcleaner/cleaner, logs, comfyui, gallery, settings)
 --auto-close <sec> Auto-close the app after N seconds (for automated testing)
 ```
-Tab names match `restrict_key` values in `TAB_CONFIG` (`ui/tabs/__init__.py`).
+Tab names come from `_TAB_ALIASES` dict in `core/luma_tools.py` (not all `restrict_key` values work — e.g., `canvas` has no alias).
 
 **Running the app from Claude Code for debugging:**
 Because PYTHONPATH must be set (uses `$env:` which bash mangles), write a `.ps1` script:

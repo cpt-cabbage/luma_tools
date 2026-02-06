@@ -20,7 +20,6 @@ The gallery tab uses a manager-based architecture for better maintainability and
 | Component | File | Responsibility |
 |-----------|------|----------------|
 | **BaseGalleryManager** | `base_manager.py` | Base class with shared functionality (workers, status, logging) |
-| **JobStatusBar** | `job_status_bar.py` | Running job status display, progress tracking |
 | **QuickActionsBar** | `quick_actions_bar.py` | Quick action buttons for common operations |
 | **FiltersDialog** | `filters_dialog.py` | Advanced filter configuration dialog |
 | **StacksDialog** | `stacks_dialog.py` | Stack management and configuration |
@@ -50,8 +49,6 @@ GalleryTab
     │       └── FavoritesManager
     │               └── likes, groups, persistence
     │
-    ├── JobStatusBar (independent widget)
-    │
     └── GroupsFilterPanel (sidebar widget)
 ```
 
@@ -69,7 +66,7 @@ Gallery subscribes to job events from ComfyUI:
 ```python
 from core.import_utils import get_event_bus
 pipeline_events, _ = get_event_bus()
-pipeline_events.job_completed.connect(self._on_job_completed)
+pipeline_events.job_output_ready.connect(self._on_job_output_ready)
 ```
 
 ### External Events Emitted
