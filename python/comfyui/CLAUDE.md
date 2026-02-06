@@ -54,7 +54,18 @@ EDITABLE_NODE_CONFIGS = {
 ```
 
 ### Subgraph Expansion
-`expand_subgraphs()` expands UUID component nodes into concrete nodes before submission.
+`expand_subgraphs()` in `workflow.py` expands UUID component nodes into concrete nodes before API conversion. Key architecture:
+
+**Boundary inputs** use negative `from_node` IDs (e.g., `-10`) in internal links. `boundary_input_map` maps `slot_index → [(internal_node, internal_slot, link)]` — note one boundary input can fan out to multiple internal nodes (e.g., `ckpt_name` → 3 different loader nodes).
+
+**Widget value propagation** to internal nodes uses `_input_overrides` dict on expanded nodes. Three code paths handle this based on format:
+1. `proxyWidgets` + list `widgets_values` — each entry is `[node_id_str, widget_name]`, boundary inputs use `"-1"` as node_id
+2. No `proxyWidgets` + list `widgets_values` — maps by subgraph input index
+3. `proxyWidgets` + dict `widgets_values` — looks up by widget name
+
+All three paths use `_apply_boundary_overrides()` helper to propagate values through `boundary_input_map` when the subgraph input definition's `link` field is `null`.
+
+**Muted/bypassed node handling** in `convert_to_api_format()`: Nodes with `mode=4` (muted) or `mode=2` (bypassed) are skipped, and links through them are resolved upstream. A muted node acts as pass-through: output slot N comes from input slot N. The resolution handles chains of multiple muted nodes.
 
 ### Export Nodes
 Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param) and `WIDGET_MAPPINGS`.

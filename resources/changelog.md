@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.2.7
+Fix values not being set by user not falling back to values in comfyui workflow files
+
 ## Version 0.6.2.6
 UI Improvements:
  - Vertical separation: Non-image widgets (text, toggles, combos) are now stacked on top, image widgets are arranged horizontally below  instead of the old left/right horizontal split

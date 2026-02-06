@@ -329,11 +329,19 @@ if main:
 **Key deps:** PySide6 ≥6.6, open3d ≥0.18, trimesh ≥4.10, usd-core ≥25.11, PyOpenGL ≥3.1, pyenchant ≥3.3
 
 **Testing:**
-```bash
-python -m pytest tests/              # Run all tests
-python -m pytest tests/test_config.py -v  # Run single test file
-python -m pytest tests/ -k "test_name"    # Run specific test by name
+Tests must be run with PYTHONPATH set. From Claude Code, use a `.ps1` script:
+```powershell
+# _run_tests.ps1
+Set-Location 'L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'
+$env:PYTHONPATH = "$(Get-Location)\python;$(Get-Location)\resources\ui"
+python\venv\Scripts\python.exe -m pytest tests\ -v                    # All tests
+# python\venv\Scripts\python.exe -m pytest tests\test_config.py -v   # Single file
+# python\venv\Scripts\python.exe -m pytest tests\ -k "test_name"     # By name
 ```
+```bash
+powershell -ExecutionPolicy Bypass -File _run_tests.ps1
+```
+Note: `pytest-timeout` is NOT installed — do not use `--timeout` flag.
 
 ### Debugging
 

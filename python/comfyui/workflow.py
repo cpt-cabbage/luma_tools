@@ -874,6 +874,50 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             link_map[link_id] = (from_node, from_slot)
 
+    # Resolve links through skipped (muted/bypassed) nodes.
+    # Muted nodes act as pass-through: output slot N comes from input slot N.
+    # Build input-slot-to-link mapping for skipped nodes so we can trace upstream.
+    if skipped_node_ids:
+        _skipped_input_links = {}  # node_id -> {input_slot: link_id}
+        for node in nodes:
+            nid = node.get('id')
+            if nid not in skipped_node_ids:
+                continue
+            slot_map = {}
+            for inp_spec in node.get('inputs', []):
+                slot_idx = inp_spec.get('slot_index',
+                                        node.get('inputs', []).index(inp_spec))
+                lid = inp_spec.get('link')
+                if lid is not None:
+                    slot_map[slot_idx] = lid
+            _skipped_input_links[nid] = slot_map
+
+        def _resolve_source(from_node, from_slot, visited=None):
+            """Trace through skipped nodes to find the real upstream source."""
+            if visited is None:
+                visited = set()
+            if from_node not in skipped_node_ids or from_node in visited:
+                return from_node, from_slot
+            visited.add(from_node)
+            upstream_link = _skipped_input_links.get(from_node, {}).get(from_slot)
+            if upstream_link is not None and upstream_link in link_map:
+                up_node, up_slot = link_map[upstream_link]
+                return _resolve_source(up_node, up_slot, visited)
+            return None, None  # No pass-through found
+
+        for link_id in list(link_map.keys()):
+            from_node, from_slot = link_map[link_id]
+            if from_node in skipped_node_ids:
+                resolved_node, resolved_slot = _resolve_source(from_node, from_slot)
+                if resolved_node is not None:
+                    link_map[link_id] = (resolved_node, resolved_slot)
+                    logger.debug(f"Resolved link {link_id} through muted node(s): "
+                                 f"{from_node}:{from_slot} -> {resolved_node}:{resolved_slot}")
+                else:
+                    del link_map[link_id]
+                    logger.debug(f"Removed link {link_id}: can't resolve through "
+                                 f"muted node {from_node}")
+
     api_workflow = {}
     from comfyui.node_info import get_widget_names as _get_ni_widget_names
 
