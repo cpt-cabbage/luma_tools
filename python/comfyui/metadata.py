@@ -102,6 +102,7 @@ def cleanup_job_temp_files(output_dir: str) -> int:
         "comfyui_runner.py",
         "comfyui_client.py",
         "comfyui_utils.py",
+        "comfyui_analytics.py",
         "comfyui_job_info.txt",
         "comfyui_plugin_info.txt",
     ]

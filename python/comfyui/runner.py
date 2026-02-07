@@ -448,6 +448,7 @@ def main():
         total_frames = len(workflows_to_run)
         successful = 0
         failed = 0
+        frame_results = []
 
         for i, (frame_num, workflow) in enumerate(workflows_to_run, 1):
             logger.info(f"\n{'='*60}")
@@ -549,13 +550,47 @@ def main():
                             )
                         except Exception:
                             pass  # Silently skip metadata storage failures
+
+                # Collect frame result for analytics
+                frame_results.append({
+                    "frame_num": frame_num,
+                    "success": True,
+                    "execution_time_ms": total_duration_ms if total_duration_ms else execution_time_ms,
+                    "node_timing": node_execution_trace or [],
+                })
             else:
                 logger.error(f"Frame {frame_num} failed or timed out")
                 failed += 1
+                frame_results.append({
+                    "frame_num": frame_num,
+                    "success": False,
+                })
 
         logger.info(f"\n{'='*60}")
         logger.info(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed")
         logger.info(f"{'='*60}")
+
+        # Record execution analytics
+        try:
+            try:
+                from comfyui.analytics import record_execution, aggregate_node_timing
+            except ImportError:
+                from comfyui_analytics import record_execution, aggregate_node_timing
+
+            record_execution(
+                output_directory=args.output_directory,
+                workflow_file=args.workflow,
+                output_prefix=args.output_prefix,
+                total_frames=total_frames,
+                successful=successful,
+                failed=failed,
+                frame_results=frame_results,
+            )
+            aggregate_node_timing()
+        except ImportError:
+            logger.debug("Analytics module not available, skipping")
+        except Exception as e:
+            logger.warning(f"Analytics recording failed (non-fatal): {e}")
 
         # Auto-establish lineage relationships based on source images
         try:

@@ -111,12 +111,18 @@ def submit_comfyui_to_deadline(
     comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
     runner_script_source = os.path.join(comfyui_package_dir, "runner.py")
     utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
+    analytics_script_source = os.path.join(comfyui_package_dir, "analytics.py")
     runner_script = os.path.join(job_data_dir, "comfyui_runner.py")
     utils_script = os.path.join(job_data_dir, "comfyui_utils.py")
+    analytics_script = os.path.join(job_data_dir, "comfyui_analytics.py")
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
-    for src, dst in [(runner_script_source, runner_script), (utils_script_source, utils_script)]:
+    for src, dst in [
+        (runner_script_source, runner_script),
+        (utils_script_source, utils_script),
+        (analytics_script_source, analytics_script),
+    ]:
         shutil.copy2(src, dst)
         logger.info(f"Copied {os.path.basename(src)} to: {dst}")
 
