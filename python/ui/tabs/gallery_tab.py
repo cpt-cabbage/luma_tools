@@ -122,6 +122,7 @@ class GalleryTab(BaseTab):
         # Cache for scanned items
         self._cached_items = None
         self._widget_cache = {}
+        self._hash_to_path = {}  # content_hash -> path (secondary index for widget lookups)
 
         # User selection for multi-user gallery viewing
         # Normalize username: strip whitespace, treat empty as None
@@ -300,6 +301,7 @@ class GalleryTab(BaseTab):
         """Thread-safe access to clear all widgets from cache."""
         with self._cache_lock:
             self._widget_cache.clear()
+            self._hash_to_path.clear()
 
     def get_widget_cache_copy(self) -> dict:
         """Thread-safe access to get a copy of the widget cache for iteration."""

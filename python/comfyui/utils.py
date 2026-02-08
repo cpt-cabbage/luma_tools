@@ -140,10 +140,21 @@ def wait_for_server(server_url: str = None, port: int = None, timeout: int = 60)
 # Workflow Submission & History
 # =============================================================================
 
-def submit_workflow(workflow: dict, server_url: str = None, port: int = None) -> Optional[str]:
-    """Submit workflow to ComfyUI API and return prompt_id."""
+def submit_workflow(workflow: dict, server_url: str = None, port: int = None, client_id: str = None) -> Optional[str]:
+    """Submit workflow to ComfyUI API and return prompt_id.
+
+    Args:
+        workflow: The workflow dict to submit.
+        server_url: Server URL.
+        port: Server port.
+        client_id: WebSocket client ID for execution event routing.
+            If provided, ComfyUI will send execution events (executing, executed,
+            execution_start) to the WebSocket client with this ID.
+    """
     base_url = _normalize_server_url(server_url, port)
     prompt_data = {"prompt": workflow}
+    if client_id:
+        prompt_data["client_id"] = client_id
     url = f"{base_url}/prompt"
     data = json.dumps(prompt_data).encode('utf-8')
 
@@ -175,7 +186,13 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
     """Check history endpoint to see if prompt completed.
 
     Returns:
-        dict with 'status' ('success', 'error', 'pending') and optional 'outputs'
+        dict with 'status' and optional 'outputs':
+        - 'success': prompt completed successfully
+        - 'error': prompt failed with error messages
+        - 'pending': prompt still executing (found in history, not finished)
+        - 'not_found': server responded but prompt_id not in history
+          (may indicate server restart cleared history)
+        - 'unreachable': server not responding
     """
     base_url = _normalize_server_url(server_url, port)
     history_url = f"{base_url}/history/{prompt_id}"
@@ -193,9 +210,13 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
                 elif status_data.get('status_str') == 'error':
                     return {'status': 'error', 'messages': status_data.get('messages', [])}
 
-            return {'status': 'pending'}
+                return {'status': 'pending'}
+
+            # Server is up but prompt_id not found — history may have been
+            # cleared by a server restart
+            return {'status': 'not_found'}
     except Exception:
-        return {'status': 'pending'}
+        return {'status': 'unreachable'}
 
 
 # =============================================================================
@@ -209,7 +230,9 @@ def wait_for_completion_websocket(
     timeout: int = 3600,
     output_dir: str = None,
     on_image_output: callable = None,
-    track_node_timing: bool = False
+    track_node_timing: bool = False,
+    client_id: str = None,
+    workflow_dict: dict = None
 ) -> bool:
     """Wait for workflow execution using WebSocket for progress + HTTP polling for completion.
 
@@ -221,18 +244,29 @@ def wait_for_completion_websocket(
         output_dir: Directory for output files
         on_image_output: Callback for image outputs
         track_node_timing: If True, track node execution timing (returns dict instead of bool)
+        client_id: WebSocket client ID (must match the one used in submit_workflow
+            for execution event routing)
+        workflow_dict: API-format workflow dict for looking up node class_type
 
     Returns:
         bool if track_node_timing=False, otherwise dict with success and node_timing
     """
     base_url = _normalize_server_url(server_url, port)
     ws_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://')
-    client_id = str(uuid.uuid4())
+    if not client_id:
+        client_id = str(uuid.uuid4())
     ws_url = f"{ws_url}/ws?clientId={client_id}"
 
     result = {'success': None, 'error': None, 'outputs': {}}
     start_time = time.time()
     last_progress = {'value': 0, 'max': 0}
+
+    # Build node_id -> class_type lookup from workflow
+    node_type_lookup = {}
+    if workflow_dict:
+        for nid, ndata in workflow_dict.items():
+            if isinstance(ndata, dict) and 'class_type' in ndata:
+                node_type_lookup[str(nid)] = ndata['class_type']
 
     # Node execution timing tracking
     node_timing = {}  # node_id -> {start_time, end_time, duration_ms, node_type}
@@ -292,7 +326,7 @@ def wait_for_completion_websocket(
                                 'start_time': now,
                                 'end_time': None,
                                 'duration_ms': None,
-                                'node_type': None  # Will be filled from executed message
+                                'node_type': node_type_lookup.get(str(node_id)),
                             }
 
                         elapsed = int(time.time() - start_time)
@@ -320,8 +354,7 @@ def wait_for_completion_websocket(
 
                     # Update node timing with type info if available
                     if track_node_timing and node_id in node_timing:
-                        # Try to extract node type from execution data
-                        node_type = exec_data.get('node_type')
+                        node_type = exec_data.get('node_type') or node_type_lookup.get(str(node_id))
                         if node_type:
                             node_timing[node_id]['node_type'] = node_type
 
@@ -379,6 +412,7 @@ def wait_for_completion_websocket(
     # Hybrid: WebSocket for progress, HTTP polling for completion
     last_poll = 0
     poll_interval = 2
+    not_found_count = 0
 
     while result['success'] is None and result['error'] is None:
         elapsed = time.time() - start_time
@@ -401,20 +435,54 @@ def wait_for_completion_websocket(
                             logger.info(f"  Output: {img.get('filename', 'unknown')}")
                             if output_dir and on_image_output:
                                 on_image_output(img, base_url, output_dir)
+                result['success'] = True
                 ws.close()
-                return True
+                break
             elif history_result['status'] == 'error':
                 logger.error(f"Workflow failed")
                 for msg in history_result.get('messages', []):
                     logger.error(f"  Error: {msg}")
+                result['error'] = '; '.join(history_result.get('messages', ['Unknown error']))
                 ws.close()
-                return False
+                break
+            elif history_result['status'] == 'not_found':
+                # Server is up but prompt_id gone from history.
+                # If we previously saw execution (node_timing populated or
+                # outputs received via WebSocket), this means the server
+                # restarted after workflow completion — treat as success.
+                had_execution = bool(node_timing) or bool(result.get('outputs'))
+                if had_execution:
+                    not_found_count += 1
+                    if not_found_count >= 3:
+                        elapsed_int = int(elapsed)
+                        logger.info(
+                            f"Server restarted after execution — treating as "
+                            f"completed ({elapsed_int}s, saw {len(node_timing)} nodes)"
+                        )
+                        result['success'] = True
+                        ws.close()
+                        break
+                    else:
+                        logger.debug(f"Prompt not found in history (count={not_found_count}), waiting...")
+                else:
+                    not_found_count = 0
+            else:
+                not_found_count = 0
 
         time.sleep(0.1)
 
     success = result['success'] == True
 
     if track_node_timing:
+        # Finalize timing for the last node if HTTP polling detected completion
+        # before the WebSocket received the executing(node=None) message
+        if current_node['id'] is not None and current_node['id'] in node_timing:
+            entry = node_timing[current_node['id']]
+            if entry['end_time'] is None:
+                end_time = time.time()
+                entry['end_time'] = end_time
+                entry['duration_ms'] = int((end_time - current_node['start']) * 1000)
+
         # Return detailed result with node timing
         return {
             'success': success,
@@ -529,7 +597,9 @@ def wait_for_completion(
     timeout: int = 3600,
     output_dir: str = None,
     on_image_output: callable = None,
-    track_node_timing: bool = False
+    track_node_timing: bool = False,
+    client_id: str = None,
+    workflow_dict: dict = None
 ):
     """Wait for workflow execution to complete using WebSocket or HTTP polling.
 
@@ -541,6 +611,8 @@ def wait_for_completion(
         output_dir: Directory for output files
         on_image_output: Callback for image outputs
         track_node_timing: If True, track node execution timing
+        client_id: WebSocket client ID (must match the one used in submit_workflow)
+        workflow_dict: API-format workflow dict for node type lookup
 
     Returns:
         bool if track_node_timing=False
@@ -551,7 +623,8 @@ def wait_for_completion(
             return wait_for_completion_websocket(
                 prompt_id, server_url=server_url, port=port,
                 timeout=timeout, output_dir=output_dir, on_image_output=on_image_output,
-                track_node_timing=track_node_timing
+                track_node_timing=track_node_timing, client_id=client_id,
+                workflow_dict=workflow_dict
             )
         except Exception as e:
             logger.warning(f"WebSocket failed, falling back to HTTP polling: {e}")
@@ -594,19 +667,19 @@ _SEED_NODES = {
 }
 
 # Node types that accept an output filename prefix.
+# Derived from EXPORT_NODE_TYPES in node_configs.py to stay in sync.
 # Values are dicts of {input_key: value_template} where None means use output_prefix.
-_PREFIX_NODES = {
-    'SaveImage': {'filename_prefix': None},
-    'HYMotionExportFBX': {'output_dir': '', 'filename_prefix': None},
-    'Trellis2ExportMesh': {'filename_prefix': None},
-    'Trellis2ExportGLB': {'filename_prefix': None},
-    'UltraShapeSaveGLB': {'filename_prefix': None},
-    'SaveAudioMP3': {'filename_prefix': None},
-    'SaveAudioOpus': {'filename_prefix': None},
-}
+try:
+    from comfyui.node_configs import EXPORT_NODE_TYPES, OUTPUT_SUFFIX
+except ImportError:
+    # Standalone on farm — copied as comfyui_node_configs.py next to comfyui_utils.py
+    from comfyui_node_configs import EXPORT_NODE_TYPES, OUTPUT_SUFFIX
 
-# Suffix for marking the primary output node (see node_configs.py for docs)
-_OUTPUT_SUFFIX = '_output'
+_PREFIX_NODES = {}
+for _nt, _pk in EXPORT_NODE_TYPES.items():
+    _PREFIX_NODES[_nt] = {_pk: None}
+# HYMotionExportFBX also needs output_dir cleared
+_PREFIX_NODES.setdefault('HYMotionExportFBX', {})['output_dir'] = ''
 
 
 def has_output_suffix_nodes(workflow: dict) -> bool:
@@ -622,7 +695,7 @@ def has_output_suffix_nodes(workflow: dict) -> bool:
         if class_type in _PREFIX_NODES:
             meta = node_data.get('_meta', {})
             title = meta.get('title', '')
-            if title.endswith(_OUTPUT_SUFFIX):
+            if title.lower().endswith(OUTPUT_SUFFIX):
                 return True
     return False
 
@@ -672,7 +745,7 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             if has_output_nodes:
                 meta = node_data.get('_meta', {})
                 title = meta.get('title', '')
-                if not title.endswith(_OUTPUT_SUFFIX):
+                if not title.lower().endswith(OUTPUT_SUFFIX):
                     logger.info(f"Skipping non-_output export node {node_id} ({class_type}, title='{title}')")
                     continue
 
@@ -1020,3 +1093,83 @@ def copy_inputs_to_server(input_files: list, server_input_dir: str):
             if not os.path.exists(dst_file) or os.path.getmtime(src_file) > os.path.getmtime(dst_file):
                 shutil.copy2(src_file, dst_file)
                 logger.info(f"Copied: {filename}")
+
+
+# =============================================================================
+# File Hashing
+# =============================================================================
+
+# Cache for file hashes: path -> (mtime, hash)
+# Uses ThreadSafeCache when available, plain dict with lock as fallback
+try:
+    from core.caching import ThreadSafeCache
+    _hash_cache = ThreadSafeCache(max_size=256)
+    _HASH_CACHE_TYPE = "threadsafe"
+except ImportError:
+    # Farm environment — use simple dict with lock
+    _hash_cache = {}
+    _hash_cache_lock = threading.Lock()
+    _HASH_CACHE_TYPE = "dict"
+
+
+def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str]:
+    """Compute a content hash for a file using streaming reads.
+
+    Results are cached with mtime-based invalidation so repeated calls
+    for the same unchanged file are fast.
+
+    Args:
+        file_path: Path to the file to hash
+        algorithm: Hash algorithm (default: sha256)
+
+    Returns:
+        Hex digest string, or None on error
+    """
+    import hashlib
+
+    if not file_path or not os.path.isfile(file_path):
+        return None
+
+    try:
+        current_mtime = os.path.getmtime(file_path)
+    except OSError:
+        return None
+
+    # Check cache
+    cache_key = file_path
+    if _HASH_CACHE_TYPE == "threadsafe":
+        cached = _hash_cache.get(cache_key)
+        if cached is not None:
+            cached_mtime, cached_hash = cached
+            if cached_mtime == current_mtime:
+                return cached_hash
+    else:
+        with _hash_cache_lock:
+            cached = _hash_cache.get(cache_key)
+        if cached is not None:
+            cached_mtime, cached_hash = cached
+            if cached_mtime == current_mtime:
+                return cached_hash
+
+    # Compute hash
+    try:
+        h = hashlib.new(algorithm)
+        with open(file_path, 'rb') as f:
+            while True:
+                chunk = f.read(65536)  # 64KB chunks
+                if not chunk:
+                    break
+                h.update(chunk)
+        file_hash = h.hexdigest()
+    except Exception as e:
+        logger.warning(f"[hash] Failed to hash {file_path}: {e}")
+        return None
+
+    # Store in cache
+    if _HASH_CACHE_TYPE == "threadsafe":
+        _hash_cache.set(cache_key, (current_mtime, file_hash))
+    else:
+        with _hash_cache_lock:
+            _hash_cache[cache_key] = (current_mtime, file_hash)
+
+    return file_hash

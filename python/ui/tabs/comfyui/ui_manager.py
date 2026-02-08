@@ -13,7 +13,8 @@ from PySide6 import QtWidgets
 
 logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy,
+    QSpinBox, QDoubleSpinBox, QComboBox,
 )
 
 
@@ -36,7 +37,7 @@ class ComfyUIWidgetManager:
         # Widget tracking
         self.dynamic_widgets = {}  # (node_id, widget_name) -> widget container
         self.condition_map = {}  # Maps condition_node_name -> list of dependent widget node_ids
-        self.settings_widgets = {}  # node_id -> widget container for settings nodes
+        self.settings_widgets = {}  # (node_id, widget_name) -> widget container for settings nodes
         self._settings_dialog = None  # Settings dialog (opened from button)
 
         # Pending values (for restoration after widget recreation)
@@ -95,13 +96,33 @@ class ComfyUIWidgetManager:
                 semantic_key = f"{node.widget_type}/{node.display_name}"
                 if hasattr(input_widget, 'toPlainText'):
                     values[semantic_key] = input_widget.toPlainText()
-                elif hasattr(input_widget, 'text'):
-                    values[semantic_key] = input_widget.text()
-                elif hasattr(input_widget, 'isChecked'):
-                    values[semantic_key] = input_widget.isChecked()
                 elif hasattr(input_widget, 'selected_files'):
                     # BatchImageSelector - capture image paths
                     values[semantic_key] = input_widget.selected_files.copy()
+                elif hasattr(input_widget, 'isChecked'):
+                    values[semantic_key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'value'):
+                    values[semantic_key] = input_widget.value()
+                elif hasattr(input_widget, 'currentText'):
+                    values[semantic_key] = input_widget.currentText()
+                elif hasattr(input_widget, 'text'):
+                    values[semantic_key] = input_widget.text()
+
+        # Also capture settings widgets with "settings/" prefix
+        for (node_id, widget_name), container in self.settings_widgets.items():
+            node = getattr(container, 'settings_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if node and input_widget:
+                semantic_key = f"settings/{node.widget_name}"
+                if hasattr(input_widget, 'isChecked'):
+                    values[semantic_key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'value'):
+                    values[semantic_key] = input_widget.value()
+                elif hasattr(input_widget, 'currentText'):
+                    values[semantic_key] = input_widget.currentText()
+                elif hasattr(input_widget, 'text'):
+                    values[semantic_key] = input_widget.text()
+
         return values
 
     def refresh_editable_nodes(self, workflow_path: Optional[str], node_overrides: Dict[str, Any]):
@@ -451,10 +472,98 @@ class ComfyUIWidgetManager:
             layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
             container.input_widget = input_widget
 
-        else:
-            # Default: generic line edit for strings, ints, floats
-            row = QHBoxLayout()
+        elif node.widget_type == 'int':
+            from comfyui.node_info import get_widget_info
+            widget_info = get_widget_info(node.node_type, node.widget_name)
 
+            row = QHBoxLayout()
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            row.addWidget(label)
+
+            # QSpinBox is limited to 32-bit signed int; seeds can be 0–2^64
+            max_val = int(widget_info.max_val) if widget_info and widget_info.max_val is not None else 999999
+            if max_val > 2**31 - 1:
+                # Large range (e.g. seeds) — fall back to plain text
+                input_widget = QLineEdit()
+                input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                if node.current_value is not None:
+                    input_widget.setText(str(node.current_value))
+            else:
+                min_val = int(widget_info.min_val) if widget_info and widget_info.min_val is not None else 0
+                input_widget = QSpinBox()
+                input_widget.setRange(min_val, max_val)
+                if widget_info and widget_info.step is not None:
+                    input_widget.setSingleStep(int(widget_info.step))
+                input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                if node.current_value is not None:
+                    try:
+                        input_widget.setValue(int(node.current_value))
+                    except (ValueError, TypeError):
+                        pass
+
+            row.addWidget(input_widget, 1)
+            layout.addLayout(row)
+            container.input_widget = input_widget
+
+        elif node.widget_type == 'float':
+            from comfyui.node_info import get_widget_info
+            widget_info = get_widget_info(node.node_type, node.widget_name)
+
+            row = QHBoxLayout()
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            row.addWidget(label)
+
+            min_val = float(widget_info.min_val) if widget_info and widget_info.min_val is not None else 0.0
+            max_val = float(widget_info.max_val) if widget_info and widget_info.max_val is not None else 999999.0
+            step = float(widget_info.step) if widget_info and widget_info.step is not None else 0.1
+
+            input_widget = QDoubleSpinBox()
+            input_widget.setRange(min_val, max_val)
+            input_widget.setSingleStep(step)
+            # Auto-detect decimal places from step size
+            if step >= 1.0:
+                input_widget.setDecimals(0)
+            elif step >= 0.1:
+                input_widget.setDecimals(2)
+            else:
+                input_widget.setDecimals(4)
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            if node.current_value is not None:
+                try:
+                    input_widget.setValue(float(node.current_value))
+                except (ValueError, TypeError):
+                    pass
+
+            row.addWidget(input_widget, 1)
+            layout.addLayout(row)
+            container.input_widget = input_widget
+
+        elif node.widget_type == 'combo':
+            row = QHBoxLayout()
+            label = self._create_label_with_tooltip(f"{node.display_name}:")
+            row.addWidget(label)
+
+            input_widget = QComboBox()
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            if node.options:
+                input_widget.addItems([str(o) for o in node.options])
+            if node.current_value is not None:
+                idx = input_widget.findText(str(node.current_value))
+                if idx >= 0:
+                    input_widget.setCurrentIndex(idx)
+                else:
+                    input_widget.addItem(str(node.current_value))
+                    input_widget.setCurrentText(str(node.current_value))
+
+            row.addWidget(input_widget, 1)
+            layout.addLayout(row)
+            container.input_widget = input_widget
+
+        else:
+            # String type or unknown — plain text input
+            if node.widget_type not in ('string', ''):
+                logger.warning(f"Unknown editable widget_type '{node.widget_type}' for node {node.node_id}, falling back to QLineEdit")
+            row = QHBoxLayout()
             label = self._create_label_with_tooltip(f"{node.display_name}:")
             row.addWidget(label)
 
@@ -521,11 +630,20 @@ class ComfyUIWidgetManager:
                     if input_widget:
                         if hasattr(input_widget, 'setPlainText'):
                             input_widget.setPlainText(value)
-                        elif hasattr(input_widget, 'setText'):
-                            input_widget.setText(value)
                         elif hasattr(input_widget, 'set_images') and isinstance(value, list):
                             # BatchImageSelector - restore image paths
                             input_widget.set_images(value)
+                        elif hasattr(input_widget, 'setChecked'):
+                            input_widget.setChecked(bool(value))
+                        elif hasattr(input_widget, 'setValue'):
+                            try:
+                                input_widget.setValue(type(input_widget.value())(value))
+                            except (ValueError, TypeError):
+                                pass
+                        elif hasattr(input_widget, 'setCurrentText'):
+                            input_widget.setCurrentText(str(value))
+                        elif hasattr(input_widget, 'setText'):
+                            input_widget.setText(str(value))
             except (ValueError, AttributeError) as e:
                 logger.debug(f"Skipped restoration of editable value for {key_str}: {e}")
 
@@ -551,16 +669,20 @@ class ComfyUIWidgetManager:
                     value = self.pending_semantic_values[semantic_key]
                     if hasattr(input_widget, 'setPlainText'):
                         input_widget.setPlainText(str(value))
-                    elif hasattr(input_widget, 'setText'):
-                        input_widget.setText(str(value))
-                    elif hasattr(input_widget, 'setChecked'):
-                        input_widget.setChecked(bool(value))
                     elif hasattr(input_widget, 'set_images') and isinstance(value, list):
                         # BatchImageSelector - restore image paths
                         input_widget.set_images(value)
-
-        # Clear pending semantic values after applying
-        self.pending_semantic_values = {}
+                    elif hasattr(input_widget, 'setChecked'):
+                        input_widget.setChecked(bool(value))
+                    elif hasattr(input_widget, 'setValue'):
+                        try:
+                            input_widget.setValue(type(input_widget.value())(value))
+                        except (ValueError, TypeError):
+                            pass
+                    elif hasattr(input_widget, 'setCurrentText'):
+                        input_widget.setCurrentText(str(value))
+                    elif hasattr(input_widget, 'setText'):
+                        input_widget.setText(str(value))
 
     def collect_editable_values(self) -> Tuple[Dict[int, Any], int]:
         """
@@ -596,6 +718,10 @@ class ComfyUIWidgetManager:
                         selected_image_count = max(selected_image_count, len(value) if value else 0)
                     elif hasattr(input_widget, 'isChecked'):
                         value = input_widget.isChecked()
+                    elif hasattr(input_widget, 'value'):
+                        value = input_widget.value()
+                    elif hasattr(input_widget, 'currentText'):
+                        value = input_widget.currentText()
                     else:
                         value = input_widget.text().strip() if hasattr(input_widget, 'text') else str(node.current_value)
 
@@ -628,21 +754,29 @@ class ComfyUIWidgetManager:
                 state_key = f"{node_id}:{widget_name}"
                 if hasattr(input_widget, 'toPlainText'):
                     editable_values[state_key] = input_widget.toPlainText()
-                elif hasattr(input_widget, 'isChecked'):
-                    editable_values[state_key] = input_widget.isChecked()
-                elif hasattr(input_widget, 'text'):
-                    editable_values[state_key] = input_widget.text()
                 elif hasattr(input_widget, 'selected_files'):
                     # BatchImageSelector - save image paths
                     editable_values[state_key] = input_widget.selected_files.copy()
+                elif hasattr(input_widget, 'isChecked'):
+                    editable_values[state_key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'value'):
+                    editable_values[state_key] = input_widget.value()
+                elif hasattr(input_widget, 'currentText'):
+                    editable_values[state_key] = input_widget.currentText()
+                elif hasattr(input_widget, 'text'):
+                    editable_values[state_key] = input_widget.text()
 
         # Also include settings values with a prefix to distinguish them
-        for node_id, container in self.settings_widgets.items():
+        for (node_id, widget_name), container in self.settings_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if input_widget:
-                key = f"settings_{node_id}"
+                key = f"settings_{node_id}:{widget_name}"
                 if hasattr(input_widget, 'isChecked'):
                     editable_values[key] = input_widget.isChecked()
+                elif hasattr(input_widget, 'value'):
+                    editable_values[key] = input_widget.value()
+                elif hasattr(input_widget, 'currentText'):
+                    editable_values[key] = input_widget.currentText()
                 elif hasattr(input_widget, 'text'):
                     editable_values[key] = input_widget.text()
         return editable_values
@@ -703,6 +837,9 @@ class ComfyUIWidgetManager:
 
         # Apply pending settings values
         self._apply_pending_settings_values()
+
+        # Apply semantic settings values (from per-workflow persistence)
+        self._apply_semantic_settings_values()
 
         # Re-show dialog if it was previously visible
         if was_visible:
@@ -814,7 +951,7 @@ class ComfyUIWidgetManager:
             widget = self._create_settings_widget(node)
             if widget:
                 grid.addWidget(widget, row, col)
-                self.settings_widgets[node.node_id] = widget
+                self.settings_widgets[(node.node_id, node.widget_name)] = widget
                 col += 1
                 if col >= 2:
                     col = 0
@@ -937,12 +1074,24 @@ class ComfyUIWidgetManager:
             return
 
         for key, value in self.pending_settings_values.items():
-            # Key format: "settings_<node_id>"
+            # Key format: "settings_<node_id>:<widget_name>" (new) or "settings_<node_id>" (legacy)
             if key.startswith("settings_"):
                 try:
-                    node_id = int(key.replace("settings_", ""))
-                    if node_id in self.settings_widgets:
-                        container = self.settings_widgets[node_id]
+                    rest = key[len("settings_"):]
+                    if ":" in rest:
+                        node_id_str, widget_name = rest.split(":", 1)
+                        node_id = int(node_id_str)
+                        lookup_key = (node_id, widget_name)
+                    else:
+                        # Legacy format - try to find any widget for this node_id
+                        node_id = int(rest)
+                        lookup_key = None
+                        for k in self.settings_widgets:
+                            if k[0] == node_id:
+                                lookup_key = k
+                                break
+                    if lookup_key and lookup_key in self.settings_widgets:
+                        container = self.settings_widgets[lookup_key]
                         input_widget = getattr(container, 'input_widget', None)
                         if input_widget:
                             if hasattr(input_widget, 'setChecked'):
@@ -961,6 +1110,34 @@ class ComfyUIWidgetManager:
 
         self.pending_settings_values = {}
 
+    def _apply_semantic_settings_values(self):
+        """Apply settings/-prefixed semantic values to settings widgets.
+
+        Used by per-workflow persistence to restore settings node values
+        when switching between workflows.
+        """
+        if not self.pending_semantic_values:
+            return
+
+        for (node_id, widget_name), container in self.settings_widgets.items():
+            node = getattr(container, 'settings_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if node and input_widget:
+                semantic_key = f"settings/{node.widget_name}"
+                if semantic_key in self.pending_semantic_values:
+                    value = self.pending_semantic_values[semantic_key]
+                    if hasattr(input_widget, 'setChecked'):
+                        input_widget.setChecked(bool(value))
+                    elif hasattr(input_widget, 'setValue'):
+                        try:
+                            input_widget.setValue(type(input_widget.value())(value))
+                        except (ValueError, TypeError):
+                            pass
+                    elif hasattr(input_widget, 'setCurrentText'):
+                        input_widget.setCurrentText(str(value))
+                    elif hasattr(input_widget, 'setText'):
+                        input_widget.setText(str(value))
+
     def collect_settings_values(self) -> Dict[int, list]:
         """
         Collect settings values from settings widgets.
@@ -970,7 +1147,7 @@ class ComfyUIWidgetManager:
         """
         settings_values = {}
 
-        for node_id, container in self.settings_widgets.items():
+        for (node_id, widget_name), container in self.settings_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             node = getattr(container, 'settings_node', None)
             if input_widget and node:

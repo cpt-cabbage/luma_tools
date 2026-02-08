@@ -252,6 +252,107 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
         return False
 
 
+def reject_request(request_id: str, admin_username: str, reason: str) -> bool:
+    """Reject a feature request and notify the user.
+
+    Args:
+        request_id: Unique ID of the request
+        admin_username: Admin who rejected it
+        reason: Reason for rejection
+
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        base_dir = get_feature_requests_base_dir()
+
+        if not os.path.exists(base_dir):
+            return False
+
+        # Find the request in user files
+        for filename in os.listdir(base_dir):
+            if not filename.endswith('_requests.json'):
+                continue
+
+            file_path = os.path.join(base_dir, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    requests = json.load(f)
+
+                # Find and update the request
+                modified = False
+                for req in requests:
+                    if req.get('id') == request_id:
+                        req['rejected'] = True
+                        req['rejected_by'] = admin_username
+                        req['rejected_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        req['reject_reason'] = reason
+                        modified = True
+                        break
+
+                if modified:
+                    _atomic_json_write(file_path, requests)
+                    logger.info(f"Rejected request {request_id} by {admin_username}: {reason}")
+                    for req in requests:
+                        if req.get('id') == request_id:
+                            _notify_user_of_rejection(req.get('username', ''), req, admin_username, reason)
+                            break
+                    return True
+
+            except Exception as e:
+                log_error("processing file", e, filename)
+                continue
+
+        logger.warning(f"Request {request_id} not found")
+        return False
+
+    except Exception as e:
+        log_error("rejecting request", e, request_id)
+        return False
+
+
+def _notify_user_of_rejection(username: str, request: Dict[str, Any], admin_username: str, reason: str):
+    """Create a notification file for the user about their rejected request.
+
+    Args:
+        username: Username to notify
+        request: The rejected request data
+        admin_username: Admin who rejected it
+        reason: Reason for rejection
+    """
+    try:
+        base_dir = get_feature_requests_base_dir()
+        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+
+        # Read existing notifications
+        notifications = []
+        if os.path.exists(notification_file):
+            try:
+                with open(notification_file, 'r', encoding='utf-8') as f:
+                    notifications = json.load(f)
+            except Exception:
+                notifications = []
+
+        # Add new notification
+        notification = {
+            'request_id': request['id'],
+            'request_category': request['category'],
+            'request_description': request['description'][:100] + '...' if len(request['description']) > 100 else request['description'],
+            'action': 'rejected',
+            'rejected_by': admin_username,
+            'rejected_at': request['rejected_at'],
+            'reason': reason,
+            'read': False
+        }
+        notifications.append(notification)
+
+        _atomic_json_write(notification_file, notifications)
+        logger.info(f"Rejection notification created for {username}")
+
+    except Exception as e:
+        log_error("creating rejection notification for", e, username)
+
+
 def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_username: str):
     """Create a notification file for the user about their completed request.
 

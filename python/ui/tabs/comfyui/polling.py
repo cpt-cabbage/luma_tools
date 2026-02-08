@@ -95,6 +95,12 @@ def estimate_remaining_time(completed, total, elapsed_seconds):
     return None
 
 
+def _get_poll_interval_ms():
+    """Get Deadline poll interval from global settings (in milliseconds)."""
+    from core.settings_manager import safe_get_setting
+    return safe_get_setting("deadline_poll_interval", 5) * 1000
+
+
 class PollingMixin:
     """
     Mixin providing job polling functionality for ComfyUI tab.
@@ -229,7 +235,7 @@ class PollingMixin:
             self._iterate_poll_timer = QTimer(self.main_window)
             self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
 
-        self._iterate_poll_timer.start(5000)
+        self._iterate_poll_timer.start(_get_poll_interval_ms())
         self._update_cancel_button_visibility()
 
         # Save job state for recovery on app restart (after timer is started)
@@ -325,7 +331,15 @@ class PollingMixin:
                 from core.state_manager import app_state
                 app_state.increment_gallery_new_count(new_frames)
 
-        self.ui.ComfyUIIterateProgress.setValue(progress)
+        # Blend node-level progress into progress bar for smoother feedback
+        # For single-task jobs, progress jumps 0%→100% without this
+        display_progress = progress
+        if task_progress and completed_tasks < display_total:
+            task_pct = task_progress.get('progress_pct', 0)
+            # Cap at 99% so 100% only appears on Deadline-confirmed completion
+            display_progress = min(99, int((completed_tasks * 100 + task_pct) / display_total))
+
+        self.ui.ComfyUIIterateProgress.setValue(display_progress)
         self._iterate_poll_count += 1
 
         if status == "Completed":
@@ -587,6 +601,9 @@ class PollingMixin:
     def _start_batch_polling(self, job_ids, network_output_dir, output_type="image"):
         """Start polling for batch job completion.
 
+        If a batch poll is already running, merges the new jobs into the
+        existing batch instead of resetting all state.
+
         Args:
             job_ids: List of Deadline job IDs to poll
             network_output_dir: Path where outputs will be saved
@@ -594,36 +611,68 @@ class PollingMixin:
         """
         from ui_components import StatusColors
 
-        self._batch_job_ids = list(job_ids)
-        self._batch_pending_jobs = set(job_ids)
-        self._batch_failed_jobs = set()
-        self._batch_completed_tasks = {job_id: 0 for job_id in job_ids}
-        self._batch_total_tasks = {job_id: self.ui.ComfyUIGenerationCount.value() for job_id in job_ids}
-        self._batch_job_statuses = {job_id: "Pending" for job_id in job_ids}
-        self._batch_network_output_dir = network_output_dir
-        self._batch_output_type = output_type
-        self._batch_poll_count = 0
-        self._batch_start_time = time.time()
-        self._batch_generation_count = self.ui.ComfyUIGenerationCount.value()
-        self._batch_poll_pending_results = 0
-        self._batch_poll_results = {}
-        self._batch_recovery_mode = False  # New submission, not recovery
+        gen_count = self.ui.ComfyUIGenerationCount.value()
 
-        total_jobs = len(job_ids)
-        total_frames = total_jobs * self._batch_generation_count
-
-        logger.info(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
-
-        self.update_status_with_spinner(
-            f"ComfyUI Batch: {total_jobs} submission(s), {total_frames} job(s) - Waiting for workers...",
-            StatusColors.INFO
+        # Check if batch polling is already active — merge instead of reset
+        already_polling = (
+            self._batch_poll_timer is not None
+            and self._batch_poll_timer.isActive()
+            and self._batch_pending_jobs
         )
 
-        if self._batch_poll_timer is None:
-            self._batch_poll_timer = QTimer(self.main_window)
-            self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
+        if already_polling:
+            # Merge new jobs into existing batch
+            self._batch_job_ids.extend(job_ids)
+            self._batch_pending_jobs.update(job_ids)
+            for job_id in job_ids:
+                self._batch_completed_tasks[job_id] = 0
+                self._batch_total_tasks[job_id] = gen_count
+                self._batch_job_statuses[job_id] = "Pending"
+            # Keep using existing network_output_dir, start_time, etc.
 
-        self._batch_poll_timer.start(10000)
+            total_jobs = len(self._batch_job_ids)
+            total_frames = sum(self._batch_total_tasks.values())
+            new_count = len(job_ids)
+
+            logger.info(f"[Batch] Merged {new_count} new job(s) into existing batch, now tracking {total_jobs} job(s), {total_frames} total tasks")
+
+            self.update_status_with_spinner(
+                f"ComfyUI Batch: {total_jobs} job(s), {total_frames} tasks - Rendering...",
+                StatusColors.INFO
+            )
+        else:
+            # Fresh batch start
+            self._batch_job_ids = list(job_ids)
+            self._batch_pending_jobs = set(job_ids)
+            self._batch_failed_jobs = set()
+            self._batch_completed_tasks = {job_id: 0 for job_id in job_ids}
+            self._batch_total_tasks = {job_id: gen_count for job_id in job_ids}
+            self._batch_job_statuses = {job_id: "Pending" for job_id in job_ids}
+            self._batch_network_output_dir = network_output_dir
+            self._batch_output_type = output_type
+            self._batch_poll_count = 0
+            self._batch_start_time = time.time()
+            self._batch_generation_count = gen_count
+            self._batch_poll_pending_results = 0
+            self._batch_poll_results = {}
+            self._batch_recovery_mode = False  # New submission, not recovery
+
+            total_jobs = len(job_ids)
+            total_frames = total_jobs * gen_count
+
+            logger.info(f"[Batch] Starting polling for {total_jobs} submission(s), {total_frames} total job(s)")
+
+            self.update_status_with_spinner(
+                f"ComfyUI Batch: {total_jobs} submission(s), {total_frames} job(s) - Waiting for workers...",
+                StatusColors.INFO
+            )
+
+            if self._batch_poll_timer is None:
+                self._batch_poll_timer = QTimer(self.main_window)
+                self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
+
+            self._batch_poll_timer.start(_get_poll_interval_ms())
+
         self._update_cancel_button_visibility()
 
         # Save job state for recovery on app restart (after timer is started)
@@ -900,6 +949,13 @@ class PollingMixin:
         elapsed_str = format_elapsed_time(elapsed)
         total_frames = sum(self._batch_total_tasks.values())
         completed_frames = sum(self._batch_completed_tasks.values())
+
+        # Record per-frame execution time for future estimates
+        if completed_frames > 0 and getattr(self, '_current_preset_name', ''):
+            from core.user_preferences import record_workflow_execution_time
+            per_frame_time = elapsed / completed_frames
+            record_workflow_execution_time(self._current_preset_name, per_frame_time)
+            logger.info(f"[Batch] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")
 
         if had_failures:
             logger.warning("[Batch] Jobs finished with failures!")
@@ -1394,7 +1450,7 @@ class PollingMixin:
                 self._iterate_poll_timer = QTimer(self.main_window)
                 self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
 
-            self._iterate_poll_timer.start(5000)
+            self._iterate_poll_timer.start(_get_poll_interval_ms())
             self._update_cancel_button_visibility()
             self.main_window.start_status_spinner()
 
@@ -1443,7 +1499,7 @@ class PollingMixin:
                 self._batch_poll_timer = QTimer(self.main_window)
                 self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
 
-            self._batch_poll_timer.start(10000)
+            self._batch_poll_timer.start(_get_poll_interval_ms())
             self._update_cancel_button_visibility()
             self.main_window.start_status_spinner()
 
@@ -1550,7 +1606,7 @@ class PollingMixin:
                     self._batch_poll_timer = QTimer(self.main_window)
                     self._batch_poll_timer.timeout.connect(self._poll_batch_jobs)
 
-                self._batch_poll_timer.start(10000)
+                self._batch_poll_timer.start(_get_poll_interval_ms())
                 self._update_cancel_button_visibility()
                 self.main_window.start_status_spinner()
 
@@ -1595,7 +1651,7 @@ class PollingMixin:
                 self._iterate_poll_timer = QTimer(self.main_window)
                 self._iterate_poll_timer.timeout.connect(self._poll_iterate_job)
 
-            self._iterate_poll_timer.start(5000)
+            self._iterate_poll_timer.start(_get_poll_interval_ms())
             self._update_cancel_button_visibility()
             self.main_window.start_status_spinner()
 

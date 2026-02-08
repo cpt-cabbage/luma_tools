@@ -532,7 +532,8 @@ class CollaborativeCanvas(QGraphicsView):
     def add_image(self, image_path: str, x: float = None, y: float = None,
                   width: float = None, height: float = None,
                   liked: bool = False, node_id: str = None,
-                  qimage: Optional[QImage] = None) -> ImageNode:
+                  qimage: Optional[QImage] = None,
+                  content_hash: str = None) -> ImageNode:
         """
         Add an image node to the canvas.
 
@@ -543,10 +544,19 @@ class CollaborativeCanvas(QGraphicsView):
             liked: Initial liked state
             node_id: Optional ID for sync (defaults to filename)
             qimage: Optional pre-loaded QImage (for async loading - avoids disk I/O)
+            content_hash: SHA-256 content hash for file identification
 
         Returns:
             The created ImageNode
         """
+        # Compute content hash if not provided
+        if content_hash is None:
+            try:
+                from comfyui.utils import compute_file_hash
+                content_hash = compute_file_hash(image_path)
+            except Exception:
+                content_hash = None
+
         # Default position to center of current view
         if x is None or y is None:
             center = self.mapToScene(self.viewport().rect().center())
@@ -555,7 +565,8 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Create node - width/height can be None to use original resolution
         # Pass qimage to avoid disk I/O if pre-loaded
-        node = ImageNode(image_path, x, y, width, height, qimage=qimage)
+        node = ImageNode(image_path, x, y, width, height, qimage=qimage,
+                         content_hash=content_hash)
         node.set_liked(liked)
 
         # Add to scene
@@ -2500,7 +2511,8 @@ class CollaborativeCanvas(QGraphicsView):
                 'width': width,
                 'height': height,
                 'liked': node.is_liked(),
-                'path': node.image_path
+                'path': node.image_path,
+                'content_hash': node.content_hash,
             }
 
         # Connections
@@ -2616,14 +2628,26 @@ class CollaborativeCanvas(QGraphicsView):
             # Load nodes
             nodes_data = state.get('nodes', {})
             for node_id, node_data in nodes_data.items():
+                image_path = node_data.get('path', '')
+                content_hash = node_data.get('content_hash')
+
+                # If file doesn't exist, try to find it by hash in the same directory
+                if not os.path.exists(image_path) and content_hash:
+                    recovered = self._find_file_by_hash(
+                        os.path.dirname(image_path), content_hash)
+                    if recovered:
+                        image_path = recovered
+                        logger.info(f"Canvas: recovered moved file by hash: {image_path}")
+
                 self.add_image(
-                    node_data.get('path', ''),
+                    image_path,
                     x=node_data.get('x', 0),
                     y=node_data.get('y', 0),
                     width=node_data.get('width'),
                     height=node_data.get('height'),
                     liked=node_data.get('liked', False),
-                    node_id=node_id
+                    node_id=node_id,
+                    content_hash=content_hash,
                 )
 
             # Load connections
@@ -2710,16 +2734,28 @@ class CollaborativeCanvas(QGraphicsView):
             # Load nodes with pre-loaded images
             nodes_data = state.get('nodes', {})
             for node_id, node_data in nodes_data.items():
+                image_path = node_data.get('path', '')
+                content_hash = node_data.get('content_hash')
+
+                # If file doesn't exist, try to find it by hash in the same directory
+                if not os.path.exists(image_path) and content_hash:
+                    recovered = self._find_file_by_hash(
+                        os.path.dirname(image_path), content_hash)
+                    if recovered:
+                        image_path = recovered
+                        logger.info(f"Canvas: recovered moved file by hash: {image_path}")
+
                 qimage = preloaded_images.get(node_id)
                 self.add_image(
-                    node_data.get('path', ''),
+                    image_path,
                     x=node_data.get('x', 0),
                     y=node_data.get('y', 0),
                     width=node_data.get('width'),
                     height=node_data.get('height'),
                     liked=node_data.get('liked', False),
                     node_id=node_id,
-                    qimage=qimage  # Use pre-loaded QImage to avoid disk I/O
+                    qimage=qimage,  # Use pre-loaded QImage to avoid disk I/O
+                    content_hash=content_hash,
                 )
 
             # Load connections (same as load_state)
@@ -2841,6 +2877,43 @@ class CollaborativeCanvas(QGraphicsView):
         """
         self.set_zoom_level(zoom)
 
+    def _find_file_by_hash(self, directory: str, expected_hash: str) -> Optional[str]:
+        """
+        Search a directory for a file matching the expected content hash.
+
+        Used to recover files that have been renamed but remain in the same directory.
+
+        Args:
+            directory: Directory to search in
+            expected_hash: SHA-256 hash to match
+
+        Returns:
+            Path to the matching file, or None
+        """
+        if not directory or not expected_hash or not os.path.isdir(directory):
+            return None
+
+        try:
+            from comfyui.utils import compute_file_hash
+            from core.config import GALLERY_SUPPORTED_EXTENSIONS
+        except ImportError:
+            return None
+
+        try:
+            for entry in os.scandir(directory):
+                if not entry.is_file():
+                    continue
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext not in GALLERY_SUPPORTED_EXTENSIONS:
+                    continue
+                file_hash = compute_file_hash(entry.path)
+                if file_hash == expected_hash:
+                    return os.path.normpath(entry.path)
+        except Exception as e:
+            logger.debug(f"Error searching for file by hash in {directory}: {e}")
+
+        return None
+
     def find_node_by_file_id(self, file_id: str) -> Optional[ImageNode]:
         """
         Find an image node by its file_id (from metadata).
@@ -2857,6 +2930,11 @@ class CollaborativeCanvas(QGraphicsView):
                 return node
             # Also check if file_id matches the filename
             if os.path.basename(node.image_path) == file_id:
+                return node
+
+        # Fallback: check content_hash
+        for node_id, node in self._image_nodes.items():
+            if node.content_hash and node.content_hash == file_id:
                 return node
         return None
 
@@ -3028,11 +3106,23 @@ class CollaborativeCanvas(QGraphicsView):
         if not favorites_manager:
             return
 
-        # Find node by path
+        # Find node by exact path match first
         for node_id, node in self._image_nodes.items():
             if node.image_path == image_path:
                 node.sync_from_gallery(favorites_manager)
-                break
+                return
+
+        # Fallback: try hash-based match
+        try:
+            from comfyui.utils import compute_file_hash
+            target_hash = compute_file_hash(image_path)
+            if target_hash:
+                for node_id, node in self._image_nodes.items():
+                    if node.content_hash and node.content_hash == target_hash:
+                        node.sync_from_gallery(favorites_manager)
+                        return
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Color Sampler

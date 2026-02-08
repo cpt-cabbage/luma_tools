@@ -19,6 +19,7 @@ if _script_dir not in sys.path:
 import json
 import time
 import copy
+import uuid
 import argparse
 import signal
 import shutil
@@ -458,7 +459,12 @@ def main():
             # Track timing for per-file metadata
             frame_start_time = time.time()
 
-            prompt_id = submit_workflow(workflow, port=args.port)
+            # Generate client_id for WebSocket event routing — ComfyUI sends
+            # execution events (executing, executed) only to the client that
+            # submitted the prompt, so both submit and wait must share the same ID.
+            frame_client_id = str(uuid.uuid4())
+
+            prompt_id = submit_workflow(workflow, port=args.port, client_id=frame_client_id)
             if not prompt_id:
                 logger.error(f"Failed to submit workflow for frame {frame_num}")
                 failed += 1
@@ -478,7 +484,8 @@ def main():
             completion_result = wait_for_completion(
                 prompt_id, port=args.port, timeout=args.timeout,
                 output_dir=download_dir, on_image_output=on_image_output,
-                track_node_timing=True
+                track_node_timing=True, client_id=frame_client_id,
+                workflow_dict=workflow
             )
 
             # Handle both dict result (with timing) and bool result (fallback)
@@ -534,19 +541,37 @@ def main():
                     # Farm execution - try local import
                     add_per_file_metadata = None
 
+                # Try to import file hashing (available with full package)
+                _compute_hash = None
+                try:
+                    from comfyui.utils import compute_file_hash as _compute_hash
+                except ImportError:
+                    try:
+                        from comfyui_utils import compute_file_hash as _compute_hash
+                    except (ImportError, AttributeError):
+                        pass  # Hashing not available on this farm worker
+
                 if add_per_file_metadata and moved:
                     for dest_path in moved:
                         try:
                             filename = os.path.basename(dest_path)
                             # Use server-reported total_duration_ms if available, else our measured time
                             file_execution_time = total_duration_ms if total_duration_ms else execution_time_ms
+                            # Compute content hash for the output file
+                            file_hash = None
+                            if _compute_hash:
+                                try:
+                                    file_hash = _compute_hash(dest_path)
+                                except Exception:
+                                    pass
                             add_per_file_metadata(
                                 output_dir=args.output_directory,
                                 filename=filename,
                                 frame_index=frame_num,
                                 actual_seed=actual_seed,
                                 execution_time_ms=file_execution_time,
-                                node_execution_trace=node_execution_trace
+                                node_execution_trace=node_execution_trace,
+                                content_hash=file_hash,
                             )
                         except Exception:
                             pass  # Silently skip metadata storage failures

@@ -77,7 +77,8 @@ class ImageNode(QGraphicsItem):
     def __init__(self, image_path: str, x: float = 0, y: float = 0,
                  width: float = None, height: float = None,
                  qimage: Optional[QImage] = None,
-                 parent: QGraphicsItem = None):
+                 parent: QGraphicsItem = None,
+                 content_hash: str = None):
         """
         Create an image node.
 
@@ -87,11 +88,13 @@ class ImageNode(QGraphicsItem):
             width, height: Size (None = use original image resolution)
             qimage: Optional pre-loaded QImage (for async loading - avoids disk I/O)
             parent: Parent graphics item
+            content_hash: SHA-256 content hash for file identification
         """
         super().__init__(parent)
 
         self.image_path = image_path
         self.filename = os.path.basename(image_path)
+        self.content_hash = content_hash
         self._requested_width = width
         self._requested_height = height
         self._width = width or self.DEFAULT_SIZE
@@ -863,12 +866,13 @@ class ImageNode(QGraphicsItem):
             return
 
         path = self.image_path
+        content_hash = self.content_hash
 
-        # Sync like status
-        self._liked = favorites_manager.is_liked(path)
+        # Sync like status (with hash fallback for renamed files)
+        self._liked = favorites_manager.is_liked(path, content_hash=content_hash)
 
-        # Sync group membership
-        self._group_ids = list(favorites_manager.get_item_groups(path))
+        # Sync group membership (with hash fallback for renamed files)
+        self._group_ids = list(favorites_manager.get_item_groups(path, content_hash=content_hash))
 
         # Get border color based on groups or like status
         self._border_color = self._get_gallery_border_color(favorites_manager)
@@ -878,9 +882,10 @@ class ImageNode(QGraphicsItem):
     def _get_gallery_border_color(self, favorites_manager) -> Optional[QColor]:
         """Get the border color based on group membership or like status."""
         path = self.image_path
+        content_hash = self.content_hash
 
         # Priority: group color > liked color
-        groups = favorites_manager.get_item_groups(path)
+        groups = favorites_manager.get_item_groups(path, content_hash=content_hash)
         if groups:
             # Use the first group's color
             first_group_id = next(iter(groups))
@@ -889,7 +894,7 @@ class ImageNode(QGraphicsItem):
                 return QColor(group_def.color)
 
         # Fallback to like color
-        if favorites_manager.is_liked(path):
+        if favorites_manager.is_liked(path, content_hash=content_hash):
             return QColor(239, 68, 68)  # Red for liked
 
         return None

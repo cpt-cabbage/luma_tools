@@ -5,7 +5,7 @@
       "description": "Image to Model",
       "iteratable": false,
       "note": "",
-      "full_restart": false,
+      "full_restart": true,
       "node_overrides": {},
       "is_multi": false,
       "output_type": "3d"
@@ -167,7 +167,12 @@
       "iteratable": false,
       "note": "",
       "full_restart": false,
-      "node_overrides": {},
+      "node_overrides": {
+        "7:text": {
+          "enabled": false,
+          "default_value": ""
+        }
+      },
       "is_multi": false,
       "output_type": "audio"
     },

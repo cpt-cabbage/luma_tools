@@ -180,12 +180,14 @@ class GalleryManager(BaseGalleryManager):
 
         # Reset widget cache
         self.tab._widget_cache = {}
+        self.tab._hash_to_path = {}
         self.tab._section_items = {}  # section_id -> [paths]
 
         # Store items for widget creation (grid mode)
-        # Include has_metadata and job_prefix for proper styling
+        # Include has_metadata, job_prefix and content_hash for proper styling and identification
         self.tab._pending_items = [
-            (item['path'], item['type'], item.get('has_metadata', False), item.get('job_prefix'))
+            (item['path'], item['type'], item.get('has_metadata', False),
+             item.get('job_prefix'), item.get('content_hash'))
             for item in items
         ]
         self.tab._load_index = 0
@@ -314,6 +316,7 @@ class GalleryManager(BaseGalleryManager):
 
         # Reset caches
         self.tab._widget_cache = {}
+        self.tab._hash_to_path = {}
         self.tab._section_items = {}
         self._stack_widgets = {}
         self._group_colors = {}
@@ -374,6 +377,11 @@ class GalleryManager(BaseGalleryManager):
                 thumbnail = self._create_thumbnail_widget(item, container)
                 if thumbnail:
                     self.tab._widget_cache[item['path']] = thumbnail
+                    content_hash = item.get('content_hash')
+                    if content_hash and hasattr(self.tab, '_hash_to_path'):
+                        self.tab._hash_to_path[content_hash] = item['path']
+                    if content_hash and hasattr(self.tab, 'favorites_manager'):
+                        self.tab.favorites_manager.register_hash(item['path'], content_hash)
                     self.tab._flow_layout.addWidget(thumbnail)
                     # Track in section_items so incremental sync can find this prefix
                     self.tab._section_items[prefix] = [item['path']]
@@ -521,6 +529,11 @@ class GalleryManager(BaseGalleryManager):
                     thumbnail = self._create_thumbnail_widget(item, container)
                     if thumbnail:
                         self.tab._widget_cache[item['path']] = thumbnail
+                        content_hash = item.get('content_hash')
+                        if content_hash and hasattr(self.tab, '_hash_to_path'):
+                            self.tab._hash_to_path[content_hash] = item['path']
+                        if content_hash and hasattr(self.tab, 'favorites_manager'):
+                            self.tab.favorites_manager.register_hash(item['path'], content_hash)
                         self.tab._flow_layout.addWidget(thumbnail)
                         new_widgets.append(thumbnail)
                         self.tab._section_items[prefix] = [item['path']]
@@ -851,6 +864,11 @@ class GalleryManager(BaseGalleryManager):
 
                 # Add to cache and insert at correct layout position
                 self.tab._widget_cache[path] = thumbnail
+                content_hash = item.get('content_hash')
+                if content_hash and hasattr(self.tab, '_hash_to_path'):
+                    self.tab._hash_to_path[content_hash] = path
+                if content_hash and hasattr(self.tab, 'favorites_manager'):
+                    self.tab.favorites_manager.register_hash(path, content_hash)
                 self.tab._flow_layout.insertWidget(target_index, thumbnail)
 
             # Update status count
@@ -963,8 +981,13 @@ class GalleryManager(BaseGalleryManager):
 
         for i in range(self.tab._widget_create_index, end_index):
             pending_item = self.tab._pending_items[i]
-            # Support formats: (path, type), (path, type, has_metadata), (path, type, has_metadata, job_prefix)
-            if len(pending_item) == 4:
+            # Support formats: (path, type), (path, type, has_metadata),
+            # (path, type, has_metadata, job_prefix),
+            # (path, type, has_metadata, job_prefix, content_hash)
+            content_hash = None
+            if len(pending_item) == 5:
+                path, file_type, has_metadata, job_prefix, content_hash = pending_item
+            elif len(pending_item) == 4:
                 path, file_type, has_metadata, job_prefix = pending_item
             elif len(pending_item) == 3:
                 path, file_type, has_metadata = pending_item
@@ -979,7 +1002,8 @@ class GalleryManager(BaseGalleryManager):
                 'path': path,
                 'type': file_type,
                 'has_metadata': has_metadata,
-                'job_prefix': job_prefix
+                'job_prefix': job_prefix,
+                'content_hash': content_hash,
             }
 
             thumbnail = self._create_thumbnail_widget(item, container, self.tab._is_editable_cache)
@@ -987,6 +1011,12 @@ class GalleryManager(BaseGalleryManager):
                 continue
 
             self.tab._widget_cache[path] = thumbnail
+            # Index by content hash for hash-based lookups
+            if content_hash and hasattr(self.tab, '_hash_to_path'):
+                self.tab._hash_to_path[content_hash] = path
+            # Register hash with favorites manager for auto-migration
+            if content_hash and hasattr(self.tab, 'favorites_manager'):
+                self.tab.favorites_manager.register_hash(path, content_hash)
             self.tab._flow_layout.addWidget(thumbnail)
 
         self.tab._widget_create_index = end_index
@@ -1144,6 +1174,8 @@ class GalleryManager(BaseGalleryManager):
         # Clear widget cache
         if hasattr(self.tab, '_widget_cache'):
             self.tab._widget_cache = {}
+        if hasattr(self.tab, '_hash_to_path'):
+            self.tab._hash_to_path = {}
 
         # Clear stacked widgets
         if hasattr(self, '_stack_widgets'):
@@ -1231,3 +1263,18 @@ class GalleryManager(BaseGalleryManager):
 
         if hasattr(self.tab, '_widget_cache'):
             return self.tab._widget_cache.get(image_path)
+
+    def find_widget_by_hash(self, content_hash: str):
+        """Find a widget by its content hash.
+
+        Args:
+            content_hash: SHA-256 content hash
+
+        Returns:
+            The thumbnail widget if found, None otherwise
+        """
+        if hasattr(self.tab, '_hash_to_path'):
+            path = self.tab._hash_to_path.get(content_hash)
+            if path:
+                return self.find_widget_by_path(path)
+        return None

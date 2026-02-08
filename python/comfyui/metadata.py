@@ -220,6 +220,8 @@ def add_item_metadata(
     workflow_preset: Optional[str] = None,
     editable_values: Optional[Dict[int, Dict[str, Any]]] = None,
     output_type: Optional[str] = None,
+    source_image_hashes: Optional[Dict[str, str]] = None,
+    custom_name: Optional[str] = None,
 ) -> bool:
     """Add metadata for items that will be generated with a given prefix.
 
@@ -241,6 +243,7 @@ def add_item_metadata(
         workflow_preset: Name of the workflow preset used
         editable_values: Dict of editable node values
         output_type: Type of output (image, video, 3d, audio, other)
+        source_image_hashes: Dict of basename -> sha256 hash for source files
 
     Returns:
         bool: True if metadata saved successfully, False otherwise
@@ -343,7 +346,7 @@ def add_item_metadata(
         entry = {
             "prompt": prompt,
             "workflow": workflow_name,
-            "workflow_preset": workflow_preset,
+            "workflow_preset": workflow_preset or "",
             "input_image": safe_basename(input_image),  # Keep for backward compat
             "timestamp": datetime.now().isoformat(),
             "generation_count": generation_count,
@@ -355,6 +358,8 @@ def add_item_metadata(
             "source_images": source_images if source_images else None,  # All input images
             "source_models": source_models if source_models else None,  # All 3D model inputs
             "output_type": output_type,  # Type of output (image, video, 3d, audio, other)
+            "source_image_hashes": source_image_hashes if source_image_hashes else None,
+            "custom_name": custom_name if custom_name else None,
         }
 
         metadata[f"_prefix_{prefix_key}"] = entry
@@ -365,13 +370,27 @@ def add_item_metadata(
         if source_images:
             for source_image in source_images:
                 input_key = f"_input_{source_image}"
+                content_hash = source_image_hashes.get(source_image) if source_image_hashes else None
                 if input_key not in metadata:
-                    metadata[input_key] = {
+                    input_entry = {
                         "is_output": False,
                         "is_input": True,
                         "used_by_job": prefix_key,
                         "timestamp": datetime.now().isoformat(),
                     }
+                    if content_hash:
+                        input_entry["content_hash"] = content_hash
+                    metadata[input_key] = input_entry
+
+                # Create hash index entry for reverse lookup
+                if content_hash:
+                    hash_key = f"_hash_{content_hash}"
+                    if hash_key not in metadata:
+                        metadata[hash_key] = {
+                            "filename": source_image,
+                            "job_prefix": prefix_key,
+                            "is_input": True,
+                        }
 
         # Same for source models
         if source_models:
@@ -391,7 +410,12 @@ def add_item_metadata(
         return False
 
 
-def get_item_metadata(output_dir: str, filename: str, allow_reverse_match: bool = True) -> Optional[Dict[str, Any]]:
+def get_item_metadata(
+    output_dir: str,
+    filename: str,
+    allow_reverse_match: bool = True,
+    content_hash: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """Get metadata for a specific gallery item (image, video, model, etc.).
 
     Args:
@@ -401,22 +425,29 @@ def get_item_metadata(output_dir: str, filename: str, allow_reverse_match: bool 
             the filename. This is useful for display/recreate purposes. Set to False
             when determining input/output status to avoid matching input files to
             output job metadata.
+        content_hash: Optional SHA-256 hash for hash-based fallback lookup
 
     Returns:
         Metadata dict for the file, or None if not found
     """
     metadata = load_gallery_metadata(output_dir)
-    return _lookup_file_metadata(metadata, filename, allow_reverse_match=allow_reverse_match)
+    return _lookup_file_metadata(
+        metadata, filename,
+        allow_reverse_match=allow_reverse_match,
+        content_hash=content_hash,
+    )
 
 
 def _lookup_file_metadata(
     metadata: Dict[str, Dict[str, Any]],
     filename: str,
-    allow_reverse_match: bool = False
+    allow_reverse_match: bool = False,
+    content_hash: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Internal helper to look up metadata for a filename.
 
-    Looks up by exact filename first, then by prefix match.
+    Looks up by exact filename first, then by prefix match,
+    then by content hash if provided.
 
     Args:
         metadata: Gallery metadata dict
@@ -424,6 +455,7 @@ def _lookup_file_metadata(
         allow_reverse_match: If True, also match when prefix ends with basename.
             This is useful for recreate settings but should be False for
             input/output detection to avoid matching input files to output metadata.
+        content_hash: Optional SHA-256 hash for hash-based fallback lookup
 
     Returns:
         Metadata dict for the file, or None if not found
@@ -496,6 +528,21 @@ def _lookup_file_metadata(
     except Exception as e:
         logger.error(f"[Metadata] Error during prefix lookup for {filename}: {e}")
 
+    # Hash-based fallback: look up by content hash if provided
+    if content_hash:
+        hash_key = f"_hash_{content_hash}"
+        hash_entry = metadata.get(hash_key)
+        if isinstance(hash_entry, dict):
+            # Follow the reference to get the job's _prefix_ entry
+            job_prefix = hash_entry.get("job_prefix")
+            if job_prefix:
+                prefix_entry = metadata.get(f"_prefix_{job_prefix}")
+                if isinstance(prefix_entry, dict):
+                    logger.info(f"[Metadata] Found metadata via hash lookup for {filename}")
+                    return prefix_entry
+            # Return hash entry itself as minimal metadata
+            return hash_entry
+
     return None
 
 
@@ -550,6 +597,27 @@ def is_known_input_file(output_dir: str, filename: str) -> bool:
             return True
 
     return False
+
+
+def find_file_by_hash(output_dir: str, content_hash: str) -> Optional[str]:
+    """Look up a filename by its content hash.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        content_hash: SHA-256 hash to look up
+
+    Returns:
+        Filename string if found, None otherwise
+    """
+    if not content_hash:
+        return None
+
+    metadata = load_gallery_metadata(output_dir)
+    hash_key = f"_hash_{content_hash}"
+    hash_entry = metadata.get(hash_key)
+    if isinstance(hash_entry, dict):
+        return hash_entry.get("filename")
+    return None
 
 
 def mark_as_input_file(output_dir: str, filename: str, used_by_job: str = None) -> bool:
@@ -696,6 +764,7 @@ def add_per_file_metadata(
     execution_time_ms: Optional[int] = None,
     node_execution_trace: Optional[list] = None,
     error: Optional[str] = None,
+    content_hash: Optional[str] = None,
 ) -> bool:
     """Store per-file metadata for enhanced traceability.
 
@@ -713,6 +782,7 @@ def add_per_file_metadata(
         execution_time_ms: Total execution time in milliseconds
         node_execution_trace: List of dicts with node_id, name, duration_ms
         error: Error message if generation failed
+        content_hash: SHA-256 hash of the file content
 
     Returns:
         bool: True if saved successfully
@@ -742,6 +812,7 @@ def add_per_file_metadata(
         "execution_time_ms": execution_time_ms,
         "node_execution_trace": node_execution_trace,
         "error": error,
+        "content_hash": content_hash,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -749,6 +820,16 @@ def add_per_file_metadata(
     entry = {k: v for k, v in entry.items() if v is not None}
 
     metadata[file_key] = entry
+
+    # Create hash index entry for reverse lookup
+    if content_hash:
+        hash_key = f"_hash_{content_hash}"
+        if hash_key not in metadata:
+            metadata[hash_key] = {
+                "filename": filename,
+                "job_prefix": None,  # Output file, not tied to a specific job prefix
+                "is_input": False,
+            }
 
     try:
         return save_gallery_metadata(output_dir, metadata)

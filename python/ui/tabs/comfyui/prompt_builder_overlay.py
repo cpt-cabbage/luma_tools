@@ -12,8 +12,8 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QScrollArea, QFrame, QCheckBox, QRadioButton,
-    QDoubleSpinBox, QButtonGroup, QTabWidget, QListWidget,
+    QTextEdit, QScrollArea, QFrame, QCheckBox,
+    QDoubleSpinBox, QTabWidget, QListWidget,
     QInputDialog, QMessageBox, QComboBox, QSplitter
 )
 from PySide6.QtCore import Qt, Signal, QTimer
@@ -65,15 +65,70 @@ class OverlayBackdrop(QWidget):
 
 
 class CategorySection(QFrame):
-    """Widget for a single category with options and weight controls"""
+    """Widget for a single category with options and weight controls.
+
+    Single-select categories use a QComboBox dropdown.
+    Multi-select categories use QCheckBox widgets with optional weight spinboxes.
+    """
     selection_changed = Signal()
+
+    # Shared combobox stylesheet (class-level to avoid rebuilding per instance)
+    _COMBO_STYLE = f"""
+        QComboBox {{
+            background-color: {CARD_BG.name()};
+            border: 1px solid {BORDER.name()};
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: {TEXT_PRIMARY.name()};
+            min-height: 24px;
+        }}
+        QComboBox:hover {{
+            border-color: {ACCENT.name()};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 24px;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid {TEXT_SECONDARY.name()};
+            margin-right: 6px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {CARD_BG.name()};
+            border: 1px solid {BORDER.name()};
+            color: {TEXT_PRIMARY.name()};
+            selection-background-color: {ACCENT.name()};
+            outline: none;
+        }}
+    """
+
+    _CHECKBOX_STYLE = f"""
+        QCheckBox {{ color: {TEXT_PRIMARY.name()}; }}
+        QCheckBox::indicator {{
+            width: 18px; height: 18px;
+            border: 2px solid {BORDER.name()};
+            border-radius: 4px;
+            background-color: {CARD_BG.name()};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {ACCENT.name()};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {ACCENT.name()};
+            border-color: {ACCENT.name()};
+        }}
+    """
 
     def __init__(self, category: PromptCategory, parent=None):
         super().__init__(parent)
         self.category = category
-        self.option_widgets = {}  # option_id -> QCheckBox/QRadioButton
-        self.weight_widgets = {}  # option_id -> QDoubleSpinBox
-        self.button_group = None
+        self._combo = None                # QComboBox for single-select
+        self._option_ids = []             # ordered option IDs matching combo indices
+        self.option_widgets = {}          # option_id -> QCheckBox (multi-select only)
+        self.weight_widgets = {}          # option_id -> QDoubleSpinBox
 
         self._setup_ui()
 
@@ -88,29 +143,52 @@ class CategorySection(QFrame):
         header.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {TEXT_PRIMARY.name()};")
         layout.addWidget(header)
 
-        # Options
-        if not self.category.multi_select:
-            self.button_group = QButtonGroup(self)
+        if self.category.multi_select:
+            self._setup_multi_select(layout)
+        else:
+            self._setup_single_select(layout)
 
+        # Frame styling
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet(f"""
+            CategorySection {{
+                background-color: {CARD_BG.name()};
+                border: 1px solid {BORDER.name()};
+                border-radius: 6px;
+            }}
+        """)
+
+    def _setup_single_select(self, layout):
+        """Build a dropdown for single-select categories"""
+        self._combo = QComboBox()
+        self._combo.setStyleSheet(self._COMBO_STYLE)
+
+        # First item is "None" (no selection)
+        self._combo.addItem("— None —")
+        self._option_ids = [None]
+
+        for option in self.category.options:
+            self._combo.addItem(option.label)
+            self._combo.setItemData(self._combo.count() - 1, option.description, Qt.ToolTipRole)
+            self._option_ids.append(option.id)
+
+        self._combo.currentIndexChanged.connect(lambda _: self.selection_changed.emit())
+        layout.addWidget(self._combo)
+
+    def _setup_multi_select(self, layout):
+        """Build checkboxes with optional weights for multi-select categories"""
         for option in self.category.options:
             option_layout = QHBoxLayout()
             option_layout.setSpacing(8)
 
-            # Checkbox or radio button
-            if self.category.multi_select:
-                widget = QCheckBox(option.label)
-            else:
-                widget = QRadioButton(option.label)
-                self.button_group.addButton(widget)
-
+            widget = QCheckBox(option.label)
             widget.setToolTip(option.description)
-            widget.setStyleSheet(f"color: {TEXT_PRIMARY.name()};")
+            widget.setStyleSheet(self._CHECKBOX_STYLE)
             widget.toggled.connect(lambda _: self.selection_changed.emit())
 
             self.option_widgets[option.id] = widget
             option_layout.addWidget(widget, stretch=1)
 
-            # Weight spinbox
             if self.category.allow_weights:
                 weight_spin = QDoubleSpinBox()
                 weight_spin.setRange(0.1, 3.0)
@@ -127,35 +205,30 @@ class CategorySection(QFrame):
 
             layout.addLayout(option_layout)
 
-        # Styling
-        self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet(f"""
-            CategorySection {{
-                background-color: {CARD_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-            }}
-        """)
-
     def get_selected_options(self) -> List[str]:
         """Get list of selected option IDs"""
-        selected = []
-        for opt_id, widget in self.option_widgets.items():
-            if widget.isChecked():
-                selected.append(opt_id)
-        return selected
+        if self._combo:
+            idx = self._combo.currentIndex()
+            opt_id = self._option_ids[idx] if idx < len(self._option_ids) else None
+            return [opt_id] if opt_id else []
+        return [oid for oid, w in self.option_widgets.items() if w.isChecked()]
 
     def get_weights(self) -> Dict[str, float]:
         """Get weights for all options"""
-        weights = {}
-        for opt_id, widget in self.weight_widgets.items():
-            weights[opt_id] = widget.value()
-        return weights
+        return {oid: w.value() for oid, w in self.weight_widgets.items()}
 
     def set_selected_options(self, option_ids: List[str]):
         """Set which options are selected"""
-        for opt_id, widget in self.option_widgets.items():
-            widget.setChecked(opt_id in option_ids)
+        if self._combo:
+            target = option_ids[0] if option_ids else None
+            try:
+                idx = self._option_ids.index(target)
+            except ValueError:
+                idx = 0  # "None" item
+            self._combo.setCurrentIndex(idx)
+        else:
+            for opt_id, widget in self.option_widgets.items():
+                widget.setChecked(opt_id in option_ids)
 
     def set_weights(self, weights: Dict[str, float]):
         """Set weights for options"""
@@ -165,31 +238,26 @@ class CategorySection(QFrame):
 
     def clear_selection(self):
         """Clear all selections"""
-        for widget in self.option_widgets.values():
-            widget.setChecked(False)
+        if self._combo:
+            self._combo.setCurrentIndex(0)
+        else:
+            for widget in self.option_widgets.values():
+                widget.setChecked(False)
 
     def randomize(self):
         """Randomly select options and weights"""
         if self.category.multi_select:
-            # Random count of selections (0-3)
             count = random.randint(0, min(3, len(self.category.options)))
             selected = random.sample(self.category.options, count)
-            selected_ids = [opt.id for opt in selected]
+            self.set_selected_options([opt.id for opt in selected])
         else:
-            # Single random selection
             if self.category.options:
                 selected = random.choice(self.category.options)
-                selected_ids = [selected.id]
-            else:
-                selected_ids = []
+                self.set_selected_options([selected.id])
 
-        self.set_selected_options(selected_ids)
-
-        # Randomize weights (0.8 - 1.5)
         if self.category.allow_weights:
-            for opt_id in self.weight_widgets.keys():
-                weight = random.uniform(0.8, 1.5)
-                self.weight_widgets[opt_id].setValue(weight)
+            for opt_id in self.weight_widgets:
+                self.weight_widgets[opt_id].setValue(random.uniform(0.8, 1.5))
 
 
 class PromptBuilderOverlay(QWidget):

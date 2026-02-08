@@ -190,8 +190,12 @@ def modify_workflow_api_format(
 
                 # Apply value based on widget type
                 if widget_type == 'text':
-                    inputs['prompt'] = value
-                    inputs['text'] = value  # Some nodes use 'text' instead of 'prompt'
+                    if widget_name:
+                        inputs[widget_name] = value
+                    else:
+                        # Legacy fallback: try both common names
+                        inputs['prompt'] = value
+                        inputs['text'] = value
                     logger.info(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
                 elif widget_type == 'image':
                     if value:
@@ -360,11 +364,18 @@ def modify_workflow_api_format(
     for _nid, _nd in modified.items():
         if isinstance(_nd, dict) and _nd.get('class_type') in EXPORT_NODE_TYPES:
             _title = _nd.get('_meta', {}).get('title', '')
-            if _title.endswith(OUTPUT_SUFFIX):
+            if _title.lower().endswith(OUTPUT_SUFFIX):
                 has_output_nodes = True
                 break
     if has_output_nodes:
         logger.info(f"Detected {OUTPUT_SUFFIX} suffix node(s) - only setting prefix on designated output nodes")
+        # Diagnostic: log all export nodes and their designation status
+        for _nid, _nd in modified.items():
+            if isinstance(_nd, dict) and _nd.get('class_type') in EXPORT_NODE_TYPES:
+                _title = _nd.get('_meta', {}).get('title', '')
+                _is_designated = _title.lower().endswith(OUTPUT_SUFFIX)
+                logger.info(f"  Export node {_nid} ({_nd.get('class_type')}): "
+                            f"title='{_title}', designated={_is_designated}")
 
     # Find and modify nodes by class_type
     # Apply special handling for certain node types (seeds, output prefixes, directories)
@@ -414,13 +425,18 @@ def modify_workflow_api_format(
 
         # Set output_dir for any node that supports it
         if 'output_dir' in widget_list and output_dir:
-            inputs['output_dir'] = output_dir
-            logger.info(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
+            # If _output nodes exist, skip output_dir on non-designated export nodes
+            # so their files don't end up in the user's gallery directory
+            if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
+                logger.info(f"Skipping output_dir for non-{OUTPUT_SUFFIX} export node {node_id} ({class_type}, title='{node_title}')")
+            else:
+                inputs['output_dir'] = output_dir
+                logger.info(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
 
         # Set filename_prefix for export nodes
         if class_type in EXPORT_NODE_TYPES:
             # If _output nodes exist, only set prefix on those
-            if has_output_nodes and not node_title.endswith(OUTPUT_SUFFIX):
+            if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
                 logger.info(f"Skipping non-{OUTPUT_SUFFIX} export node {node_id} ({class_type}, title='{node_title}')")
             else:
                 prefix_key = EXPORT_NODE_TYPES[class_type]

@@ -46,6 +46,7 @@ This project has skills in `.claude/skills/`.
 | **check-code** | **After writing larger code changes that affects:** - threading, imports, settings patterns before presenting. | Auto |
 | **commit-message** | Generate well-formatted commit messages from staged/unstaged changes | `/commit-message` |
 | **feature-dev** | Guided feature development with codebase understanding and architecture focus | `/feature-dev` |
+| **paper-watcher** | Track research papers, check for code releases and ComfyUI custom node support | `/paper-watcher` |
 
 ## Per-Module Documentation
 

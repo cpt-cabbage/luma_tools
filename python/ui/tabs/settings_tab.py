@@ -52,6 +52,8 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     # Canvas sync settings
     ("canvas_sync_interval", "CanvasSyncIntervalSpinBox", _SPINBOX),
+    # Deadline polling settings
+    ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]
 
 
@@ -143,8 +145,9 @@ class SettingsTab(BaseTab):
         # Check if user is supervisor (can see user settings but not global settings)
         is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
 
-        # Create canvas sync interval spinbox programmatically (for global settings)
+        # Create programmatic global settings UI widgets
         self._setup_canvas_sync_interval_ui()
+        self._setup_deadline_poll_interval_ui()
 
         # Initialize completion sound combobox with data values
         if hasattr(self.ui, 'ComfyUICompletionSoundCombo'):
@@ -229,6 +232,50 @@ class SettingsTab(BaseTab):
         # Store reference so declarative system can find it
         self.ui.CanvasSyncIntervalSpinBox = spinbox
 
+    def _setup_deadline_poll_interval_ui(self):
+        """Create and add Deadline poll interval spinbox to global settings."""
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QSpinBox, QSpacerItem, QSizePolicy
+
+        if not hasattr(self.ui, 'globalSettingsLayout'):
+            return
+
+        layout = self.ui.globalSettingsLayout
+
+        row_layout = QHBoxLayout()
+
+        label = QLabel("Deadline Poll Interval:")
+        label.setToolTip("How often to check Deadline for job status updates")
+        row_layout.addWidget(label)
+
+        spinbox = QSpinBox()
+        spinbox.setMinimum(1)
+        spinbox.setMaximum(60)
+        spinbox.setSingleStep(1)
+        spinbox.setValue(5)
+        spinbox.setSuffix(" s")
+        spinbox.setToolTip("Poll interval in seconds (1-60s)")
+        row_layout.addWidget(spinbox)
+
+        spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        row_layout.addItem(spacer)
+
+        # Insert after canvas sync interval (find adminUsersHeader as reference)
+        insert_index = -1
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.widget():
+                widget = item.widget()
+                if widget.objectName() == 'adminUsersHeader':
+                    insert_index = i
+                    break
+
+        if insert_index >= 0:
+            layout.insertLayout(insert_index, row_layout)
+        else:
+            layout.addLayout(row_layout)
+
+        self.ui.DeadlinePollIntervalSpinBox = spinbox
+
     def _load_version_ui(self):
         """Load version information into the UI."""
         version = APP_VERSION
@@ -268,27 +315,45 @@ class SettingsTab(BaseTab):
         self.signals.request_attention.emit()
 
     def _check_user_notifications(self):
-        """Check if user has notifications about completed requests."""
+        """Check if user has notifications about completed or rejected requests."""
         from core.feature_requests import get_user_notifications, mark_notifications_read
 
         try:
             notifications = get_user_notifications(self.app_state.user)
 
             if notifications:
-                # Show system tray notification instead of dialog
-                count = len(notifications)
-                if count == 1:
-                    notif = notifications[0]
-                    message = f"[{notif['request_category']}] {notif['request_description']}"
-                else:
-                    message = f"{count} feature requests have been completed"
+                # Separate completed and rejected notifications
+                # Missing 'action' field is treated as "completed" for backwards compatibility
+                completed = [n for n in notifications if n.get('action', 'completed') == 'completed']
+                rejected = [n for n in notifications if n.get('action') == 'rejected']
 
                 if hasattr(self.main_window, 'show_system_notification'):
-                    self.main_window.show_system_notification(
-                        "Feature Requests Completed",
-                        message,
-                        "success"
-                    )
+                    # Show completed notifications
+                    if completed:
+                        if len(completed) == 1:
+                            notif = completed[0]
+                            message = f"[{notif['request_category']}] {notif['request_description']}"
+                        else:
+                            message = f"{len(completed)} feature requests have been completed"
+                        self.main_window.show_system_notification(
+                            "Feature Requests Completed",
+                            message,
+                            "success"
+                        )
+
+                    # Show rejected notifications
+                    if rejected:
+                        if len(rejected) == 1:
+                            notif = rejected[0]
+                            reason = notif.get('reason', 'No reason provided')
+                            message = f"[{notif['request_category']}] {notif['request_description']}\nReason: {reason}"
+                        else:
+                            message = f"{len(rejected)} feature requests have been rejected"
+                        self.main_window.show_system_notification(
+                            "Feature Request Update",
+                            message,
+                            "warning"
+                        )
 
                 # Mark as read
                 mark_notifications_read(self.app_state.user)
@@ -749,6 +814,13 @@ class SettingsTab(BaseTab):
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()
+
+        # Clear cached paths so logging and other modules pick up the new values
+        try:
+            from core.logging_utils import clear_path_cache
+            clear_path_cache()
+        except ImportError:
+            pass
 
         self.show_status("Global settings saved", "success")
 

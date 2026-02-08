@@ -10,6 +10,7 @@ Cross-tab communication:
 """
 
 import os
+import re
 import random
 import time
 import logging
@@ -56,6 +57,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_randomize_seed)
         self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 16))
 
+        # Name field (debounced save)
+        self.ui.ComfyUIName.textChanged.connect(self._on_text_changed)
+
         # Iterate mode signals
         self.ui.ComfyUIUseAsInput.clicked.connect(self._on_use_as_input_clicked)
 
@@ -84,6 +88,14 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Create workflow selector dropdown (will be added to UI dynamically)
         self._setup_workflow_selector()
         self._setup_note_display()
+
+        # Set up filename-safe validator on the Name field
+        from PySide6.QtCore import QRegularExpression
+        from PySide6.QtGui import QRegularExpressionValidator
+        name_validator = QRegularExpressionValidator(
+            QRegularExpression(r'[\w\- ]*'), self.ui.ComfyUIName
+        )
+        self.ui.ComfyUIName.setValidator(name_validator)
 
         # Initialize polling state from mixin
         self._init_polling_state()
@@ -563,11 +575,21 @@ class ComfyUITab(PollingMixin, BaseTab):
         if not workflow_name:
             return
 
-        # Capture current editable values BEFORE clearing widgets
-        # This preserves prompts etc. when switching between workflows
-        self.widget_manager.pending_semantic_values = self.widget_manager.capture_editable_values_by_type()
+        # Save current per-workflow inputs before switching
+        self.state_manager.save_per_workflow_inputs(self.widget_manager)
+
+        # Capture current editable values as cross-workflow fallback
+        cross_workflow_values = self.widget_manager.capture_editable_values_by_type()
 
         self.state_manager.current_selected_workflow = workflow_name
+
+        # Load per-workflow saved inputs for the new sub-workflow,
+        # falling back to cross-workflow semantic values if no saved data
+        saved_inputs = self.state_manager.load_per_workflow_inputs()
+        if saved_inputs:
+            self.widget_manager.pending_semantic_values = saved_inputs
+        else:
+            self.widget_manager.pending_semantic_values = cross_workflow_values
 
         # Get the workflow path for this selection
         workflow_path = get_comfyui_workflow_preset_path(
@@ -655,6 +677,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             get_workflow_preset_subworkflows
         )
 
+        # Save current per-workflow inputs before switching
+        self.state_manager.save_per_workflow_inputs(self.widget_manager)
+
         self.state_manager.current_preset_name = preset_name
 
         # Update button text with rating
@@ -692,6 +717,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         if workflow_path and os.path.exists(workflow_path):
             self.ui.ComfyUIWorkflowPath.setText(workflow_path)
             self.app_state.comfyui_workflow_path = workflow_path
+
+            # Load per-workflow saved inputs for the new preset
+            saved_inputs = self.state_manager.load_per_workflow_inputs()
+            if saved_inputs:
+                self.widget_manager.pending_semantic_values = saved_inputs
+
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
@@ -807,6 +838,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             node_overrides
         )
 
+        # Clear pending semantic values now that both widget types have been processed
+        self.widget_manager.pending_semantic_values = {}
+
         # Update settings button visibility
         self._update_workflow_settings_button_visibility()
 
@@ -850,10 +884,25 @@ class ComfyUITab(PollingMixin, BaseTab):
             elif node.widget_type == '3d_model':
                 input_widget.textChanged.connect(self._on_text_changed)
 
+            elif node.widget_type == 'video':
+                input_widget.images_changed.connect(self._on_images_changed)
+
             else:
                 # Default widgets
                 if hasattr(input_widget, 'textChanged'):
                     input_widget.textChanged.connect(self._on_text_changed)
+
+        # Connect settings widget signals for auto-save
+        for (node_id, widget_name), container in self.widget_manager.settings_widgets.items():
+            input_widget = getattr(container, 'input_widget', None)
+            if not input_widget:
+                continue
+            if hasattr(input_widget, 'valueChanged'):
+                input_widget.valueChanged.connect(self._on_text_changed)
+            elif hasattr(input_widget, 'currentTextChanged'):
+                input_widget.currentTextChanged.connect(self._on_text_changed)
+            elif hasattr(input_widget, 'stateChanged'):
+                input_widget.stateChanged.connect(lambda: self._on_text_changed())
 
     # =========================================================================
     # PROMPT PRESETS
@@ -1011,12 +1060,15 @@ class ComfyUITab(PollingMixin, BaseTab):
         self._save_timer.start(200)
 
     def _on_images_changed(self, images):
-        """Handle image selection changes - save the last browse directory."""
+        """Handle image selection changes - save the last browse directory and trigger state save."""
         from core.user_preferences import set_last_browse_directory
 
         if images:
             last_dir = os.path.dirname(images[0])
             set_last_browse_directory("comfyui_images", last_dir)
+
+        # Trigger debounced save so image selections are persisted per-workflow
+        self._on_text_changed()
 
     # =========================================================================
     # VALIDATION
@@ -1099,6 +1151,14 @@ class ComfyUITab(PollingMixin, BaseTab):
         else:
             job_name = "luma_tools_job"
 
+        # Read optional custom name and prepend to job_name
+        custom_name = self.ui.ComfyUIName.text().strip()
+        if custom_name:
+            # Sanitize: replace spaces with underscores, strip non-filename-safe chars
+            sanitized_name = re.sub(r'[^\w\-]', '_', custom_name).strip('_')
+            if sanitized_name:
+                job_name = f"{sanitized_name}_{job_name}"
+
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
         self.animator.update_status_animated(
@@ -1145,6 +1205,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 "workflow_preset": self.state_manager.current_preset_name,
                 "full_restart": full_restart,
                 "output_type": output_type,
+                "custom_name": custom_name if custom_name else None,
             },
             on_result=self._on_submit_result,
             on_error=self._on_submit_error,
@@ -1174,6 +1235,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                 if self.state_manager.current_preset_name:
                     from comfyui.ratings import increment_model_usage
                     increment_model_usage(self.state_manager.current_preset_name)
+
+                # Capture preset name for analytics recording in polling handlers
+                self._current_preset_name = self.state_manager.current_preset_name
 
                 # Start polling for job completion
                 logger.info(f"[ComfyUI] Starting polling - iterate_mode={self.app_state.comfyui_iterate_mode}, job_count={len(job_ids)}")
@@ -1309,6 +1373,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             logger.debug("[ComfyUI] No source files found in metadata")
             return
 
+        # Get source image hashes for hash-based fallback
+        source_image_hashes = metadata.get('source_image_hashes') or {}
+
         # Build full paths for source files
         image_paths = []
         for basename in source_images:
@@ -1318,7 +1385,15 @@ class ComfyUITab(PollingMixin, BaseTab):
             if os.path.exists(full_path):
                 image_paths.append(full_path)
             else:
-                logger.warning(f"[ComfyUI] Source image not found: {full_path}")
+                # Try hash-based fallback: scan directory for file with matching hash
+                found_by_hash = self._find_file_by_hash(
+                    output_dir, source_image_hashes.get(basename)
+                )
+                if found_by_hash:
+                    image_paths.append(found_by_hash)
+                    logger.info(f"[ComfyUI] Found source image by hash: {basename} -> {os.path.basename(found_by_hash)}")
+                else:
+                    logger.warning(f"[ComfyUI] Source image not found: {full_path}")
 
         model_paths = []
         for basename in source_models:
@@ -1328,7 +1403,15 @@ class ComfyUITab(PollingMixin, BaseTab):
             if os.path.exists(full_path):
                 model_paths.append(full_path)
             else:
-                logger.warning(f"[ComfyUI] Source model not found: {full_path}")
+                # Try hash-based fallback for models too
+                found_by_hash = self._find_file_by_hash(
+                    output_dir, source_image_hashes.get(basename)
+                )
+                if found_by_hash:
+                    model_paths.append(found_by_hash)
+                    logger.info(f"[ComfyUI] Found source model by hash: {basename} -> {os.path.basename(found_by_hash)}")
+                else:
+                    logger.warning(f"[ComfyUI] Source model not found: {full_path}")
 
         # Find and populate input widgets
         for node_id, container in self.widget_manager.dynamic_widgets.items():
@@ -1358,6 +1441,46 @@ class ComfyUITab(PollingMixin, BaseTab):
                     input_widget.setText(model_paths[0])
                     logger.info(f"[ComfyUI] Restored source model: {model_paths[0]}")
 
+    @staticmethod
+    def _find_file_by_hash(directory: str, expected_hash: str) -> str:
+        """Scan directory for a file matching the expected content hash.
+
+        Args:
+            directory: Directory to scan
+            expected_hash: SHA-256 hash to match
+
+        Returns:
+            Full path to matching file, or empty string if not found
+        """
+        if not expected_hash or not directory or not os.path.isdir(directory):
+            return ""
+
+        try:
+            from comfyui.utils import compute_file_hash
+        except ImportError:
+            return ""
+
+        # Scan all supported file types (images, videos, 3D models, audio)
+        from core.config import COMFYUI_OUTPUT_EXTENSIONS
+        scannable_exts = set(COMFYUI_OUTPUT_EXTENSIONS) | {
+            '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.exr',
+        }
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if not entry.is_file():
+                        continue
+                    ext = os.path.splitext(entry.name)[1].lower()
+                    if ext not in scannable_exts:
+                        continue
+                    file_hash = compute_file_hash(entry.path)
+                    if file_hash == expected_hash:
+                        return entry.path
+        except OSError:
+            pass
+
+        return ""
+
     # =========================================================================
     # STATE PERSISTENCE
     # =========================================================================
@@ -1369,16 +1492,34 @@ class ComfyUITab(PollingMixin, BaseTab):
         state = self.state_manager.save_state(self.ui, self.widget_manager)
         set_setting("comfyui_tab_state", state, verbose=False)
 
+        # Also save per-workflow inputs
+        self.state_manager.save_per_workflow_inputs(self.widget_manager)
+
     def _restore_state(self):
         """Restore the ComfyUI tab state from user settings."""
         from core.settings_manager import get_setting
 
         state = get_setting("comfyui_tab_state")
-        pending_values = self.state_manager.restore_state(state, self.ui, self._select_preset)
+        if not state:
+            return
 
-        if pending_values:
-            # Store pending values to apply after widgets are created
-            self.widget_manager.pending_editable_values = pending_values
+        # Pre-load editable and settings values BEFORE restore_state() calls
+        # _select_preset() which creates widgets and applies pending values.
+        # This fixes the pre-existing bug where pending values were set after
+        # widgets were already created and _apply_pending_editable_values() had run.
+        editable_values = state.get("editable_values", {})
+        if editable_values:
+            # Split into editable vs settings values
+            settings_vals = {k: v for k, v in editable_values.items() if k.startswith("settings_")}
+            editable_vals = {k: v for k, v in editable_values.items() if not k.startswith("settings_")}
+            if editable_vals:
+                self.widget_manager.pending_editable_values = editable_vals
+            if settings_vals:
+                self.widget_manager.pending_settings_values = settings_vals
+
+        # restore_state() calls _select_preset() which creates widgets;
+        # pending values are now already set so they get applied during widget creation
+        self.state_manager.restore_state(state, self.ui, self._select_preset)
 
     # =========================================================================
     # EVENT BUS INTEGRATION (Cross-tab communication)

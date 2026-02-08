@@ -42,6 +42,7 @@ class ComfyUIStateManager:
             "selected_workflow": self.current_selected_workflow or "",  # For multi-workflow models
             "generation_count": ui.ComfyUIGenerationCount.value(),
             "seed": ui.ComfyUISeed.value(),
+            "custom_name": ui.ComfyUIName.text().strip(),
         }
 
         # Save editable node values
@@ -85,6 +86,10 @@ class ComfyUIStateManager:
         # Restore seed
         seed = state.get("seed", random.randint(0, 2147483647))
         ui.ComfyUISeed.setValue(seed)
+
+        # Restore custom name
+        custom_name = state.get("custom_name", "")
+        ui.ComfyUIName.setText(custom_name)
 
         # Return editable values to apply after widgets are created
         return state.get("editable_values", {})
@@ -130,6 +135,11 @@ class ComfyUIStateManager:
         gen_count = metadata.get("generation_count")
         if gen_count is not None:
             ui.ComfyUIGenerationCount.setValue(gen_count)
+
+        # Restore custom name from metadata
+        custom_name = metadata.get("custom_name")
+        if custom_name:
+            ui.ComfyUIName.setText(custom_name)
 
         # Prepare editable values for restoration
         editable_values = metadata.get("editable_values")
@@ -247,6 +257,80 @@ class ComfyUIStateManager:
         self._history.clear()
         self._history_index = -1
         logger.debug("[History] Cleared")
+
+    # =========================================================================
+    # PER-WORKFLOW INPUT PERSISTENCE
+    # =========================================================================
+
+    def get_workflow_key(self) -> str:
+        """Return a storage key for the current preset + sub-workflow.
+
+        Returns:
+            Key like "PresetName" or "PresetName/SubWorkflow"
+        """
+        if not self.current_preset_name:
+            return ""
+        if self.current_selected_workflow:
+            return f"{self.current_preset_name}/{self.current_selected_workflow}"
+        return self.current_preset_name
+
+    def save_per_workflow_inputs(self, widget_manager) -> None:
+        """Save current widget values to per-workflow store.
+
+        Args:
+            widget_manager: ComfyUIWidgetManager instance
+        """
+        from core.settings_manager import safe_get_setting, safe_set_setting
+
+        workflow_key = self.get_workflow_key()
+        if not workflow_key:
+            return
+
+        values = widget_manager.capture_editable_values_by_type()
+        if not values:
+            return
+
+        store = safe_get_setting("comfyui_per_workflow_inputs", {})
+        store[workflow_key] = values
+        safe_set_setting("comfyui_per_workflow_inputs", store)
+        logger.debug(f"[PerWorkflow] Saved {len(values)} values for '{workflow_key}'")
+
+    def load_per_workflow_inputs(self, workflow_key: str = None) -> Dict[str, Any]:
+        """Load saved values for a workflow key.
+
+        Filters file paths to only include files that still exist.
+
+        Args:
+            workflow_key: Workflow key to load. Uses current if None.
+
+        Returns:
+            Semantic values dict (e.g. {'text/Prompt': 'value', ...})
+        """
+        import os
+        from core.settings_manager import safe_get_setting
+
+        if workflow_key is None:
+            workflow_key = self.get_workflow_key()
+        if not workflow_key:
+            return {}
+
+        store = safe_get_setting("comfyui_per_workflow_inputs", {})
+        values = store.get(workflow_key, {})
+        if not values:
+            return {}
+
+        # Filter file paths: only keep existing files
+        filtered = {}
+        for key, value in values.items():
+            if isinstance(value, list):
+                # BatchImageSelector paths — keep only existing files
+                existing = [p for p in value if os.path.exists(p)]
+                if existing:
+                    filtered[key] = existing
+            else:
+                filtered[key] = value
+
+        return filtered
 
     # =========================================================================
     # SESSION CONTINUITY (resume previous work)

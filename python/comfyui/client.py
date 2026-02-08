@@ -26,6 +26,7 @@ import sys
 import os
 import json
 import copy
+import uuid
 import logging
 import argparse
 
@@ -153,14 +154,15 @@ Examples:
             output_prefix = args.output_prefix
             workflow = modify_workflow_seed(workflow, 12345, output_prefix)
 
-        # Submit and wait
-        prompt_id = submit_workflow(workflow, server_url=args.server_url)
+        # Submit and wait — share client_id for WebSocket event routing
+        frame_client_id = str(uuid.uuid4())
+        prompt_id = submit_workflow(workflow, server_url=args.server_url, client_id=frame_client_id)
         if not prompt_id:
             logger.error(f"Failed to submit frame {frame_num}")
             failed += 1
             continue
 
-        success = wait_for_completion(prompt_id, server_url=args.server_url, timeout=args.timeout)
+        success = wait_for_completion(prompt_id, server_url=args.server_url, timeout=args.timeout, client_id=frame_client_id)
         if success:
             successful += 1
         else:

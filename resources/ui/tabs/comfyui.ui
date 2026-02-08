@@ -347,6 +347,33 @@
              </widget>
             </item>
             <item>
+             <layout class="QHBoxLayout" name="nameLayout">
+              <property name="spacing">
+               <number>6</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_name">
+                <property name="text">
+                 <string>Name:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLineEdit" name="ComfyUIName">
+                <property name="placeholderText">
+                 <string>Optional - prefixes output filenames</string>
+                </property>
+                <property name="maxLength">
+                 <number>60</number>
+                </property>
+                <property name="toolTip">
+                 <string>Optional label prepended to output filenames for easier identification</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
              <layout class="QHBoxLayout" name="submitButtonsLayout">
               <property name="spacing">
                <number>8</number>

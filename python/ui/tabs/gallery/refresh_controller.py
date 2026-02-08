@@ -262,6 +262,12 @@ class RefreshController(BaseGalleryManager):
             _lookup_file_metadata = None
             metadata_available = False
 
+        # Import hash function
+        try:
+            from comfyui.utils import compute_file_hash
+        except ImportError:
+            compute_file_hash = None
+
         # Group items by directory for metadata loading
         files_by_dir = {}
         for item in items:
@@ -286,6 +292,15 @@ class RefreshController(BaseGalleryManager):
             for item in dir_items:
                 filename = os.path.basename(item['path'])
 
+                # Compute content hash if missing
+                if 'content_hash' not in item and compute_file_hash:
+                    try:
+                        item['content_hash'] = compute_file_hash(item['path'])
+                    except Exception:
+                        item['content_hash'] = None
+
+                content_hash = item.get('content_hash')
+
                 # Check if already enriched
                 if 'job_prefix' in item:
                     continue
@@ -300,7 +315,10 @@ class RefreshController(BaseGalleryManager):
                     try:
                         # Use allow_reverse_match=False for input/output detection
                         # to avoid matching input files to output job metadata
-                        file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
+                        file_metadata = _lookup_file_metadata(
+                            full_metadata, filename,
+                            allow_reverse_match=False,
+                            content_hash=content_hash)
                         if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
                             has_metadata = True
                             is_output = file_metadata.get('is_output', True)

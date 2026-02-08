@@ -8,6 +8,7 @@ for faster model loading between jobs.
 
 import os
 import copy
+import random
 import logging
 from typing import Optional, Callable, List, Dict, Any, Tuple
 
@@ -112,9 +113,11 @@ def submit_comfyui_to_deadline(
     runner_script_source = os.path.join(comfyui_package_dir, "runner.py")
     utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
     analytics_script_source = os.path.join(comfyui_package_dir, "analytics.py")
+    node_configs_script_source = os.path.join(comfyui_package_dir, "node_configs.py")
     runner_script = os.path.join(job_data_dir, "comfyui_runner.py")
     utils_script = os.path.join(job_data_dir, "comfyui_utils.py")
     analytics_script = os.path.join(job_data_dir, "comfyui_analytics.py")
+    node_configs_script = os.path.join(job_data_dir, "comfyui_node_configs.py")
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
@@ -122,6 +125,7 @@ def submit_comfyui_to_deadline(
         (runner_script_source, runner_script),
         (utils_script_source, utils_script),
         (analytics_script_source, analytics_script),
+        (node_configs_script_source, node_configs_script),
     ]:
         shutil.copy2(src, dst)
         logger.info(f"Copied {os.path.basename(src)} to: {dst}")
@@ -238,6 +242,7 @@ def submit_comfyui_job(
     workflow_preset: Optional[str] = None,
     full_restart: bool = False,
     output_type: Optional[str] = None,
+    custom_name: Optional[str] = None,
 ) -> Tuple[List[str], str]:
     """
     Submit ComfyUI job to Deadline. Supports batch input file processing.
@@ -358,16 +363,54 @@ def submit_comfyui_job(
 
         workflow_file = save_workflow(modified, job_data_dir)
 
+        # Extract job_id from workflow filename for matching seeds file
+        # e.g. "comfyui_workflow_20260208_115304_a347719c.json" → "20260208_115304_a347719c"
+        wf_basename = os.path.splitext(os.path.basename(workflow_file))[0]
+        job_id = wf_basename.replace("comfyui_workflow_", "")
+
         if base_seed is not None:
             seeds = [base_seed + i for i in range(generation_count)]
         else:
             seeds = [random.randint(0, 2**63 - 1) for _ in range(generation_count)]
         seeds_data = {"seeds": seeds, "count": generation_count}
 
-        seeds_file = os.path.join(job_data_dir, "comfyui_seeds.json")
+        seeds_file = os.path.join(job_data_dir, f"comfyui_seeds_{job_id}.json")
         save_json(seeds_file, seeds_data)
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)
+
+        # Compute hashes for source files (for content-based matching)
+        source_image_hashes = {}
+        try:
+            from comfyui.utils import compute_file_hash
+
+            # Hash the primary input file
+            if current_file and os.path.exists(current_file):
+                file_hash = compute_file_hash(current_file)
+                if file_hash:
+                    source_image_hashes[os.path.basename(current_file)] = file_hash
+
+            # Hash all file-type editable values (images, videos, 3D models)
+            _hashable_types = ('image', 'video', '3d_model')
+            if current_editable_values:
+                for _, entries in current_editable_values.items():
+                    entry_list = entries if isinstance(entries, list) else [entries]
+                    for data in entry_list:
+                        node_info = data.get('node')
+                        value = data.get('value')
+                        if node_info and node_info.widget_type in _hashable_types:
+                            files = value if isinstance(value, list) else ([value] if value else [])
+                            for fpath in files:
+                                if fpath and os.path.exists(fpath):
+                                    fhash = compute_file_hash(fpath)
+                                    if fhash:
+                                        source_image_hashes[os.path.basename(fpath)] = fhash
+
+            if source_image_hashes:
+                logger.info(f"Computed {len(source_image_hashes)} source file hash(es)")
+        except Exception as e:
+            logger.warning(f"Could not compute source file hashes: {e}")
+
         if prompt_text or current_file or current_editable_values:
             add_item_metadata(
                 output_dir=current_working_dir,
@@ -380,6 +423,8 @@ def submit_comfyui_job(
                 workflow_preset=workflow_preset,
                 editable_values=current_editable_values,
                 output_type=output_type,
+                source_image_hashes=source_image_hashes if source_image_hashes else None,
+                custom_name=custom_name,
             )
 
         # Copy input file to working directory for farm access (convert if needed)

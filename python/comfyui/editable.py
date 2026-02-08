@@ -91,6 +91,8 @@ def _resolve_config_entries(node_type: str, config: list) -> list:
 
     resolved = []
     for entry in config:
+        if entry is None:
+            continue
         if isinstance(entry, str):
             # Name-only format
             widget_name = entry

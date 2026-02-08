@@ -132,7 +132,7 @@ def _read_workflow_preset(output_directory: str) -> str:
         for key, value in metadata.items():
             if key.startswith("_prefix_") and isinstance(value, dict):
                 preset = value.get('workflow_preset')
-                if preset:
+                if preset is not None and preset != "":
                     return preset
         return "unknown"
     except Exception as e:

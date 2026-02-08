@@ -87,6 +87,7 @@ class FavoritesManager(BaseGalleryManager, QObject):
         self._groups: Dict[str, GroupDef] = {}
         self._item_groups: Dict[str, Set[str]] = {}  # path -> set of group_ids
         self._group_items: Dict[str, Set[str]] = {}  # group_id -> set of paths (reverse index)
+        self._hash_index: Dict[str, str] = {}  # content_hash -> path (for liked/grouped items)
         self._loaded = False
 
     def _ensure_loaded(self):
@@ -128,6 +129,12 @@ class FavoritesManager(BaseGalleryManager, QObject):
                         self._group_items[gid] = set()
                     self._group_items[gid].add(norm_path)
 
+        # Load hash index (content_hash -> path for liked/grouped items)
+        hash_index_dict = get_setting("gallery_hash_index")
+        self._hash_index = {}
+        if hash_index_dict and isinstance(hash_index_dict, dict):
+            self._hash_index = dict(hash_index_dict)
+
     def _save_liked_items(self):
         """Save liked items to settings."""
         from core.settings_manager import set_setting
@@ -145,22 +152,112 @@ class FavoritesManager(BaseGalleryManager, QObject):
         item_groups_dict = {path: list(gids) for path, gids in self._item_groups.items()}
         set_setting("gallery_item_groups", item_groups_dict, verbose=False)
 
+    def _save_hash_index(self):
+        """Save hash index to settings."""
+        from core.settings_manager import set_setting
+        set_setting("gallery_hash_index", dict(self._hash_index), verbose=False)
+
+    def register_hash(self, path: str, content_hash: str):
+        """Register a content hash for a file path.
+
+        Called during gallery scan to associate current file hash with path.
+        Does not save immediately (batched during scan) — saved on next mutation.
+
+        Args:
+            path: File path
+            content_hash: SHA-256 content hash
+        """
+        if content_hash:
+            self._ensure_loaded()
+            self._hash_index[content_hash] = os.path.normpath(path)
+
+    def _resolve_and_migrate(self, path: str, content_hash: str = None) -> str:
+        """Resolve a path using hash index, auto-migrating if file was renamed.
+
+        Args:
+            path: Current file path
+            content_hash: Optional content hash for the file
+
+        Returns:
+            The resolved path (may be the same or migrated)
+        """
+        path = os.path.normpath(path)
+
+        # Fast path: already known by current path
+        if path in self._liked_items or path in self._item_groups:
+            return path
+
+        if not content_hash:
+            return path
+
+        # Hash lookup: find old path that was liked/grouped with this hash
+        old_path = self._hash_index.get(content_hash)
+        if not old_path or old_path == path:
+            return path
+
+        # Check if the old path has favorites data that should be migrated
+        if old_path in self._liked_items or old_path in self._item_groups:
+            self._migrate_path(old_path, path, content_hash)
+
+        return path
+
+    def _migrate_path(self, old_path: str, new_path: str, content_hash: str):
+        """Migrate all favorites data from old_path to new_path.
+
+        Args:
+            old_path: Previous file path (has favorites data)
+            new_path: New file path (same content, different name/location)
+            content_hash: Content hash linking the two
+        """
+        migrated = False
+
+        # Migrate likes
+        if old_path in self._liked_items:
+            self._liked_items.discard(old_path)
+            self._liked_items.add(new_path)
+            migrated = True
+
+        # Migrate group memberships
+        if old_path in self._item_groups:
+            group_ids = self._item_groups.pop(old_path)
+            self._item_groups[new_path] = group_ids
+            # Update reverse index
+            for gid in group_ids:
+                if gid in self._group_items:
+                    self._group_items[gid].discard(old_path)
+                    self._group_items[gid].add(new_path)
+            migrated = True
+
+        # Update hash index
+        self._hash_index[content_hash] = new_path
+
+        if migrated:
+            self._save_liked_items()
+            self._save_item_groups()
+            self._save_hash_index()
+            logger.info(f"Favorites: migrated '{os.path.basename(old_path)}' -> "
+                        f"'{os.path.basename(new_path)}' (hash match)")
+
     # =========================================================================
     # LIKES
     # =========================================================================
 
-    def toggle_like(self, path: str) -> bool:
+    def toggle_like(self, path: str, content_hash: str = None) -> bool:
         """
         Toggle like status for an item.
 
         Args:
             path: Path to the item
+            content_hash: Optional content hash for hash-based migration
 
         Returns:
             True if item is now liked, False if unliked
         """
         self._ensure_loaded()
+        if content_hash:
+            self.register_hash(path, content_hash)
         path = os.path.normpath(path)
+        path = self._resolve_and_migrate(path, content_hash)
         if path in self._liked_items:
             self._liked_items.discard(path)
             is_liked = False
@@ -171,10 +268,18 @@ class FavoritesManager(BaseGalleryManager, QObject):
         self.like_changed.emit(path, is_liked)
         return is_liked
 
-    def is_liked(self, path: str) -> bool:
-        """Check if an item is liked."""
+    def is_liked(self, path: str, content_hash: str = None) -> bool:
+        """Check if an item is liked.
+
+        Args:
+            path: Path to the item
+            content_hash: Optional content hash for hash-based migration
+        """
         self._ensure_loaded()
-        return os.path.normpath(path) in self._liked_items
+        path = os.path.normpath(path)
+        if content_hash:
+            path = self._resolve_and_migrate(path, content_hash)
+        return path in self._liked_items
 
     def get_liked_items(self) -> List[str]:
         """Get list of all liked item paths."""
@@ -339,19 +444,23 @@ class FavoritesManager(BaseGalleryManager, QObject):
     # ITEM-GROUP ASSIGNMENT
     # =========================================================================
 
-    def add_to_group(self, path: str, group_id: str) -> bool:
+    def add_to_group(self, path: str, group_id: str, content_hash: str = None) -> bool:
         """
         Add an item to a group.
 
         Args:
             path: Path to the item
             group_id: ID of the group
+            content_hash: Optional content hash for hash-based migration
 
         Returns:
             True if item was added, False if already in group or group doesn't exist
         """
         self._ensure_loaded()
+        if content_hash:
+            self.register_hash(path, content_hash)
         path = os.path.normpath(path)
+        path = self._resolve_and_migrate(path, content_hash)
         if group_id not in self._groups:
             return False
 
@@ -430,10 +539,17 @@ class FavoritesManager(BaseGalleryManager, QObject):
             self.add_to_group(path, group_id)
             return True
 
-    def get_item_groups(self, path: str) -> List[str]:
-        """Get list of group IDs an item belongs to."""
+    def get_item_groups(self, path: str, content_hash: str = None) -> List[str]:
+        """Get list of group IDs an item belongs to.
+
+        Args:
+            path: Path to the item
+            content_hash: Optional content hash for hash-based migration
+        """
         self._ensure_loaded()
         path = os.path.normpath(path)
+        if content_hash:
+            path = self._resolve_and_migrate(path, content_hash)
         if path not in self._item_groups:
             return []
         return list(self._item_groups[path])

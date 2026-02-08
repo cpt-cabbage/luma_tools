@@ -20,7 +20,7 @@ from .user_preferences import (
 )
 from .feature_requests import (
     append_feature_request, get_feature_requests,
-    mark_request_completed, get_user_notifications,
+    mark_request_completed, reject_request, get_user_notifications,
     mark_notifications_read, get_unread_feature_request_count,
     mark_feature_requests_as_read,
 )

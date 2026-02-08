@@ -179,6 +179,26 @@ class ModelPickerOverlay(QWidget):
 
         header_layout.addStretch()
 
+        # Request a Model button
+        request_btn = QPushButton("Request a Model")
+        request_btn.setCursor(Qt.PointingHandCursor)
+        request_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {ACCENT};
+                border: 1px solid {ACCENT};
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {ACCENT};
+                color: {TEXT_PRIMARY};
+            }}
+        """)
+        request_btn.clicked.connect(self._on_request_model_clicked)
+        header_layout.addWidget(request_btn)
+
         # Search box
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search models...")
@@ -455,6 +475,62 @@ class ModelPickerOverlay(QWidget):
         """Handle Add Model button click."""
         self.hide_overlay()
         self.add_model_requested.emit()
+
+    def _on_request_model_clicked(self):
+        """Show dialog for requesting a new model."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLabel, QDialogButtonBox
+        from core.feature_requests import append_feature_request
+        from dialog_helpers import show_info, show_error, show_warning
+
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle("Request a Model")
+        dialog.setMinimumSize(450, 300)
+
+        layout = QVBoxLayout(dialog)
+
+        label = QLabel("Describe the model you'd like added:")
+        layout.addWidget(label)
+
+        description_edit = QTextEdit()
+        description_edit.setPlaceholderText(
+            "Supply a link to model paper, github and give small description "
+            "for how we could use it. Must be open source and be able to use commercially."
+        )
+
+        try:
+            from ui.spell_checker import add_spell_checking
+            add_spell_checking(description_edit)
+        except Exception:
+            pass
+
+        layout.addWidget(description_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec() == QDialog.Accepted:
+            description = description_edit.toPlainText().strip()
+            if not description:
+                show_warning("Empty Description", "Please enter a description.", self.window())
+                return
+
+            username = app_state.user
+            success = append_feature_request("Feature", f"[Model Request] {description}", username)
+
+            if success:
+                show_info(
+                    "Request Submitted",
+                    "Your model request has been submitted.\nAdmins will be notified.",
+                    self.window()
+                )
+            else:
+                show_error(
+                    "Submission Failed",
+                    "Failed to submit model request. Please try again.",
+                    self.window()
+                )
 
     def _on_context_menu(self, model_name: str, pos: QPoint):
         """Handle context menu request."""

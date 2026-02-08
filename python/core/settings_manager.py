@@ -66,6 +66,13 @@ def _validate_canvas_sync_interval(v):
     except (ValueError, TypeError):
         return 1000  # Default 1 second
 
+def _validate_deadline_poll_interval(v):
+    """Validate Deadline poll interval (1-60 seconds)."""
+    try:
+        return max(1, min(60, int(v)))
+    except (ValueError, TypeError):
+        return 5  # Default 5 seconds
+
 # Registry of all simple settings (get/set only, no complex logic)
 SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # ComfyUI Global Settings (actual paths configured in global_settings.json)
@@ -103,8 +110,13 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "canvas_sync_interval": SettingDef(
         "canvas_sync_interval", 1000, "global", _validate_canvas_sync_interval
     ),
+    # Deadline Settings
+    "deadline_poll_interval": SettingDef(
+        "deadline_poll_interval", 5, "global", _validate_deadline_poll_interval
+    ),
     # User Settings
     "comfyui_tab_state": SettingDef("comfyui_tab_state", {}, "user"),
+    "comfyui_per_workflow_inputs": SettingDef("comfyui_per_workflow_inputs", {}, "user"),
     "tab_order": SettingDef("tab_order", [], "user"),
     "show_tray_notifications": SettingDef("show_tray_notifications", True, "user"),
     "show_verbose_logs": SettingDef("show_verbose_logs", False, "user"),
@@ -125,6 +137,7 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "gallery_liked_items": SettingDef("gallery_liked_items", [], "user"),
     "gallery_groups": SettingDef("gallery_groups", {}, "user"),
     "gallery_item_groups": SettingDef("gallery_item_groups", {}, "user"),
+    "gallery_hash_index": SettingDef("gallery_hash_index", {}, "user"),
     "gallery_multi_group_enabled": SettingDef("gallery_multi_group_enabled", True, "user"),
     "gallery_stacking_mode": SettingDef("gallery_stacking_mode", "both", "user", _validate_stacking_mode),
     "gallery_sidebar_collapsed": SettingDef("gallery_sidebar_collapsed", False, "user"),

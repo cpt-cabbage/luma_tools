@@ -176,6 +176,7 @@ class GalleryLoader:
             try:
                 from comfyui.metadata import load_gallery_metadata, _lookup_file_metadata
                 from comfyui.metadata import get_workflow_preset_for_files
+                from comfyui.utils import compute_file_hash
             except ImportError as e:
                 logger.error(f"[Loader] Failed to import metadata functions: {e}")
                 load_gallery_metadata = None
@@ -208,12 +209,22 @@ class GalleryLoader:
                 # Build items dict
                 items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
+                    # Compute content hash for file identification
+                    content_hash = None
+                    try:
+                        content_hash = compute_file_hash(full_path)
+                    except Exception:
+                        pass
+
                     # Try to get metadata-based detection first (new method)
                     # Use allow_reverse_match=False to avoid matching input files to output metadata
                     file_metadata = None
                     if full_metadata and _lookup_file_metadata:
                         try:
-                            file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
+                            file_metadata = _lookup_file_metadata(
+                                full_metadata, filename,
+                                allow_reverse_match=False,
+                                content_hash=content_hash)
                         except Exception:
                             file_metadata = None
 
@@ -277,6 +288,7 @@ class GalleryLoader:
                         'source_images': source_images,  # Input images used
                         'has_metadata': has_metadata,  # Whether metadata was found for this file
                         'metadata_level': metadata_level,  # 'full', 'partial', or 'none'
+                        'content_hash': content_hash,  # SHA-256 hash for file identification
                     }
 
                 # Detect and bundle _view/_export pairs if enabled
@@ -330,6 +342,7 @@ class GalleryLoader:
                                 'source_images': view_item.get('source_images', []),
                                 'has_metadata': view_item.get('has_metadata', False),
                                 'metadata_level': view_item.get('metadata_level', 'none'),
+                                'content_hash': view_item.get('content_hash'),
                                 'is_bundled': True
                             })
                         else:
@@ -366,6 +379,7 @@ class GalleryLoader:
         # Import metadata functions with error handling
         try:
             from comfyui.metadata import load_gallery_metadata, get_workflow_preset_for_files, _lookup_file_metadata
+            from comfyui.utils import compute_file_hash
         except ImportError as e:
             logger.error(f"[Prewarm] Failed to import metadata functions: {e}")
             # Fall back to filename pattern for all items
@@ -430,6 +444,15 @@ class GalleryLoader:
                     if not filename:
                         continue
 
+                    # Compute content hash if missing
+                    if 'content_hash' not in item:
+                        try:
+                            item['content_hash'] = compute_file_hash(item['path'])
+                        except Exception:
+                            item['content_hash'] = None
+
+                    content_hash = item.get('content_hash')
+
                     # Update workflow if missing
                     if 'workflow' not in item or not item['workflow']:
                         item['workflow'] = workflow_map.get(filename, '')
@@ -442,7 +465,10 @@ class GalleryLoader:
                         # Use allow_reverse_match=False to avoid matching input files to output metadata
                         if full_metadata:
                             try:
-                                file_metadata = _lookup_file_metadata(full_metadata, filename, allow_reverse_match=False)
+                                file_metadata = _lookup_file_metadata(
+                                    full_metadata, filename,
+                                    allow_reverse_match=False,
+                                    content_hash=content_hash)
                             except Exception:
                                 pass  # Fall back to filename pattern
 
