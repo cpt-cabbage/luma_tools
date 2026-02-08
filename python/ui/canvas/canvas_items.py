@@ -22,7 +22,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
     QGraphicsRectItem, QGraphicsTextItem, QGraphicsSceneMouseEvent,
-    QStyleOptionGraphicsItem, QWidget, QMenu, QInputDialog, QColorDialog
+    QGraphicsProxyWidget, QStyleOptionGraphicsItem, QWidget,
+    QMenu, QInputDialog, QColorDialog, QVBoxLayout
 )
 
 logger = logging.getLogger(__name__)
@@ -1761,4 +1762,875 @@ class GroupRegion(QGraphicsRectItem):
     def _remove(self):
         scene = self.scene()
         if scene:
+            scene.removeItem(self)
+
+
+class VideoNode(QGraphicsItem):
+    """
+    A draggable, resizable video node for the canvas.
+
+    Shows a thumbnail (first frame) by default with play icon and duration badge.
+    Click activates inline playback with controls. Only one video plays at a time.
+
+    Features:
+    - Async thumbnail extraction via FFmpeg
+    - Inline playback with VideoSinkWidget + VideoControlBar
+    - Single-active-player policy (canvas deactivates others)
+    - Resizable via corner handles
+    - Gallery integration (border colors from groups/likes)
+    - Like badge
+    """
+
+    # Class-level constants
+    MIN_SIZE = 100
+    DEFAULT_WIDTH = 320
+    DEFAULT_HEIGHT = 180
+    HANDLE_SIZE = 10
+    BADGE_SIZE = 20
+    BORDER_WIDTH = 3
+
+    def __init__(self, video_path: str, x: float = 0, y: float = 0,
+                 width: float = None, height: float = None,
+                 parent: QGraphicsItem = None,
+                 content_hash: str = None,
+                 thumbnail_pixmap: Optional[QPixmap] = None):
+        """
+        Create a video node.
+
+        Args:
+            video_path: Path to the video file
+            x, y: Position on canvas
+            width, height: Size (None = use defaults)
+            parent: Parent graphics item
+            content_hash: SHA-256 content hash for file identification
+            thumbnail_pixmap: Optional pre-loaded thumbnail pixmap
+        """
+        super().__init__(parent)
+
+        self.video_path = video_path
+        self.filename = os.path.basename(video_path)
+        self.content_hash = content_hash
+        self._width = width or self.DEFAULT_WIDTH
+        self._height = height or self.DEFAULT_HEIGHT
+        self._liked = False
+        self._missing = not os.path.exists(video_path)
+
+        # Thumbnail state
+        self._thumbnail_pixmap: Optional[QPixmap] = thumbnail_pixmap
+        self._thumbnail_loading = False
+        self._duration_seconds: Optional[float] = None
+        self._duration_text: str = ""
+
+        # Inline playback state
+        self._is_active = False
+        self._player_proxy: Optional['QGraphicsProxyWidget'] = None
+        self._media_player = None
+        self._audio_output = None
+
+        # Resize state
+        self._resize_handle = ResizeHandle.NONE
+        self._resize_start_rect: Optional[QRectF] = None
+        self._resize_start_pos: Optional[QPointF] = None
+        self._resize_start_size: Optional[Tuple[float, float]] = None
+
+        # Gallery integration
+        self._show_gallery_border = True
+        self._border_color: Optional[QColor] = None
+        self._group_ids: List[str] = []
+
+        # Setup item flags
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
+
+        # Position
+        self.setPos(x, y)
+
+        # Start async thumbnail load if not provided
+        if not self._thumbnail_pixmap and not self._missing:
+            self._load_thumbnail_async()
+
+    # -------------------------------------------------------------------------
+    # Thumbnail Loading
+    # -------------------------------------------------------------------------
+
+    def _load_thumbnail_async(self):
+        """Load thumbnail and duration in a worker thread."""
+        if self._thumbnail_loading:
+            return
+        self._thumbnail_loading = True
+
+        from PySide6.QtCore import QThreadPool
+
+        def _worker():
+            from ui_components import Worker
+            self._thumb_worker = Worker(self._extract_thumbnail_and_duration, self.video_path)
+            self._thumb_worker.signals.result.connect(self._on_thumbnail_loaded)
+            self._thumb_worker.signals.error.connect(self._on_thumbnail_error)
+            QThreadPool.globalInstance().start(self._thumb_worker)
+
+        # Defer to avoid importing during __init__ in wrong thread context
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, _worker)
+
+    @staticmethod
+    def _extract_thumbnail_and_duration(video_path: str):
+        """
+        Extract first frame and duration from video (runs in worker thread).
+
+        Returns:
+            tuple: (QImage, duration_seconds: float)
+        """
+        import subprocess
+        import tempfile
+        from core.config import FFMPEG_PATH
+        from core.utils import get_media_duration
+
+        if not FFMPEG_PATH:
+            return None
+
+        # Extract duration
+        duration = get_media_duration(video_path)
+
+        # Extract first frame
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            cmd = [
+                FFMPEG_PATH, '-i', video_path,
+                '-vframes', '1', '-y', tmp_path
+            ]
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.run(cmd, capture_output=True, timeout=10,
+                           creationflags=creationflags)
+            image = QImage(tmp_path)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        if image.isNull():
+            return None
+
+        return (image, duration)
+
+    def _on_thumbnail_loaded(self, result):
+        """Handle thumbnail extraction result (main thread)."""
+        self._thumbnail_loading = False
+        if result is None:
+            return
+
+        qimage, duration = result
+        self._thumbnail_pixmap = QPixmap.fromImage(qimage)
+        self._duration_seconds = duration
+
+        if duration is not None:
+            from core.utils import format_duration
+            self._duration_text = format_duration(duration)
+        else:
+            self._duration_text = ""
+
+        self.update()
+
+    def _on_thumbnail_error(self, error):
+        """Handle thumbnail extraction error."""
+        self._thumbnail_loading = False
+        logger.warning(f"Video thumbnail extraction failed for {self.filename}: {error}")
+
+    # -------------------------------------------------------------------------
+    # Rendering
+    # -------------------------------------------------------------------------
+
+    def boundingRect(self) -> QRectF:
+        margin = 300
+        return QRectF(-margin, -margin,
+                      self._width + 2 * margin,
+                      self._height + 2 * margin)
+
+    def shape(self) -> QPainterPath:
+        """Return the content rect as shape (used for clipping children)."""
+        path = QPainterPath()
+        path.addRect(QRectF(0, 0, self._width, self._height))
+        return path
+
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
+              widget: QWidget = None):
+        """Paint the video node."""
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        rect = QRectF(0, 0, self._width, self._height)
+
+        if self._missing:
+            self._paint_missing(painter, rect)
+        elif self._is_active:
+            # When active, the proxy widget handles video rendering.
+            # Paint a dark background behind it for clean edges.
+            painter.fillRect(rect, QColor(0, 0, 0))
+        elif self._thumbnail_pixmap and not self._thumbnail_pixmap.isNull():
+            self._paint_thumbnail(painter, rect)
+        else:
+            self._paint_placeholder(painter, rect)
+
+        # Gallery border
+        if self._show_gallery_border and self._border_color:
+            border_pen = QPen(self._border_color, self.BORDER_WIDTH)
+            border_pen.setCosmetic(True)
+            painter.setPen(border_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(rect.adjusted(1, 1, -1, -1))
+
+        # Selection highlight
+        if self.isSelected():
+            select_pen = QPen(QColor(74, 158, 255), 2)
+            select_pen.setCosmetic(True)
+            painter.setPen(select_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(rect.adjusted(-1, -1, 1, 1))
+            self._draw_resize_handles(painter)
+
+        # Like badge
+        if self._liked:
+            self._draw_like_badge(painter)
+
+    def _paint_missing(self, painter: QPainter, rect: QRectF):
+        """Paint placeholder for missing video file."""
+        painter.fillRect(rect, QColor(60, 60, 60))
+        painter.setPen(QPen(QColor(100, 100, 100), 2, Qt.DashLine))
+        painter.drawRect(rect)
+        painter.setPen(QColor(150, 150, 150))
+        font = QFont()
+        font.setPointSize(10)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter, "Missing Video")
+
+    def _paint_thumbnail(self, painter: QPainter, rect: QRectF):
+        """Paint video thumbnail with play icon and duration badge."""
+        # Draw thumbnail scaled to fit
+        pixmap = self._thumbnail_pixmap
+        img_aspect = pixmap.width() / max(1, pixmap.height())
+        rect_aspect = self._width / max(1, self._height)
+
+        if img_aspect > rect_aspect:
+            draw_width = self._width
+            draw_height = self._width / img_aspect
+        else:
+            draw_height = self._height
+            draw_width = self._height * img_aspect
+
+        draw_rect = QRectF(
+            (self._width - draw_width) / 2,
+            (self._height - draw_height) / 2,
+            draw_width, draw_height
+        )
+        painter.drawPixmap(draw_rect, pixmap, QRectF(pixmap.rect()))
+
+        # Dark overlay for contrast
+        overlay = QColor(0, 0, 0, 60)
+        painter.fillRect(draw_rect, overlay)
+
+        # Play icon (centered triangle)
+        self._draw_play_icon(painter, rect)
+
+        # Duration badge (bottom-right)
+        if self._duration_text:
+            self._draw_duration_badge(painter, rect)
+
+    def _paint_placeholder(self, painter: QPainter, rect: QRectF):
+        """Paint loading placeholder."""
+        painter.fillRect(rect, QColor(40, 40, 40))
+
+        # Draw play icon even on placeholder
+        self._draw_play_icon(painter, rect)
+
+        # Loading text
+        if self._thumbnail_loading:
+            painter.setPen(QColor(120, 120, 120))
+            font = QFont()
+            font.setPointSize(8)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignBottom | Qt.AlignHCenter, "Loading...")
+
+    def _draw_play_icon(self, painter: QPainter, rect: QRectF):
+        """Draw a centered play triangle icon (screen-space size)."""
+        icon_size = self._get_screen_space_size(40)
+        center = rect.center()
+
+        # Semi-transparent circle background
+        circle_rect = QRectF(
+            center.x() - icon_size / 2,
+            center.y() - icon_size / 2,
+            icon_size, icon_size
+        )
+        painter.setBrush(QBrush(QColor(0, 0, 0, 140)))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(circle_rect)
+
+        # Triangle
+        tri_size = icon_size * 0.4
+        # Offset slightly right to visually center the triangle
+        tri_x = center.x() - tri_size * 0.35
+        tri_y = center.y() - tri_size * 0.5
+
+        triangle = QPainterPath()
+        triangle.moveTo(tri_x, tri_y)
+        triangle.lineTo(tri_x, tri_y + tri_size)
+        triangle.lineTo(tri_x + tri_size * 0.85, tri_y + tri_size * 0.5)
+        triangle.closeSubpath()
+
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.setPen(Qt.NoPen)
+        painter.drawPath(triangle)
+
+    def _draw_duration_badge(self, painter: QPainter, rect: QRectF):
+        """Draw duration text badge in bottom-right corner."""
+        font = QFont()
+        font_size = self._get_screen_space_size(9)
+        font.setPointSizeF(max(6, font_size))
+        font.setBold(True)
+        painter.setFont(font)
+
+        metrics = QFontMetrics(font)
+        text_rect = metrics.boundingRect(self._duration_text)
+        padding = self._get_screen_space_size(4)
+        margin = self._get_screen_space_size(6)
+
+        badge_width = text_rect.width() + padding * 2
+        badge_height = text_rect.height() + padding
+
+        badge_rect = QRectF(
+            self._width - badge_width - margin,
+            self._height - badge_height - margin,
+            badge_width, badge_height
+        )
+
+        # Dark background
+        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+        painter.setPen(Qt.NoPen)
+        badge_radius = self._get_screen_space_size(3)
+        painter.drawRoundedRect(badge_rect, badge_radius, badge_radius)
+
+        # White text
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(badge_rect, Qt.AlignCenter, self._duration_text)
+
+    def _get_screen_space_size(self, size: float) -> float:
+        """Convert a screen-space size to scene-space based on current zoom."""
+        scene = self.scene()
+        if scene and scene.views():
+            view = scene.views()[0]
+            zoom = view.transform().m11()
+            if zoom > 0:
+                return size / zoom
+        return size
+
+    def _draw_resize_handles(self, painter: QPainter):
+        """Draw resize handles at corners (screen-space size)."""
+        handle_color = QColor(74, 158, 255)
+        painter.setBrush(QBrush(handle_color))
+        painter.setPen(Qt.NoPen)
+
+        hs = self._get_screen_space_size(self.HANDLE_SIZE)
+
+        handles = [
+            QRectF(-hs/2, -hs/2, hs, hs),
+            QRectF(self._width - hs/2, -hs/2, hs, hs),
+            QRectF(-hs/2, self._height - hs/2, hs, hs),
+            QRectF(self._width - hs/2, self._height - hs/2, hs, hs),
+        ]
+
+        for handle_rect in handles:
+            painter.drawRect(handle_rect)
+
+    def _draw_like_badge(self, painter: QPainter):
+        """Draw the like heart badge in corner (screen-space size)."""
+        badge_size = self._get_screen_space_size(self.BADGE_SIZE)
+        margin = self._get_screen_space_size(5)
+
+        badge_rect = QRectF(
+            self._width - badge_size - margin,
+            margin,
+            badge_size, badge_size
+        )
+
+        painter.setBrush(QBrush(QColor(239, 68, 68)))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(badge_rect)
+
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont()
+        font_size = self._get_screen_space_size(12)
+        font.setPointSizeF(max(6, font_size))
+        painter.setFont(font)
+        painter.drawText(badge_rect, Qt.AlignCenter, "\u2665")
+
+    # -------------------------------------------------------------------------
+    # Inline Playback
+    # -------------------------------------------------------------------------
+
+    def activate_player(self):
+        """Switch from thumbnail to inline video player."""
+        if self._is_active or self._missing:
+            return
+
+        # Deactivate other video nodes first
+        scene = self.scene()
+        if scene and scene.views():
+            canvas = scene.views()[0]
+            if hasattr(canvas, 'deactivate_all_videos'):
+                canvas.deactivate_all_videos(except_node=self)
+
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtCore import QUrl
+
+            # Lazy import video components
+            from image_viewers import VideoSinkWidget, VideoControlBar
+
+            self._media_player = QMediaPlayer()
+            self._audio_output = QAudioOutput()
+            self._media_player.setAudioOutput(self._audio_output)
+
+            # Build container widget — set fixed size BEFORE embedding in proxy
+            container = QWidget()
+            container.setStyleSheet("background-color: #000000;")
+            container.setFixedSize(int(self._width), int(self._height))
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+
+            video_sink = VideoSinkWidget()
+            control_bar = VideoControlBar(self._media_player)
+            layout.addWidget(video_sink, 1)
+            layout.addWidget(control_bar, 0)
+
+            self._media_player.setVideoSink(video_sink.videoSink)
+
+            # Embed via proxy widget, clip to node bounds
+            self.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
+            self._player_proxy = QGraphicsProxyWidget(self)
+            self._player_proxy.setWidget(container)
+            self._player_proxy.setPos(0, 0)
+
+            # Start playback
+            self._media_player.setSource(QUrl.fromLocalFile(self.video_path))
+            self._media_player.play()
+
+            self._is_active = True
+            self.update()
+            logger.debug(f"Activated video player for {self.filename}")
+
+        except Exception as e:
+            logger.error(f"Failed to activate video player for {self.filename}: {e}")
+            self._cleanup_player()
+
+    def deactivate_player(self):
+        """Switch from inline player back to thumbnail."""
+        if not self._is_active:
+            return
+
+        self._cleanup_player()
+        self._is_active = False
+        # Re-enable drawing outside bounds (handles, badges)
+        self.setFlag(QGraphicsItem.ItemClipsChildrenToShape, False)
+        self.update()
+        logger.debug(f"Deactivated video player for {self.filename}")
+
+    def _cleanup_player(self):
+        """Clean up all player resources."""
+        if self._media_player:
+            self._media_player.stop()
+            from PySide6.QtCore import QUrl
+            self._media_player.setSource(QUrl())
+            self._media_player.deleteLater()
+            self._media_player = None
+
+        if self._audio_output:
+            self._audio_output.deleteLater()
+            self._audio_output = None
+
+        if self._player_proxy:
+            widget = self._player_proxy.widget()
+            if widget:
+                widget.deleteLater()
+            self._player_proxy.deleteLater()
+            self._player_proxy = None
+
+    # -------------------------------------------------------------------------
+    # Interaction
+    # -------------------------------------------------------------------------
+
+    def _get_handle_at(self, pos: QPointF) -> ResizeHandle:
+        """Get the resize handle at the given position."""
+        if not self.isSelected():
+            return ResizeHandle.NONE
+
+        hs = self._get_screen_space_size(self.HANDLE_SIZE)
+
+        if QRectF(-hs/2, -hs/2, hs, hs).contains(pos):
+            return ResizeHandle.TOP_LEFT
+        if QRectF(self._width - hs/2, -hs/2, hs, hs).contains(pos):
+            return ResizeHandle.TOP_RIGHT
+        if QRectF(-hs/2, self._height - hs/2, hs, hs).contains(pos):
+            return ResizeHandle.BOTTOM_LEFT
+        if QRectF(self._width - hs/2, self._height - hs/2, hs, hs).contains(pos):
+            return ResizeHandle.BOTTOM_RIGHT
+
+        return ResizeHandle.NONE
+
+    def hoverMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        """Update cursor based on position."""
+        handle = self._get_handle_at(event.pos())
+        if handle in (ResizeHandle.TOP_LEFT, ResizeHandle.BOTTOM_RIGHT):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif handle in (ResizeHandle.TOP_RIGHT, ResizeHandle.BOTTOM_LEFT):
+            self.setCursor(Qt.SizeBDiagCursor)
+        else:
+            self.setCursor(Qt.PointingHandCursor if not self._is_active else Qt.ArrowCursor)
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        """Handle mouse press for resize or activation."""
+        if event.button() == Qt.LeftButton:
+            # Check resize first
+            self._resize_handle = self._get_handle_at(event.pos())
+            if self._resize_handle != ResizeHandle.NONE:
+                self._resize_start_rect = QRectF(0, 0, self._width, self._height)
+                self._resize_start_pos = event.pos()
+                self._resize_start_size = (self._width, self._height)
+                event.accept()
+                return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        """Handle mouse move for resize."""
+        if self._resize_handle != ResizeHandle.NONE:
+            self._do_resize(event.pos())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        """Handle mouse release after resize."""
+        if self._resize_handle != ResizeHandle.NONE:
+            if self._resize_start_size is not None:
+                old_size = self._resize_start_size
+                new_size = (self._width, self._height)
+                if old_size != new_size:
+                    self._push_resize_undo_command(old_size, new_size)
+                    # Update proxy widget size if active
+                    if self._is_active and self._player_proxy:
+                        widget = self._player_proxy.widget()
+                        if widget:
+                            widget.setFixedSize(int(self._width), int(self._height))
+
+            self._resize_handle = ResizeHandle.NONE
+            self._resize_start_rect = None
+            self._resize_start_pos = None
+            self._resize_start_size = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
+        """Toggle inline playback on double-click."""
+        if event.button() == Qt.LeftButton:
+            if self._is_active:
+                self.deactivate_player()
+            else:
+                self.activate_player()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _do_resize(self, pos: QPointF):
+        """Perform the resize operation."""
+        if not self._resize_start_rect or not self._resize_start_pos:
+            return
+
+        delta = pos - self._resize_start_pos
+        old_rect = self._resize_start_rect
+
+        new_width = self._width
+        new_height = self._height
+        new_x = self.x()
+        new_y = self.y()
+
+        if self._resize_handle == ResizeHandle.BOTTOM_RIGHT:
+            new_width = max(self.MIN_SIZE, old_rect.width() + delta.x())
+            new_height = max(self.MIN_SIZE, old_rect.height() + delta.y())
+        elif self._resize_handle == ResizeHandle.TOP_LEFT:
+            new_width = max(self.MIN_SIZE, old_rect.width() - delta.x())
+            new_height = max(self.MIN_SIZE, old_rect.height() - delta.y())
+            if new_width > self.MIN_SIZE:
+                new_x = self.x() + delta.x()
+            if new_height > self.MIN_SIZE:
+                new_y = self.y() + delta.y()
+        elif self._resize_handle == ResizeHandle.TOP_RIGHT:
+            new_width = max(self.MIN_SIZE, old_rect.width() + delta.x())
+            new_height = max(self.MIN_SIZE, old_rect.height() - delta.y())
+            if new_height > self.MIN_SIZE:
+                new_y = self.y() + delta.y()
+        elif self._resize_handle == ResizeHandle.BOTTOM_LEFT:
+            new_width = max(self.MIN_SIZE, old_rect.width() - delta.x())
+            new_height = max(self.MIN_SIZE, old_rect.height() + delta.y())
+            if new_width > self.MIN_SIZE:
+                new_x = self.x() + delta.x()
+
+        self.prepareGeometryChange()
+        self._width = max(self.MIN_SIZE, new_width)
+        self._height = max(self.MIN_SIZE, new_height)
+        self.setPos(new_x, new_y)
+        self.update()
+
+    def _push_resize_undo_command(self, old_size: Tuple[float, float],
+                                   new_size: Tuple[float, float]):
+        """Push a resize command to the undo stack."""
+        scene = self.scene()
+        if not scene or not scene.views():
+            return
+        view = scene.views()[0]
+        if not hasattr(view, '_undo_stack') or not view._undo_stack:
+            return
+
+        from .canvas_undo import ResizeItemCommand
+        cmd = ResizeItemCommand(view, self.filename, old_size, new_size)
+        view._undo_stack._undo_stack.append(cmd)
+        view._undo_stack._redo_stack.clear()
+        view._undo_stack._emit_changes()
+
+    # -------------------------------------------------------------------------
+    # Size & State
+    # -------------------------------------------------------------------------
+
+    def get_size(self) -> Tuple[float, float]:
+        return (self._width, self._height)
+
+    def set_size(self, width: float, height: float):
+        self.prepareGeometryChange()
+        self._width = max(self.MIN_SIZE, width)
+        self._height = max(self.MIN_SIZE, height)
+        if self._is_active and self._player_proxy:
+            widget = self._player_proxy.widget()
+            if widget:
+                widget.setFixedSize(int(self._width), int(self._height))
+        self.update()
+
+    def set_liked(self, liked: bool):
+        if self._liked != liked:
+            self._liked = liked
+            self.update()
+
+    def is_liked(self) -> bool:
+        return self._liked
+
+    # -------------------------------------------------------------------------
+    # Gallery Integration
+    # -------------------------------------------------------------------------
+
+    def set_border_color(self, color: Optional[QColor]):
+        self._border_color = color
+        self.update()
+
+    def set_show_gallery_border(self, show: bool):
+        self._show_gallery_border = show
+        self.update()
+
+    def set_group_ids(self, group_ids: List[str]):
+        self._group_ids = group_ids
+
+    def get_group_ids(self) -> List[str]:
+        return self._group_ids
+
+    def sync_from_gallery(self, favorites_manager):
+        """Sync this node's state from the gallery FavoritesManager."""
+        if not favorites_manager:
+            return
+
+        path = self.video_path
+        content_hash = self.content_hash
+
+        self._liked = favorites_manager.is_liked(path, content_hash=content_hash)
+        self._group_ids = list(favorites_manager.get_item_groups(path, content_hash=content_hash))
+        self._border_color = self._get_gallery_border_color(favorites_manager)
+        self.update()
+
+    def _get_gallery_border_color(self, favorites_manager) -> Optional[QColor]:
+        """Get the border color based on group membership or like status."""
+        path = self.video_path
+        content_hash = self.content_hash
+
+        groups = favorites_manager.get_item_groups(path, content_hash=content_hash)
+        if groups:
+            first_group_id = next(iter(groups))
+            group_def = favorites_manager.get_group(first_group_id)
+            if group_def:
+                return QColor(group_def.color)
+
+        if favorites_manager.is_liked(path, content_hash=content_hash):
+            return QColor(239, 68, 68)
+
+        return None
+
+    def _get_favorites_manager(self):
+        """Get the FavoritesManager from the view."""
+        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        if view and hasattr(view, '_get_favorites_manager'):
+            return view._get_favorites_manager()
+        return None
+
+    # -------------------------------------------------------------------------
+    # Snapping
+    # -------------------------------------------------------------------------
+
+    def itemChange(self, change, value):
+        """Handle item changes for snapping and cleanup."""
+        if change == QGraphicsItem.ItemPositionChange:
+            new_pos = value
+            scene = self.scene()
+            if scene and scene.views():
+                view = scene.views()[0]
+                if hasattr(view, 'snap_position_to_grid'):
+                    new_pos = view.snap_position_to_grid(new_pos)
+                if hasattr(view, 'snap_to_neighbor_items'):
+                    new_pos = view.snap_to_neighbor_items(self, new_pos)
+            return new_pos
+
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Update connected lines
+            scene = self.scene()
+            if scene:
+                for item in scene.items():
+                    if isinstance(item, ConnectionLine):
+                        if item.source_node == self or item.target_node == self:
+                            item.update_path()
+
+        return super().itemChange(change, value)
+
+    # -------------------------------------------------------------------------
+    # Context Menu
+    # -------------------------------------------------------------------------
+
+    def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
+        """Show context menu."""
+        menu = QMenu()
+
+        # Play/Stop action
+        if self._is_active:
+            stop_action = menu.addAction("\u25A0 Stop Playback")
+            stop_action.triggered.connect(self.deactivate_player)
+        else:
+            play_action = menu.addAction("\u25B6 Play Video")
+            play_action.triggered.connect(self.activate_player)
+
+        menu.addSeparator()
+
+        # Like action
+        like_action = menu.addAction("\u2665 Unlike" if self._liked else "\u2661 Like")
+        like_action.triggered.connect(self._toggle_like)
+
+        # Groups submenu
+        groups_menu = menu.addMenu("Add to Group")
+        self._populate_groups_menu(groups_menu)
+
+        menu.addSeparator()
+
+        # Gallery actions
+        show_in_gallery = menu.addAction("Show in Gallery")
+        show_in_gallery.triggered.connect(self._show_in_gallery)
+
+        open_folder = menu.addAction("Open Containing Folder")
+        open_folder.triggered.connect(self._open_folder)
+
+        menu.addSeparator()
+
+        # Display options
+        border_action = menu.addAction(
+            "Hide Border Colors" if self._show_gallery_border else "Show Border Colors")
+        border_action.triggered.connect(
+            lambda: self.set_show_gallery_border(not self._show_gallery_border))
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Remove from Canvas")
+        delete_action.triggered.connect(self._remove_from_canvas)
+
+        menu.exec_(event.screenPos())
+
+    def _toggle_like(self):
+        """Toggle like status and sync with gallery."""
+        new_liked = not self._liked
+        self.set_liked(new_liked)
+        favorites_manager = self._get_favorites_manager()
+        if favorites_manager:
+            if new_liked:
+                favorites_manager.like_item(self.video_path)
+            else:
+                favorites_manager.unlike_item(self.video_path)
+
+    def _populate_groups_menu(self, menu: QMenu):
+        """Populate the groups submenu."""
+        favorites_manager = self._get_favorites_manager()
+        if not favorites_manager:
+            no_groups = menu.addAction("(No groups available)")
+            no_groups.setEnabled(False)
+            return
+
+        groups = favorites_manager.get_groups()
+        if not groups:
+            no_groups = menu.addAction("(No groups created)")
+            no_groups.setEnabled(False)
+            return
+
+        current_groups = favorites_manager.get_item_groups(self.video_path)
+        for group in groups:
+            is_member = group.group_id in current_groups
+            action_text = f"{'✓ ' if is_member else '   '}{group.name}"
+            action = menu.addAction(action_text)
+            action.triggered.connect(
+                lambda checked, gid=group.group_id: self._toggle_group(gid))
+
+    def _toggle_group(self, group_id: str):
+        """Toggle membership in a group."""
+        favorites_manager = self._get_favorites_manager()
+        if not favorites_manager:
+            return
+        current_groups = favorites_manager.get_item_groups(self.video_path)
+        if group_id in current_groups:
+            favorites_manager.remove_from_group(self.video_path, group_id)
+        else:
+            favorites_manager.add_to_group(self.video_path, group_id)
+        self.sync_from_gallery(favorites_manager)
+
+    def _show_in_gallery(self):
+        """Show this video in the gallery tab."""
+        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        if view and hasattr(view, '_show_in_gallery'):
+            view._show_in_gallery(self.video_path)
+
+    def _open_folder(self):
+        """Open the containing folder in file explorer."""
+        import subprocess
+        folder = os.path.dirname(self.video_path)
+        if os.path.exists(folder):
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(
+                f'explorer /select,"{self.video_path}"',
+                creationflags=creationflags)
+
+    def _remove_from_canvas(self):
+        """Remove this node from the canvas."""
+        if self._is_active:
+            self.deactivate_player()
+        scene = self.scene()
+        if scene:
+            # Remove connected lines
+            for item in list(scene.items()):
+                if isinstance(item, ConnectionLine):
+                    if item.source_node == self or item.target_node == self:
+                        scene.removeItem(item)
             scene.removeItem(self)

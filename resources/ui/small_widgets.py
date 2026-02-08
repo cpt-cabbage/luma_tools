@@ -480,7 +480,8 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             # Close and reopen to refresh with new items
             self.collapse(animated=False)
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(100, self.expand)
+            from shiboken6 import isValid
+            QTimer.singleShot(100, lambda: self.expand() if isValid(self) else None)
         else:
             # Update top thumbnail if we have a new top item
             self._thumbnail_loaded = False
@@ -1954,8 +1955,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
         # Delete expanded widgets
         for widget in getattr(self, '_expanded_widgets', []):
-            widget.setParent(None)
-            widget.deleteLater()
+            if isValid(widget):
+                widget.setParent(None)
+                widget.deleteLater()
         self._expanded_widgets = []
 
         # Show the count badge again

@@ -47,6 +47,43 @@ from core.utils import load_json, ensure_directory
 logger = logging.getLogger(__name__)
 
 
+class ThreadSafeState:
+    """Thread-safe wrapper around a state dict.
+
+    Provides locked access for all reads/writes and an atomic
+    increment() method for counters (server_state is accessed from
+    the main thread, health_monitor_thread, stream_comfyui_output,
+    and HTTP handler threads simultaneously).
+    """
+
+    def __init__(self, initial_state: dict):
+        self._state = dict(initial_state)
+        self._lock = threading.RLock()
+
+    def __getitem__(self, key):
+        with self._lock:
+            return self._state[key]
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            self._state[key] = value
+
+    def get(self, key, default=None):
+        with self._lock:
+            return self._state.get(key, default)
+
+    def increment(self, key, amount=1):
+        """Atomically increment a counter."""
+        with self._lock:
+            self._state[key] += amount
+            return self._state[key]
+
+    def snapshot(self):
+        """Return a point-in-time copy of all state for consistent reads."""
+        with self._lock:
+            return dict(self._state)
+
+
 def kill_process_on_port(port: int) -> bool:
     """Kill any process using the specified port (Windows only).
 
@@ -180,8 +217,8 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
     return log_path
 
 
-# Server state
-server_state = {
+# Server state — wrapped in ThreadSafeState for multi-thread access
+server_state = ThreadSafeState({
     'comfyui_process': None,
     'comfyui_port': 8188,
     'start_time': None,
@@ -200,7 +237,7 @@ server_state = {
     'max_crash_restarts': 5,
     'crash_cooldown_seconds': 60,
     'self_restart_pending': False,  # Set when ComfyUI initiates its own restart
-}
+})
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -239,15 +276,17 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode())
 
     def _handle_health(self):
-        if server_state['is_ready']:
+        # Snapshot for consistent multi-value read across threads
+        state = server_state.snapshot()
+        if state['is_ready']:
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             response = {
                 'status': 'healthy',
-                'uptime_seconds': int(time.time() - server_state['start_time']) if server_state['start_time'] else 0,
-                'jobs_completed': server_state['jobs_completed'],
-                'jobs_failed': server_state['jobs_failed'],
+                'uptime_seconds': int(time.time() - state['start_time']) if state['start_time'] else 0,
+                'jobs_completed': state['jobs_completed'],
+                'jobs_failed': state['jobs_failed'],
             }
             self.wfile.write(json.dumps(response).encode())
         else:
@@ -261,19 +300,21 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
 
-        uptime = int(time.time() - server_state['start_time']) if server_state['start_time'] else 0
+        # Snapshot for consistent multi-value read across threads
+        state = server_state.snapshot()
+        uptime = int(time.time() - state['start_time']) if state['start_time'] else 0
         response = {
-            'is_ready': server_state['is_ready'],
-            'comfyui_port': server_state['comfyui_port'],
+            'is_ready': state['is_ready'],
+            'comfyui_port': state['comfyui_port'],
             'uptime_seconds': uptime,
             'uptime_human': format_uptime(uptime),
-            'jobs_completed': server_state['jobs_completed'],
-            'jobs_failed': server_state['jobs_failed'],
-            'start_time': server_state['start_time'],
-            'last_health_check': server_state['last_health_check'],
-            'crash_count': server_state['crash_count'],
-            'last_crash_time': server_state['last_crash_time'],
-            'max_crash_restarts': server_state['max_crash_restarts'],
+            'jobs_completed': state['jobs_completed'],
+            'jobs_failed': state['jobs_failed'],
+            'start_time': state['start_time'],
+            'last_health_check': state['last_health_check'],
+            'crash_count': state['crash_count'],
+            'last_crash_time': state['last_crash_time'],
+            'max_crash_restarts': state['max_crash_restarts'],
         }
         self.wfile.write(json.dumps(response, default=str).encode())
 
@@ -480,9 +521,9 @@ def stream_comfyui_output(process: subprocess.Popen):
                 logger.info(f"[ComfyUI] {line}")
 
                 if "Prompt executed in" in line:
-                    server_state['jobs_completed'] += 1
+                    server_state.increment('jobs_completed')
                 elif "Error" in line and "node" in line.lower():
-                    server_state['jobs_failed'] += 1
+                    server_state.increment('jobs_failed')
 
                 # Detect ComfyUI self-restart (e.g., from Manager or internal restart)
                 # This prevents treating exit code 0 as a crash
@@ -497,7 +538,7 @@ def stream_comfyui_output(process: subprocess.Popen):
                         logger.error(f"FATAL GPU ERROR DETECTED: {pattern}")
                         logger.error(f"Requesting immediate server restart...")
                         logger.error(f"{'!' * 60}\n")
-                        server_state['jobs_failed'] += 1
+                        server_state.increment('jobs_failed')
                         server_state['restart_requested'] = True
                         server_state['is_ready'] = False  # Mark as not ready immediately
                         # Fatal error detected, server is in bad state
@@ -591,7 +632,7 @@ def handle_crash_recovery(exit_code: int) -> bool:
     Returns:
         True if recovery was successful, False if we should give up
     """
-    server_state['crash_count'] += 1
+    server_state.increment('crash_count')
     server_state['last_crash_time'] = datetime.now().isoformat()
 
     logger.error("\n" + "!" * 60)

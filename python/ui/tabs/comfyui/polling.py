@@ -699,6 +699,11 @@ class PollingMixin:
             self._stop_batch_polling()
             return
 
+        # Guard: skip if previous poll cycle's workers haven't all reported back
+        if getattr(self, '_batch_poll_pending_results', 0) > 0:
+            logger.debug("[Batch] Skipping poll cycle — previous workers still pending")
+            return
+
         self._batch_poll_pending_results = len(self._batch_pending_jobs)
         self._batch_poll_results = {}
 

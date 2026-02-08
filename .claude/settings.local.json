@@ -95,7 +95,8 @@
       "Bash(git status:*)",
       "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ui\\\\tabs\\\\gallery\\\\job_status_bar.py\")",
       "Bash(cmd /c:*)",
-      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe -m pytest:*)"
+      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe -m pytest:*)",
+      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_check_records.ps1\")"
     ],
     "deny": [
       "Read(./python/venv/**)",

@@ -34,7 +34,7 @@ from drag_drop import (
     extract_files_from_mime_data, filter_files_by_category, IMAGE_EXTENSIONS
 )
 
-from .canvas_items import ImageNode, ConnectionLine, StickyNote, GroupRegion
+from .canvas_items import ImageNode, VideoNode, ConnectionLine, StickyNote, GroupRegion
 from .canvas_drawing import DrawingPath, DrawingRect, DrawingEllipse, DrawingLine, DrawingToolbar
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Track items by ID for sync
         self._image_nodes: Dict[str, ImageNode] = {}
+        self._video_nodes: Dict[str, 'VideoNode'] = {}
         self._connections: Dict[str, ConnectionLine] = {}
         self._sticky_notes: Dict[str, StickyNote] = {}
         self._groups: Dict[str, GroupRegion] = {}
@@ -595,6 +596,96 @@ class CollaborativeCanvas(QGraphicsView):
 
         return node
 
+    def add_video(self, video_path: str, x: float = None, y: float = None,
+                  width: float = None, height: float = None,
+                  node_id: str = None,
+                  content_hash: str = None) -> 'VideoNode':
+        """
+        Add a video node to the canvas.
+
+        Args:
+            video_path: Path to the video file
+            x, y: Position (defaults to center of view)
+            width, height: Size (None = use defaults)
+            node_id: Optional ID for sync (defaults to filename)
+            content_hash: SHA-256 content hash for file identification
+
+        Returns:
+            The created VideoNode
+        """
+        # Compute content hash if not provided
+        if content_hash is None:
+            try:
+                from comfyui.utils import compute_file_hash
+                content_hash = compute_file_hash(video_path)
+            except Exception:
+                content_hash = None
+
+        # Default position to center of current view
+        if x is None or y is None:
+            center = self.mapToScene(self.viewport().rect().center())
+            x = x if x is not None else center.x()
+            y = y if y is not None else center.y()
+
+        # Create video node
+        node = VideoNode(video_path, x, y, width, height,
+                         content_hash=content_hash)
+
+        # Add to scene
+        self._scene.addItem(node)
+
+        # Track by ID
+        node_id = node_id or os.path.basename(video_path)
+        self._video_nodes[node_id] = node
+
+        # Ensure scene contains this item
+        actual_width, actual_height = node.get_size()
+        item_rect = QRectF(x, y, actual_width, actual_height)
+        self._ensure_scene_contains(item_rect)
+
+        # Sync from gallery
+        favorites_manager = self._get_favorites_manager()
+        if favorites_manager:
+            node.sync_from_gallery(favorites_manager)
+
+        # Emit signal
+        self.item_added.emit('video', {
+            'id': node_id,
+            'path': video_path,
+            'x': x, 'y': y,
+            'width': actual_width, 'height': actual_height,
+        })
+        self._emit_modified()
+
+        return node
+
+    def remove_video(self, node_id: str):
+        """Remove a video node by ID."""
+        node = self._video_nodes.pop(node_id, None)
+        if node:
+            # Deactivate player if active
+            if node._is_active:
+                node.deactivate_player()
+
+            # Remove connected lines
+            for conn_id, conn in list(self._connections.items()):
+                if conn.source_node == node or conn.target_node == node:
+                    self._scene.removeItem(conn)
+                    del self._connections[conn_id]
+
+            self._scene.removeItem(node)
+            self.item_removed.emit('video', node_id)
+            self._emit_modified()
+
+    def deactivate_all_videos(self, except_node: 'VideoNode' = None):
+        """Deactivate all video players except the given node.
+
+        Enforces single-active-player policy to save resources.
+        """
+        for node in self._video_nodes.values():
+            if node != except_node and node._is_active:
+                node.deactivate_player()
+
     def add_connection(self, source_id: str, target_id: str,
                        connection_type: str = 'manual', label: str = '',
                        connection_id: str = None) -> Optional[ConnectionLine]:
@@ -979,22 +1070,22 @@ class CollaborativeCanvas(QGraphicsView):
     # -------------------------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        """Handle drag enter - accept if contains image files."""
+        """Handle drag enter - accept if contains image or video files."""
         paths = extract_files_from_mime_data(event.mimeData())
-        image_paths = filter_files_by_category(paths, {'image'})
-        if image_paths:
+        media_paths = filter_files_by_category(paths, {'image', 'video'})
+        if media_paths:
             event.acceptProposedAction()
             self._drop_highlight_active = True
             self.viewport().update()
-            logger.debug(f"Canvas drag enter: {len(image_paths)} image(s)")
+            logger.debug(f"Canvas drag enter: {len(media_paths)} file(s)")
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent):
         """Handle drag move - continue accepting if valid."""
         paths = extract_files_from_mime_data(event.mimeData())
-        image_paths = filter_files_by_category(paths, {'image'})
-        if image_paths:
+        media_paths = filter_files_by_category(paths, {'image', 'video'})
+        if media_paths:
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1006,29 +1097,34 @@ class CollaborativeCanvas(QGraphicsView):
         event.accept()
 
     def dropEvent(self, event: QDropEvent):
-        """Handle drop - add images to canvas."""
+        """Handle drop - add images and videos to canvas."""
         self._drop_highlight_active = False
         self.viewport().update()
 
         paths = extract_files_from_mime_data(event.mimeData())
-        image_paths = filter_files_by_category(paths, {'image'})
+        media_paths = filter_files_by_category(paths, {'image', 'video'})
 
-        if not image_paths:
+        if not media_paths:
             event.ignore()
             return
 
         # Get drop position in scene coordinates
         drop_pos = self.mapToScene(event.position().toPoint())
-        logger.info(f"Dropped {len(image_paths)} image(s) at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
+        logger.info(f"Dropped {len(media_paths)} file(s) at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
 
-        # Add images to canvas, staggering position if multiple
+        # Add files to canvas, routing by type, staggering position if multiple
+        from drag_drop import get_file_category
         offset = 0
-        for path in image_paths:
-            self.add_image(path, drop_pos.x() + offset, drop_pos.y() + offset)
-            offset += 50  # Stagger multiple images
+        for path in media_paths:
+            category = get_file_category(path)
+            if category == 'video':
+                self.add_video(path, drop_pos.x() + offset, drop_pos.y() + offset)
+            else:
+                self.add_image(path, drop_pos.x() + offset, drop_pos.y() + offset)
+            offset += 50
 
         # Emit signal for gallery integration (to copy external files to gallery)
-        self.files_dropped_on_canvas.emit(image_paths)
+        self.files_dropped_on_canvas.emit(media_paths)
 
         event.acceptProposedAction()
 
@@ -2497,6 +2593,7 @@ class CollaborativeCanvas(QGraphicsView):
                 'zoom': self._current_zoom
             },
             'nodes': {},
+            'videos': {},
             'connections': [],
             'annotations': [],
             'groups': []
@@ -2512,6 +2609,19 @@ class CollaborativeCanvas(QGraphicsView):
                 'height': height,
                 'liked': node.is_liked(),
                 'path': node.image_path,
+                'content_hash': node.content_hash,
+            }
+
+        # Video nodes
+        for node_id, node in self._video_nodes.items():
+            width, height = node.get_size()
+            state['videos'][node_id] = {
+                'x': node.x(),
+                'y': node.y(),
+                'width': width,
+                'height': height,
+                'liked': node.is_liked(),
+                'path': node.video_path,
                 'content_hash': node.content_hash,
             }
 
@@ -2650,6 +2760,30 @@ class CollaborativeCanvas(QGraphicsView):
                     content_hash=content_hash,
                 )
 
+            # Load video nodes
+            videos_data = state.get('videos', {})
+            for node_id, node_data in videos_data.items():
+                video_path = node_data.get('path', '')
+                content_hash = node_data.get('content_hash')
+
+                if not os.path.exists(video_path) and content_hash:
+                    recovered = self._find_file_by_hash(
+                        os.path.dirname(video_path), content_hash)
+                    if recovered:
+                        video_path = recovered
+                        logger.info(f"Canvas: recovered moved video by hash: {video_path}")
+
+                node = self.add_video(
+                    video_path,
+                    x=node_data.get('x', 0),
+                    y=node_data.get('y', 0),
+                    width=node_data.get('width'),
+                    height=node_data.get('height'),
+                    node_id=node_id,
+                    content_hash=content_hash,
+                )
+                node.set_liked(node_data.get('liked', False))
+
             # Load connections
             for conn_data in state.get('connections', []):
                 self.add_connection(
@@ -2758,6 +2892,29 @@ class CollaborativeCanvas(QGraphicsView):
                     content_hash=content_hash,
                 )
 
+            # Load video nodes (thumbnails loaded async, no preloading needed)
+            videos_data = state.get('videos', {})
+            for node_id, node_data in videos_data.items():
+                video_path = node_data.get('path', '')
+                content_hash = node_data.get('content_hash')
+
+                if not os.path.exists(video_path) and content_hash:
+                    recovered = self._find_file_by_hash(
+                        os.path.dirname(video_path), content_hash)
+                    if recovered:
+                        video_path = recovered
+
+                node = self.add_video(
+                    video_path,
+                    x=node_data.get('x', 0),
+                    y=node_data.get('y', 0),
+                    width=node_data.get('width'),
+                    height=node_data.get('height'),
+                    node_id=node_id,
+                    content_hash=content_hash,
+                )
+                node.set_liked(node_data.get('liked', False))
+
             # Load connections (same as load_state)
             for conn_data in state.get('connections', []):
                 self.add_connection(
@@ -2818,8 +2975,12 @@ class CollaborativeCanvas(QGraphicsView):
 
     def clear(self):
         """Clear all items from the canvas."""
+        # Deactivate video players before clearing
+        self.deactivate_all_videos()
+
         # Clear tracking dicts
         self._image_nodes.clear()
+        self._video_nodes.clear()
         self._connections.clear()
         self._sticky_notes.clear()
         self._groups.clear()
@@ -2843,6 +3004,14 @@ class CollaborativeCanvas(QGraphicsView):
     def get_all_image_nodes(self) -> Dict[str, ImageNode]:
         """Get all image nodes."""
         return dict(self._image_nodes)
+
+    def get_video_node(self, node_id: str) -> Optional['VideoNode']:
+        """Get a video node by ID."""
+        return self._video_nodes.get(node_id)
+
+    def get_all_video_nodes(self) -> Dict[str, 'VideoNode']:
+        """Get all video nodes."""
+        return dict(self._video_nodes)
 
     def get_zoom_level(self) -> float:
         """Get current zoom level."""
@@ -3082,7 +3251,7 @@ class CollaborativeCanvas(QGraphicsView):
 
     def sync_all_from_gallery(self):
         """
-        Sync all image nodes from the gallery FavoritesManager.
+        Sync all image and video nodes from the gallery FavoritesManager.
 
         Call this after loading canvas state or when gallery data changes.
         """
@@ -3093,31 +3262,43 @@ class CollaborativeCanvas(QGraphicsView):
         for node in self._image_nodes.values():
             node.sync_from_gallery(favorites_manager)
 
+        for node in self._video_nodes.values():
+            node.sync_from_gallery(favorites_manager)
+
         logger.debug("Synced all canvas nodes from gallery")
 
-    def sync_node_from_gallery(self, image_path: str):
+    def sync_node_from_gallery(self, media_path: str):
         """
         Sync a specific node from gallery.
 
         Args:
-            image_path: Path of the node to sync
+            media_path: Path of the node to sync
         """
         favorites_manager = self._get_favorites_manager()
         if not favorites_manager:
             return
 
-        # Find node by exact path match first
+        # Find node by exact path match first (images then videos)
         for node_id, node in self._image_nodes.items():
-            if node.image_path == image_path:
+            if node.image_path == media_path:
+                node.sync_from_gallery(favorites_manager)
+                return
+
+        for node_id, node in self._video_nodes.items():
+            if node.video_path == media_path:
                 node.sync_from_gallery(favorites_manager)
                 return
 
         # Fallback: try hash-based match
         try:
             from comfyui.utils import compute_file_hash
-            target_hash = compute_file_hash(image_path)
+            target_hash = compute_file_hash(media_path)
             if target_hash:
                 for node_id, node in self._image_nodes.items():
+                    if node.content_hash and node.content_hash == target_hash:
+                        node.sync_from_gallery(favorites_manager)
+                        return
+                for node_id, node in self._video_nodes.items():
                     if node.content_hash and node.content_hash == target_hash:
                         node.sync_from_gallery(favorites_manager)
                         return

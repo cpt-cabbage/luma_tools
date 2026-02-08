@@ -52,9 +52,6 @@ except ImportError as e:
     logger.warning(f"Deadline imports failed: {e}")
     DEADLINE_AVAILABLE = False
 
-# Try to import Qt for processEvents
-
-from PySide6.QtWidgets import QApplication
 
 
 
@@ -894,7 +891,9 @@ class PublishStrategy(ABC):
         """Report progress if callback provided."""
         if callback:
             callback(progress, message)
-            QApplication.processEvents()
+            # Note: Do NOT call processEvents() here — this method may run in a
+            # worker thread where processEvents() is unsafe. The progress callback
+            # already emits a cross-thread signal that updates the UI.
 
 
 class FarmPublishStrategy(PublishStrategy):

@@ -168,16 +168,20 @@ class CanvasTab(BaseTab):
         except ImportError:
             logger.debug("Event bus not available for canvas tab")
 
-    def _on_add_to_canvas_requested(self, image_path: str):
-        """Handle request to add an image to the canvas.
+    def _on_add_to_canvas_requested(self, media_path: str):
+        """Handle request to add an image or video to the canvas.
 
-        Called when ComfyUI or Gallery wants to add an image to the canvas.
+        Called when ComfyUI or Gallery wants to add media to the canvas.
 
         Args:
-            image_path: Path to the image to add
+            media_path: Path to the image or video to add
         """
-        if hasattr(self, 'add_image_to_canvas'):
-            self.add_image_to_canvas(image_path)
+        from drag_drop import get_file_category
+        category = get_file_category(media_path)
+        if category == 'video':
+            self.add_video_to_canvas(media_path)
+        elif hasattr(self, 'add_image_to_canvas'):
+            self.add_image_to_canvas(media_path)
 
     def _setup_minimap(self):
         """Setup the floating canvas minimap widget."""
@@ -1290,6 +1294,29 @@ class CanvasTab(BaseTab):
 
         # Check metadata for lineage and auto-connect
         self._auto_connect_from_metadata(node, image_path)
+
+        return node
+
+    def add_video_to_canvas(self, video_path: str, position: tuple = None):
+        """
+        Add a video to the canvas.
+
+        Called from Gallery context menu or auto-add from ComfyUI.
+
+        Args:
+            video_path: Path to the video file
+            position: Optional (x, y) position, or None for auto-placement
+        """
+        if position is None:
+            center = self._canvas.mapToScene(
+                self._canvas.viewport().rect().center()
+            )
+            position = (center.x(), center.y())
+
+        node = self._canvas.add_video(video_path, position[0], position[1])
+
+        # Sync node with gallery data (likes, groups, colors)
+        self._canvas.sync_node_from_gallery(video_path)
 
         return node
 

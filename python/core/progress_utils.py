@@ -11,12 +11,14 @@ logger = logging.getLogger(__name__)
 
 def report_progress(callback, progress, message):
     """
-    Report progress and process Qt events to keep UI responsive.
+    Report progress via callback.
 
     This utility consolidates the common pattern of:
     - Checking if callback exists
     - Calling the callback
-    - Processing Qt events to keep the UI responsive (if Qt available)
+
+    The callback (typically Worker's progress_callback) emits a cross-thread
+    signal that safely updates the UI from the main thread.
 
     Args:
         callback: Progress callback function(progress, message) or None
@@ -28,11 +30,7 @@ def report_progress(callback, progress, message):
     """
     if callback:
         callback(progress, message)
-        # Process events if Qt is available (non-blocking)
-        try:
-            from PySide6.QtWidgets import QApplication
-            app = QApplication.instance()
-            if app:
-                app.processEvents()
-        except ImportError:
-            pass  # Qt not available, skip processEvents
+        # Note: Do NOT call processEvents() here. This function is typically called
+        # from worker threads where processEvents() is unsafe and can cause
+        # re-entrancy crashes. The Worker's progress signal already delivers
+        # updates to the main thread safely.

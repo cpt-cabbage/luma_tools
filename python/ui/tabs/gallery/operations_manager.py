@@ -69,11 +69,13 @@ class OperationsManager(BaseGalleryManager):
                     success_count += 1
 
                     # Remove widget from layout (for non-stacked items)
-                    if item_path in self.tab._widget_cache:
-                        widget = self.tab._widget_cache[item_path]
-                        self.tab._flow_layout.removeWidget(widget)
-                        widget.deleteLater()
-                        del self.tab._widget_cache[item_path]
+                    # Use thread-safe cache accessor to avoid race conditions
+                    widget = self.remove_cached_widget(item_path)
+                    if widget:
+                        from shiboken6 import isValid
+                        if isValid(widget):
+                            self.tab._flow_layout.removeWidget(widget)
+                            widget.deleteLater()
                     else:
                         # Item might be in a stacked view - find which stack contains it
                         stack_id = self._find_stack_containing_item(item_path)
@@ -192,9 +194,10 @@ class OperationsManager(BaseGalleryManager):
                     stack_widget.deleteLater()
                 del self.tab._manager._stack_widgets[stack_id]
 
-            # Also clean up section_items tracking
-            if hasattr(self.tab, '_section_items') and stack_id in self.tab._section_items:
-                del self.tab._section_items[stack_id]
+            # Also clean up section_items tracking (thread-safe)
+            if hasattr(self.tab, '_section_items') and hasattr(self.tab, '_cache_lock'):
+                with self.tab._cache_lock:
+                    self.tab._section_items.pop(stack_id, None)
 
     def _on_item_deleted(self, item_path):
         """Handle item deletion - clean up all caches."""

@@ -60,6 +60,10 @@ def export_to_luma(canvas_state: Dict[str, Any], output_path: str,
         for node_id, node_data in canvas_state.get('nodes', {}).items():
             _store_node(cursor, node_id, node_data, embed_images, base_path)
 
+        # Store video nodes
+        for node_id, node_data in canvas_state.get('videos', {}).items():
+            _store_video(cursor, node_id, node_data, embed_images, base_path)
+
         # Store connections
         for conn_data in canvas_state.get('connections', []):
             _store_connection(cursor, conn_data)
@@ -132,6 +136,24 @@ def import_from_luma(db_path: str, extract_path: str = None) -> Optional[Dict[st
             nodes[node_id] = node_data
 
         state['nodes'] = nodes
+
+        # Load video nodes
+        try:
+            cursor.execute("SELECT node_id, data FROM videos")
+            videos = {}
+            for node_id, data_json in cursor.fetchall():
+                node_data = json.loads(data_json)
+                if embed_images:
+                    # Videos use prefixed sqlar key to avoid collisions with images
+                    video_path = _extract_embedded_image(
+                        cursor, f"video_{node_id}", extract_path)
+                    if video_path:
+                        node_data['path'] = video_path
+                videos[node_id] = node_data
+            state['videos'] = videos
+        except sqlite3.OperationalError:
+            # Table may not exist in older .luma files
+            state['videos'] = {}
 
         # Load connections
         cursor.execute("SELECT data FROM connections")
@@ -212,6 +234,14 @@ def _create_tables(cursor):
         )
     """)
 
+    # Videos table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS videos (
+            node_id TEXT PRIMARY KEY,
+            data TEXT
+        )
+    """)
+
     # Drawings table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS drawings (
@@ -258,6 +288,18 @@ def _store_node(cursor, node_id: str, node_data: dict, embed_images: bool, base_
             _embed_image(cursor, node_id, image_path)
 
 
+def _store_video(cursor, node_id: str, node_data: dict, embed_images: bool, base_path: str):
+    """Store a video node and optionally embed the video file."""
+    cursor.execute("INSERT INTO videos VALUES (?, ?)",
+                   (node_id, json.dumps(node_data)))
+
+    # Embed video if requested (same sqlar mechanism as images)
+    if embed_images:
+        video_path = node_data.get('path', '')
+        if video_path and os.path.exists(video_path):
+            _embed_image(cursor, f"video_{node_id}", video_path)
+
+
 def _embed_image(cursor, node_id: str, image_path: str):
     """Embed an image in the sqlar table."""
     try:
@@ -291,7 +333,7 @@ def _extract_embedded_image(cursor, node_id: str, extract_path: str) -> Optional
         # Decompress
         data = zlib.decompress(compressed_data)
 
-        # Determine extension from data
+        # Determine extension from data (images and videos)
         ext = '.png'  # Default
         if data[:2] == b'\xff\xd8':
             ext = '.jpg'
@@ -299,6 +341,10 @@ def _extract_embedded_image(cursor, node_id: str, extract_path: str) -> Optional
             ext = '.webp'
         elif data[:4] == b'GIF8':
             ext = '.gif'
+        elif data[4:8] == b'ftyp':
+            ext = '.mp4'
+        elif data[:4] == b'\x1a\x45\xdf\xa3':
+            ext = '.webm'
 
         # Save to extract path
         filename = f"{node_id}{ext}"

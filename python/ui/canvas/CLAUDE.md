@@ -17,9 +17,13 @@ Collaborative infinite canvas for spatial organization of AI generations.
 ### Canvas Items
 All items in `canvas_items.py`:
 - `ImageNode` - Image display with metadata, thumbnails, and interaction
+- `VideoNode` - Video display with thumbnail, inline playback (QMediaPlayer), duration badge
 - `ConnectionLine` - Visual connections between items
 - `StickyNote` - Text annotations on the canvas
 - `GroupRegion` - Visual grouping regions for organizing items
+
+### Video Support
+`VideoNode` shows a static thumbnail (FFmpeg first-frame extraction) with play icon overlay and duration badge. Double-click activates inline playback via `QGraphicsProxyWidget` embedding `VideoSinkWidget` + `VideoControlBar`. Single-active-player policy: `deactivate_all_videos()` ensures only one video plays at a time. Videos are tracked in `_video_nodes` dict, serialized in `'videos'` key of state, and exported to a `videos` table in `.luma` files. Supports drag-drop, gallery context menu, ComfyUI auto-add, and event bus entry points.
 
 ### Drawing System
 `canvas_drawing.py` provides pen tablet support with pressure sensitivity. Tools include pen, eraser, and selection modes for drawings.

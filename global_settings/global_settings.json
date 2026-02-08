@@ -262,5 +262,6 @@
     "Gaussian Splats",
     "Music",
     "Images"
-  ]
+  ],
+  "deadline_poll_interval": 1
 }

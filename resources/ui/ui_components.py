@@ -181,12 +181,13 @@ def get_cached_image_thumbnail(path):
 def cache_image_thumbnail(path, data):
     """Cache image thumbnail bytes (memory + disk).
 
-    Thread-safe: Uses lock for memory cache access.
+    Thread-safe: Uses lock for both memory cache and disk write to prevent
+    concurrent writes to the same file.
     """
     if not data:
         return
 
-    # Memory cache with LRU-like eviction (thread-safe)
+    # Memory cache with LRU-like eviction + disk write (thread-safe)
     with _image_thumbnail_cache_lock:
         if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
             keys = list(_image_thumbnail_cache.keys())
@@ -194,13 +195,13 @@ def cache_image_thumbnail(path, data):
                 del _image_thumbnail_cache[key]
         _image_thumbnail_cache[path] = data
 
-    # Write to disk cache
-    cache_path = _get_thumbnail_disk_path(path)
-    try:
-        with open(cache_path, 'wb') as f:
-            f.write(data)
-    except (OSError, IOError):
-        pass  # Disk write failed, memory cache still works
+        # Write to disk cache inside lock to prevent concurrent file writes
+        cache_path = _get_thumbnail_disk_path(path)
+        try:
+            with open(cache_path, 'wb') as f:
+                f.write(data)
+        except (OSError, IOError):
+            pass  # Disk write failed, memory cache still works
 
 
 # ============================================================================
@@ -235,20 +236,23 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     _cached_liked_color = None
     _cached_stack_colors = None
     _settings_cache_initialized = False
+    _settings_cache_lock = threading.Lock()
 
     @classmethod
     def _ensure_settings_cache(cls):
-        """Initialize or refresh settings cache (call once, not per widget)."""
-        if not cls._settings_cache_initialized:
-            from core.settings_manager import get_setting
-            cls._cached_liked_color = get_setting("gallery_liked_color") or "#55ff9c"
-            cls._cached_stack_colors = get_setting("gallery_stack_colors") or {}
-            cls._settings_cache_initialized = True
+        """Initialize or refresh settings cache (call once, not per widget). Thread-safe."""
+        with cls._settings_cache_lock:
+            if not cls._settings_cache_initialized:
+                from core.settings_manager import get_setting
+                cls._cached_liked_color = get_setting("gallery_liked_color") or "#55ff9c"
+                cls._cached_stack_colors = get_setting("gallery_stack_colors") or {}
+                cls._settings_cache_initialized = True
 
     @classmethod
     def invalidate_settings_cache(cls):
-        """Call this when settings change to refresh the cache."""
-        cls._settings_cache_initialized = False
+        """Call this when settings change to refresh the cache. Thread-safe."""
+        with cls._settings_cache_lock:
+            cls._settings_cache_initialized = False
 
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,

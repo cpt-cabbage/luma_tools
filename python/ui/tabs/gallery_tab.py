@@ -69,7 +69,7 @@ class GalleryTab(BaseTab):
 
     def connect_signals(self):
         """Connect gallery tab signals."""
-        self.ui.GallerySourceToggle.clicked.connect(self._on_source_toggle)
+        self.ui.GallerySourceToggle.hide()
         self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
         self.ui.GalleryRefresh.clicked.connect(self._on_refresh_button_clicked)
         self.ui.GallerySortButton.clicked.connect(self._on_sort_button_clicked)
@@ -91,9 +91,6 @@ class GalleryTab(BaseTab):
         self._flow_layout = FlowLayout(margin=10, spacing=10)
         self.ui.galleryThumbnailContainer.setLayout(self._flow_layout)
 
-        # Source mode: "network" or "custom"
-        self._source_mode = "network"
-        self._custom_path = ""
         self._current_path = ""
 
         # Load gallery settings
@@ -484,11 +481,8 @@ class GalleryTab(BaseTab):
         return os.path.join(base_path, username)
 
     def _update_gallery_path(self, reset_tracking=True):
-        """Update the gallery path based on source mode and selected user."""
-        if self._source_mode == "network":
-            self._current_path = self._get_network_user_path()
-        else:
-            self._current_path = self._custom_path
+        """Update the gallery path to the network path for selected user."""
+        self._current_path = self._get_network_user_path()
 
         if reset_tracking:
             self._known_items.clear()
@@ -524,37 +518,6 @@ class GalleryTab(BaseTab):
         except Exception as e:
             logging.warning(f"[Gallery] Error opening explorer: {e}")
             self.show_status(f"Could not open folder: {e}", "error")
-
-    def _on_source_toggle(self):
-        """Toggle between network and custom source modes."""
-        if self._source_mode == "network":
-            self._browse_custom_folder()
-        else:
-            # Switch back to network
-            self._source_mode = "network"
-            self.ui.GallerySourceToggle.setText("📁 Network")
-            self._update_gallery_path()
-            self._on_refresh(force=True)
-            self.show_status("Switched to network gallery", "info")
-
-    def _browse_custom_folder(self):
-        """Browse for a custom gallery folder."""
-        from file_dialogs import browse_directory_with_memory
-
-        folder = browse_directory_with_memory(
-            self.main_window,
-            context="gallery_custom_folder",
-            title="Select Gallery Folder",
-            fallback_path=self._current_path or ""
-        )
-
-        if folder:
-            self._source_mode = "custom"
-            self._custom_path = folder
-            self.ui.GallerySourceToggle.setText("📁 Custom")
-            self._update_gallery_path()
-            self._on_refresh(force=True)
-            self.show_status(f"Custom: {os.path.basename(folder)}", "info")
 
     # =========================================================================
     # GROUPS & LIKES FILTERING
@@ -776,15 +739,16 @@ class GalleryTab(BaseTab):
     def show_loading_overlay(self, message="Loading..."):
         """Show the loading overlay with a message."""
         if hasattr(self, '_loading_overlay'):
-            from PySide6.QtWidgets import QApplication
-
             # Size overlay to cover the entire viewport
             viewport = self.ui.galleryScrollArea.viewport()
             self._loading_overlay.setGeometry(viewport.rect())
             self._loading_overlay.show_loading(message)
 
-            # Force immediate repaint so overlay is visible before blocking work
-            QApplication.processEvents()
+            # Note: Do NOT call QApplication.processEvents() here.
+            # Re-entering the event loop can cause batch poll timers, gallery
+            # refresh timers, or other deferred callbacks to fire mid-operation,
+            # leading to widget access on deleted objects (segfault).
+            self._loading_overlay.repaint()
 
     def hide_loading_overlay(self):
         """Hide the loading overlay."""

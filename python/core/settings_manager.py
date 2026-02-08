@@ -7,6 +7,7 @@ Uses a registry pattern to minimize boilerplate for simple settings.
 
 import os
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, Callable, List
 from .config import (
@@ -194,14 +195,16 @@ TAB_RESTRICTION_MAP = {
 _user_settings_cache: Optional[Dict[str, Any]] = None
 _global_settings_cache: Optional[Dict[str, Any]] = None
 _global_settings_path_cache: Optional[str] = None
+_settings_cache_lock = threading.RLock()
 
 
 def clear_settings_cache():
     """Clear all settings caches. Call after saving settings."""
     global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
-    _user_settings_cache = None
-    _global_settings_cache = None
-    _global_settings_path_cache = None
+    with _settings_cache_lock:
+        _user_settings_cache = None
+        _global_settings_cache = None
+        _global_settings_path_cache = None
 
 
 def ensure_settings_dir():
@@ -217,49 +220,54 @@ def ensure_settings_dir():
 # ============================================================================
 
 def load_user_settings() -> Dict[str, Any]:
-    """Load user settings from file."""
+    """Load user settings from file. Thread-safe via _settings_cache_lock."""
     from .utils import load_json
     global _user_settings_cache
-    if _user_settings_cache is not None:
-        return _user_settings_cache.copy()
+    with _settings_cache_lock:
+        if _user_settings_cache is not None:
+            return _user_settings_cache.copy()
 
-    default_settings = {"default_passes": DEFAULT_PASSES.copy()}
+        default_settings = {"default_passes": DEFAULT_PASSES.copy()}
 
-    if not os.path.exists(USER_SETTINGS_FILE):
-        _user_settings_cache = default_settings
-        return default_settings.copy()
+        if not os.path.exists(USER_SETTINGS_FILE):
+            _user_settings_cache = default_settings
+            return default_settings.copy()
 
-    settings = load_json(USER_SETTINGS_FILE, default_settings)
-    if "default_passes" not in settings:
-        settings["default_passes"] = DEFAULT_PASSES.copy()
-    _user_settings_cache = settings
-    return settings.copy()
+        settings = load_json(USER_SETTINGS_FILE, default_settings)
+        if "default_passes" not in settings:
+            settings["default_passes"] = DEFAULT_PASSES.copy()
+        _user_settings_cache = settings
+        return settings.copy()
 
 
 def save_user_settings(settings: Dict[str, Any]):
-    """Save user settings to file using atomic write to prevent corruption."""
+    """Save user settings to file using atomic write. Thread-safe via _settings_cache_lock."""
     from .utils import save_json
     global _user_settings_cache
     ensure_settings_dir()
-    if save_json(USER_SETTINGS_FILE, settings):
-        _user_settings_cache = settings.copy()
-    else:
-        logger.error("Failed to save user settings")
+    with _settings_cache_lock:
+        if save_json(USER_SETTINGS_FILE, settings):
+            _user_settings_cache = settings.copy()
+        else:
+            logger.error("Failed to save user settings")
 
 
 def get_global_settings_path() -> str:
-    """Get the path to the global settings directory."""
+    """Get the path to the global settings directory. Thread-safe via _settings_cache_lock."""
     global _global_settings_path_cache
-    if _global_settings_path_cache is not None:
-        return _global_settings_path_cache
+    with _settings_cache_lock:
+        if _global_settings_path_cache is not None:
+            return _global_settings_path_cache
 
     settings = load_user_settings()
     path = settings.get("global_settings_path")
     if path and os.path.isdir(path):
-        _global_settings_path_cache = path
+        with _settings_cache_lock:
+            _global_settings_path_cache = path
         return path
 
-    _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
+    with _settings_cache_lock:
+        _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
     return DEFAULT_GLOBAL_SETTINGS_PATH
 
 
@@ -269,8 +277,9 @@ def set_global_settings_path(path: str):
     settings = load_user_settings()
     settings["global_settings_path"] = path
     save_user_settings(settings)
-    _global_settings_path_cache = None
-    _global_settings_cache = None
+    with _settings_cache_lock:
+        _global_settings_path_cache = None
+        _global_settings_cache = None
     logger.info(f"Set global settings path to: {path}")
 
 
@@ -289,38 +298,40 @@ def _ensure_global_settings_dir():
 
 
 def load_global_settings() -> Dict[str, Any]:
-    """Load global settings from file."""
+    """Load global settings from file. Thread-safe via _settings_cache_lock."""
     from .utils import load_json
     global _global_settings_cache
-    if _global_settings_cache is not None:
-        return _global_settings_cache.copy()
+    with _settings_cache_lock:
+        if _global_settings_cache is not None:
+            return _global_settings_cache.copy()
 
-    default_settings = {
-        "comfyui_workflow_presets": {},
-        "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
-        "sup_users": [],  # Supervisors: can see ComfyUI and Gallery tabs (not Settings)
-    }
-    settings_file = _get_global_settings_file()
+        default_settings = {
+            "comfyui_workflow_presets": {},
+            "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
+            "sup_users": [],  # Supervisors: can see ComfyUI and Gallery tabs (not Settings)
+        }
+        settings_file = _get_global_settings_file()
 
-    if not os.path.exists(settings_file):
-        _global_settings_cache = default_settings
-        return default_settings.copy()
+        if not os.path.exists(settings_file):
+            _global_settings_cache = default_settings
+            return default_settings.copy()
 
-    settings = load_json(settings_file, default_settings)
-    _global_settings_cache = settings
-    return settings.copy()
+        settings = load_json(settings_file, default_settings)
+        _global_settings_cache = settings
+        return settings.copy()
 
 
 def save_global_settings(settings: Dict[str, Any]):
-    """Save global settings to file using atomic write to prevent corruption."""
+    """Save global settings to file using atomic write. Thread-safe via _settings_cache_lock."""
     from .utils import save_json
     global _global_settings_cache
     _ensure_global_settings_dir()
     settings_file = _get_global_settings_file()
-    if save_json(settings_file, settings):
-        _global_settings_cache = settings.copy()
-    else:
-        logger.error("Failed to save global settings")
+    with _settings_cache_lock:
+        if save_json(settings_file, settings):
+            _global_settings_cache = settings.copy()
+        else:
+            logger.error("Failed to save global settings")
 
 
 # ============================================================================
@@ -341,10 +352,11 @@ class SettingsAccessor:
         return self._load_fn().get(key, default)
 
     def set(self, key: str, value: Any, verbose: bool = True):
-        """Set a settings value by key."""
-        settings = self._load_fn()
-        settings[key] = value
-        self._save_fn(settings)
+        """Set a settings value by key. Atomic load-modify-save under lock."""
+        with _settings_cache_lock:
+            settings = self._load_fn()
+            settings[key] = value
+            self._save_fn(settings)
         if verbose:
             logger.info(f"Set {key} to: {value}")
 
@@ -453,25 +465,27 @@ def get_hdri_list() -> List[Dict[str, str]]:
 
 
 def add_hdri_to_list(name: str, path: str):
-    """Add an HDRI to the global list."""
-    settings = load_global_settings()
-    hdri_list = settings.get("hdri_list", [])
-    # Check for duplicates
-    for hdri in hdri_list:
-        if hdri.get("name") == name:
-            return  # Already exists
-    hdri_list.append({"name": name, "path": path})
-    settings["hdri_list"] = hdri_list
-    save_global_settings(settings)
+    """Add an HDRI to the global list. Atomic load-modify-save."""
+    with _settings_cache_lock:
+        settings = load_global_settings()
+        hdri_list = settings.get("hdri_list", [])
+        # Check for duplicates
+        for hdri in hdri_list:
+            if hdri.get("name") == name:
+                return  # Already exists
+        hdri_list.append({"name": name, "path": path})
+        settings["hdri_list"] = hdri_list
+        save_global_settings(settings)
     logger.info(f"Added HDRI to global settings: {name}")
 
 
 def remove_hdri_from_list(name: str):
-    """Remove an HDRI from the global list."""
-    settings = load_global_settings()
-    hdri_list = settings.get("hdri_list", [])
-    settings["hdri_list"] = [h for h in hdri_list if h.get("name") != name]
-    save_global_settings(settings)
+    """Remove an HDRI from the global list. Atomic load-modify-save."""
+    with _settings_cache_lock:
+        settings = load_global_settings()
+        hdri_list = settings.get("hdri_list", [])
+        settings["hdri_list"] = [h for h in hdri_list if h.get("name") != name]
+        save_global_settings(settings)
     logger.info(f"Removed HDRI from global settings: {name}")
 
 
@@ -532,7 +546,7 @@ def is_user_in_role(username: str, role: str) -> bool:
 
 
 def add_user_to_role(username: str, role: str):
-    """Add a user to a role.
+    """Add a user to a role. Atomic load-modify-save.
 
     Args:
         username: Username to add
@@ -541,32 +555,34 @@ def add_user_to_role(username: str, role: str):
     if not username:
         return
     settings_key = _get_role_settings_key(role)
-    settings = load_global_settings()
-    if settings_key not in settings:
-        settings[settings_key] = []
-    existing_lower = [u.lower() for u in settings[settings_key]]
-    if username.lower() not in existing_lower:
-        settings[settings_key].append(username)
-        save_global_settings(settings)
-        logger.info(f"Added {role} user: {username}")
+    with _settings_cache_lock:
+        settings = load_global_settings()
+        if settings_key not in settings:
+            settings[settings_key] = []
+        existing_lower = [u.lower() for u in settings[settings_key]]
+        if username.lower() not in existing_lower:
+            settings[settings_key].append(username)
+            save_global_settings(settings)
+    logger.info(f"Added {role} user: {username}")
 
 
 def remove_user_from_role(username: str, role: str):
-    """Remove a user from a role.
+    """Remove a user from a role. Atomic load-modify-save.
 
     Args:
         username: Username to remove
         role: Role name ("admin" or "sup")
     """
     settings_key = _get_role_settings_key(role)
-    settings = load_global_settings()
-    if settings_key not in settings:
-        return
-    original_list = settings[settings_key]
-    settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
-    if len(settings[settings_key]) < len(original_list):
-        save_global_settings(settings)
-        logger.info(f"Removed {role} user: {username}")
+    with _settings_cache_lock:
+        settings = load_global_settings()
+        if settings_key not in settings:
+            return
+        original_list = settings[settings_key]
+        settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
+        if len(settings[settings_key]) < len(original_list):
+            save_global_settings(settings)
+    logger.info(f"Removed {role} user: {username}")
 
 
 def has_elevated_access(username: str) -> bool:

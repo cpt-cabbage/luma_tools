@@ -141,8 +141,10 @@ class ComfyUIWidgetManager:
         # Without this, Qt's layout engine can retain stale size hints from
         # widgets that are detached but not yet destroyed, causing overflow
         # when switching from fewer to more widgets.
-        from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()
+        # Note: Use sendPostedEvents with DeferredDelete instead of processEvents()
+        # to avoid re-entering the event loop (which could fire timers/signals).
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
         if not workflow_path:
             return

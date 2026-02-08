@@ -13,7 +13,7 @@ Features:
 """
 
 from .collaborative_canvas import CollaborativeCanvas
-from .canvas_items import ImageNode, ConnectionLine, StickyNote, GroupRegion
+from .canvas_items import ImageNode, VideoNode, ConnectionLine, StickyNote, GroupRegion
 from .canvas_drawing import (
     DrawingPath, DrawingRect, DrawingEllipse, DrawingLine,
     DrawingToolbar, DrawingItemBase
@@ -31,6 +31,7 @@ from .canvas_selector_dialog import CanvasSelectorDialog, NewCanvasDialog
 __all__ = [
     'CollaborativeCanvas',
     'ImageNode',
+    'VideoNode',
     'ConnectionLine',
     'StickyNote',
     'GroupRegion',

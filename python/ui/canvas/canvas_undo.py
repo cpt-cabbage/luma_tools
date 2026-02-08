@@ -76,7 +76,7 @@ class AddItemCommand(CanvasCommand):
 
         Args:
             canvas: The canvas
-            item_type: Type of item ('image', 'sticky', 'connection', 'group')
+            item_type: Type of item ('image', 'video', 'sticky', 'connection', 'group')
             item_data: Data needed to create the item
         """
         super().__init__(canvas, f"Add {item_type}")
@@ -94,6 +94,17 @@ class AddItemCommand(CanvasCommand):
                     width=self._item_data.get('width'),
                     height=self._item_data.get('height'),
                     liked=self._item_data.get('liked', False),
+                    node_id=self._item_data.get('id')
+                )
+                self._item_id = self._item_data.get('id') or node.filename
+
+            elif self._item_type == 'video':
+                node = self._canvas.add_video(
+                    self._item_data.get('path', ''),
+                    x=self._item_data.get('x'),
+                    y=self._item_data.get('y'),
+                    width=self._item_data.get('width'),
+                    height=self._item_data.get('height'),
                     node_id=self._item_data.get('id')
                 )
                 self._item_id = self._item_data.get('id') or node.filename
@@ -143,6 +154,8 @@ class AddItemCommand(CanvasCommand):
 
             if self._item_type == 'image':
                 self._canvas.remove_image(self._item_id)
+            elif self._item_type == 'video':
+                self._canvas.remove_video(self._item_id)
             elif self._item_type == 'sticky':
                 self._canvas.remove_sticky_note(self._item_id)
             elif self._item_type == 'connection':
@@ -178,6 +191,8 @@ class RemoveItemCommand(CanvasCommand):
         try:
             if self._item_type == 'image':
                 self._canvas.remove_image(self._item_id)
+            elif self._item_type == 'video':
+                self._canvas.remove_video(self._item_id)
             elif self._item_type == 'sticky':
                 self._canvas.remove_sticky_note(self._item_id)
             elif self._item_type == 'connection':
@@ -213,9 +228,16 @@ class MoveItemCommand(CanvasCommand):
         self._old_pos = old_pos
         self._new_pos = new_pos
 
+    def _find_node(self):
+        """Find node by ID across image and video nodes."""
+        node = self._canvas.get_image_node(self._item_id)
+        if not node:
+            node = self._canvas.get_video_node(self._item_id)
+        return node
+
     def execute(self) -> bool:
         try:
-            node = self._canvas.get_image_node(self._item_id)
+            node = self._find_node()
             if node:
                 node.setPos(self._new_pos)
                 return True
@@ -226,7 +248,7 @@ class MoveItemCommand(CanvasCommand):
 
     def undo(self) -> bool:
         try:
-            node = self._canvas.get_image_node(self._item_id)
+            node = self._find_node()
             if node:
                 node.setPos(self._old_pos)
                 return True
@@ -297,9 +319,16 @@ class ResizeItemCommand(CanvasCommand):
         self._old_size = old_size
         self._new_size = new_size
 
+    def _find_node(self):
+        """Find node by ID across image and video nodes."""
+        node = self._canvas.get_image_node(self._item_id)
+        if not node:
+            node = self._canvas.get_video_node(self._item_id)
+        return node
+
     def execute(self) -> bool:
         try:
-            node = self._canvas.get_image_node(self._item_id)
+            node = self._find_node()
             if node:
                 node.set_size(self._new_size[0], self._new_size[1])
                 return True
@@ -310,7 +339,7 @@ class ResizeItemCommand(CanvasCommand):
 
     def undo(self) -> bool:
         try:
-            node = self._canvas.get_image_node(self._item_id)
+            node = self._find_node()
             if node:
                 node.set_size(self._old_size[0], self._old_size[1])
                 return True

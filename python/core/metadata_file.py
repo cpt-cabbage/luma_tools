@@ -83,7 +83,8 @@ class MetadataFile:
         """
         Load metadata from file, using cache if available and file unchanged.
 
-        Thread-safe: Uses RLock for cache access.
+        Thread-safe: Uses RLock for cache check, file read, and cache update
+        to prevent TOCTOU races between mtime check and file read.
 
         Args:
             default: Value to return if file is missing/corrupted (default: empty dict)
@@ -104,32 +105,33 @@ class MetadataFile:
             return default
 
         try:
-            current_mtime = os.path.getmtime(metadata_path)
+            with self._lock:
+                current_mtime = os.path.getmtime(metadata_path)
 
-            # Check cache (thread-safe)
-            if use_cache:
-                with self._lock:
+                # Check cache
+                if use_cache:
                     if self._cache is not None and self._cache_mtime == current_mtime:
                         return self._cache
 
-            # Load from file (outside lock - file I/O can be slow)
-            with open(metadata_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                # Load from file (under lock to prevent TOCTOU race between
+                # mtime check and file read — another thread could modify the
+                # file between the two operations)
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-            # Validate data is a dict
-            if not isinstance(data, dict):
-                logger.warning(
-                    f"[MetadataFile] Invalid format in {metadata_path}, "
-                    f"expected dict but got {type(data).__name__}"
-                )
-                return default
+                # Validate data is a dict
+                if not isinstance(data, dict):
+                    logger.warning(
+                        f"[MetadataFile] Invalid format in {metadata_path}, "
+                        f"expected dict but got {type(data).__name__}"
+                    )
+                    return default
 
-            # Update cache (thread-safe)
-            with self._lock:
+                # Update cache
                 self._cache = data
                 self._cache_mtime = current_mtime
 
-            return data
+                return data
 
         except json.JSONDecodeError as e:
             logger.error(f"[MetadataFile] Corrupted JSON in {metadata_path}: {e}")
