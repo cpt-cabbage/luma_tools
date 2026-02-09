@@ -261,6 +261,7 @@ def wait_for_completion_websocket(
     downloaded_files = set()  # Track files already downloaded via WebSocket
     start_time = time.time()
     last_progress = {'value': 0, 'max': 0}
+    last_ws_activity = {'time': time.time()}  # Track last WebSocket activity for our prompt
 
     # Build node_id -> class_type lookup from workflow
     node_type_lookup = {}
@@ -290,11 +291,13 @@ def wait_for_completion_websocket(
             elif msg_type == 'execution_start':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
+                    last_ws_activity['time'] = time.time()
                     logger.info(f"Execution started")
 
             elif msg_type == 'executing':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
+                    last_ws_activity['time'] = time.time()
                     node_id = exec_data.get('node')
                     if node_id is None:
                         # Execution completed - finalize timing for last node
@@ -335,6 +338,7 @@ def wait_for_completion_websocket(
                         last_progress = {'value': 0, 'max': 0}
 
             elif msg_type == 'progress':
+                last_ws_activity['time'] = time.time()
                 prog_data = data.get('data', {})
                 value = prog_data.get('value', 0)
                 max_val = prog_data.get('max', 100)
@@ -349,6 +353,7 @@ def wait_for_completion_websocket(
             elif msg_type == 'executed':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
+                    last_ws_activity['time'] = time.time()
                     node_id = exec_data.get('node')
                     output = exec_data.get('output', {})
                     result['outputs'][node_id] = output
@@ -456,23 +461,41 @@ def wait_for_completion_websocket(
                 break
             elif history_result['status'] == 'not_found':
                 # Server is up but prompt_id gone from history.
-                # If we previously saw execution (node_timing populated or
-                # outputs received via WebSocket), this means the server
-                # restarted after workflow completion — treat as success.
+                # During NORMAL execution, the prompt is in the queue (not
+                # history) — so not_found is expected while nodes are running.
+                # Only treat as post-restart completion if:
+                #   1. We previously saw execution (nodes ran via WebSocket)
+                #   2. No recent WebSocket activity (confirms workflow stopped)
                 had_execution = bool(node_timing) or bool(result.get('outputs'))
-                if had_execution:
+                ws_idle_seconds = time.time() - last_ws_activity['time']
+
+                if had_execution and ws_idle_seconds > 10:
+                    # No WebSocket activity for >10s — workflow likely finished
+                    # or server restarted after completion
                     not_found_count += 1
                     if not_found_count >= 3:
                         elapsed_int = int(elapsed)
                         logger.info(
                             f"Server restarted after execution — treating as "
-                            f"completed ({elapsed_int}s, saw {len(node_timing)} nodes)"
+                            f"completed ({elapsed_int}s, saw {len(node_timing)} nodes, "
+                            f"idle {int(ws_idle_seconds)}s)"
                         )
                         result['success'] = True
                         ws.close()
                         break
                     else:
-                        logger.debug(f"Prompt not found in history (count={not_found_count}), waiting...")
+                        logger.debug(
+                            f"Prompt not found in history (count={not_found_count}, "
+                            f"idle {int(ws_idle_seconds)}s), waiting..."
+                        )
+                elif had_execution:
+                    # WebSocket still active — workflow is running, not_found is
+                    # normal (prompt in queue, not history yet)
+                    not_found_count = 0
+                    logger.debug(
+                        f"Prompt not found in history but WS active "
+                        f"({int(ws_idle_seconds)}s ago), still executing..."
+                    )
                 else:
                     not_found_count = 0
             else:

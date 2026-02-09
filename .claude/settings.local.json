@@ -96,7 +96,10 @@
       "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\ui\\\\tabs\\\\gallery\\\\job_status_bar.py\")",
       "Bash(cmd /c:*)",
       "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe -m pytest:*)",
-      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_check_records.ps1\")"
+      "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_check_records.ps1\")",
+      "Bash(L:tools_studio_toolsAYON_devchristophela_shot_toolsluma_toolspythonvenvScriptspython.exe -c \"import vlc; print\\(''VLC available:'', vlc.__version__\\)\")",
+      "Bash(git rm:*)",
+      "Bash(git push:*)"
     ],
     "deny": [
       "Read(./python/venv/**)",
