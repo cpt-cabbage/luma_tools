@@ -64,6 +64,7 @@ def submit_comfyui_to_deadline(
     batch_name: str,
     render_name: str,
     generation_count: int,
+    job_data_dir: str,
     priority: Optional[int] = None,
     pool: Optional[str] = None,
     group: Optional[str] = None,
@@ -84,6 +85,7 @@ def submit_comfyui_to_deadline(
         batch_name: BatchName for Deadline job grouping
         render_name: Name for the job display
         generation_count: Number of generations (frames)
+        job_data_dir: Unique per-job directory for scripts, workflow, and Deadline files
         priority: Job priority (default from config)
         pool: Deadline pool (default from config)
         group: Deadline group (default from config)
@@ -105,9 +107,7 @@ def submit_comfyui_to_deadline(
     # Get settings needed for this function
     comfyui_path, comfyui_mode, comfyui_python, python_exe = _get_comfyui_config()
 
-    # Scripts are in comfyui package — copy to _job_data/ subdirectory to keep output dir clean
-    # Note: _job_data cleanup happens in submit_comfyui_job() before workflow is saved
-    job_data_dir = os.path.join(output_dir, "_job_data")
+    # Scripts are in comfyui package — copy to job_data_dir for farm access
     ensure_directory(job_data_dir)
 
     comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
@@ -271,7 +271,9 @@ def submit_comfyui_job(
     Returns:
         Tuple of (job_ids, error_message)
     """
+    import uuid
     import shutil
+    from datetime import datetime
     from comfyui.workflow import load_workflow, save_workflow
     from comfyui.modifier import modify_workflow
     from comfyui.metadata import add_item_metadata, extract_prompts_from_editable_values
@@ -358,23 +360,16 @@ def submit_comfyui_job(
             logger.error(error_msg)
             return [], error_msg
 
-        # Save workflow and seeds to _job_data/ subdirectory to keep output dir clean
-        # Clean up old _job_data first to avoid stale files from previous submissions
-        import shutil
-        job_data_dir = os.path.join(current_working_dir, "_job_data")
-        if os.path.isdir(job_data_dir):
-            try:
-                shutil.rmtree(job_data_dir)
-            except Exception:
-                pass
+        # Generate unique job ID and create isolated _job_data/<job_id>/ directory
+        # Each submission gets its own directory to avoid race conditions
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_suffix = uuid.uuid4().hex[:8]
+        job_id = f"{timestamp}_{unique_suffix}"
+
+        job_data_dir = os.path.join(current_working_dir, "_job_data", job_id)
         ensure_directory(job_data_dir)
 
-        workflow_file = save_workflow(modified, job_data_dir)
-
-        # Extract job_id from workflow filename for matching seeds file
-        # e.g. "comfyui_workflow_20260208_115304_a347719c.json" → "20260208_115304_a347719c"
-        wf_basename = os.path.splitext(os.path.basename(workflow_file))[0]
-        job_id = wf_basename.replace("comfyui_workflow_", "")
+        workflow_file = save_workflow(modified, job_data_dir, job_id=job_id)
 
         if base_seed is not None:
             seeds = [base_seed + i for i in range(generation_count)]
@@ -486,6 +481,7 @@ def submit_comfyui_job(
             batch_name=job_name,
             render_name=current_job_name,
             generation_count=generation_count,
+            job_data_dir=job_data_dir,
             use_server_mode=True,
             full_restart=full_restart,
         )

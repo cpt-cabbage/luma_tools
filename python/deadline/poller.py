@@ -41,37 +41,18 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         output = result.stdout.strip()
 
-        # Check if job was deleted
+        # Check if job was not found (deleted, or transient Deadline error)
+        # Always return "Unknown" — the caller (polling handler) decides whether
+        # this means "completed and auto-deleted" or "still registering" based on
+        # its own state (saw_active flag, poll count, output files with timestamp).
         if is_job_not_found(result.returncode, result.stderr, output):
-            # Import here to avoid circular dependency
-            from comfyui.metadata import get_job_output_files
-
-            if output_dir:
-                output_files = get_job_output_files(output_dir)
-                if output_files:
-                    return {
-                        "status": "Completed",
-                        "progress": 100,
-                        "completed_tasks": 1,
-                        "total_tasks": 1,
-                        "error_message": ""
-                    }
-                else:
-                    return {
-                        "status": "Unknown",
-                        "progress": 0,
-                        "completed_tasks": 0,
-                        "total_tasks": 1,
-                        "error_message": "Job not found (may still be registering)"
-                    }
-            else:
-                return {
-                    "status": "Completed",
-                    "progress": 100,
-                    "completed_tasks": 1,
-                    "total_tasks": 1,
-                    "error_message": ""
-                }
+            return {
+                "status": "Unknown",
+                "progress": 0,
+                "completed_tasks": 0,
+                "total_tasks": 1,
+                "error_message": "Job not found in Deadline"
+            }
 
         if result.returncode != 0:
             return {"status": "Unknown", "progress": 0, "error_message": result.stderr}

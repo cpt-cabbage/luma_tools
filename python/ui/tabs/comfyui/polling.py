@@ -126,6 +126,7 @@ class PollingMixin:
         self._iterate_start_time = None
         self._iterate_rendering_start_time = None  # Track when rendering actually started
         self._iterate_output_type = "image"  # Track output type for notifications
+        self._iterate_saw_active = False  # True once job has been seen as Active/Rendering
 
         # Batch mode state
         self._batch_poll_timer = None
@@ -144,6 +145,7 @@ class PollingMixin:
         self._batch_poll_results = {}
         self._batch_poll_workers = []
         self._batch_recovery_mode = False  # Track if we're recovering from app restart
+        self._batch_jobs_seen_active = set()  # Per-job tracking of Active/Rendering
 
         # Recovery state
         self._recovery_worker = None
@@ -215,6 +217,7 @@ class PollingMixin:
         self._iterate_total_tasks = self.ui.ComfyUIGenerationCount.value()
         self._iterate_start_time = time.time()
         self._iterate_rendering_start_time = None  # Reset to avoid stale model-loading detection
+        self._iterate_saw_active = False
 
         logger.info(f"[Iterate] Starting polling for job {job_id}")
         logger.info(f"[Iterate] Network output dir: {network_output_dir}")
@@ -292,9 +295,11 @@ class PollingMixin:
         display_total = max(total_tasks, self._iterate_total_tasks)
 
         # Track when rendering actually starts
-        if status in ("Active", "Rendering") and self._iterate_rendering_start_time is None:
-            self._iterate_rendering_start_time = time.time()
-            logger.debug(f"[Iterate Poll] Rendering started at {time.time()}")
+        if status in ("Active", "Rendering"):
+            self._iterate_saw_active = True
+            if self._iterate_rendering_start_time is None:
+                self._iterate_rendering_start_time = time.time()
+                logger.debug(f"[Iterate Poll] Rendering started at {time.time()}")
 
         # Infer model loading if rendering but no progress for a while
         # If we've been rendering for >5 seconds with no task progress, assume loading models
@@ -355,9 +360,34 @@ class PollingMixin:
                 StatusColors.ERROR
             )
         elif status == "Unknown":
-            # Job not found in Deadline — on early polls this is likely a race condition
-            # (job submitted but not yet registered). After many polls it means job was deleted.
-            if self._iterate_poll_count <= 6:
+            # Job not found in Deadline — could be: (a) not yet registered,
+            # (b) completed and auto-deleted, or (c) transient Deadline error.
+            if self._iterate_saw_active and completed_tasks >= display_total:
+                # Job was running and all tasks completed before it disappeared
+                logger.info(f"[Iterate Poll] Job was active with {completed_tasks}/{display_total} tasks done, treating as completed")
+                self._stop_iterate_polling()
+                self._on_iterate_job_completed()
+            elif self._iterate_saw_active:
+                # Job was running but disappeared — check for output files
+                from comfyui.metadata import get_job_output_files
+                output_dir = self._iterate_network_output_dir
+                if output_dir:
+                    output_files = get_job_output_files(output_dir, min_mtime=self._iterate_start_time)
+                    if output_files:
+                        logger.info(f"[Iterate Poll] Job disappeared but found {len(output_files)} output file(s), treating as completed")
+                        self._stop_iterate_polling()
+                        self._on_iterate_job_completed()
+                        return
+                logger.warning(f"[Iterate Poll] Job was active but disappeared with no output, treating as lost")
+                self._stop_iterate_polling()
+                self.ui.ComfyUIIterateStatus.setText(f"Job lost: {error_message}")
+                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+                self.animator.update_status_animated(
+                    "ComfyUI: Job disappeared from Deadline",
+                    StatusColors.ERROR
+                )
+            elif self._iterate_poll_count <= 6:
+                # Never saw the job active, still in grace period for registration
                 logger.debug(f"[Iterate Poll] Job not found on poll #{self._iterate_poll_count}, likely still registering")
                 self.ui.ComfyUIIterateStatus.setText("Waiting for Deadline to register job...")
                 self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
@@ -677,6 +707,7 @@ class PollingMixin:
             self._batch_poll_pending_results = 0
             self._batch_poll_results = {}
             self._batch_recovery_mode = False  # New submission, not recovery
+            self._batch_jobs_seen_active = set()
 
             total_jobs = len(job_ids)
             total_frames = total_jobs * gen_count
@@ -798,6 +829,10 @@ class PollingMixin:
                 if total_tasks > 1:
                     self._batch_total_tasks[job_id] = total_tasks
 
+                # Track per-job active state for Unknown handling
+                if status in ("Active", "Rendering"):
+                    self._batch_jobs_seen_active.add(job_id)
+
                 # Capture task progress from any active job for status display
                 if status in ("Active", "Rendering") and task_progress and not active_job_task_progress:
                     active_job_task_progress = task_progress
@@ -828,8 +863,36 @@ class PollingMixin:
                     logger.error(f"[Batch] Job {job_id} FAILED: {error_msg}")
 
                 elif status == "Unknown":
-                    # Job not found — grace period for newly submitted jobs
-                    if self._batch_poll_count <= 6:
+                    # Job not found — could be transient error, not yet registered,
+                    # or completed and auto-deleted.
+                    was_active = job_id in self._batch_jobs_seen_active
+                    job_total = self._batch_total_tasks.get(job_id, 1)
+                    job_completed = self._batch_completed_tasks.get(job_id, 0)
+
+                    if was_active and job_completed >= job_total:
+                        # Job was running and all tasks completed → auto-deleted
+                        logger.info(f"[Batch] Job {job_id} was active with {job_completed}/{job_total} tasks done, treating as completed")
+                        self._batch_pending_jobs.discard(job_id)
+                        self._batch_completed_tasks[job_id] = job_total
+                    elif was_active:
+                        # Job was running but disappeared — check for output files
+                        from comfyui.metadata import get_job_output_files
+                        output_dir = self._batch_network_output_dir
+                        if output_dir:
+                            output_files = get_job_output_files(output_dir, min_mtime=self._batch_start_time)
+                            if output_files:
+                                logger.info(f"[Batch] Job {job_id} disappeared but found output file(s), treating as completed")
+                                self._batch_pending_jobs.discard(job_id)
+                                self._batch_completed_tasks[job_id] = job_total
+                            else:
+                                logger.warning(f"[Batch] Job {job_id} was active but disappeared with no output, treating as lost")
+                                self._batch_pending_jobs.discard(job_id)
+                                self._batch_failed_jobs.add(job_id)
+                        else:
+                            logger.warning(f"[Batch] Job {job_id} was active but disappeared, no output dir to check")
+                            self._batch_pending_jobs.discard(job_id)
+                            self._batch_failed_jobs.add(job_id)
+                    elif self._batch_poll_count <= 6:
                         logger.debug(f"[Batch] Job {job_id} not found on poll #{self._batch_poll_count}, likely still registering")
                     else:
                         logger.warning(f"[Batch] Job {job_id} not found after {self._batch_poll_count} polls, treating as lost")
@@ -1506,6 +1569,7 @@ class PollingMixin:
             self._iterate_completed_tasks = 0
             self._iterate_poll_count = 0
             self._iterate_output_type = persisted_state.get("output_type", "image") if persisted_state else "image"
+            self._iterate_saw_active = job["status"] in ("Active", "Rendering")
             self.app_state.comfyui_current_job_id = job_id
 
             if self._iterate_poll_timer is None:
@@ -1556,6 +1620,11 @@ class PollingMixin:
             self._batch_poll_pending_results = 0
             self._batch_poll_results = {}
             self._batch_recovery_mode = True
+            # Pre-populate seen-active from Deadline query results
+            self._batch_jobs_seen_active = {
+                job["job_id"] for job in running_jobs
+                if job["status"] in ("Active", "Rendering")
+            }
 
             if self._batch_poll_timer is None:
                 self._batch_poll_timer = QTimer(self.main_window)
@@ -1662,6 +1731,7 @@ class PollingMixin:
                 self._batch_poll_pending_results = 0
                 self._batch_poll_results = {}
                 self._batch_recovery_mode = True  # Flag to track we're in recovery
+                self._batch_jobs_seen_active = set()  # Will be populated on first poll
 
                 # Start polling without re-submitting
                 if self._batch_poll_timer is None:
@@ -1706,6 +1776,7 @@ class PollingMixin:
             self._iterate_output_type = job_state.get("output_type", "image")
             self._iterate_completed_tasks = 0
             self._iterate_poll_count = 0
+            self._iterate_saw_active = status in ("Active", "Rendering")
             self.app_state.comfyui_current_job_id = job_id
 
             # Start polling without re-submitting

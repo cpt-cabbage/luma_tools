@@ -79,17 +79,45 @@ def get_job_output_files(
 def cleanup_job_temp_files(output_dir: str) -> int:
     """Clean up temporary job files from the output directory.
 
-    Note: _job_data/ is NOT cleaned here to avoid a race condition where
-    a new submission is writing to _job_data/ while a previous job's
-    completion handler deletes it. Instead, _job_data/ is cleaned at the
-    start of each new submission in the submitter.
+    Cleans up:
+    - Old _job_data/<job_id>/ subdirectories (older than 1 hour, safe from
+      concurrent submissions since each job gets its own unique subdirectory)
+    - Legacy root-level temp files from old job format
     """
     import glob
+    import shutil
+    import time
 
     if not output_dir or not os.path.exists(output_dir):
         return 0
 
     deleted_count = 0
+    max_age_seconds = 3600  # 1 hour
+
+    # Clean up old _job_data/<job_id>/ subdirectories
+    job_data_dir = os.path.join(output_dir, "_job_data")
+    if os.path.isdir(job_data_dir):
+        now = time.time()
+        try:
+            for entry in os.scandir(job_data_dir):
+                if entry.is_dir():
+                    try:
+                        age = now - entry.stat().st_mtime
+                        if age > max_age_seconds:
+                            shutil.rmtree(entry.path)
+                            deleted_count += 1
+                            logger.debug(f"Cleaned up old job data: {entry.name}")
+                    except Exception:
+                        pass
+        except OSError:
+            pass
+
+        # Remove _job_data/ parent if empty
+        try:
+            if not any(os.scandir(job_data_dir)):
+                os.rmdir(job_data_dir)
+        except OSError:
+            pass
 
     # Backward compat: clean up root-level files from old jobs
     temp_patterns = [
@@ -109,7 +137,7 @@ def cleanup_job_temp_files(output_dir: str) -> int:
                 os.remove(file_path)
                 deleted_count += 1
             except Exception:
-                pass  # Silently skip files that can't be deleted
+                pass
 
     return deleted_count
 
