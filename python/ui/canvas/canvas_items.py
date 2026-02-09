@@ -2188,7 +2188,7 @@ class VideoNode(QGraphicsItem):
             from PySide6.QtCore import QUrl
 
             # Lazy import video components
-            from image_viewers import VideoSinkWidget, VideoControlBar
+            from media_viewers import VideoSinkWidget, VideoControlBar
 
             self._media_player = QMediaPlayer()
             self._audio_output = QAudioOutput()

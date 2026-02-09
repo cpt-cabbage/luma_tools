@@ -221,9 +221,9 @@ class GalleryTab(BaseTab):
         self._clear_selection()
         self._viewer_manager.open_viewer(image_path)
 
-    def _open_viewer(self, start_image=None, fullscreen=False, image_paths=None):
-        """Open the image viewer."""
-        self._viewer_manager.open_viewer(start_image, fullscreen, image_paths)
+    def _open_viewer(self, start_media=None, fullscreen=False, media_paths=None):
+        """Open the media viewer."""
+        self._viewer_manager.open_viewer(start_media, fullscreen, media_paths)
 
     # -- Operations (signal handlers from thumbnails/toolbar) --
 
@@ -618,8 +618,8 @@ class GalleryTab(BaseTab):
         if source_path:
             # Open comparison viewer
             self._viewer_manager.open_viewer(
-                start_image=path,
-                image_paths=[source_path, path]
+                start_media=path,
+                media_paths=[source_path, path]
             )
             self.show_status("Showing comparison with source image", "info")
         else:

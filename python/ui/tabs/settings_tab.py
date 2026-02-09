@@ -34,6 +34,7 @@ _USER_SETTINGS_MAP = [
     # ComfyUI-Gallery integration settings
     ("comfyui_completion_sound", "ComfyUICompletionSoundCombo", _COMBOBOX),
     ("comfyui_convert_colorspace", "ComfyUIConvertColorspace", _CHECKBOX),
+    ("viewer_live_audio_scrub", "ViewerLiveAudioScrub", _CHECKBOX),
 ]
 
 _seconds_to_minutes = lambda s: s // 60  # noqa: E731

@@ -333,9 +333,6 @@ class SelectionManager(BaseGalleryManager):
         self.tab._selected_items.clear()
         self._update_toolbar()
 
-        if show_status and had_selection and hasattr(self.tab, 'show_status_message'):
-            self.tab.show_status_message("Selection cleared")
-
     def _on_selection_changed(self, image_path, is_selected):
         """Handle thumbnail selection state change."""
         if is_selected:

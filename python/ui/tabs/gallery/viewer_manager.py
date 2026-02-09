@@ -5,7 +5,7 @@ Handles embedded and fullscreen viewer lifecycle:
 - Opening/closing embedded viewer
 - Fullscreen viewer management
 - Loading states and spinner display
-- Image navigation
+- Media navigation
 """
 
 from PySide6.QtCore import QTimer
@@ -29,54 +29,54 @@ class ViewerManager(BaseGalleryManager):
         self._embedded_viewer = None
         self._fullscreen_viewer = None
         self._viewer_creation_pending = False
-        self._pending_image_paths = []
+        self._pending_media_paths = []
         self._pending_start_index = 0
         self._viewer_loading_widget = None
         self._viewer_loading_spinner = None
 
-    def open_viewer(self, start_image=None, fullscreen=False, image_paths=None):
+    def open_viewer(self, start_media=None, fullscreen=False, media_paths=None):
         """
-        Open the image viewer.
+        Open the media viewer.
 
         Args:
-            start_image: Path of image to start on (None = first image)
+            start_media: Path of media to start on (None = first item)
             fullscreen: If True, open in fullscreen mode
-            image_paths: Optional list of specific image paths to show (for filtered view)
+            media_paths: Optional list of specific media paths to show (for filtered view)
         """
         from ui_components import EmbeddedImageViewer, FullscreenImageViewer
 
-        # Use provided image paths or collect all from gallery
-        if image_paths is None:
-            image_paths = self._get_image_paths()
+        # Use provided media paths or collect all from gallery
+        if media_paths is None:
+            media_paths = self._get_media_paths()
 
-        if not image_paths:
-            self.tab.log("No images to display")
+        if not media_paths:
+            self.tab.log("No media to display")
             return
 
         # Find start index
         start_index = 0
-        if start_image and start_image in image_paths:
-            start_index = image_paths.index(start_image)
+        if start_media and start_media in media_paths:
+            start_index = media_paths.index(start_media)
 
         if fullscreen:
-            self._open_fullscreen(image_paths, start_index)
+            self._open_fullscreen(media_paths, start_index)
         else:
-            self._show_embedded(image_paths, start_index)
+            self._show_embedded(media_paths, start_index)
 
-    def _open_fullscreen(self, image_paths, start_index):
+    def _open_fullscreen(self, media_paths, start_index):
         """Open fullscreen viewer as separate window."""
         from ui_components import FullscreenImageViewer
 
         # Don't pass output_dir - let viewer derive it from each image's path
         # (metadata is stored per-workflow subfolder, not at gallery root)
         self._fullscreen_viewer = FullscreenImageViewer(
-            image_paths,
+            media_paths,
             start_index=start_index,
             output_dir=None,
             parent=None
         )
         self._fullscreen_viewer.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-        self._fullscreen_viewer.image_viewed.connect(self.tab._on_item_viewed)
+        self._fullscreen_viewer.media_viewed.connect(self.tab._on_item_viewed)
 
         # Set favorites manager for like/group functionality
         favorites_manager = getattr(self.tab, '_favorites_manager', None)
@@ -86,8 +86,8 @@ class ViewerManager(BaseGalleryManager):
 
         self._fullscreen_viewer.show()
 
-    def _show_embedded(self, image_paths, start_index):
-        """Show the embedded image viewer, hiding the gallery grid."""
+    def _show_embedded(self, media_paths, start_index):
+        """Show the embedded media viewer, hiding the gallery grid."""
         # Hide the gallery splitter (contains scroll area and groups panel)
         if hasattr(self.tab, '_gallery_splitter'):
             self.tab._gallery_splitter.hide()
@@ -106,7 +106,7 @@ class ViewerManager(BaseGalleryManager):
         # Check if viewer creation is already in progress
         if self._viewer_creation_pending:
             # Update the pending parameters for when creation completes
-            self._pending_image_paths = image_paths
+            self._pending_media_paths = media_paths
             self._pending_start_index = start_index
             return
 
@@ -114,7 +114,7 @@ class ViewerManager(BaseGalleryManager):
         if self._embedded_viewer is None:
             # Mark creation as in progress to prevent duplicate creations
             self._viewer_creation_pending = True
-            self._pending_image_paths = image_paths
+            self._pending_media_paths = media_paths
             self._pending_start_index = start_index
 
             # Show loading indicator for first-time viewer creation
@@ -124,9 +124,9 @@ class ViewerManager(BaseGalleryManager):
             QTimer.singleShot(10, self._create_embedded_async)
         else:
             # Update existing viewer (fast path - no lag)
-            self._embedded_viewer.image_paths = image_paths
+            self._embedded_viewer.media_paths = media_paths
             self._embedded_viewer.current_index = start_index
-            self._embedded_viewer._load_current_image()
+            self._embedded_viewer._load_current_media()
             self._embedded_viewer.show()
             self._embedded_viewer.setFocus()
 
@@ -173,7 +173,7 @@ class ViewerManager(BaseGalleryManager):
         from ui_components import EmbeddedImageViewer
 
         # Get the most recent parameters (may have been updated by rapid clicks)
-        image_paths = self._pending_image_paths
+        media_paths = self._pending_media_paths
         start_index = self._pending_start_index
 
         # Stop spinner and hide loading widget
@@ -186,7 +186,7 @@ class ViewerManager(BaseGalleryManager):
         # Don't pass output_dir - let viewer derive it from each image's path
         # (metadata is stored per-workflow subfolder, not at gallery root)
         self._embedded_viewer = EmbeddedImageViewer(
-            image_paths,
+            media_paths,
             start_index=start_index,
             output_dir=None,
             parent=self.tab.ui
@@ -194,7 +194,7 @@ class ViewerManager(BaseGalleryManager):
         self._embedded_viewer.closed.connect(self.close_embedded)
         self._embedded_viewer.view_fullscreen.connect(self._on_view_fullscreen)
         self._embedded_viewer.copy_settings_requested.connect(self.tab._on_copy_settings_requested)
-        self._embedded_viewer.image_viewed.connect(self.tab._on_item_viewed)
+        self._embedded_viewer.media_viewed.connect(self.tab._on_item_viewed)
 
         # Set favorites manager for like button functionality
         favorites_manager = getattr(self.tab, '_favorites_manager', None)
@@ -263,11 +263,11 @@ class ViewerManager(BaseGalleryManager):
         if hasattr(self.tab.ui, 'galleryFooterLayout'):
             self._set_layout_visible(self.tab.ui.galleryFooterLayout, True)
 
-    def _on_view_fullscreen(self, image_path, index):
+    def _on_view_fullscreen(self, media_path, index):
         """Handle request to view in fullscreen from embedded viewer."""
-        self.open_viewer(image_path, fullscreen=True)
+        self.open_viewer(media_path, fullscreen=True)
 
-    def _get_image_paths(self):
+    def _get_media_paths(self):
         """Get list of all media paths (images, 3D models, videos) from current gallery."""
         from small_widgets import StackedThumbnailWidget
 
@@ -297,7 +297,7 @@ class ViewerManager(BaseGalleryManager):
         selected_paths = sorted(list(self.tab._selected_items))
 
         # Open viewer with filtered list
-        self.open_viewer(start_image=selected_paths[0], image_paths=selected_paths)
+        self.open_viewer(start_media=selected_paths[0], media_paths=selected_paths)
 
     def _set_layout_visible(self, layout, visible):
         """Set visibility of all widgets in a layout."""

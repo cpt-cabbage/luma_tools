@@ -99,7 +99,9 @@
       "Bash(del \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\_check_records.ps1\")",
       "Bash(L:tools_studio_toolsAYON_devchristophela_shot_toolsluma_toolspythonvenvScriptspython.exe -c \"import vlc; print\\(''VLC available:'', vlc.__version__\\)\")",
       "Bash(git rm:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(pythonvenvScriptspython.exe -c \"import py_compile; py_compile.compile\\(''resources/ui/media_viewers.py'', doraise=True\\); print\\(''media_viewers.py: OK''\\)\")",
+      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)"
     ],
     "deny": [
       "Read(./python/venv/**)",

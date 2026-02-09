@@ -1,5 +1,21 @@
 # Luma Tools Changelog
 
+## Version 0.6.3
+
+- Canvas: Add VideoNode with inline playback, thumbnail extraction, drag-drop, and gallery integration
+- Content Hashing: SHA-256 file identity for gallery metadata, canvas file recovery, and favorites auto-migration on rename
+- Per-Workflow Input Persistence: Save/restore editable widget values per preset and sub-workflow across sessions
+- Custom Job Names: Add ComfyUI job name field with filename-safe validation
+- Utility Tab Buttons: Move Settings and Logs to fixed icon buttons in tab bar corner with notification badges
+- Video Player: Click-to-play/pause, Space key toggle, seek throttling, fade animations on control bar
+- Thread Safety: Wrap server state, settings cache, metadata, and thumbnail writes in proper locks; remove processEvents() calls that caused re-entrancy crashes
+- Gallery Stability: Display generation guards against stale widget references, single-to-stack transition handling, batch poll overlap protection
+- Polling: Dedicated polling log, grace period for new Deadline jobs, UserName filter, smarter Unknown status handling
+- WebSocket: Track activity timestamps to prevent false-positive completion detection during normal execution
+- Job Data Isolation: Per-submission _job_data directories to fix race conditions between concurrent submissions
+- Feature Requests: Add reject with reason and user notification support
+- ComfyUI: WebSocket image download, deduplication between WS and HTTP paths, configurable Deadline poll interval
+
 ## Version 0.6.2.10
 
 - Add ComfyUI dynamic workflow execution analytics, user feedback from farm will get more and more accurate as we use the models.

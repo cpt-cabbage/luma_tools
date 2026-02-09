@@ -43,7 +43,7 @@ This project has skills in `.claude/skills/`.
 
 | Skill | When to Apply | Invocation |
 |-------|---------------|------------|
-| **check-code** | **After writing larger code changes that affects:** - threading, imports, settings patterns before presenting. | Auto |
+| **check-code** | **After writing larger code changes that affects:** threading, imports, settings patterns before presenting. | Auto (runs automatically, do not invoke manually) |
 | **commit-message** | Generate well-formatted commit messages from staged/unstaged changes | `/commit-message` |
 | **feature-dev** | Guided feature development with codebase understanding and architecture focus | `/feature-dev` |
 | **paper-watcher** | Track research papers, check for code releases and ComfyUI custom node support | `/paper-watcher` |
@@ -193,7 +193,7 @@ QThreadPool.globalInstance().start(self._worker)
 **Thread-Safe Caching:** When caching data accessed from multiple threads, use locks:
 ```python
 import threading
-self._cache_lock = threading.Lock()
+self._cache_lock = threading.RLock()
 
 with self._cache_lock:
     self._cache[key] = value  # Thread-safe access

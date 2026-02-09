@@ -209,7 +209,11 @@ class VideoControlBar(QWidget):
     - Time display (current / total)
     - Loop toggle
     - Auto-hide after inactivity
+    - Frame stepping (comma/period keys)
+    - Live audio scrubbing (optional setting)
     """
+
+    SLIDER_PRECISION = 10000  # Slider range for smooth scrubbing (~2.4ms/step at 25fps)
 
     def __init__(self, media_player, parent=None):
         super().__init__(parent)
@@ -298,7 +302,7 @@ class VideoControlBar(QWidget):
 
         # Timeline scrubber (seek bar)
         self.timeline_slider = QSlider(Qt.Horizontal)
-        self.timeline_slider.setRange(0, 1000)
+        self.timeline_slider.setRange(0, self.SLIDER_PRECISION)
         self.timeline_slider.setValue(0)
         self.timeline_slider.setCursor(Qt.PointingHandCursor)
         self.timeline_slider.setStyleSheet("""
@@ -447,7 +451,7 @@ class VideoControlBar(QWidget):
         """Update timeline and time label when position changes."""
         if not self.timeline_slider.isSliderDown():
             if self._duration > 0:
-                self.timeline_slider.setValue(int((position / self._duration) * 1000))
+                self.timeline_slider.setValue(int((position / self._duration) * self.SLIDER_PRECISION))
 
             # Format and update time label
             from core.utils import format_duration
@@ -460,21 +464,28 @@ class VideoControlBar(QWidget):
         self.duration_label.setText(format_duration(duration / 1000))
 
     def _on_seek_start(self):
-        """Pause playback while seeking so the backend renders each seeked frame."""
+        """Pause playback while seeking so the backend renders each seeked frame.
+
+        If live audio scrub is enabled, keep playback running so the user
+        hears the audio at the scrubbed position.
+        """
         try:
             from PySide6.QtMultimedia import QMediaPlayer
+            from core.settings_manager import safe_get_setting
             self._was_playing_before_seek = (
                 self.media_player.playbackState() == QMediaPlayer.PlayingState
             )
-            if self._was_playing_before_seek:
+            self._live_audio_scrub = safe_get_setting("viewer_live_audio_scrub", False)
+            if self._was_playing_before_seek and not self._live_audio_scrub:
                 self.media_player.pause()
         except Exception:
             self._was_playing_before_seek = False
+            self._live_audio_scrub = False
 
     def _on_seek_move(self, value):
         """Buffer seek position and throttle actual seeks for live scrubbing."""
         if self._duration > 0:
-            position = int((value / 1000) * self._duration)
+            position = int((value / self.SLIDER_PRECISION) * self._duration)
             from core.utils import format_duration
             self.time_label.setText(format_duration(position / 1000))
             self._pending_seek_pos = position
@@ -488,17 +499,52 @@ class VideoControlBar(QWidget):
         if self._pending_seek_pos is not None:
             self.media_player.setPosition(self._pending_seek_pos)
             self._pending_seek_pos = None
+            # In live scrub mode, ensure player stays playing after setPosition
+            if getattr(self, '_live_audio_scrub', False) and self._was_playing_before_seek:
+                from PySide6.QtMultimedia import QMediaPlayer
+                if self.media_player.playbackState() != QMediaPlayer.PlayingState:
+                    self.media_player.play()
 
     def _on_seek_end(self):
         """Apply final position and resume playback if it was playing."""
         self._seek_throttle.stop()
         if self._duration > 0:
-            position = int((self.timeline_slider.value() / 1000) * self._duration)
+            position = int((self.timeline_slider.value() / self.SLIDER_PRECISION) * self._duration)
             self.media_player.setPosition(position)
         self._pending_seek_pos = None
+        live_scrub = getattr(self, '_live_audio_scrub', False)
         if self._was_playing_before_seek:
-            self.media_player.play()
-            self._was_playing_before_seek = False
+            if not live_scrub:
+                # Normal mode: resume playback after seek
+                self.media_player.play()
+            # Live scrub mode: player was already playing, just continue
+        elif live_scrub:
+            # Was not playing before, ensure we stop (user started from paused)
+            self.media_player.pause()
+        self._was_playing_before_seek = False
+        self._live_audio_scrub = False
+
+    def step_frame(self, direction):
+        """Step one frame forward (+1) or backward (-1). Pauses if playing.
+
+        Uses AYON_DEFAULT_FPS (25) as fallback frame rate.
+        Works for both video and audio since both use VideoControlBar.
+        """
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            from core.config import AYON_DEFAULT_FPS
+
+            # Pause if currently playing
+            if self.media_player.playbackState() == QMediaPlayer.PlayingState:
+                self.media_player.pause()
+
+            fps = AYON_DEFAULT_FPS  # 25 fps
+            frame_ms = int(1000 / fps)
+            current = self.media_player.position()
+            new_pos = max(0, min(current + direction * frame_ms, self._duration))
+            self.media_player.setPosition(new_pos)
+        except Exception as e:
+            logger.debug(f"Frame step error: {e}")
 
     def _on_volume_changed(self, value):
         """Update volume."""
@@ -594,14 +640,19 @@ class VideoControlBar(QWidget):
 
 
 class WaveformWidget(QWidget):
-    """Custom widget for drawing audio waveform."""
+    """Custom widget for drawing audio waveform with click/drag scrubbing."""
+
+    seek_requested = Signal(float)   # Emitted during scrub with position ratio (0.0-1.0)
+    seek_finished = Signal()         # Emitted when scrub drag ends
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.waveform_data = None
         self.play_position = 0.0
+        self._is_scrubbing = False
         self.setStyleSheet("background-color: #1a1a1a;")
         self.setMinimumHeight(200)
+        self.setCursor(Qt.PointingHandCursor)
 
     def paintEvent(self, event):
         """Draw the waveform."""
@@ -646,6 +697,41 @@ class WaveformWidget(QWidget):
         painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))
 
         painter.end()
+
+    def _position_from_mouse(self, event):
+        """Convert mouse x position to a 0.0-1.0 ratio, clamped."""
+        w = self.width()
+        if w <= 0:
+            return 0.0
+        return max(0.0, min(1.0, event.position().x() / w))
+
+    def mousePressEvent(self, event):
+        """Start waveform scrubbing on left click."""
+        if event.button() == Qt.LeftButton:
+            self._is_scrubbing = True
+            ratio = self._position_from_mouse(event)
+            self.seek_requested.emit(ratio)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Continue waveform scrubbing while dragging."""
+        if self._is_scrubbing:
+            ratio = self._position_from_mouse(event)
+            self.seek_requested.emit(ratio)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """End waveform scrubbing on release."""
+        if event.button() == Qt.LeftButton and self._is_scrubbing:
+            self._is_scrubbing = False
+            self.seek_finished.emit()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class AudioPlayerWidget(QWidget):
@@ -706,6 +792,11 @@ class AudioPlayerWidget(QWidget):
             # Create control bar as overlay
             self.controls = VideoControlBar(self.media_player, parent=self)
             self.controls.show()
+
+            # Connect waveform scrubbing signals
+            self._waveform_scrub_started = False
+            self.waveform_widget.seek_requested.connect(self._on_waveform_seek)
+            self.waveform_widget.seek_finished.connect(self._on_waveform_seek_end)
         except Exception as e:
             logger.error(f"Failed to set up audio player: {e}")
             self.status_label.setText(f"Audio Player Not Available\n\n{str(e)}")
@@ -821,6 +912,30 @@ class AudioPlayerWidget(QWidget):
         """Handle duration change."""
         pass
 
+    def _on_waveform_seek(self, ratio):
+        """Handle waveform click/drag — route through VideoControlBar seek path.
+
+        On first drag event, trigger _on_seek_start (pause + save state).
+        On each move, set slider value and call _on_seek_move (throttled seek).
+        """
+        if not hasattr(self, 'controls'):
+            return
+        controls = self.controls
+        if not getattr(self, '_waveform_scrub_started', False):
+            self._waveform_scrub_started = True
+            controls._on_seek_start()
+        # Convert ratio to slider value and update
+        slider_value = int(ratio * controls.SLIDER_PRECISION)
+        controls.timeline_slider.setValue(slider_value)
+        controls._on_seek_move(slider_value)
+
+    def _on_waveform_seek_end(self):
+        """Handle waveform drag release — finalize seek via VideoControlBar."""
+        if not hasattr(self, 'controls'):
+            return
+        self._waveform_scrub_started = False
+        self.controls._on_seek_end()
+
     def resizeEvent(self, event):
         """Handle resize to reposition controls."""
         super().resizeEvent(event)
@@ -862,19 +977,19 @@ class EmbeddedImageViewer(QWidget):
     closed = Signal()
     view_fullscreen = Signal(str, int)
     copy_settings_requested = Signal(dict)
-    image_deleted = Signal(str)  # Emitted when an image is deleted (path)
-    image_viewed = Signal(str)  # Emitted when navigating to an image (path)
+    media_deleted = Signal(str)  # Emitted when an image is deleted (path)
+    media_viewed = Signal(str)  # Emitted when navigating to an image (path)
     like_toggled = Signal(str, bool)  # Emitted when like status is toggled (path, is_liked)
 
-    def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
+    def __init__(self, media_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
-        self.image_paths = list(image_paths)
+        self.media_paths = list(media_paths)
         self.current_index = start_index
         self.output_dir = output_dir
         self._favorites_manager = None
 
         self._setup_ui()
-        self._load_current_image()
+        self._load_current_media()
         self.setFocusPolicy(Qt.StrongFocus)
 
     def set_favorites_manager(self, manager):
@@ -899,12 +1014,12 @@ class EmbeddedImageViewer(QWidget):
         layout.setSpacing(0)
 
         # Main container for content and overlays
-        self.image_container = QWidget()
-        self.image_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.image_container, stretch=1)
+        self.media_container = QWidget()
+        self.media_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.media_container, stretch=1)
 
         # Content layout inside container
-        content_layout = QHBoxLayout(self.image_container)
+        content_layout = QHBoxLayout(self.media_container)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
@@ -916,11 +1031,11 @@ class EmbeddedImageViewer(QWidget):
             QPushButton:disabled { color: #333333; }
         """)
         self.left_btn.setCursor(Qt.PointingHandCursor)
-        self.left_btn.clicked.connect(self._prev_image)
+        self.left_btn.clicked.connect(self._prev_media)
         content_layout.addWidget(self.left_btn)
 
-        self.image_stack = QtWidgets.QStackedWidget()
-        content_layout.addWidget(self.image_stack, stretch=1)
+        self.media_stack = QtWidgets.QStackedWidget()
+        content_layout.addWidget(self.media_stack, stretch=1)
 
         # 1. Zoomable Image View
         self.image_view = ZoomableImageWidget()
@@ -928,7 +1043,7 @@ class EmbeddedImageViewer(QWidget):
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
         self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
-        self.image_stack.addWidget(self.image_view)
+        self.media_stack.addWidget(self.image_view)
 
         # 2. 3D Model Viewer (Three.js) - Lazy initialization
         self._has_glb_viewer = None
@@ -951,11 +1066,11 @@ class EmbeddedImageViewer(QWidget):
             self.video_widget.setMouseTracking(True)
             self.video_widget.installEventFilter(self)
 
-            self.image_stack.addWidget(self.video_widget)
+            self.media_stack.addWidget(self.video_widget)
             self._has_video_player = True
 
             # Create video control bar (overlay widget)
-            self.video_controls = VideoControlBar(self.media_player, parent=self.image_container)
+            self.video_controls = VideoControlBar(self.media_player, parent=self.media_container)
             self.video_controls.hide()  # Hidden by default, shown for video playback
         except Exception as e:
             logger.warning(f"Video player not available: {e}")
@@ -968,7 +1083,7 @@ class EmbeddedImageViewer(QWidget):
         self.message_label = QLabel()
         self.message_label.setAlignment(Qt.AlignCenter)
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
-        self.image_stack.addWidget(self.message_label)
+        self.media_stack.addWidget(self.message_label)
 
         self.right_btn = QPushButton(">")
         self.right_btn.setFixedWidth(50)
@@ -978,11 +1093,11 @@ class EmbeddedImageViewer(QWidget):
             QPushButton:disabled { color: #333333; }
         """)
         self.right_btn.setCursor(Qt.PointingHandCursor)
-        self.right_btn.clicked.connect(self._next_image)
+        self.right_btn.clicked.connect(self._next_media)
         content_layout.addWidget(self.right_btn)
 
-        # Top bar - overlay widget (child of image_container, not in layout)
-        self.top_bar = QWidget(self.image_container)
+        # Top bar - overlay widget (child of media_container, not in layout)
+        self.top_bar = QWidget(self.media_container)
         self.top_bar.setStyleSheet("background-color: transparent;")
         self.top_bar.setFixedHeight(50)
 
@@ -1138,11 +1253,11 @@ class EmbeddedImageViewer(QWidget):
             QPushButton:hover { background-color: #ef4444; }
         """)
         self.delete_btn.setToolTip("Delete current file (Del)")
-        self.delete_btn.clicked.connect(self._delete_current_image)
+        self.delete_btn.clicked.connect(self._delete_current_media)
         top_layout.addWidget(self.delete_btn)
 
         # Bottom info bar - overlay widget (simplified, just shows filename)
-        self.info_bar = QWidget(self.image_container)
+        self.info_bar = QWidget(self.media_container)
         self.info_bar.setStyleSheet("background-color: transparent;")
         self.info_bar.setFixedHeight(40)
 
@@ -1184,28 +1299,28 @@ class EmbeddedImageViewer(QWidget):
         self._position_overlays()
 
     def _position_overlays(self):
-        """Position top_bar and info_bar as overlays on image_container."""
-        if not hasattr(self, 'image_container'):
+        """Position top_bar and info_bar as overlays on media_container."""
+        if not hasattr(self, 'media_container'):
             return
 
-        w = self.image_container.width()
-        h = self.image_container.height()
+        w = self.media_container.width()
+        h = self.media_container.height()
 
         if w == 0 or h == 0:
             return  # Widget not yet sized
 
         # Lower the content stack first (helps with QWebEngineView z-order)
-        if hasattr(self, 'image_stack'):
-            self.image_stack.lower()
+        if hasattr(self, 'media_stack'):
+            self.media_stack.lower()
 
-        # Top bar at top of image_container
+        # Top bar at top of media_container
         if hasattr(self, 'top_bar'):
             top_height = 50
             self.top_bar.setGeometry(0, 0, w, top_height)
             self.top_bar.raise_()
             self.top_bar.show()
 
-        # Info bar at bottom of image_container (now smaller - just filename)
+        # Info bar at bottom of media_container (now smaller - just filename)
         if hasattr(self, 'info_bar'):
             bar_height = 40
             self.info_bar.setGeometry(0, h - bar_height, w, bar_height)
@@ -1244,7 +1359,7 @@ class EmbeddedImageViewer(QWidget):
         # Show controls if video is currently playing
         if hasattr(self, 'video_controls') and self.video_controls:
             if hasattr(self, 'video_widget') and self.video_widget:
-                if self.image_stack.currentWidget() == self.video_widget:
+                if self.media_stack.currentWidget() == self.video_widget:
                     self.video_controls.show_controls()
 
     def _init_glb_viewer_async(self, callback=None):
@@ -1255,7 +1370,7 @@ class EmbeddedImageViewer(QWidget):
             return
 
         self.message_label.setText("Initializing 3D viewer...")
-        self.image_stack.setCurrentWidget(self.message_label)
+        self.media_stack.setCurrentWidget(self.message_label)
 
         # Use QTimer to defer initialization so UI can update
         from PySide6.QtCore import QTimer
@@ -1285,7 +1400,7 @@ class EmbeddedImageViewer(QWidget):
                 logger.info("Created Three.js 3D viewer (GPU pre-warmed)")
                 self.glb_viewer.loadError.connect(self._on_3d_load_error)
                 self.glb_viewer.modelLoaded.connect(self._on_3d_model_loaded)
-                self.image_stack.addWidget(self.glb_viewer)
+                self.media_stack.addWidget(self.glb_viewer)
                 self._has_glb_viewer = True
                 self._glb_viewer_initialized = True
                 if callback:
@@ -1302,12 +1417,12 @@ class EmbeddedImageViewer(QWidget):
         if callback:
             callback(False)
 
-    def _load_current_image(self):
+    def _load_current_media(self):
         """Load and display the current media (image, 3D model, or video)."""
-        if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
+        if not self.media_paths or self.current_index < 0 or self.current_index >= len(self.media_paths):
             return
 
-        media_path = self.image_paths[self.current_index]
+        media_path = self.media_paths[self.current_index]
 
         try:
             ext = os.path.splitext(media_path)[1].lower()
@@ -1348,7 +1463,7 @@ class EmbeddedImageViewer(QWidget):
 
                 if not self._glb_viewer_initialized:
                     self.message_label.setText("Initializing 3D viewer...")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
                     self._pending_3d_path = media_path
 
                     def on_viewer_ready(available):
@@ -1356,14 +1471,14 @@ class EmbeddedImageViewer(QWidget):
                             self._load_3d_model(self._pending_3d_path)
                         elif not available:
                             self.message_label.setText("3D Model Viewer Not Available\n\nInstall pyvista and pyvistaqt")
-                            self.image_stack.setCurrentWidget(self.message_label)
+                            self.media_stack.setCurrentWidget(self.message_label)
 
                     self._init_glb_viewer_async(callback=on_viewer_ready)
                 elif self._has_glb_viewer and self.glb_viewer:
                     self._load_3d_model(media_path)
                 else:
                     self.message_label.setText("3D Model Viewer Not Available")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
             elif ext in ('.mp4', '.mov', '.avi', '.webm'):
                 self.shading_btn.hide()
@@ -1377,7 +1492,7 @@ class EmbeddedImageViewer(QWidget):
 
                     # Qt6 API: use setSource instead of setMedia
                     self.media_player.setSource(QUrl.fromLocalFile(media_path))
-                    self.image_stack.setCurrentWidget(self.video_widget)
+                    self.media_stack.setCurrentWidget(self.video_widget)
                     self.media_player.play()
 
                     # Show video controls
@@ -1385,7 +1500,7 @@ class EmbeddedImageViewer(QWidget):
                         self.video_controls.show_controls()
                 else:
                     self.message_label.setText("Video Player Not Available")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
             elif ext in ('.wav', '.mp3', '.flac', '.ogg'):
                 # Audio file
@@ -1408,22 +1523,22 @@ class EmbeddedImageViewer(QWidget):
                             if hasattr(old_player, 'cleanup'):
                                 old_player.cleanup()
                             # Remove from stack if present
-                            stack_index = self.image_stack.indexOf(old_player)
+                            stack_index = self.media_stack.indexOf(old_player)
                             if stack_index >= 0:
-                                self.image_stack.removeWidget(old_player)
+                                self.media_stack.removeWidget(old_player)
                             old_player.deleteLater()
 
                         # Create new audio player
                         self._current_audio_player = AudioPlayerWidget(media_path, parent=self)
-                        self.image_stack.addWidget(self._current_audio_player)
+                        self.media_stack.addWidget(self._current_audio_player)
 
                     # Show the audio player
-                    self.image_stack.setCurrentWidget(self._current_audio_player)
+                    self.media_stack.setCurrentWidget(self._current_audio_player)
 
                 except Exception as e:
                     logger.error(f"Error loading audio player: {e}")
                     self.message_label.setText(f"Audio Player Error\n\n{str(e)}")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
             elif ext == '.exr':
                 self.shading_btn.hide()
@@ -1433,7 +1548,7 @@ class EmbeddedImageViewer(QWidget):
                 self.light_value_label.hide()
                 self._current_3d_path = None
                 self.message_label.setText("EXR Preview Not Available")
-                self.image_stack.setCurrentWidget(self.message_label)
+                self.media_stack.setCurrentWidget(self.message_label)
 
             else:
                 self.shading_btn.hide()
@@ -1445,15 +1560,15 @@ class EmbeddedImageViewer(QWidget):
                 pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
                     self.image_view.setPixmap(pixmap)
-                    self.image_stack.setCurrentWidget(self.image_view)
+                    self.media_stack.setCurrentWidget(self.image_view)
                     self.setFocus()  # Ensure keyboard navigation works
                 else:
                     self.message_label.setText("Failed to load image")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
         except Exception as e:
             self.message_label.setText(f"Error: {e}")
-            self.image_stack.setCurrentWidget(self.message_label)
+            self.media_stack.setCurrentWidget(self.message_label)
 
         self._update_info()
         self._update_like_button()
@@ -1462,12 +1577,12 @@ class EmbeddedImageViewer(QWidget):
         """Load a 3D model into the Three.js viewer."""
         if not self.glb_viewer:
             self.message_label.setText("3D viewer not available")
-            self.image_stack.setCurrentWidget(self.message_label)
+            self.media_stack.setCurrentWidget(self.message_label)
             return
 
         # Show loading message while model loads
         self.message_label.setText("Loading 3D model...")
-        self.image_stack.setCurrentWidget(self.message_label)
+        self.media_stack.setCurrentWidget(self.message_label)
 
         # Set camera distance from user settings before loading
         try:
@@ -1483,7 +1598,7 @@ class EmbeddedImageViewer(QWidget):
 
     def _on_3d_model_loaded(self, path):
         """Handle successful 3D model load - switch to the viewer."""
-        self.image_stack.setCurrentWidget(self.glb_viewer)
+        self.media_stack.setCurrentWidget(self.glb_viewer)
         self.glb_viewer.setFocus()
 
         # Apply saved lighting/shading preferences
@@ -1521,40 +1636,40 @@ class EmbeddedImageViewer(QWidget):
     def _on_3d_load_error(self, error_msg):
         """Handle 3D model loading error from Three.js viewer."""
         self.message_label.setText(f"Error Loading 3D Model\n\n{error_msg}")
-        self.image_stack.setCurrentWidget(self.message_label)
+        self.media_stack.setCurrentWidget(self.message_label)
 
     def _update_info(self):
         """Update info labels and button states."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
 
         self.filename_label.setText(filename)
-        self.counter_label.setText(f"{self.current_index + 1} / {len(self.image_paths)}")
+        self.counter_label.setText(f"{self.current_index + 1} / {len(self.media_paths)}")
 
         self.left_btn.setEnabled(self.current_index > 0)
-        self.right_btn.setEnabled(self.current_index < len(self.image_paths) - 1)
+        self.right_btn.setEnabled(self.current_index < len(self.media_paths) - 1)
 
-    def _next_image(self):
-        if self.current_index < len(self.image_paths) - 1:
+    def _next_media(self):
+        if self.current_index < len(self.media_paths) - 1:
             self.current_index += 1
-            self._load_current_image()
-            self.image_viewed.emit(self.image_paths[self.current_index])
+            self._load_current_media()
+            self.media_viewed.emit(self.media_paths[self.current_index])
 
-    def _prev_image(self):
+    def _prev_media(self):
         if self.current_index > 0:
             self.current_index -= 1
-            self._load_current_image()
-            self.image_viewed.emit(self.image_paths[self.current_index])
+            self._load_current_media()
+            self.media_viewed.emit(self.media_paths[self.current_index])
 
     def _on_back(self):
         self.closed.emit()
 
     def _on_fullscreen(self):
-        if self.image_paths:
-            self.view_fullscreen.emit(self.image_paths[self.current_index], self.current_index)
+        if self.media_paths:
+            self.view_fullscreen.emit(self.media_paths[self.current_index], self.current_index)
 
     def _on_zoom_changed(self, level):
         self.image_view.setZoomLevel(level)
@@ -1703,10 +1818,10 @@ class EmbeddedImageViewer(QWidget):
 
     def _copy_prompt(self):
         """Copy prompt for current image to clipboard."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
 
@@ -1726,10 +1841,10 @@ class EmbeddedImageViewer(QWidget):
 
     def _copy_settings(self):
         """Apply all settings for current image to the ComfyUI tab."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
 
@@ -1752,7 +1867,7 @@ class EmbeddedImageViewer(QWidget):
 
         try:
             from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
-            image_path = self.image_paths[self.current_index]
+            image_path = self.media_paths[self.current_index]
             success = publish_comfyui_asset_to_ayon(
                 file_path=image_path,
                 parent_widget=parent_window,
@@ -1764,28 +1879,48 @@ class EmbeddedImageViewer(QWidget):
             logger.error(f"Failed to publish image to AYON: {e}", exc_info=True)
             show_error("Publish Error", f"Failed to publish image to AYON:\n\n{str(e)}", parent_window)
 
+    def _get_active_controls(self):
+        """Return the VideoControlBar for the currently-showing media, or None."""
+        # Video: uses self.video_controls
+        if (hasattr(self, 'video_controls') and self.video_controls
+                and hasattr(self, 'video_widget') and self.video_widget
+                and self.media_stack.currentWidget() == self.video_widget):
+            return self.video_controls
+        # Audio: AudioPlayerWidget has its own .controls
+        if (hasattr(self, '_current_audio_player') and self._current_audio_player
+                and self.media_stack.currentWidget() == self._current_audio_player
+                and hasattr(self._current_audio_player, 'controls')):
+            return self._current_audio_player.controls
+        return None
+
     def keyPressEvent(self, event):
         key = event.key()
         if key in (Qt.Key_Right, Qt.Key_D):
-            self._next_image()
+            self._next_media()
         elif key in (Qt.Key_Left, Qt.Key_A):
-            self._prev_image()
+            self._prev_media()
         elif key in (Qt.Key_Escape, Qt.Key_Backspace):
             self._on_back()
         elif key == Qt.Key_Home:
             self.current_index = 0
-            self._load_current_image()
+            self._load_current_media()
         elif key == Qt.Key_End:
-            self.current_index = len(self.image_paths) - 1
-            self._load_current_image()
+            self.current_index = len(self.media_paths) - 1
+            self._load_current_media()
         elif key == Qt.Key_Space:
-            # Toggle play/pause if video is showing
-            if (hasattr(self, 'video_controls') and self.video_controls
-                    and hasattr(self, 'video_widget') and self.video_widget
-                    and self.image_stack.currentWidget() == self.video_widget):
-                self.video_controls._toggle_play()
+            controls = self._get_active_controls()
+            if controls:
+                controls._toggle_play()
             else:
                 super().keyPressEvent(event)
+        elif key == Qt.Key_Comma:
+            controls = self._get_active_controls()
+            if controls:
+                controls.step_frame(-1)
+        elif key == Qt.Key_Period:
+            controls = self._get_active_controls()
+            if controls:
+                controls.step_frame(1)
         elif key == Qt.Key_C:
             self._copy_prompt()
         elif key == Qt.Key_S:
@@ -1793,7 +1928,7 @@ class EmbeddedImageViewer(QWidget):
         elif key == Qt.Key_F:
             self._on_fullscreen()
         elif key == Qt.Key_Delete:
-            self._delete_current_image()
+            self._delete_current_media()
         elif key == Qt.Key_L:
             self._toggle_like()
         else:
@@ -1801,18 +1936,18 @@ class EmbeddedImageViewer(QWidget):
 
     def _toggle_like(self):
         """Toggle like status for current image."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         is_liked = self._favorites_manager.toggle_like(path)
         self._update_like_button_style(is_liked)
         self.like_toggled.emit(path, is_liked)
 
     def _update_like_button(self):
         """Update like button based on current image's like status."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         is_liked = self._favorites_manager.is_liked(path)
         self._update_like_button_style(is_liked)
 
@@ -1848,30 +1983,30 @@ class EmbeddedImageViewer(QWidget):
                 }
             """)
 
-    def _delete_current_image(self):
+    def _delete_current_media(self):
         """Delete the current image file after confirmation."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
 
         if confirm_action("Delete File", f"Are you sure you want to delete:\n{filename}?", self):
             try:
                 os.remove(image_path)
                 deleted_path = image_path
-                self.image_paths.pop(self.current_index)
+                self.media_paths.pop(self.current_index)
 
-                if not self.image_paths:
-                    self.image_deleted.emit(deleted_path)
+                if not self.media_paths:
+                    self.media_deleted.emit(deleted_path)
                     self._on_back()
                     return
 
-                if self.current_index >= len(self.image_paths):
-                    self.current_index = len(self.image_paths) - 1
+                if self.current_index >= len(self.media_paths):
+                    self.current_index = len(self.media_paths) - 1
 
-                self._load_current_image()
-                self.image_deleted.emit(deleted_path)
+                self._load_current_media()
+                self.media_deleted.emit(deleted_path)
                 self.filename_label.setText(f"Deleted: {filename}")
                 QTimer.singleShot(1500, self._update_info)
 
@@ -1879,10 +2014,10 @@ class EmbeddedImageViewer(QWidget):
                 show_warning("Delete Error", f"Failed to delete file:\n{str(e)}", self)
 
     def _show_context_menu(self, pos):
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
         menu = QMenu(self)
@@ -1965,15 +2100,15 @@ class EmbeddedImageViewer(QWidget):
         # Delete
         menu.addSeparator()
         delete_action = menu.addAction("Delete (Del)")
-        delete_action.triggered.connect(self._delete_current_image)
+        delete_action.triggered.connect(self._delete_current_media)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
 
     def _get_metadata(self):
         """Get metadata for current image."""
-        if not self.image_paths:
+        if not self.media_paths:
             return {}
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
         try:
@@ -1985,9 +2120,9 @@ class EmbeddedImageViewer(QWidget):
 
     def _toggle_group_membership(self, group_id):
         """Toggle group membership for current image."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         item_groups = set(self._favorites_manager.get_item_groups(path))
         if group_id in item_groups:
             self._favorites_manager.remove_from_group(path, group_id)
@@ -1996,9 +2131,9 @@ class EmbeddedImageViewer(QWidget):
 
     def _create_new_group(self):
         """Create a new group and add current image to it."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         try:
             from dialogs import QuickGroupDialog
             dialog = QuickGroupDialog(item_count=1, parent=self)
@@ -2022,9 +2157,9 @@ class EmbeddedImageViewer(QWidget):
         if not input_path or not os.path.exists(input_path):
             return
         # Navigate to the input image in the current viewer
-        if input_path in self.image_paths:
-            self.current_index = self.image_paths.index(input_path)
-            self._load_current_image()
+        if input_path in self.media_paths:
+            self.current_index = self.media_paths.index(input_path)
+            self._load_current_media()
         else:
             # Open in a new viewer if not in current list
             if EVENT_BUS_AVAILABLE and pipeline_events:
@@ -2032,9 +2167,9 @@ class EmbeddedImageViewer(QWidget):
 
     def _show_properties(self):
         """Show properties dialog for current image."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         output_dir = self.output_dir or os.path.dirname(image_path)
         try:
             from properties_dialog import PropertiesDialog
@@ -2084,20 +2219,20 @@ class FullscreenImageViewer(QWidget):
     """
     closed = Signal()
     copy_settings_requested = Signal(dict)
-    image_deleted = Signal(str)  # Emitted when a file is deleted (path)
-    image_viewed = Signal(str)  # Emitted when navigating to an image (path)
+    media_deleted = Signal(str)  # Emitted when a file is deleted (path)
+    media_viewed = Signal(str)  # Emitted when navigating to an image (path)
     like_toggled = Signal(str, bool)  # Emitted when like status is toggled (path, is_liked)
 
-    def __init__(self, image_paths, start_index=0, output_dir=None, parent=None):
+    def __init__(self, media_paths, start_index=0, output_dir=None, parent=None):
         super().__init__(parent)
-        self.image_paths = list(image_paths)
+        self.media_paths = list(media_paths)
         self.current_index = start_index
         self.output_dir = output_dir
         self._show_info = True
         self._favorites_manager = None
 
         self._setup_ui()
-        self._load_current_image()
+        self._load_current_media()
 
     def set_favorites_manager(self, manager):
         """Set the favorites manager for like functionality."""
@@ -2116,19 +2251,19 @@ class FullscreenImageViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.image_stack = QtWidgets.QStackedWidget()
-        layout.addWidget(self.image_stack, stretch=1)
+        self.media_stack = QtWidgets.QStackedWidget()
+        layout.addWidget(self.media_stack, stretch=1)
 
         self.image_view = ZoomableImageWidget()
         self.image_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_view.customContextMenuRequested.connect(self._show_context_menu)
         self.image_view.zoom_changed.connect(self._on_image_zoom_changed)
-        self.image_stack.addWidget(self.image_view)
+        self.media_stack.addWidget(self.image_view)
 
         self.message_label = QLabel()
         self.message_label.setAlignment(Qt.AlignCenter)
         self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
-        self.image_stack.addWidget(self.message_label)
+        self.media_stack.addWidget(self.message_label)
 
         # Video Player (uses VideoSinkWidget for software rendering
         #    so overlay controls can draw on top of the video)
@@ -2145,7 +2280,7 @@ class FullscreenImageViewer(QWidget):
             self.video_widget.setMouseTracking(True)
             self.video_widget.installEventFilter(self)
 
-            self.image_stack.addWidget(self.video_widget)
+            self.media_stack.addWidget(self.video_widget)
             self._has_video_player = True
 
             # Create video control bar (overlay widget)
@@ -2206,7 +2341,7 @@ class FullscreenImageViewer(QWidget):
             QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
         """)
         self.left_btn.setCursor(Qt.PointingHandCursor)
-        self.left_btn.clicked.connect(self._prev_image)
+        self.left_btn.clicked.connect(self._prev_media)
 
         self.right_btn = QPushButton(">", self)
         self.right_btn.setStyleSheet("""
@@ -2214,7 +2349,7 @@ class FullscreenImageViewer(QWidget):
             QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
         """)
         self.right_btn.setCursor(Qt.PointingHandCursor)
-        self.right_btn.clicked.connect(self._next_image)
+        self.right_btn.clicked.connect(self._next_media)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2243,14 +2378,14 @@ class FullscreenImageViewer(QWidget):
         # Show controls if video is currently playing
         if hasattr(self, 'video_controls') and self.video_controls:
             if hasattr(self, 'video_widget') and self.video_widget:
-                if self.image_stack.currentWidget() == self.video_widget:
+                if self.media_stack.currentWidget() == self.video_widget:
                     self.video_controls.show_controls()
 
     def _position_overlays(self):
         """Position info bar and nav buttons as overlays."""
         # Lower the content first
-        if hasattr(self, 'image_stack'):
-            self.image_stack.lower()
+        if hasattr(self, 'media_stack'):
+            self.media_stack.lower()
 
         # Video controls bar (above info bar when playing video)
         bar_height = self.info_bar.height()
@@ -2281,13 +2416,13 @@ class FullscreenImageViewer(QWidget):
         self.right_btn.setGeometry(self.width() - margin - btn_width, center_y, btn_width, btn_height)
 
         self.left_btn.setVisible(self.current_index > 0)
-        self.right_btn.setVisible(self.current_index < len(self.image_paths) - 1)
+        self.right_btn.setVisible(self.current_index < len(self.media_paths) - 1)
 
-    def _load_current_image(self):
-        if not self.image_paths or self.current_index < 0 or self.current_index >= len(self.image_paths):
+    def _load_current_media(self):
+        if not self.media_paths or self.current_index < 0 or self.current_index >= len(self.media_paths):
             return
 
-        media_path = self.image_paths[self.current_index]
+        media_path = self.media_paths[self.current_index]
 
         try:
             ext = os.path.splitext(media_path)[1].lower()
@@ -2305,7 +2440,7 @@ class FullscreenImageViewer(QWidget):
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
                     from PySide6.QtCore import QUrl
                     self.media_player.setSource(QUrl.fromLocalFile(media_path))
-                    self.image_stack.setCurrentWidget(self.video_widget)
+                    self.media_stack.setCurrentWidget(self.video_widget)
                     self.media_player.play()
 
                     # Show video controls
@@ -2313,7 +2448,7 @@ class FullscreenImageViewer(QWidget):
                         self.video_controls.show_controls()
                 else:
                     self.message_label.setText("Video Player Not Available")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
             elif ext in ('.wav', '.mp3', '.flac', '.ogg'):
                 # Audio file
@@ -2328,66 +2463,66 @@ class FullscreenImageViewer(QWidget):
                             old_player = self._current_audio_player
                             if hasattr(old_player, 'cleanup'):
                                 old_player.cleanup()
-                            stack_index = self.image_stack.indexOf(old_player)
+                            stack_index = self.media_stack.indexOf(old_player)
                             if stack_index >= 0:
-                                self.image_stack.removeWidget(old_player)
+                                self.media_stack.removeWidget(old_player)
                             old_player.deleteLater()
 
                         # Create new audio player
                         self._current_audio_player = AudioPlayerWidget(media_path, parent=self)
-                        self.image_stack.addWidget(self._current_audio_player)
+                        self.media_stack.addWidget(self._current_audio_player)
 
                     # Show the audio player
-                    self.image_stack.setCurrentWidget(self._current_audio_player)
+                    self.media_stack.setCurrentWidget(self._current_audio_player)
 
                 except Exception as e:
                     logger.error(f"Error loading audio player: {e}")
                     self.message_label.setText(f"Audio Player Error\n\n{str(e)}")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
             elif ext == '.exr':
                 self.message_label.setText("EXR Preview Not Available")
-                self.image_stack.setCurrentWidget(self.message_label)
+                self.media_stack.setCurrentWidget(self.message_label)
 
             else:
                 # Regular image
                 pixmap = QPixmap(media_path)
                 if not pixmap.isNull():
                     self.image_view.setPixmap(pixmap)
-                    self.image_stack.setCurrentWidget(self.image_view)
+                    self.media_stack.setCurrentWidget(self.image_view)
                 else:
                     self.message_label.setText("Failed to load image")
-                    self.image_stack.setCurrentWidget(self.message_label)
+                    self.media_stack.setCurrentWidget(self.message_label)
 
         except Exception as e:
             self.message_label.setText(f"Error: {e}")
-            self.image_stack.setCurrentWidget(self.message_label)
+            self.media_stack.setCurrentWidget(self.message_label)
 
         self._update_info()
         self._position_nav_buttons()
 
     def _update_info(self):
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
 
         self.filename_label.setText(filename)
-        self.counter_label.setText(f"{self.current_index + 1} / {len(self.image_paths)}")
+        self.counter_label.setText(f"{self.current_index + 1} / {len(self.media_paths)}")
         self.info_bar.setVisible(self._show_info)
 
-    def _next_image(self):
-        if self.current_index < len(self.image_paths) - 1:
+    def _next_media(self):
+        if self.current_index < len(self.media_paths) - 1:
             self.current_index += 1
-            self._load_current_image()
-            self.image_viewed.emit(self.image_paths[self.current_index])
+            self._load_current_media()
+            self.media_viewed.emit(self.media_paths[self.current_index])
 
-    def _prev_image(self):
+    def _prev_media(self):
         if self.current_index > 0:
             self.current_index -= 1
-            self._load_current_image()
-            self.image_viewed.emit(self.image_paths[self.current_index])
+            self._load_current_media()
+            self.media_viewed.emit(self.media_paths[self.current_index])
 
     def _on_zoom_changed(self, level):
         self.image_view.setZoomLevel(level)
@@ -2399,10 +2534,10 @@ class FullscreenImageViewer(QWidget):
         self.zoom_combo.blockSignals(False)
 
     def _copy_prompt(self):
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
 
@@ -2421,10 +2556,10 @@ class FullscreenImageViewer(QWidget):
             logger.error(f"Error copying prompt: {e}")
 
     def _copy_settings(self):
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
 
@@ -2441,35 +2576,55 @@ class FullscreenImageViewer(QWidget):
         except Exception as e:
             logger.error(f"Error applying settings: {e}")
 
+    def _get_active_controls(self):
+        """Return the VideoControlBar for the currently-showing media, or None."""
+        # Video: uses self.video_controls
+        if (hasattr(self, 'video_controls') and self.video_controls
+                and hasattr(self, 'video_widget') and self.video_widget
+                and self.media_stack.currentWidget() == self.video_widget):
+            return self.video_controls
+        # Audio: AudioPlayerWidget has its own .controls
+        if (hasattr(self, '_current_audio_player') and self._current_audio_player
+                and self.media_stack.currentWidget() == self._current_audio_player
+                and hasattr(self._current_audio_player, 'controls')):
+            return self._current_audio_player.controls
+        return None
+
     def keyPressEvent(self, event):
         key = event.key()
         if key in (Qt.Key_Right, Qt.Key_D):
-            self._next_image()
+            self._next_media()
         elif key in (Qt.Key_Left, Qt.Key_A):
-            self._prev_image()
+            self._prev_media()
         elif key in (Qt.Key_Escape, Qt.Key_Q):
             self.close()
         elif key == Qt.Key_Home:
             self.current_index = 0
-            self._load_current_image()
+            self._load_current_media()
         elif key == Qt.Key_End:
-            self.current_index = len(self.image_paths) - 1
-            self._load_current_image()
+            self.current_index = len(self.media_paths) - 1
+            self._load_current_media()
         elif key == Qt.Key_Space:
-            # Toggle play/pause if video is showing, otherwise toggle info display
-            if (hasattr(self, 'video_controls') and self.video_controls
-                    and hasattr(self, 'video_widget') and self.video_widget
-                    and self.image_stack.currentWidget() == self.video_widget):
-                self.video_controls._toggle_play()
+            controls = self._get_active_controls()
+            if controls:
+                controls._toggle_play()
             else:
                 self._show_info = not self._show_info
                 self._update_info()
+        elif key == Qt.Key_Comma:
+            controls = self._get_active_controls()
+            if controls:
+                controls.step_frame(-1)
+        elif key == Qt.Key_Period:
+            controls = self._get_active_controls()
+            if controls:
+                controls.step_frame(1)
         elif key == Qt.Key_C:
             self._copy_prompt()
         elif key == Qt.Key_S:
             self._copy_settings()
         elif key == Qt.Key_Delete:
-            self._delete_current_image()
+            self._delete_current_media()
         elif key == Qt.Key_L:
             self._toggle_like()
         else:
@@ -2477,9 +2632,9 @@ class FullscreenImageViewer(QWidget):
 
     def _toggle_like(self):
         """Toggle like status for current image."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         is_liked = self._favorites_manager.toggle_like(path)
         self.like_toggled.emit(path, is_liked)
         # Show feedback in info label
@@ -2487,30 +2642,30 @@ class FullscreenImageViewer(QWidget):
         self.filename_label.setText(f"{os.path.basename(path)} - {status}")
         QTimer.singleShot(1500, self._update_info)
 
-    def _delete_current_image(self):
+    def _delete_current_media(self):
         """Delete the current file after confirmation."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
 
         if confirm_action("Delete File", f"Are you sure you want to delete:\n{filename}?", self):
             try:
                 os.remove(image_path)
                 deleted_path = image_path
-                self.image_paths.pop(self.current_index)
+                self.media_paths.pop(self.current_index)
 
-                if not self.image_paths:
-                    self.image_deleted.emit(deleted_path)
+                if not self.media_paths:
+                    self.media_deleted.emit(deleted_path)
                     self.close()
                     return
 
-                if self.current_index >= len(self.image_paths):
-                    self.current_index = len(self.image_paths) - 1
+                if self.current_index >= len(self.media_paths):
+                    self.current_index = len(self.media_paths) - 1
 
-                self._load_current_image()
-                self.image_deleted.emit(deleted_path)
+                self._load_current_media()
+                self.media_deleted.emit(deleted_path)
                 self.filename_label.setText(f"Deleted: {filename}")
                 QTimer.singleShot(1500, self._update_info)
 
@@ -2530,10 +2685,10 @@ class FullscreenImageViewer(QWidget):
         super().closeEvent(event)
 
     def _show_context_menu(self, pos):
-        if not self.image_paths:
+        if not self.media_paths:
             return
 
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
         menu = QMenu(self)
@@ -2616,15 +2771,15 @@ class FullscreenImageViewer(QWidget):
         # Delete
         menu.addSeparator()
         delete_action = menu.addAction("Delete (Del)")
-        delete_action.triggered.connect(self._delete_current_image)
+        delete_action.triggered.connect(self._delete_current_media)
 
         menu.exec_(self.image_view.mapToGlobal(pos))
 
     def _get_metadata(self):
         """Get metadata for current image."""
-        if not self.image_paths:
+        if not self.media_paths:
             return {}
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         filename = os.path.basename(image_path)
         output_dir = self.output_dir or os.path.dirname(image_path)
         try:
@@ -2636,9 +2791,9 @@ class FullscreenImageViewer(QWidget):
 
     def _toggle_group_membership(self, group_id):
         """Toggle group membership for current image."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         item_groups = set(self._favorites_manager.get_item_groups(path))
         if group_id in item_groups:
             self._favorites_manager.remove_from_group(path, group_id)
@@ -2647,9 +2802,9 @@ class FullscreenImageViewer(QWidget):
 
     def _create_new_group(self):
         """Create a new group and add current image to it."""
-        if not self.image_paths or not self._favorites_manager:
+        if not self.media_paths or not self._favorites_manager:
             return
-        path = self.image_paths[self.current_index]
+        path = self.media_paths[self.current_index]
         try:
             from dialogs import QuickGroupDialog
             dialog = QuickGroupDialog(item_count=1, parent=self)
@@ -2673,9 +2828,9 @@ class FullscreenImageViewer(QWidget):
         if not input_path or not os.path.exists(input_path):
             return
         # Navigate to the input image in the current viewer
-        if input_path in self.image_paths:
-            self.current_index = self.image_paths.index(input_path)
-            self._load_current_image()
+        if input_path in self.media_paths:
+            self.current_index = self.media_paths.index(input_path)
+            self._load_current_media()
         else:
             # Open in a new viewer if not in current list
             if EVENT_BUS_AVAILABLE and pipeline_events:
@@ -2683,9 +2838,9 @@ class FullscreenImageViewer(QWidget):
 
     def _show_properties(self):
         """Show properties dialog for current image."""
-        if not self.image_paths:
+        if not self.media_paths:
             return
-        image_path = self.image_paths[self.current_index]
+        image_path = self.media_paths[self.current_index]
         output_dir = self.output_dir or os.path.dirname(image_path)
         try:
             from properties_dialog import PropertiesDialog
@@ -2709,7 +2864,7 @@ class FullscreenImageViewer(QWidget):
 
         try:
             from comfyui.ayon_publisher import publish_comfyui_asset_to_ayon
-            image_path = self.image_paths[self.current_index]
+            image_path = self.media_paths[self.current_index]
             success = publish_comfyui_asset_to_ayon(
                 file_path=image_path,
                 parent_widget=parent_window,

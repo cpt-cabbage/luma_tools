@@ -11,7 +11,7 @@ The actual implementations are in:
 - dialogs.py: Edit dialogs (EditItemDialog, EditModelDialog)
 - batch_selector.py: Image selection (BatchImageSelector)
 - thumbnail_base.py: Base thumbnail widget (BaseThumbnailWidget)
-- image_viewers.py: Image and model viewing widgets
+- media_viewers.py: Media viewing widgets (image, video, audio, 3D model)
 """
 import os
 import logging
@@ -35,7 +35,7 @@ from layouts import FlowLayout
 from dialogs import EditItemDialog, EditModelDialog, BaseEditDialog, GroupEditorDialog
 from batch_selector import BatchImageSelector
 from thumbnail_base import BaseThumbnailWidget
-from image_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
+from media_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
 from small_widgets import StackedThumbnailWidget, show_popup_menu
 from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
 

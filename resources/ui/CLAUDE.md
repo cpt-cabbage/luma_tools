@@ -35,8 +35,8 @@ self._source_manager = OptionButtonManager(
 ### ui_components.py — Core Components
 `Worker` class for threading — the foundation of all async operations.
 
-### image_viewers.py
-Image and video viewer widgets with zoom, pan, and comparison features.
+### media_viewers.py
+Media viewing widgets (image, video, audio, 3D model) with zoom, pan, and comparison features.
 
 ### small_widgets.py
 Small reusable widgets (labels, buttons, indicators).

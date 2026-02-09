@@ -359,6 +359,29 @@
            </widget>
           </item>
           <item>
+           <widget class="QLabel" name="viewerSettingsSectionLabel">
+            <property name="text">
+             <string>Viewer Settings:</string>
+            </property>
+            <property name="styleSheet">
+             <string>color: #4a9eff; font-weight: bold; margin-top: 8px;</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="ViewerLiveAudioScrub">
+            <property name="toolTip">
+             <string>When scrubbing the timeline slider or waveform, keep audio playing so you can hear the current position. Default is off (silent scrubbing).</string>
+            </property>
+            <property name="text">
+             <string>Play audio during scrubbing</string>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
            <layout class="QHBoxLayout" name="viewer3DZoomLayout">
             <item>
              <widget class="QLabel" name="Viewer3DZoomLabel">
