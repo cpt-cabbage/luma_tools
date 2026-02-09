@@ -332,6 +332,47 @@ def _setup_dual_handlers(log_path: str):
     root_logger.addHandler(console_handler)
 
 
+def setup_polling_logger() -> Optional[str]:
+    """
+    Set up a dedicated log file for polling modules.
+
+    Routes deadline.poller and ui.tabs.comfyui.polling to a separate
+    log file under _logs/polling/ to reduce noise in the main app log.
+    Sets propagate=False so polling messages don't appear in the main log.
+
+    Returns:
+        Path to the polling log file, or None if setup failed
+    """
+    username = getpass.getuser()
+    hostname = socket.gethostname()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"polling_{username}_{hostname}_{timestamp}.log"
+
+    log_dir = get_network_log_dir("polling")
+    if not log_dir:
+        log_dir = get_local_log_dir()
+
+    log_path = os.path.join(log_dir, log_filename)
+
+    handler = logging.FileHandler(log_path, encoding='utf-8')
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    ))
+
+    for name in ("deadline.poller", "ui.tabs.comfyui.polling"):
+        polling_logger = logging.getLogger(name)
+        polling_logger.addHandler(handler)
+        polling_logger.propagate = False
+
+    # Cleanup old polling logs
+    cleanup_old_logs(log_dir, f"polling_{username}_{hostname}_", keep_count=5)
+
+    logging.info(f"Polling log file: {log_path}")
+    return log_path
+
+
 def cleanup_old_logs(log_dir: str, prefix: str, keep_count: int = 5):
     """
     Remove old log files, keeping only the most recent.

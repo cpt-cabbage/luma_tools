@@ -29,25 +29,6 @@
    <item>
     <layout class="QHBoxLayout" name="galleryHeaderLayout">
      <item>
-      <widget class="QPushButton" name="GallerySourceToggle">
-       <property name="text">
-        <string>Network Folder</string>
-       </property>
-       <property name="toolTip">
-        <string>Click to switch between network folder and custom folder</string>
-       </property>
-       <property name="minimumSize">
-        <size>
-         <width>120</width>
-         <height>0</height>
-        </size>
-       </property>
-       <property name="visible">
-        <bool>false</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
       <widget class="QPushButton" name="GalleryUserButton">
        <property name="text">
         <string>You</string>

@@ -13,7 +13,7 @@ import os
 import logging
 
 from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH, IS_DEV_MODE
-from core.logging_utils import setup_file_logging, cleanup_old_logs, setup_exception_hook, get_network_log_dir, get_local_log_dir
+from core.logging_utils import setup_file_logging, cleanup_old_logs, setup_exception_hook, setup_polling_logger, get_network_log_dir, get_local_log_dir
 
 
 # ============================================================================
@@ -38,6 +38,9 @@ log_dir = get_network_log_dir("users") or get_local_log_dir()
 cleanup_old_logs(log_dir, f"luma_tools_{username}_{hostname}_", keep_count=5)
 
 logging.info(f"=== Luma Tools Starting ===")
+
+# Route polling logs to separate file to reduce main log noise
+POLLING_LOG_FILE = setup_polling_logger()
 
 # Install global exception hook
 setup_exception_hook()
@@ -128,6 +131,9 @@ from core.state_manager import app_state
 
 # Import tab configuration
 from ui.tabs import TAB_CONFIG
+
+# Tabs that appear as fixed utility buttons instead of reorderable tabs
+UTILITY_TAB_KEYS = {'settings', 'logs'}
 
 
 # ============================================================================
@@ -348,38 +354,65 @@ class ExpandingTabBar(QTabBar):
             logging.error(f"ExpandingTabBar._on_drag_hover_timeout error: {e}", exc_info=True)
 
     def tabSizeHint(self, index):
-        """Calculate tab size to fill the tab bar width evenly."""
-        # Get the default size for height
-        default_size = super().tabSizeHint(index)
+        """Calculate tab size to fill the tab bar width evenly.
 
-        # Get number of tabs
-        tab_count = self.count()
-        if tab_count <= 0:
+        Hidden tabs get zero width.  Visible tabs share the remaining space
+        after subtracting the corner widget.
+        """
+        default_size = super().tabSizeHint(index)
+        tab_widget = self.parentWidget()
+
+        # Hidden tabs get zero width (but keep height to avoid layout issues)
+        if tab_widget and hasattr(tab_widget, 'isTabVisible') and not tab_widget.isTabVisible(index):
+            return QtCore.QSize(0, default_size.height())
+
+        # Count only visible tabs
+        visible_count = 0
+        for i in range(self.count()):
+            if not tab_widget or not hasattr(tab_widget, 'isTabVisible') or tab_widget.isTabVisible(i):
+                visible_count += 1
+        if visible_count <= 0:
             return default_size
 
-        # Get parent tab widget width
-        parent = self.parentWidget()
-        if parent:
-            available_width = parent.width() - (self.HORIZONTAL_PADDING * 2)
+        # Use the parent (QTabWidget) width, subtract corner widget
+        if tab_widget:
+            corner = tab_widget.cornerWidget(Qt.TopRightCorner)
+            corner_width = 0
+            if corner and corner.isVisible():
+                corner_width = corner.width() or corner.sizeHint().width()
+            available_width = tab_widget.width() - corner_width
         else:
-            available_width = self.width() - (self.HORIZONTAL_PADDING * 2)
+            available_width = self.width()
 
-        # If width is too small (during init), use a reasonable default
         if available_width < 200:
             return default_size
 
-        # Calculate width per tab - equal distribution
-        tab_width = available_width // tab_count
-
-        # Ensure minimum width
+        tab_width = available_width // visible_count
         tab_width = max(80, tab_width)
 
         return QtCore.QSize(tab_width, default_size.height())
 
+    def paintEvent(self, event):
+        """Paint normally, then paint over hidden tabs to erase ghost indicators."""
+        # Let Qt handle all normal rendering (including drag animations)
+        super().paintEvent(event)
+
+        # Paint over hidden tab areas with the tab bar background
+        tab_widget = self.parentWidget()
+        if not tab_widget:
+            return
+        painter = QPainter(self)
+        bg = QColor("#1a1d23")
+        for i in range(self.count()):
+            if hasattr(tab_widget, 'isTabVisible') and not tab_widget.isTabVisible(i):
+                rect = self.tabRect(i)
+                if not rect.isEmpty():
+                    painter.fillRect(rect, bg)
+        painter.end()
+
     def showEvent(self, event):
         """Force size recalculation when tab bar is shown."""
         super().showEvent(event)
-        # Defer the update to after the widget is fully shown
         QtCore.QTimer.singleShot(0, self.updateGeometry)
 
 
@@ -395,6 +428,10 @@ class LumaShotTools(QtWidgets.QWidget):
         # Store tab instances
         self.tabs = {}
         self.logs_tab = None
+
+        # Utility buttons (Settings, Logs) in top-right corner
+        self._utility_buttons = {}   # restrict_key -> QPushButton
+        self._utility_badges = {}    # restrict_key -> ButtonNotificationBadge
 
         # Check for new version
         self._check_version_update()
@@ -446,10 +483,13 @@ class LumaShotTools(QtWidgets.QWidget):
         # Hide tabs that require shot context in standalone mode
         self._hide_standalone_incompatible_tabs()
 
-        # Show notification on Settings tab if new version (use the glow effect)
+        # Show notification on Settings tab if new version
         if self._is_new_version and 'settings' in self.tabs:
-            # Request attention to show the red notification dot
-            self.tabs['settings'].signals.request_attention.emit()
+            # Show badge on the utility button (or fall back to glow for regular tabs)
+            if 'settings' in self._utility_badges:
+                self._utility_badges['settings'].show_badge()
+            else:
+                self.tabs['settings'].signals.request_attention.emit()
 
         # Disable scroll wheel on combo boxes and spin boxes
         self._disable_scroll_wheel_on_inputs()
@@ -573,6 +613,9 @@ class LumaShotTools(QtWidgets.QWidget):
             if restrict_key == 'logs':
                 self.logs_tab = tab_instance
 
+        # Setup utility buttons (Settings, Logs) in the corner of the tab bar
+        self._setup_utility_buttons()
+
         # Create a unified ui object for backward compatibility
         self._create_unified_ui()
 
@@ -596,6 +639,80 @@ class LumaShotTools(QtWidgets.QWidget):
                     name = child.objectName()
                     if name and not name.startswith("qt_"):
                         setattr(self.ui, name, child)
+
+    def _setup_utility_buttons(self):
+        """Create fixed utility buttons (Settings, Logs) in the tab bar corner.
+
+        Hides these tabs from the movable tab bar and shows them as fixed
+        QPushButtons via setCornerWidget so they can't be reordered.
+        """
+        from PySide6.QtWidgets import QPushButton, QVBoxLayout
+        from effects import ButtonNotificationBadge
+
+        # Ordered list of utility tabs to show as buttons
+        utility_tab_defs = [
+            ('settings', 'settings', 'Settings'),
+            ('logs', 'terminal', 'Logs'),
+        ]
+
+        container = QtWidgets.QWidget()
+        container.setObjectName("UtilityButtonContainer")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 6, 0)
+        layout.setSpacing(0)
+
+        for restrict_key, icon_name, label in utility_tab_defs:
+            if restrict_key not in self.tabs:
+                continue
+
+            tab_instance = self.tabs[restrict_key]
+            tab_index = self.tab_widget.indexOf(tab_instance.ui)
+            if tab_index == -1:
+                continue
+
+            # Hide the tab bar entry but keep the page in the stack
+            self.tab_widget.setTabVisible(tab_index, False)
+
+            # Create icon-only button
+            btn = QPushButton()
+            btn.setObjectName(f"UtilityButton_{restrict_key}")
+            icon = IconManager.get_icon(icon_name, DEFAULT_ICON_COLOR, 16)
+            btn.setIcon(icon)
+            btn.setToolTip(label)
+            btn.setCheckable(True)
+            btn.setProperty("utility", True)
+            btn.clicked.connect(lambda checked, rk=restrict_key: self._on_utility_button_clicked(rk))
+
+            layout.addWidget(btn)
+            self._utility_buttons[restrict_key] = btn
+
+            # Create notification badge on the button
+            badge = ButtonNotificationBadge(btn)
+            self._utility_badges[restrict_key] = badge
+
+        if self._utility_buttons:
+            self.tab_widget.setCornerWidget(container, Qt.TopRightCorner)
+
+    def _on_utility_button_clicked(self, restrict_key):
+        """Handle click on a utility button — switch to the hidden tab."""
+        if restrict_key not in self.tabs:
+            return
+        tab_instance = self.tabs[restrict_key]
+        tab_index = self.tab_widget.indexOf(tab_instance.ui)
+        if tab_index >= 0:
+            self.tab_widget.setCurrentIndex(tab_index)
+
+    def _update_utility_button_states(self, active_index):
+        """Update checked state of utility buttons to reflect current tab."""
+        for restrict_key, btn in self._utility_buttons.items():
+            if restrict_key not in self.tabs:
+                continue
+            tab_index = self.tab_widget.indexOf(self.tabs[restrict_key].ui)
+            is_active = (tab_index == active_index)
+            btn.setChecked(is_active)
+            # Hide badge when user navigates to that tab
+            if is_active and restrict_key in self._utility_badges:
+                self._utility_badges[restrict_key].hide_badge()
 
     @QtCore.Slot(str)
     def _append_log(self, message):
@@ -630,11 +747,27 @@ class LumaShotTools(QtWidgets.QWidget):
             self.status_spinner.stop()
 
     def _on_tab_request_attention(self, tab_instance):
-        """Handle tab requesting attention with pulsing glow."""
+        """Handle tab requesting attention with pulsing glow or badge."""
         logging.info(f"[TabAttention] _on_tab_request_attention called for tab '{tab_instance.tab_name}'")
 
+        # Determine the restrict_key for this tab
+        restrict_key = None
+        for key, inst in self.tabs.items():
+            if inst is tab_instance:
+                restrict_key = key
+                break
+
+        # For utility tabs, show a badge on the button instead of tab glow
+        if restrict_key and restrict_key in self._utility_badges:
+            badge = self._utility_badges[restrict_key]
+            # Don't show badge if user is already viewing this tab
+            tab_index = self.tab_widget.indexOf(tab_instance.ui)
+            if tab_index != self.tab_widget.currentIndex():
+                badge.show_badge()
+                logging.info(f"[TabAttention] Showing badge on utility button '{restrict_key}'")
+            return
+
         if not hasattr(self, 'tab_glow_manager'):
-            # This can happen during startup before tab_glow_manager is initialized
             logging.debug(f"[TabAttention] tab_glow_manager not yet initialized, skipping")
             return
 
@@ -655,7 +788,7 @@ class LumaShotTools(QtWidgets.QWidget):
         logging.info(f"Tab '{tab_instance.tab_name}' is requesting attention")
 
     def _on_tab_changed(self, index):
-        """Handle tab change - notify tabs."""
+        """Handle tab change - notify tabs and sync utility button states."""
         # Skip activation/deactivation while user is dragging tabs around
         if self._is_reordering_tabs:
             return
@@ -672,6 +805,10 @@ class LumaShotTools(QtWidgets.QWidget):
                     logging.debug(f"[MainWindow] deactivating tab: {tab_name}")
                     tab_instance.on_tab_deactivated()
                     logging.debug(f"[MainWindow] tab deactivated: {tab_name}")
+
+            # Sync utility button checked states
+            self._update_utility_button_states(index)
+
             logging.debug(f"[MainWindow] _on_tab_changed COMPLETE")
         except Exception as e:
             logging.error(f"[MainWindow] _on_tab_changed error: {e}", exc_info=True)
@@ -689,7 +826,10 @@ class LumaShotTools(QtWidgets.QWidget):
         tab_names = []
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
-            tab_names.append(widget.objectName())
+            name = widget.objectName()
+            # Don't persist utility tab positions — they're fixed buttons
+            if name not in UTILITY_TAB_KEYS:
+                tab_names.append(name)
 
         save_tab_order(tab_names)
 
@@ -717,13 +857,20 @@ class LumaShotTools(QtWidgets.QWidget):
         return False
 
     def _restore_tab_order(self):
-        """Restore saved tab order on startup."""
+        """Restore saved tab order on startup.
+
+        Only reorders regular (non-utility) tabs.  Utility tabs are hidden
+        from the tab bar and shown as fixed corner-widget buttons.
+        """
         from core.user_preferences import get_tab_order
 
         saved_order = get_tab_order()
         if not saved_order:
             self.tab_widget.setCurrentIndex(0)
             return
+
+        # Filter out utility tab keys — they are not in the movable bar
+        saved_order = [n for n in saved_order if n not in UTILITY_TAB_KEYS]
 
         # Build a map of tab name to widget
         tab_widgets = {}
@@ -820,6 +967,10 @@ class LumaShotTools(QtWidgets.QWidget):
         if settings_tab and hasattr(settings_tab, 'show_new_version_available'):
             settings_tab.show_new_version_available(new_version)
 
+        # Show badge on the Settings utility button
+        if 'settings' in self._utility_badges:
+            self._utility_badges['settings'].show_badge()
+
 
     def _restore_window_state(self):
         """Restore window size and maximized state from previous session."""
@@ -874,6 +1025,9 @@ class LumaShotTools(QtWidgets.QWidget):
         - Admins: Full access (all tabs including Settings with full edit access)
         - Supervisors: Can see ComfyUI, Gallery, and Settings tabs (Settings is read-only, info only)
         - Regular users: Cannot see any restricted tabs
+
+        For utility tabs (Settings, Logs), hides the corner-widget button
+        instead of calling removeTab.
         """
         from core.settings_manager import get_setting
 
@@ -894,8 +1048,13 @@ class LumaShotTools(QtWidgets.QWidget):
                 continue
 
             if tab_name in restricted:
-                self.tab_widget.removeTab(i)
-                logging.info(f"Hidden restricted tab: {tab_name}")
+                # For utility tabs, hide their button instead of removing the tab
+                if tab_name in self._utility_buttons:
+                    self._utility_buttons[tab_name].hide()
+                    logging.info(f"Hidden restricted utility button: {tab_name}")
+                else:
+                    self.tab_widget.removeTab(i)
+                    logging.info(f"Hidden restricted tab: {tab_name}")
 
     def _hide_standalone_incompatible_tabs(self):
         """Hide tabs that require shot context in standalone mode."""
@@ -912,17 +1071,18 @@ class LumaShotTools(QtWidgets.QWidget):
                 logging.info(f"Hidden standalone-incompatible tab: {widget.objectName()}")
 
     def _setup_tab_icons(self):
-        """Setup monochromatic icons for each tab."""
+        """Setup monochromatic icons for each tab.
+
+        Skips utility tabs — their icons are set on the corner-widget buttons.
+        """
         tab_icons = {
             'passbuilder': 'layers',
             'mp4maker': 'video',
             'republish': 'upload',
             'cleaner': 'trash',
-            'logs': 'terminal',
             'comfyui': 'sparkles',
             'gallery': 'image',
             'canvas': 'grid',
-            'settings': 'settings',
         }
 
         for i in range(self.tab_widget.count()):

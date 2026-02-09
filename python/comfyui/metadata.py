@@ -77,23 +77,19 @@ def get_job_output_files(
 
 
 def cleanup_job_temp_files(output_dir: str) -> int:
-    """Clean up temporary job files from the output directory."""
+    """Clean up temporary job files from the output directory.
+
+    Note: _job_data/ is NOT cleaned here to avoid a race condition where
+    a new submission is writing to _job_data/ while a previous job's
+    completion handler deletes it. Instead, _job_data/ is cleaned at the
+    start of each new submission in the submitter.
+    """
     import glob
-    import shutil
 
     if not output_dir or not os.path.exists(output_dir):
         return 0
 
     deleted_count = 0
-
-    # Clean up _job_data/ subdirectory (new layout)
-    job_data_dir = os.path.join(output_dir, "_job_data")
-    if os.path.isdir(job_data_dir):
-        try:
-            shutil.rmtree(job_data_dir)
-            deleted_count += 1
-        except Exception:
-            pass  # Silently skip if can't be deleted
 
     # Backward compat: clean up root-level files from old jobs
     temp_patterns = [

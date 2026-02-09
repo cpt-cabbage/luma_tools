@@ -69,7 +69,6 @@ class GalleryTab(BaseTab):
 
     def connect_signals(self):
         """Connect gallery tab signals."""
-        self.ui.GallerySourceToggle.hide()
         self.ui.GalleryOpenExplorer.clicked.connect(self._on_open_explorer)
         self.ui.GalleryRefresh.clicked.connect(self._on_refresh_button_clicked)
         self.ui.GallerySortButton.clicked.connect(self._on_sort_button_clicked)

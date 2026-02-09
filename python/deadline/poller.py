@@ -58,11 +58,11 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
                     }
                 else:
                     return {
-                        "status": "Failed",
-                        "progress": 100,
+                        "status": "Unknown",
+                        "progress": 0,
                         "completed_tasks": 0,
                         "total_tasks": 1,
-                        "error_message": "Job deleted but no output files found"
+                        "error_message": "Job not found (may still be registering)"
                     }
             else:
                 return {
@@ -485,8 +485,10 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     """
     Find all running luma_tools jobs for a specific user on Deadline.
 
-    Queries Deadline for Active, Rendering, Pending, and Queued jobs
-    submitted by the specified user that match luma_tools naming conventions.
+    Queries Deadline for Active and Pending jobs submitted by the specified
+    user that match luma_tools naming conventions.  Uses Deadline's built-in
+    UserName filter so only the user's jobs are returned (avoids querying
+    every job on the farm).
 
     Args:
         username: The username to search for (case-insensitive)
@@ -499,17 +501,29 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
             - submit_date: When the job was submitted
             - output_dir: Extracted output directory from job properties (if available)
     """
+    import time
+
     running_jobs = []
 
     if not DEADLINE_PATH or not username:
         return running_jobs
 
-    username_lower = username.lower()
+    # Overall time budget to prevent blocking startup for too long
+    MAX_TOTAL_SECONDS = 30
+    start_time = time.monotonic()
 
     try:
-        # Get all active/pending jobs from Deadline
+        # Filter by both Status AND UserName so Deadline only returns this user's jobs
         for status_filter in ["Active", "Pending"]:
-            result = run_command([DEADLINE_PATH, "GetJobIdsFilter", f"Status={status_filter}"], timeout=30)
+            if time.monotonic() - start_time > MAX_TOTAL_SECONDS:
+                logger.warning("[Deadline] Recovery query exceeded time budget, returning partial results")
+                break
+
+            result = run_command(
+                [DEADLINE_PATH, "GetJobIdsFilter",
+                 f"Status={status_filter}", f"UserName={username}"],
+                timeout=15,
+            )
 
             if result.returncode != 0:
                 continue
@@ -517,26 +531,33 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
             job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
 
             for job_id in job_ids:
-                job_result = run_command([DEADLINE_PATH, "GetJob", job_id], timeout=15)
+                if time.monotonic() - start_time > MAX_TOTAL_SECONDS:
+                    logger.warning("[Deadline] Recovery query exceeded time budget, returning partial results")
+                    break
+
+                try:
+                    job_result = run_command([DEADLINE_PATH, "GetJob", job_id], timeout=10)
+                except Exception as e:
+                    logger.warning(f"[Deadline] Timeout/error fetching job {job_id}: {e}")
+                    continue
 
                 if job_result.returncode != 0:
                     continue
 
                 job_info = parse_job_info(job_result.stdout)
                 job_name = job_info.get("Name", "")
-                job_user = job_info.get("UserName", job_info.get("User", ""))
                 job_status = job_info.get("Status", status_filter)
                 submit_date = job_info.get("SubmitDate", "")
                 output_dir = job_info.get("OutputDirectory0", "")
 
-                # Check if this is a luma_tools job from the specified user
+                # Check if this is a luma_tools job
                 is_luma_job = (
                     job_name.startswith("LUMA TOOLS - ") or
                     job_name.endswith("_luma_tools") or
                     job_name == "luma_tools_job"
                 )
 
-                if is_luma_job and job_user.lower() == username_lower:
+                if is_luma_job:
                     running_jobs.append({
                         "job_id": job_id,
                         "name": job_name,
@@ -548,7 +569,6 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
         # Sort by submit date (oldest first) so we process in order
         running_jobs.sort(key=lambda x: x["submit_date"])
 
-        # Log summary only if jobs were found
         if running_jobs:
             logger.info(f"[Deadline] Found {len(running_jobs)} running jobs for user {username}")
 

@@ -2207,6 +2207,9 @@ class VideoNode(QGraphicsItem):
             layout.addWidget(video_sink, 1)
             layout.addWidget(control_bar, 0)
 
+            # Click on video area toggles play/pause
+            video_sink.clicked.connect(control_bar._toggle_play)
+
             self._media_player.setVideoSink(video_sink.videoSink)
 
             # Embed via proxy widget, clip to node bounds

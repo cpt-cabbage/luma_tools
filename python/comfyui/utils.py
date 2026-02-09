@@ -258,6 +258,7 @@ def wait_for_completion_websocket(
     ws_url = f"{ws_url}/ws?clientId={client_id}"
 
     result = {'success': None, 'error': None, 'outputs': {}}
+    downloaded_files = set()  # Track files already downloaded via WebSocket
     start_time = time.time()
     last_progress = {'value': 0, 'max': 0}
 
@@ -358,9 +359,15 @@ def wait_for_completion_websocket(
                         if node_type:
                             node_timing[node_id]['node_type'] = node_type
 
+                    # Download images immediately via WebSocket event
+                    # (don't wait for HTTP poll which may never run)
                     if 'images' in output:
                         for img in output['images']:
-                            logger.info(f"  Output: {img.get('filename', 'unknown')}")
+                            fname = img.get('filename', 'unknown')
+                            logger.info(f"  Output: {fname}")
+                            if output_dir and on_image_output:
+                                on_image_output(img, base_url, output_dir)
+                                downloaded_files.add(fname)
                     if 'gltf' in output or 'glb' in output:
                         for item in output.get('gltf', []) + output.get('glb', []):
                             logger.info(f"  Output 3D: {item.get('filename', 'unknown')}")
@@ -432,9 +439,11 @@ def wait_for_completion_websocket(
                 for node_id, output in outputs.items():
                     if 'images' in output:
                         for img in output['images']:
-                            logger.info(f"  Output: {img.get('filename', 'unknown')}")
-                            if output_dir and on_image_output:
-                                on_image_output(img, base_url, output_dir)
+                            fname = img.get('filename', 'unknown')
+                            if fname not in downloaded_files:
+                                logger.info(f"  Output: {fname}")
+                                if output_dir and on_image_output:
+                                    on_image_output(img, base_url, output_dir)
                 result['success'] = True
                 ws.close()
                 break

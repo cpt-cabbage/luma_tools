@@ -5,10 +5,10 @@ Contains embedded and fullscreen viewers with support for images, 3D models, and
 """
 import os
 import logging
-from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool
+from PySide6.QtCore import Qt, QTimer, Signal, QThreadPool, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
-    QMenu, QComboBox, QApplication, QSlider
+    QMenu, QComboBox, QApplication, QSlider, QGraphicsOpacityEffect
 )
 from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
@@ -154,6 +154,7 @@ class VideoSinkWidget(QWidget):
     Replaces QVideoWidget to avoid its native rendering surface painting
     over Qt overlay widgets (controls, info bars) on Windows.
     """
+    clicked = Signal()  # Emitted on left mouse click (for click-to-play/pause)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -190,6 +191,12 @@ class VideoSinkWidget(QWidget):
         else:
             super().paintEvent(event)
 
+    def mousePressEvent(self, event):
+        """Emit clicked signal on left mouse button press."""
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
 
 class VideoControlBar(QWidget):
     """
@@ -214,9 +221,26 @@ class VideoControlBar(QWidget):
         self._auto_hide_timer.timeout.connect(self._fade_out)
         self._hide_delay = 3000  # 3 seconds
 
+        # Seek throttle — Windows Media Foundation drops rapid setPosition() calls,
+        # so we buffer to ~20fps to let each seek actually decode a frame.
+        self._pending_seek_pos = None
+        self._was_playing_before_seek = False
+        self._seek_throttle = QTimer(self)
+        self._seek_throttle.setSingleShot(True)
+        self._seek_throttle.setInterval(50)
+        self._seek_throttle.timeout.connect(self._apply_pending_seek)
+
         # Enable mouse tracking and ensure widget accepts events
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+
+        # Opacity effect for fade animations
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_effect)
+
+        self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        self._fade_anim.setEasingCurve(QEasingCurve.InOutQuad)
 
         self._setup_ui()
         self._connect_signals()
@@ -230,7 +254,7 @@ class VideoControlBar(QWidget):
     def _setup_ui(self):
         """Set up the control bar UI."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)
         # Ensure layout doesn't constrain child widgets
         layout.setAlignment(Qt.AlignVCenter)
@@ -238,7 +262,7 @@ class VideoControlBar(QWidget):
         # Play/Pause button
         self.play_button = QPushButton()
         self.play_button.setText("\u25B6")  # Play symbol ▶
-        self.play_button.setFixedSize(36, 36)  # Larger for easier clicking
+        self.play_button.setFixedSize(44, 44)
         self.play_button.setCursor(Qt.PointingHandCursor)
         self.play_button.setFocusPolicy(Qt.ClickFocus)
         # Ensure button gets all mouse events
@@ -248,8 +272,8 @@ class VideoControlBar(QWidget):
                 background-color: #4a9eff;
                 color: white;
                 border: none;
-                border-radius: 18px;
-                font-size: 18px;
+                border-radius: 22px;
+                font-size: 22px;
                 font-weight: bold;
                 font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Arial Unicode MS", Arial, sans-serif;
                 padding: 0px;
@@ -268,7 +292,7 @@ class VideoControlBar(QWidget):
 
         # Current time label
         self.time_label = QLabel("0:00")
-        self.time_label.setStyleSheet("color: white; font-size: 11px;")
+        self.time_label.setStyleSheet("color: white; font-size: 12px;")
         self.time_label.setFixedWidth(45)
         layout.addWidget(self.time_label)
 
@@ -280,19 +304,19 @@ class VideoControlBar(QWidget):
         self.timeline_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 background: #444444;
-                height: 4px;
-                border-radius: 2px;
+                height: 6px;
+                border-radius: 3px;
             }
             QSlider::sub-page:horizontal {
                 background: #4a9eff;
-                border-radius: 2px;
+                border-radius: 3px;
             }
             QSlider::handle:horizontal {
                 background: white;
-                width: 12px;
-                height: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
             }
             QSlider::handle:horizontal:hover {
                 background: #e0e0e0;
@@ -305,24 +329,24 @@ class VideoControlBar(QWidget):
 
         # Duration label
         self.duration_label = QLabel("0:00")
-        self.duration_label.setStyleSheet("color: white; font-size: 11px;")
+        self.duration_label.setStyleSheet("color: white; font-size: 12px;")
         self.duration_label.setFixedWidth(45)
         layout.addWidget(self.duration_label)
 
         # Volume button
-        self.volume_button = QPushButton("🔊")
-        self.volume_button.setFixedSize(28, 28)
+        self.volume_button = QPushButton("\U0001f50a")
+        self.volume_button.setFixedSize(34, 34)
         self.volume_button.setCursor(Qt.PointingHandCursor)
         self.volume_button.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: white;
                 border: none;
-                font-size: 14px;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 14px;
+                border-radius: 17px;
             }
         """)
         self.volume_button.clicked.connect(self._toggle_mute)
@@ -337,40 +361,40 @@ class VideoControlBar(QWidget):
         self.volume_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 background: #444444;
-                height: 4px;
-                border-radius: 2px;
+                height: 6px;
+                border-radius: 3px;
             }
             QSlider::sub-page:horizontal {
                 background: #4a9eff;
-                border-radius: 2px;
+                border-radius: 3px;
             }
             QSlider::handle:horizontal {
                 background: white;
-                width: 10px;
-                height: 10px;
-                margin: -3px 0;
-                border-radius: 5px;
+                width: 14px;
+                height: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
             }
         """)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         layout.addWidget(self.volume_slider)
 
         # Loop toggle button
-        self.loop_button = QPushButton("🔁")
+        self.loop_button = QPushButton("\U0001f501")
         self.loop_button.setCheckable(True)
         self.loop_button.setChecked(False)
-        self.loop_button.setFixedSize(28, 28)
+        self.loop_button.setFixedSize(34, 34)
         self.loop_button.setCursor(Qt.PointingHandCursor)
         self.loop_button.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: #888888;
                 border: none;
-                font-size: 12px;
+                font-size: 14px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 14px;
+                border-radius: 17px;
             }
             QPushButton:checked {
                 color: #4a9eff;
@@ -436,21 +460,45 @@ class VideoControlBar(QWidget):
         self.duration_label.setText(format_duration(duration / 1000))
 
     def _on_seek_start(self):
-        """Pause updates while seeking."""
-        pass
+        """Pause playback while seeking so the backend renders each seeked frame."""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            self._was_playing_before_seek = (
+                self.media_player.playbackState() == QMediaPlayer.PlayingState
+            )
+            if self._was_playing_before_seek:
+                self.media_player.pause()
+        except Exception:
+            self._was_playing_before_seek = False
 
     def _on_seek_move(self, value):
-        """Show time preview while scrubbing."""
+        """Buffer seek position and throttle actual seeks for live scrubbing."""
         if self._duration > 0:
             position = int((value / 1000) * self._duration)
             from core.utils import format_duration
             self.time_label.setText(format_duration(position / 1000))
+            self._pending_seek_pos = position
+            # Fire immediately if throttle isn't running, otherwise let timer batch it
+            if not self._seek_throttle.isActive():
+                self._apply_pending_seek()
+                self._seek_throttle.start()
+
+    def _apply_pending_seek(self):
+        """Apply the most recent buffered seek position."""
+        if self._pending_seek_pos is not None:
+            self.media_player.setPosition(self._pending_seek_pos)
+            self._pending_seek_pos = None
 
     def _on_seek_end(self):
-        """Seek to new position when slider is released."""
+        """Apply final position and resume playback if it was playing."""
+        self._seek_throttle.stop()
         if self._duration > 0:
             position = int((self.timeline_slider.value() / 1000) * self._duration)
             self.media_player.setPosition(position)
+        self._pending_seek_pos = None
+        if self._was_playing_before_seek:
+            self.media_player.play()
+            self._was_playing_before_seek = False
 
     def _on_volume_changed(self, value):
         """Update volume."""
@@ -490,15 +538,46 @@ class VideoControlBar(QWidget):
             pass
 
     def show_controls(self):
-        """Show controls and restart auto-hide timer."""
+        """Show controls with fade-in and restart auto-hide timer."""
+        # Stop any running fade animation
+        self._fade_anim.stop()
+
         self.show()
         self.raise_()  # Ensure controls are on top
         self.setFocus()  # Give focus to controls for interaction
+
+        # Fade in from current opacity to fully visible
+        current_opacity = self._opacity_effect.opacity()
+        if current_opacity < 1.0:
+            self._fade_anim.setDuration(200)
+            self._fade_anim.setStartValue(current_opacity)
+            self._fade_anim.setEndValue(1.0)
+            # Disconnect any previous finished connections
+            try:
+                self._fade_anim.finished.disconnect()
+            except RuntimeError:
+                pass
+            self._fade_anim.start()
         self._auto_hide_timer.start(self._hide_delay)
 
     def _fade_out(self):
-        """Hide controls after inactivity."""
+        """Fade out controls after inactivity."""
         if self._is_playing:
+            self._fade_anim.stop()
+            self._fade_anim.setDuration(400)
+            self._fade_anim.setStartValue(self._opacity_effect.opacity())
+            self._fade_anim.setEndValue(0.0)
+            # Disconnect any previous finished connections
+            try:
+                self._fade_anim.finished.disconnect()
+            except RuntimeError:
+                pass
+            self._fade_anim.finished.connect(self._on_fade_out_finished)
+            self._fade_anim.start()
+
+    def _on_fade_out_finished(self):
+        """Hide widget after fade-out completes."""
+        if self._opacity_effect.opacity() <= 0.01:
             self.hide()
 
     def enterEvent(self, event):
@@ -748,7 +827,7 @@ class AudioPlayerWidget(QWidget):
 
         # Position control bar at bottom
         if hasattr(self, 'controls'):
-            controls_height = 50
+            controls_height = 56
             controls_margin = 10
             self.controls.setGeometry(
                 controls_margin,
@@ -1083,7 +1162,7 @@ class EmbeddedImageViewer(QWidget):
 
         info_layout.addStretch()
 
-        help_label = QLabel("Navigate | Esc Back | C Prompt | Del Delete")
+        help_label = QLabel("Navigate | Esc Back | Space Play/Pause | C Prompt | Del Delete")
         help_label.setStyleSheet("color: #888888; font-size: 10px;")
         info_layout.addWidget(help_label)
 
@@ -1135,7 +1214,7 @@ class EmbeddedImageViewer(QWidget):
 
         # Video controls bar (above info bar when playing video)
         if hasattr(self, 'video_controls') and self.video_controls:
-            controls_height = 50
+            controls_height = 56
             controls_margin = 10
             # Position just above info bar (40px from bottom)
             self.video_controls.setGeometry(
@@ -1148,11 +1227,15 @@ class EmbeddedImageViewer(QWidget):
             # Visibility is managed by video playback state
 
     def eventFilter(self, obj, event):
-        """Event filter to show video controls on mouse movement."""
+        """Event filter to show video controls on mouse movement and handle click-to-play."""
         from PySide6.QtCore import QEvent
-        if obj == self.video_widget and event.type() == QEvent.MouseMove:
-            if hasattr(self, 'video_controls') and self.video_controls:
-                self.video_controls.show_controls()
+        if hasattr(self, 'video_widget') and obj == self.video_widget:
+            if event.type() == QEvent.MouseMove:
+                if hasattr(self, 'video_controls') and self.video_controls:
+                    self.video_controls.show_controls()
+            elif event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                if hasattr(self, 'video_controls') and self.video_controls:
+                    self.video_controls._toggle_play()
         return super().eventFilter(obj, event)
 
     def mouseMoveEvent(self, event):
@@ -1695,6 +1778,14 @@ class EmbeddedImageViewer(QWidget):
         elif key == Qt.Key_End:
             self.current_index = len(self.image_paths) - 1
             self._load_current_image()
+        elif key == Qt.Key_Space:
+            # Toggle play/pause if video is showing
+            if (hasattr(self, 'video_controls') and self.video_controls
+                    and hasattr(self, 'video_widget') and self.video_widget
+                    and self.image_stack.currentWidget() == self.video_widget):
+                self.video_controls._toggle_play()
+            else:
+                super().keyPressEvent(event)
         elif key == Qt.Key_C:
             self._copy_prompt()
         elif key == Qt.Key_S:
@@ -2099,7 +2190,7 @@ class FullscreenImageViewer(QWidget):
         self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
         info_layout.addWidget(self.zoom_combo)
 
-        self.help_label = QLabel("Navigate | Esc Close | Space Info | C Prompt | Del Delete")
+        self.help_label = QLabel("Navigate | Esc Close | Space Play/Info | C Prompt | Del Delete")
         self.help_label.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
         info_layout.addWidget(self.help_label)
 
@@ -2135,11 +2226,15 @@ class FullscreenImageViewer(QWidget):
         self._position_overlays()
 
     def eventFilter(self, obj, event):
-        """Event filter to show video controls on mouse movement."""
+        """Event filter to show video controls on mouse movement and handle click-to-play."""
         from PySide6.QtCore import QEvent
-        if hasattr(self, 'video_widget') and obj == self.video_widget and event.type() == QEvent.MouseMove:
-            if hasattr(self, 'video_controls') and self.video_controls:
-                self.video_controls.show_controls()
+        if hasattr(self, 'video_widget') and obj == self.video_widget:
+            if event.type() == QEvent.MouseMove:
+                if hasattr(self, 'video_controls') and self.video_controls:
+                    self.video_controls.show_controls()
+            elif event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                if hasattr(self, 'video_controls') and self.video_controls:
+                    self.video_controls._toggle_play()
         return super().eventFilter(obj, event)
 
     def mouseMoveEvent(self, event):
@@ -2160,7 +2255,7 @@ class FullscreenImageViewer(QWidget):
         # Video controls bar (above info bar when playing video)
         bar_height = self.info_bar.height()
         if hasattr(self, 'video_controls') and self.video_controls:
-            controls_height = 50
+            controls_height = 56
             controls_margin = 20
             # Position just above info bar
             self.video_controls.setGeometry(
@@ -2361,8 +2456,14 @@ class FullscreenImageViewer(QWidget):
             self.current_index = len(self.image_paths) - 1
             self._load_current_image()
         elif key == Qt.Key_Space:
-            self._show_info = not self._show_info
-            self._update_info()
+            # Toggle play/pause if video is showing, otherwise toggle info display
+            if (hasattr(self, 'video_controls') and self.video_controls
+                    and hasattr(self, 'video_widget') and self.video_widget
+                    and self.image_stack.currentWidget() == self.video_widget):
+                self.video_controls._toggle_play()
+            else:
+                self._show_info = not self._show_info
+                self._update_info()
         elif key == Qt.Key_C:
             self._copy_prompt()
         elif key == Qt.Key_S:

@@ -214,6 +214,7 @@ class PollingMixin:
         self._iterate_completed_tasks = 0
         self._iterate_total_tasks = self.ui.ComfyUIGenerationCount.value()
         self._iterate_start_time = time.time()
+        self._iterate_rendering_start_time = None  # Reset to avoid stale model-loading detection
 
         logger.info(f"[Iterate] Starting polling for job {job_id}")
         logger.info(f"[Iterate] Network output dir: {network_output_dir}")
@@ -353,6 +354,26 @@ class PollingMixin:
                 f"ComfyUI Failed: {error_message}",
                 StatusColors.ERROR
             )
+        elif status == "Unknown":
+            # Job not found in Deadline — on early polls this is likely a race condition
+            # (job submitted but not yet registered). After many polls it means job was deleted.
+            if self._iterate_poll_count <= 6:
+                logger.debug(f"[Iterate Poll] Job not found on poll #{self._iterate_poll_count}, likely still registering")
+                self.ui.ComfyUIIterateStatus.setText("Waiting for Deadline to register job...")
+                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
+                self.animator.update_status_animated(
+                    "ComfyUI: Waiting for job to appear in Deadline...",
+                    StatusColors.INFO
+                )
+            else:
+                logger.warning(f"[Iterate Poll] Job not found after {self._iterate_poll_count} polls, treating as lost")
+                self._stop_iterate_polling()
+                self.ui.ComfyUIIterateStatus.setText(f"Job lost: {error_message}")
+                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+                self.animator.update_status_animated(
+                    "ComfyUI: Job disappeared from Deadline",
+                    StatusColors.ERROR
+                )
         else:
             eta_str = estimate_remaining_time(completed_tasks, display_total, elapsed)
 
@@ -806,6 +827,15 @@ class PollingMixin:
                     error_msg = result.get("error_message", "Unknown error")
                     logger.error(f"[Batch] Job {job_id} FAILED: {error_msg}")
 
+                elif status == "Unknown":
+                    # Job not found — grace period for newly submitted jobs
+                    if self._batch_poll_count <= 6:
+                        logger.debug(f"[Batch] Job {job_id} not found on poll #{self._batch_poll_count}, likely still registering")
+                    else:
+                        logger.warning(f"[Batch] Job {job_id} not found after {self._batch_poll_count} polls, treating as lost")
+                        self._batch_pending_jobs.discard(job_id)
+                        self._batch_failed_jobs.add(job_id)
+
             if had_new_frames:
                 self._refresh_gallery_for_new_frames("[Batch]")
                 # Update app_state for cross-tab awareness
@@ -813,6 +843,8 @@ class PollingMixin:
                     from core.state_manager import app_state
                     if total_new_frames > 0:
                         app_state.increment_gallery_new_count(total_new_frames)
+
+            self._batch_poll_count += 1
 
             completed_jobs = total_jobs - len(self._batch_pending_jobs)
             total_frames_all = sum(self._batch_total_tasks.values())
@@ -904,7 +936,7 @@ class PollingMixin:
                 if others_queued > 0:
                     main_status = f"ComfyUI: {total_frames_all} task(s) queued - {others_queued} other job(s) ahead in farm queue"
                 else:
-                    main_status = f"ComfyUI: {total_frames_all} task(s) queued - Next in line!"
+                    main_status = f"ComfyUI: {total_frames_all} task(s) queued"
                 status_color = StatusColors.INFO
             else:
                 main_status = f"ComfyUI: {completed_jobs}/{total_jobs} jobs - {elapsed_str}"
@@ -1025,8 +1057,6 @@ class PollingMixin:
             # Play completion sound (if enabled)
             play_completion_sound()
 
-        self._batch_failed_jobs.clear()
-
         # Emit completion events for cross-tab awareness
         if EVENT_BUS_AVAILABLE:
             for job_id in self._batch_job_ids:
@@ -1041,6 +1071,8 @@ class PollingMixin:
                 job_completed=True
             )
             # Add recent outputs (we don't have individual paths, but we can mark completion)
+
+        self._batch_failed_jobs.clear()
 
         gallery_tab = self.main_window.get_tab("gallery")
         if gallery_tab:
@@ -1279,15 +1311,6 @@ class PollingMixin:
         # Store persisted state on instance to avoid lambda capture issues
         self._recovery_persisted_state = persisted_state
 
-        # Show status feedback for recovery
-        try:
-            if self.animator:
-                self.animator.start_activity(
-                    "job_recovery", "Checking Deadline for running jobs"
-                )
-        except Exception as e:
-            logger.debug(f"[Recovery] Warning: Could not start activity: {e}")
-
         # Run the Deadline query in background to avoid blocking UI
         # Store worker to prevent garbage collection
         self._recovery_worker = Worker(find_user_running_jobs, current_user)
@@ -1348,33 +1371,67 @@ class PollingMixin:
         try:
             running_jobs = running_jobs or []
 
+            # Check if polling is already active in this session — if so, don't
+            # override status messages and skip jobs that are already tracked
+            polling_active = (
+                (self._iterate_poll_timer and self._iterate_poll_timer.isActive()) or
+                (self._batch_poll_timer and self._batch_poll_timer.isActive())
+            )
+
             if not running_jobs:
                 logger.info("[Recovery] No running jobs found on Deadline for current user")
-                # Show status
-                try:
-                    if self.animator:
-                        from ui_components import StatusColors
-                        self.animator.update_status_animated(
-                            "Ready", StatusColors.INFO
-                        )
-                except Exception as e:
-                    logger.debug(f"[Recovery] Warning: Could not update status: {e}")
+                # Only update status if no active polling (avoid overriding poll status)
+                if not polling_active:
+                    try:
+                        if self.animator:
+                            from ui_components import StatusColors
+                            self.animator.update_status_animated(
+                                "Ready", StatusColors.INFO
+                            )
+                    except Exception as e:
+                        logger.debug(f"[Recovery] Warning: Could not update status: {e}")
 
                 # If we have persisted state but no running jobs, the job must have completed
                 if persisted_state:
                     logger.info("[Recovery] Persisted state exists but no running jobs - clearing state")
                     self._clear_running_job_state()
-                    # Job completed while app was closed - show notification
-                    mode = persisted_state.get("mode") if persisted_state else None
-                    if mode == "iterate":
-                        self.show_status("Previous ComfyUI job completed while app was closed", "success")
-                    elif mode == "batch":
-                        self.show_status("Previous ComfyUI batch completed while app was closed", "success")
+                    if not polling_active:
+                        mode = persisted_state.get("mode") if persisted_state else None
+                        if mode == "iterate":
+                            self.show_status("Previous ComfyUI job completed while app was closed", "success")
+                        elif mode == "batch":
+                            self.show_status("Previous ComfyUI batch completed while app was closed", "success")
+                        # Reset to "Ready" after showing the completion message briefly
+                        from ui_components import StatusColors
+                        QTimer.singleShot(4000, lambda: self.animator.update_status_animated(
+                            "Ready", StatusColors.INFO
+                        ) if self.animator else None)
                 return
 
             logger.info(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")
             for job in running_jobs:
                 logger.info(f"[Recovery]   - {job['job_id']}: {job['name']} ({job['status']})")
+
+            # Collect job IDs already being polled in this session (in-memory)
+            already_polling = set()
+            if self._iterate_poll_timer and self._iterate_poll_timer.isActive():
+                current_iterate_id = self.app_state.comfyui_current_job_id
+                if current_iterate_id:
+                    already_polling.add(current_iterate_id)
+            if self._batch_poll_timer and self._batch_poll_timer.isActive():
+                already_polling.update(self._batch_job_ids)
+
+            # Filter out jobs already being polled
+            if already_polling:
+                filtered_jobs = [j for j in running_jobs if j["job_id"] not in already_polling]
+                if len(filtered_jobs) < len(running_jobs):
+                    skipped = len(running_jobs) - len(filtered_jobs)
+                    logger.info(f"[Recovery] Skipping {skipped} job(s) already being polled in this session")
+                running_jobs = filtered_jobs
+
+            if not running_jobs:
+                logger.info("[Recovery] All running jobs are already being polled - no recovery needed")
+                return
 
             # Get job IDs from persisted state for comparison
             persisted_job_ids = set()

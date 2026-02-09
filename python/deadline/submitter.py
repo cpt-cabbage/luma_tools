@@ -106,6 +106,7 @@ def submit_comfyui_to_deadline(
     comfyui_path, comfyui_mode, comfyui_python, python_exe = _get_comfyui_config()
 
     # Scripts are in comfyui package — copy to _job_data/ subdirectory to keep output dir clean
+    # Note: _job_data cleanup happens in submit_comfyui_job() before workflow is saved
     job_data_dir = os.path.join(output_dir, "_job_data")
     ensure_directory(job_data_dir)
 
@@ -358,7 +359,14 @@ def submit_comfyui_job(
             return [], error_msg
 
         # Save workflow and seeds to _job_data/ subdirectory to keep output dir clean
+        # Clean up old _job_data first to avoid stale files from previous submissions
+        import shutil
         job_data_dir = os.path.join(current_working_dir, "_job_data")
+        if os.path.isdir(job_data_dir):
+            try:
+                shutil.rmtree(job_data_dir)
+            except Exception:
+                pass
         ensure_directory(job_data_dir)
 
         workflow_file = save_workflow(modified, job_data_dir)

@@ -702,6 +702,45 @@ QLineEdit:focus {
     text-transform: uppercase;
 }
 
+/* ============================================================================
+ * UTILITY BUTTONS - Fixed Settings/Logs buttons in tab bar corner
+ * ============================================================================ */
+QPushButton[utility="true"] {
+    background-color: rgba(74, 158, 255, 0.08) !important;
+    color: #c5cad3 !important;
+    border: none !important;
+    border-left: 2px solid transparent !important;
+    border-radius: 0px !important;
+    padding: 0px !important;
+    margin: 0px !important;
+    min-height: 33px !important;
+    max-height: 33px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+}
+
+QPushButton[utility="true"]:hover {
+    background-color: rgba(74, 158, 255, 0.15) !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-left: 2px solid transparent !important;
+}
+
+QPushButton[utility="true"]:checked {
+    background-color: rgba(74, 158, 255, 0.35) !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-left: 2px solid #4a9eff !important;
+}
+
+#UtilityButtonContainer {
+    background-color: transparent !important;
+    min-height: 67px !important;
+    max-height: 67px !important;
+    padding: 0px !important;
+    margin: 0px !important;
+}
+
 /* Batch Image Selector */
 BatchImageSelector {
     background-color: transparent;
