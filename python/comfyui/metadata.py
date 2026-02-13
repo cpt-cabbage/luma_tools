@@ -1049,7 +1049,7 @@ def auto_establish_lineage_from_job_metadata(output_dir: str) -> int:
         if not isinstance(value, dict):
             continue
 
-        source_images = value.get('source_images', [])
+        source_images = value.get('source_images') or []
         job_prefix = value.get('job_prefix', key[8:])  # Remove "_prefix_"
 
         # Only establish lineage if there's exactly one source image

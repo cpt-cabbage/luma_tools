@@ -691,6 +691,10 @@ class LumaShotTools(QtWidgets.QWidget):
             self._utility_badges[restrict_key] = badge
 
         if self._utility_buttons:
+            # Size container height to actual button count (each button is 33px)
+            button_count = len(self._utility_buttons)
+            container_height = button_count * 33
+            container.setFixedHeight(container_height)
             self.tab_widget.setCornerWidget(container, Qt.TopRightCorner)
 
     def _on_utility_button_clicked(self, restrict_key):

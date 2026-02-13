@@ -60,6 +60,8 @@ class NodeTypeInfo:
     # widget_names_for_values includes None placeholders for phantom widgets
     # (control_after_generate, upload buttons, etc.)
     widget_names_for_values: List[Optional[str]] = field(default_factory=list)
+    # Names of all required inputs (both widget and connection inputs)
+    required_input_names: List[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -250,12 +252,17 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
         for missing_name in missing_config['end']:
             widget_names.append(missing_name)
 
+    # Collect names of all required inputs (both widget and connection)
+    required_section = input_data.get('required', {})
+    required_input_names = list(required_section.keys()) if isinstance(required_section, dict) else []
+
     return NodeTypeInfo(
         class_type=class_type,
         display_name=raw_info.get('display_name', class_type),
         category=raw_info.get('category', ''),
         widgets=widgets,
         widget_names_for_values=widget_names,
+        required_input_names=required_input_names,
     )
 
 
@@ -355,6 +362,7 @@ class NodeInfoCache:
                     category=node_data.get('category', ''),
                     widgets=widgets,
                     widget_names_for_values=widget_names,
+                    required_input_names=node_data.get('required_input_names', []),
                 )
             except Exception as e:
                 logger.debug(f"Skipping cached node '{class_type}': {e}")
@@ -399,12 +407,15 @@ class NodeInfoCache:
             }
 
             for class_type, node_info in self._node_types.items():
-                data['nodes'][class_type] = {
+                node_entry = {
                     'display_name': node_info.display_name,
                     'category': node_info.category,
                     'widgets': [asdict(w) for w in node_info.widgets],
                     'widget_names_for_values': node_info.widget_names_for_values,
                 }
+                if node_info.required_input_names:
+                    node_entry['required_input_names'] = node_info.required_input_names
+                data['nodes'][class_type] = node_entry
 
             try:
                 with open(path, 'w', encoding='utf-8') as f:
@@ -534,6 +545,18 @@ def get_widget_names(class_type: str) -> Optional[List[Optional[str]]]:
     if info is None:
         return None
     return info.widget_names_for_values
+
+
+def get_required_input_names(class_type: str) -> Optional[List[str]]:
+    """Get names of all required inputs for a node type.
+
+    Returns a list of input names that are required (both widget and connection).
+    Returns None if the node type is not in cache.
+    """
+    info = _cache.get(class_type)
+    if info is None:
+        return None
+    return info.required_input_names
 
 
 def get_widget_info(class_type: str, widget_name: str) -> Optional[WidgetInfo]:

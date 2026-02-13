@@ -37,6 +37,9 @@ The watchlist is stored in `.claude/paper_watchlist.json` at the project root. T
         "github_url": "https://github.com/author/repo",
         "comfyui_support": "none|in_progress|available",
         "comfyui_url": "https://github.com/someone/comfyui-paper-nodes",
+        "license": "Apache-2.0",
+        "commercial_ok": true,
+        "license_issues": null,
         "notes": "Any relevant details"
       }
     }
@@ -92,7 +95,21 @@ This is the core functionality. For each paper in the watchlist (or the specifie
 - Use WebFetch to scan for GitHub links on the page
 - Follow the first relevant GitHub link found
 
-#### Step 2: Check for ComfyUI support
+#### Step 2: Check license and commercial viability
+
+For each paper that has code available (real code, not placeholder):
+
+- Check the repo's LICENSE file (via WebFetch or from the repo page) to identify the license type
+- Check if the code depends on non-commercial models or weights (e.g., FLUX.1-dev is non-commercial, Stable Diffusion models vary, some HuggingFace weights are research-only)
+- Check the paper or README for usage restrictions
+
+Classify commercial viability:
+- **`commercial_ok: true`** — Permissive license (Apache-2.0, MIT, BSD) AND no non-commercial model dependencies
+- **`commercial_ok: false`** — Non-commercial license (CC BY-NC, research-only) OR depends on non-commercial models/weights
+- **`license`** — The SPDX license identifier (e.g., "Apache-2.0", "MIT", "CC-BY-NC-SA-4.0") or "unknown" if not found
+- **`license_issues`** — null if no issues, otherwise a brief string explaining the problem (e.g., "Code is Apache-2.0 but depends on FLUX.1-dev (non-commercial)", "CC BY-NC-SA 4.0 — non-commercial only")
+
+#### Step 3: Check for ComfyUI support
 
 For each paper that has a GitHub repo identified:
 
@@ -105,7 +122,7 @@ Classify ComfyUI support as:
 - **`in_progress`** - There are WIP repos, open issues requesting ComfyUI support, or forks working on it
 - **`none`** - No ComfyUI integration found
 
-#### Step 3: Update and report
+#### Step 4: Update and report
 
 1. Update each paper's `status` and `last_checked` in the watchlist JSON
 2. Write the updated watchlist
@@ -130,8 +147,12 @@ Classify ComfyUI support as:
 🔴 **Paper Name** — no repo found
 (repeat for each paper with no repo at all)
 
+### Commercial Usage Warnings
+⚠️ **Paper Name** — license issue description
+(repeat for each paper where commercial_ok is false. Only show this section if there are issues.)
+
 ---
-**Summary:** X checked · X code available · X ComfyUI · X no code
+**Summary:** X checked · X code available · X ComfyUI · X no code · X commercial issues
 ```
 
 **Rules for the report:**

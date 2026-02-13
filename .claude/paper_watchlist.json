@@ -4,416 +4,512 @@
       "url": "https://dvirsamuel.github.io/omnimattezero.github.io/",
       "name": "OmnimatteZero: Fast Training-free Omnimatte with Pre-trained Video Diffusion Models",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/dvirsamuel/OmnimatteZero",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "SIGGRAPH ASIA 2025. arXiv: 2503.18033. Repo has 102 stars, working code for object removal/extraction/composition. Requires 32GB+ GPU VRAM, uses LTX-Video 0.9.7. No ComfyUI custom node found."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file — all rights reserved. LTX-Video dep is Apache-2.0 but code itself has no license grant.",
+        "notes": "SIGGRAPH ASIA 2025. arXiv: 2503.18033. Full working code (OmnimatteZero.py, object_removal.py, foreground_composition.py). Requires 32GB+ GPU VRAM, uses LTX-Video 0.9.7. No ComfyUI custom node found."
       }
     },
     {
       "url": "https://hjrphoebus.github.io/3DiMo/",
       "name": "3DiMo: 3D-Aware Implicit Motion Control for View-Adaptive Human Video Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/hjrPhoebus/3DiMo",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2602.03796 (Feb 2026). GitHub repo exists but is project page only (HTML/assets, no source code). From Kling Team / Kuaishou Technology / Tsinghua / CASIA."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2602.03796 (Feb 2026). GitHub repo exists but is project page only (HTML/assets, no source code). From Kling Team / Kuaishou Technology. A Threads post explicitly listed 'code: none'."
       }
     },
     {
       "url": "https://sirui-xu.github.io/InterPrior/",
       "name": "InterPrior: Scaling Generative Control for Physics-Based Human-Object Interactions",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2602.06035 (Feb 2026). No code released yet. Author (Sirui Xu) has released code for prior work InterMimic (CVPR 2025) and InterDiff (ICCV 2023) at github.com/Sirui-Xu/. Code may follow."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2602.06035 (Feb 2026). No code released yet. Author (Sirui Xu) has released code for prior work InterMimic (CVPR 2025) and InterDiff (ICCV 2023). Code may follow."
       }
     },
     {
       "url": "https://edit-yourself.github.io/",
       "name": "EditYourself: Audio-Driven Generation and Manipulation of Talking Head Videos with Diffusion Transformers",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2601.22127 (Jan 2026). No code released. DiT-based V2V framework for audio-driven talking head editing with lip sync. No ComfyUI integration found."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2601.22127 (Jan 2026). Project page has placeholder 'Code' link. No code released, no timeline announced."
       }
     },
     {
       "url": "https://zjp-shadow.github.io/works/SkinTokens/#",
       "name": "SkinTokens: A Learned Compact Representation for Unified Autoregressive Rigging",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Code link on project page is placeholder (#). Author (Jiapeng Zhang / zjp-shadow) has released CharacterGen (SIGGRAPH'24) and co-authored UniRig. SkinTokens code not yet released."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2602.04805 (Feb 2026). Placeholder code link on project page. Author (zjp-shadow) has released CharacterGen, UniRig. SkinTokens code not yet released."
       }
     },
     {
       "url": "https://coral79.github.io/frankenmotion/",
       "name": "FrankenMotion: Part-level Human Motion Generation and Composition",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/Coral79/FrankenMotion-Code",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "GitHub repo exists (189 stars) but is placeholder only - README says 'Coming Soon' for code, models, and Frankenstein Dataset. No actual source code yet."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2601.10909. GitHub repo (191 stars) is placeholder only — README says 'Coming Soon' for code, models, and Frankenstein Dataset."
       }
     },
     {
       "url": "https://motion3-to-4.github.io/",
       "name": "Motion 3-to-4: 3D Motion Reconstruction for 4D Synthesis",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/Inception3D/Motion324",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2601.14253. Full working code: train.py, inference scripts, configs. 112 stars. Requires Python 3.11, PyTorch 2.4.1, GPU compute >8.0, Hunyuan3D-2.0, Blender 4.0. Pre-trained checkpoints on HuggingFace. CC BY-NC-SA 4.0 license. No ComfyUI integration found."
+        "license": "CC-BY-NC-SA-4.0",
+        "commercial_ok": false,
+        "license_issues": "CC BY-NC-SA 4.0 — non-commercial only",
+        "notes": "arXiv: 2601.14253. Full working code: train.py, model architecture, configs, evaluation. 112 stars. Requires Python 3.11, PyTorch 2.4.1, GPU compute >8.0. No ComfyUI node."
       }
     },
     {
       "url": "https://congwei1230.github.io/UniVideo/",
       "name": "UniVideo: Unified Understanding, Generation, and Editing for Videos",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/KwaiVGI/UniVideo",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "ICLR 2026. Full implementation. 9 tasks: captioning, T2V, I2V, editing, etc. Built on HunyuanVideo + Qwen2.5-VL. Requires 24GB+ VRAM (80GB recommended). No ComfyUI node found, but KwaiVGI has other ComfyUI integrations (KLingAI-API)."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file — all rights reserved. HunyuanVideo dep has geo restrictions (no EU/UK/Korea, 100M MAU cap).",
+        "notes": "ICLR 2026. Full implementation: pipeline, transformer, MLLM encoder, inference, evaluation. Built on HunyuanVideo + Qwen2.5-VL. 24GB+ VRAM (80GB recommended). No ComfyUI node."
       }
     },
     {
       "url": "https://lemonsky1995.github.io/dreamstyle/",
       "name": "DreamStyle: A Unified Framework for Video Stylization",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/LemonSky1995/DreamStyle",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From ByteDance. arXiv: 2601.02785. Repo exists but placeholder only (README + assets). Code release planned but not yet available."
+        "license": "Apache-2.0",
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From ByteDance. arXiv: 2601.02785. Repo is placeholder (README + assets). TODO list shows only 'Release technical report' checked; inference/models/training all unchecked."
       }
     },
     {
       "url": "https://neoverse-4d.github.io/",
       "name": "NeoVerse: Enhancing 4D World Model with in-the-wild Monocular Videos",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/IamCreateAI/NeoVerse",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2601.00393. From CASIA & CreateAI. Repo exists but placeholder only (README). No code released."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2601.00393. From CASIA & CreateAI. Repo is placeholder (README only). No code released."
       }
     },
     {
       "url": "https://xiaokunsun.github.io/MorphAny3D.github.io/",
       "name": "MorphAny3D: Unleashing the Power of Structured Latent in 3D Morphing",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/XiaokunSun/MorphAny3D",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2601.00204. From Nanjing U & Peking U. Repo exists but placeholder - README says 'code will be released after paper is accepted'."
+        "license": "MIT",
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2601.00204. Repo is placeholder — README still says 'code will be released after paper is accepted'. MIT license."
       }
     },
     {
       "url": "https://yichuanh.github.io/GaMO/",
       "name": "GaMO: Geometry-aware Multi-view Diffusion Outpainting for Sparse-View 3D Reconstruction",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/yichuanH/GaMO_official",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2512.25073. Full implementation: Python, CUDA, C++. Five-stage pipeline. Requires 3 conda environments. 25x speedup over SOTA. No ComfyUI integration."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file — all rights reserved under default copyright.",
+        "notes": "arXiv: 2512.25073. Full implementation: Python, CUDA, C++. Five-stage pipeline (3dgs, gamo, getmask, pointcloud). 25x speedup over SOTA. No ComfyUI integration."
       }
     },
     {
       "url": "https://zju3dv.github.io/InfiniDepth/",
       "name": "InfiniDepth: Arbitrary-Resolution and Fine-Grained Depth Estimation with Neural Implicit Fields",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/zju3dv/InfiniDepth",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From ZJU 3DV. 549 stars. Repo exists but placeholder (README + assets). Roadmap for weights/inference/training release planned but Phase 1 incomplete. Depth up to 16K resolution."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From ZJU 3DV. 549 stars. Repo is placeholder (README + assets). Phased roadmap (weights/inference → training/benchmark) still incomplete. Depth up to 16K resolution."
       }
     },
     {
       "url": "https://github.com/Tencent-Hunyuan/HY-MT",
       "name": "HY-MT: Hunyuan Translation Model v1.5",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/Tencent-Hunyuan/HY-MT",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Tencent open-source NMT. 1.8B and 7B models, 33 languages. Full code: train, finetune, inference. vLLM/TensorRT-LLM support. Not relevant to ComfyUI (translation, not image/video)."
+        "license": "Tencent-Hunyuan-Community",
+        "commercial_ok": true,
+        "license_issues": "Commercial OK but with restrictions: no EU/UK/South Korea, 100M MAU cap requires separate license, no training competing AI models.",
+        "notes": "Tencent open-source NMT. 1.8B and 7B models on HuggingFace, 33 languages. Full code: train, finetune, inference. vLLM/TensorRT-LLM support. Not relevant to ComfyUI (translation model)."
       }
     },
     {
       "url": "https://biangbiang0321.github.io/SpotEdit.github.io/",
       "name": "SpotEdit: Selective Region Editing in Diffusion Transformers",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/Biangbiang0321/SpotEdit",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2512.22323. From NUS & SJTU. Full Python code. Training-free selective region editing in DiT. 1.95x speedup. No ComfyUI node found."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file — all rights reserved under default copyright.",
+        "notes": "arXiv: 2512.22323. From NUS & SJTU. Full Python code. Training-free selective region editing in DiT. 1.95x speedup. Open issue #1 requesting ComfyUI/Gradio support — no author response yet."
       }
     },
     {
       "url": "https://isee-laboratory.github.io/ProEdit/",
       "name": "ProEdit: Inversion-based Editing From Prompts Done Right",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/iSEE-Laboratory/ProEdit",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Dec 2025. Full code (Python + Shell). FLUX backbone. KV-mix + Latents-Shift. Image editing released, video editing pending. No ComfyUI node found."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file + depends on FLUX.1-dev (non-commercial license from Black Forest Labs).",
+        "notes": "Dec 2025. Image editing code released (Image_Edit_FLUX/ directory, FLUX backbone). KV-mix + Latents-Shift. Video editing code still pending per TODO list. No ComfyUI node."
       }
     },
     {
       "url": "https://zheninghuang.github.io/Space-Time-Pilot/",
       "name": "SpaceTimePilot: Generative Rendering of Dynamic Scenes Across Space and Time",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/ZheningHuang/SpaceTimePilot",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From Adobe Research + Cambridge. Dec 2025. Repo is placeholder (assets + README). Code under internal review, coming soon. Bullet-time, slow motion, reverse playback."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From Adobe Research + Cambridge. Dec 2025. Repo is placeholder (README + assets). 'Code and datasets under internal review, will be released soon.' No specific timeline."
       }
     },
     {
       "url": "https://generative-refocusing.github.io/",
       "name": "Generative Refocusing: Flexible Defocus Control from a Single Image",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/rayray9999/Genfocus",
         "comfyui_support": "available",
         "comfyui_url": "https://github.com/EricRollei/comfyui-refocus",
-        "notes": "Full code with Gradio demo. FLUX.1-dev based. ~45GB VRAM. 278 stars. Apache-2.0. ComfyUI integration by Eric Rollei (comfyui-refocus)."
+        "license": "Apache-2.0",
+        "commercial_ok": false,
+        "license_issues": "Code is Apache-2.0 but depends on FLUX.1-dev (non-commercial license from Black Forest Labs).",
+        "notes": "Full code with Gradio demo. FLUX.1-dev based. ~45GB VRAM. 278 stars. ComfyUI node by EricRollei (5 commits, Dec 2025) provides DeblurNet, BokehNet, DepthPro nodes + example workflows."
       }
     },
     {
       "url": "https://emjay73.github.io/InfCam/",
       "name": "InfCam: Infinite-Homography as Robust Conditioning for Camera-Controlled Video Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/emjay73/InfCam",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2512.17040. Full code (Python + CUDA). 10 preset camera trajectories. Depth-free camera control. Requires H100 80GB. Dec 2025. No ComfyUI node found."
+        "license": "Apache-2.0",
+        "commercial_ok": false,
+        "license_issues": "Code is Apache-2.0 but depends on UniDepth (CC-BY-NC-4.0, non-commercial).",
+        "notes": "arXiv: 2512.17040. Full code (inference + training). 10 preset camera trajectories. Depth-free camera control. Pre-trained weights on HuggingFace. Requires H100 80GB. No ComfyUI node."
       }
     },
     {
       "url": "https://zhaojingjing713.github.io/Spatia/",
       "name": "Spatia: Video Generation with Updatable Spatial Memory",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/ZhaoJingjing713/Spatia",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From U Sydney / Microsoft Research / HKUST / Waterloo. 168 stars. Repo is placeholder - 'Code Coming Soon'. CC BY-SA 4.0."
+        "license": "CC-BY-SA-4.0",
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From U Sydney / Microsoft Research / HKUST / Waterloo. 168 stars. Repo is placeholder — 'Code Coming Soon' badge. CC BY-SA 4.0."
       }
     },
     {
       "url": "https://maddog241.github.io/mvinverse-page/",
       "name": "MVInverse: Feed-forward Multi-view Inverse Rendering in Seconds",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/Maddog241/mvinverse",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2512.21003. Inference code + model utils (partial - no full training). Pre-trained models on HuggingFace. Predicts albedo, metallic, roughness, normals. No ComfyUI node."
+        "license": "BSD-2-Clause-NC",
+        "commercial_ok": false,
+        "license_issues": "BSD-2-Clause modified with non-commercial restriction ('Pi3 for non-commercial purposes').",
+        "notes": "arXiv: 2512.21003. Inference code + mvinverse package (no training code). Pre-trained models on HuggingFace. Predicts albedo, metallic, roughness, normals. No ComfyUI node."
       }
     },
     {
       "url": "https://dreamontage.github.io/DreaMontage/",
       "name": "DreaMontage: Arbitrary Frame-Guided One-Shot Video Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "arXiv: 2512.21252. No GitHub repo found. Has CapCut demo only. No code released."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2512.21252. ByteDance. No GitHub repo found. Has CapCut demo only. Social media confirmed 'No code'. No code released."
       }
     },
     {
       "url": "https://3dregen.jdihlmann.com/",
       "name": "3D-RE-GEN: 3D Reconstruction of Indoor Scenes with a Generative Framework",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/cgtuebingen/3D-RE-GEN",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Dec 2025. From U Tübingen. Full source code (src/ directory). Single-image to editable 3D scene. Uses git submodules for external models. No ComfyUI node."
+        "license": "none",
+        "commercial_ok": false,
+        "license_issues": "No LICENSE file + Hunyuan3D-2 dep has geo/MAU restrictions + VGGT dep default checkpoint is non-commercial.",
+        "notes": "Dec 2025. From U Tubingen. Full source code (98.2% Python): run.py, src/, segmentor/. Uses git submodules (Hunyuan3D-2, VGGT). Single-image to editable 3D scene. No ComfyUI node."
       }
     },
     {
       "url": "https://nvlabs.github.io/CARI4D/",
       "name": "CARI4D: Category Agnostic 4D Reconstruction of Human-Object Interaction",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/NVlabs/CARI4D",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From NVIDIA. Repo exists but is project page only (JS/HTML/CSS). Code pending internal approval, expected Jan 2026 release (may be overdue)."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From NVIDIA. Repo is project page only (HTML/JS). README stated 'Expected code release in January 2026' but all TODO items remain unchecked. NVIDIA internal approval still pending."
       }
     },
     {
       "url": "https://snowflakewang.github.io/AniX/",
       "name": "AniX: Animate Any Character in Any World",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/snowflakewang/AniX",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "From Fudan / Microsoft Research / Waterloo / HKU. Repo is placeholder - 'Code Coming Soon'. NLP-controlled 3D character animation."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "From Fudan / Microsoft Research / Waterloo / HKU. Repo is placeholder — 'Code Coming Soon' badge. No source code released."
       }
     },
     {
       "url": "https://huggingface.co/spaces/huawei-bayerlab/windowseat-reflection-removal-web",
       "name": "WindowSeat: Reflection Removal",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/huawei-bayerlab/windowseat-reflection-removal",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Full Python implementation with inference script. LoRA adaptation of Qwen-Image-Edit-2509. Requires 24GB VRAM."
+        "license": "Apache-2.0",
+        "commercial_ok": true,
+        "license_issues": null,
+        "notes": "Full Python implementation: inference + reproducibility scripts. Qwen-Image-Edit backbone (also Apache-2.0) with WindowSeat LoRA on HuggingFace. Requires 24GB VRAM. No ComfyUI node."
       }
     },
     {
       "url": "https://github.com/ali-vilab/Wan-Move",
       "name": "Wan-Move: Motion-controllable Video Generation via Latent Trajectory Guidance",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/ali-vilab/Wan-Move",
         "comfyui_support": "available",
         "comfyui_url": "https://github.com/kijai/ComfyUI-WanVideoWrapper",
-        "notes": "NeurIPS 2025. Full inference code + Gradio app. ComfyUI via Kijai's WanVideoWrapper (WanMove folder, models on HF)."
+        "license": "Apache-2.0",
+        "commercial_ok": true,
+        "license_issues": null,
+        "notes": "NeurIPS 2025. Full inference code + Gradio app. ComfyUI via Kijai's WanVideoWrapper (1,423 commits, actively maintained). Dedicated WanMove/ dir + example workflow. FP8/FP16 models on HF. Recent issue #1926 noted compat fix needed with latest ComfyUI."
       }
     },
     {
       "url": "https://lizhiqi49.github.io/MoCA/",
       "name": "MoCA: Mixture-of-Components Attention for Scalable Compositional 3D Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/lizhiqi49/MoCA",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Code available on GitHub. No ComfyUI custom node exists."
+        "license": "unknown",
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "Code available on GitHub. Research-oriented 3D compositional generation. No ComfyUI custom node exists. License undetermined."
       }
     },
     {
       "url": "https://ke-xing.github.io/StereoWorld/",
       "name": "StereoWorld: Geometry-Aware Monocular-to-Stereo Video Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "No code released yet. Generic stereo nodes exist in ComfyUI but not specific to this paper."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv Dec 2025. Uses Wan2.1-T2V-1.3B backbone. No code released. Related stereo tools exist in ComfyUI (ComfyStereo, SSStereoscope) but not StereoWorld-specific."
       }
     },
     {
       "url": "https://animotionlab.github.io/MoCapAnything/",
       "name": "MoCapAnything: Unified 3D Motion Capture for Arbitrary Skeletons from Monocular Videos",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": null,
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Code release pending. No ComfyUI integration."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "Dec 2025. From Huawei. No code or Truebones Zoo dataset released. No code release timeline announced."
       }
     },
     {
       "url": "https://lightx-ai.github.io/",
       "name": "Light-X: Generative 4D Video Rendering with Camera and Illumination Control",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": true,
         "github_url": "https://github.com/TQTQliu/Light-X",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Full code with inference/training scripts. No ComfyUI node (ComfyUI-Lightx2vWrapper is a different project)."
+        "license": "S-Lab-1.0",
+        "commercial_ok": false,
+        "license_issues": "S-Lab License 1.0 — commercial use requires contacting authors for permission.",
+        "notes": "Full code: inference.py, train.py, demo.py, configs, pretrained models auto-download. No ComfyUI node (various lighting nodes exist but none wrap Light-X specifically)."
       }
     },
     {
       "url": "https://franciszzj.github.io/Saber/",
       "name": "Saber: Scaling Zero-Shot Reference-to-Video Generation",
       "added": "2026-02-08",
-      "last_checked": "2026-02-08",
+      "last_checked": "2026-02-09",
       "status": {
         "code_available": false,
         "github_url": "https://github.com/franciszzj/Saber",
         "comfyui_support": "none",
         "comfyui_url": null,
-        "notes": "Placeholder repo - 'code will be released once organized'. No ComfyUI support."
+        "license": null,
+        "commercial_ok": null,
+        "license_issues": null,
+        "notes": "arXiv: 2512.06905. Repo is placeholder — 'code will be released once organized'. Only CSS/HTML for project page, 2.4% Python (mask augmentation script). No inference/training code."
       }
     }
   ]

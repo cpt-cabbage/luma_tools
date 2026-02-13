@@ -1,5 +1,20 @@
 # Luma Tools Changelog
 
+## Version 0.6.3.5
+- Bug fixes
+
+## Version 0.6.3.4
+- Fix seed Qspinbox overflow
+
+## Version 0.6.3.3
+- Fix Multiworkflow models not showing notes
+
+## Version 0.6.3.2
+- Add Trellis MultiView
+
+## Version 0.6.3.1
+UI Fix
+
 ## Version 0.6.3
 
 - Canvas: Add VideoNode with inline playback, thumbnail extraction, drag-drop, and gallery integration

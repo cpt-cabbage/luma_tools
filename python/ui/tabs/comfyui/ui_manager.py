@@ -1003,16 +1003,22 @@ class ComfyUIWidgetManager:
         elif node.widget_type == 'int':
             input_widget = QSpinBox()
             # Use real constraints from node_info, fall back to defaults
+            # Clamp to QSpinBox's 32-bit signed int range (ComfyUI seeds can be 2^64-1)
+            _INT_MIN, _INT_MAX = -2_147_483_648, 2_147_483_647
             min_val = int(widget_info.min_val) if widget_info and widget_info.min_val is not None else 0
             max_val = int(widget_info.max_val) if widget_info and widget_info.max_val is not None else 999999
+            min_val = max(min_val, _INT_MIN)
+            max_val = min(max_val, _INT_MAX)
             input_widget.setRange(min_val, max_val)
             if widget_info and widget_info.step is not None:
                 input_widget.setSingleStep(int(widget_info.step))
             input_widget.setFixedWidth(80)
             if node.current_value is not None:
                 try:
-                    input_widget.setValue(int(node.current_value))
-                except (ValueError, TypeError):
+                    val = int(node.current_value)
+                    val = max(min_val, min(val, max_val))
+                    input_widget.setValue(val)
+                except (ValueError, TypeError, OverflowError):
                     pass
             layout.addWidget(input_widget)
 

@@ -735,8 +735,6 @@ QPushButton[utility="true"]:checked {
 
 #UtilityButtonContainer {
     background-color: transparent !important;
-    min-height: 67px !important;
-    max-height: 67px !important;
     padding: 0px !important;
     margin: 0px !important;
 }

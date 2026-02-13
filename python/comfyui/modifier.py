@@ -39,6 +39,117 @@ def _is_file_path(value: Any) -> bool:
     return any(value.lower().endswith(ext) for ext in FILE_EXTENSIONS)
 
 
+def _is_link(value: Any) -> bool:
+    """Check if an input value is a link reference to another node ([node_id, slot])."""
+    return isinstance(value, list) and len(value) == 2 and isinstance(value[1], int)
+
+
+def remove_nodes_from_api_workflow(
+    workflow: Dict[str, Any],
+    node_ids_to_remove: set,
+) -> None:
+    """Remove nodes from an API-format workflow with cascading removal.
+
+    For each removed node, downstream references are rerouted through it
+    (pass-through: output slot N maps to N-th link input). If no upstream
+    source exists for a slot, the downstream input is removed. If that
+    input was REQUIRED (per node_info cache), the downstream node is also
+    removed (cascade). Optional lost inputs are simply dropped.
+
+    Args:
+        workflow: API format workflow dict (modified in place).
+        node_ids_to_remove: Set of node ID strings to remove.
+    """
+    from comfyui.node_info import get_required_input_names
+
+    if not node_ids_to_remove:
+        return
+
+    all_removed = set(node_ids_to_remove)
+    pending = set(node_ids_to_remove)
+
+    # Cascade: keep removing until no new nodes are affected
+    while pending:
+        # Build pass-through maps for pending nodes:
+        # {node_id: {output_slot: (upstream_node_id, upstream_slot)}}
+        passthrough = {}
+        for nid in pending:
+            node_data = workflow.get(nid)
+            if not node_data or not isinstance(node_data, dict):
+                continue
+            inputs = node_data.get('inputs', {})
+            # Collect link inputs in dict order (insertion order = slot order)
+            link_inputs = []
+            for value in inputs.values():
+                if _is_link(value):
+                    link_inputs.append((str(value[0]), value[1]))
+            passthrough[nid] = {slot: src for slot, src in enumerate(link_inputs)}
+
+        # Reroute downstream references, track nodes that lose required inputs
+        newly_broken = set()
+        for node_id, node_data in list(workflow.items()):
+            if node_id in all_removed or not isinstance(node_data, dict):
+                continue
+            inputs = node_data.get('inputs', {})
+            class_type = node_data.get('class_type', '')
+            required = get_required_input_names(class_type)
+            # If cache miss, assume all inputs are required (safe default)
+            required_set = set(required) if required is not None else None
+
+            keys_to_remove = []
+            for input_name, value in inputs.items():
+                if not _is_link(value):
+                    continue
+                ref_node = str(value[0])
+                ref_slot = value[1]
+                if ref_node not in pending:
+                    continue
+                # Trace through chain of removed nodes
+                visited = set()
+                cur_node, cur_slot = ref_node, ref_slot
+                while cur_node in all_removed and cur_node not in visited:
+                    visited.add(cur_node)
+                    upstream = passthrough.get(cur_node, {}).get(cur_slot)
+                    if upstream:
+                        cur_node, cur_slot = upstream
+                    else:
+                        cur_node = None
+                        break
+                if cur_node and cur_node not in all_removed:
+                    inputs[input_name] = [cur_node, cur_slot]
+                    logger.info(f"  Rerouted node {node_id}.{input_name}: "
+                                f"[{ref_node},{ref_slot}] -> [{cur_node},{cur_slot}]")
+                else:
+                    keys_to_remove.append(input_name)
+
+            if keys_to_remove:
+                lost_required = False
+                for key in keys_to_remove:
+                    del inputs[key]
+                    is_req = required_set is None or key in required_set
+                    req_label = "required" if is_req else "optional"
+                    logger.info(f"  Removed {req_label} input {node_id}.{key}: "
+                                f"no upstream through removed node(s)")
+                    if is_req:
+                        lost_required = True
+                if lost_required:
+                    # Lost a required input — node can't execute, cascade
+                    newly_broken.add(node_id)
+
+        # Delete pending nodes from workflow
+        for nid in pending:
+            if nid in workflow:
+                class_type = workflow[nid].get('class_type', 'unknown')
+                del workflow[nid]
+                logger.info(f"  Removed node {nid} ({class_type}) from workflow")
+
+        # Cascade: only nodes that lost required inputs
+        pending = newly_broken - all_removed
+        if pending:
+            logger.info(f"  Cascading removal to {len(pending)} downstream node(s)")
+        all_removed.update(pending)
+
+
 def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]:
     """
     Scan API format workflow and convert all file paths to basenames.
@@ -157,6 +268,7 @@ def modify_workflow_api_format(
     # Apply editable_values first (from dynamic UI)
     # Format: {node_id: [{'node': EditableNode, 'value': Any}, ...]} (list-per-node)
     # Also supports legacy format: {node_id: {'node': EditableNode, 'value': Any}}
+
     if editable_values:
         total_entries = sum(len(v) if isinstance(v, list) else 1 for v in editable_values.values())
         logger.info(f"=== Applying {total_entries} editable values across {len(editable_values)} nodes ===")
@@ -201,7 +313,6 @@ def modify_workflow_api_format(
                     if value:
                         # Handle both string paths and lists (from batch selector)
                         if isinstance(value, list):
-                            # If it's a list, use the first item
                             image_path = value[0] if value else None
                         else:
                             image_path = value
@@ -215,9 +326,8 @@ def modify_workflow_api_format(
                             inputs['image'] = basename
                             logger.info(f"  Set image node {node_id} ({node_type}): {basename}")
                     else:
-                        # No image provided - bypass this loader node
-                        node_data['mode'] = 4  # 4 = bypassed
-                        logger.info(f"  Bypassed image loader node {node_id} ({node_type}) - no image provided")
+                        # No image provided — leave node as-is with its workflow default
+                        logger.info(f"  Image node {node_id} ({node_type}): no file selected, keeping workflow default")
                 elif widget_type == 'int':
                     # For settings nodes, use explicit widget_name if available
                     if widget_name:
@@ -279,9 +389,8 @@ def modify_workflow_api_format(
                             inputs['model_file'] = os.path.basename(model_path)
                             logger.info(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
                     else:
-                        # No 3D model provided - bypass this loader node
-                        node_data['mode'] = 4  # 4 = bypassed
-                        logger.info(f"  Bypassed 3D model loader node {node_id} ({node_type}) - no model provided")
+                        # No model provided — leave node as-is with its workflow default
+                        logger.info(f"  3D model node {node_id} ({node_type}): no file selected, keeping workflow default")
                 elif widget_type == 'video':
                     # Video file path
                     if value:
@@ -295,9 +404,8 @@ def modify_workflow_api_format(
                             inputs['video'] = os.path.basename(video_path)
                             logger.info(f"  Set video node {node_id} ({node_type}): {os.path.basename(video_path)}")
                     else:
-                        # No video provided - bypass this loader node
-                        node_data['mode'] = 4  # 4 = bypassed
-                        logger.info(f"  Bypassed video loader node {node_id} ({node_type}) - no video provided")
+                        # No video provided — leave node as-is with its workflow default
+                        logger.info(f"  Video node {node_id} ({node_type}): no file selected, keeping workflow default")
                 elif widget_type == 'directory':
                     # Directory path
                     if value:
@@ -327,7 +435,9 @@ def modify_workflow_api_format(
 
     # Process nodes with @if_ conditional in their title
     # Format: "Node Name_editable&if_ToggleName" or "Node Name&if_ToggleName"
-    # If the referenced toggle is False, bypass this node
+    # If the referenced toggle is False, remove the node from the workflow
+    # with pass-through rerouting of downstream references
+    nodes_to_remove = set()
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict):
             continue
@@ -351,12 +461,16 @@ def modify_workflow_api_format(
             toggle_value = toggle_values.get(if_match)
             if toggle_value is not None:
                 if not toggle_value:
-                    # Toggle is OFF - bypass this node
-                    node_data['mode'] = 4  # 4 = bypassed
+                    # Toggle is OFF - mark for removal
                     class_type = node_data.get('class_type', 'unknown')
-                    logger.info(f"[Bypass] Bypassed node {node_id} ({class_type}) - '{if_match}' is OFF")
+                    nodes_to_remove.add(str(node_id))
+                    logger.info(f"[Bypass] Will remove node {node_id} ({class_type}) - '{if_match}' is OFF")
             else:
                 logger.warning(f"[Bypass] Node {node_id} references toggle '{if_match}' but toggle not found")
+
+    if nodes_to_remove:
+        logger.info(f"[Bypass] Removing {len(nodes_to_remove)} conditionally disabled node(s)")
+        remove_nodes_from_api_workflow(modified, nodes_to_remove)
 
     # Check if any export node has _output suffix (primary output designation)
     # If so, only those nodes get the output prefix — others are skipped

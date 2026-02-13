@@ -1,14 +1,30 @@
 {
   "comfyui_workflow_presets": {
     "Trellis 2": {
-      "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_2_v003.json",
+      "path": "",
       "description": "Image to Model",
       "iteratable": false,
       "note": "",
-      "full_restart": true,
+      "full_restart": false,
       "node_overrides": {},
-      "is_multi": false,
-      "output_type": "3d"
+      "is_multi": true,
+      "output_type": "3d",
+      "workflows": {
+        "SingleView": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_2_v004.json",
+          "note": "Needs single Subject, clear difference between BG and FG and center of frame. Does not work on greyscale, needs to be rendered/real.",
+          "iteratable": false,
+          "full_restart": true,
+          "node_overrides": {}
+        },
+        "MultiViews": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_Multiview_v005.json",
+          "note": "Needs single Subject, clear difference between BG and FG and center of frame. Does not work on greyscale, needs to be rendered/real. Make sure they all line up.",
+          "iteratable": false,
+          "full_restart": true,
+          "node_overrides": {}
+        }
+      }
     },
     "Qwen image 2512 Turbo": {
       "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/image_qwen_image_2512_with_2steps_lora_v001.json",
@@ -201,6 +217,32 @@
           "node_overrides": {}
         }
       }
+    },
+    "WindowSeat": {
+      "path": "",
+      "description": "Auto Reflection Removal",
+      "iteratable": false,
+      "note": "",
+      "full_restart": false,
+      "node_overrides": {},
+      "is_multi": true,
+      "output_type": "image",
+      "workflows": {
+        "Single Image": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/WindowSeat_Single_v001.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": false,
+          "node_overrides": {}
+        },
+        "Image Sequence": {
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/WindowSeat_Multi.json",
+          "note": "",
+          "iteratable": false,
+          "full_restart": false,
+          "node_overrides": {}
+        }
+      }
     }
   },
   "comfyui_path": "D:\\ComfyUI\\",
@@ -209,7 +251,8 @@
   "admin_users": [
     "neill.vermaak",
     "mark.zimmer",
-    "christophe.leyder"
+    "christophe.leyder",
+    "jason.cullen"
   ],
   "network_output_path": "W:/LumaRND/luma_tools",
   "comfyui_use_user_subfolder": true,

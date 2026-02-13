@@ -237,6 +237,7 @@ server_state = ThreadSafeState({
     'max_crash_restarts': 5,
     'crash_cooldown_seconds': 60,
     'self_restart_pending': False,  # Set when ComfyUI initiates its own restart
+    'last_output_time': None,  # Timestamp of last stdout activity from ComfyUI
 })
 
 
@@ -373,12 +374,22 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
 def health_monitor_thread(port: int):
     """Background thread to monitor ComfyUI health."""
     consecutive_failures = 0
-    max_consecutive_failures = 2  # Trigger restart after 2 consecutive failures (was 3)
+    max_consecutive_failures = 2  # Trigger restart after 2 consecutive failures
+    activity_grace_period = 300  # Seconds — skip health check if ComfyUI produced output recently
 
     while not server_state['shutdown_requested']:
-        time.sleep(20)  # Check more frequently (was 30s)
+        time.sleep(20)
 
         if server_state['is_ready']:
+            # If ComfyUI has produced stdout output recently, it's alive and working.
+            # Heavy operations (model loading, GPU inference) can block the HTTP
+            # server from responding, causing false-positive health check failures.
+            last_output = server_state.get('last_output_time')
+            if last_output and (time.time() - last_output) < activity_grace_period:
+                consecutive_failures = 0
+                server_state['last_health_check'] = datetime.now().isoformat()
+                continue
+
             healthy = check_server_health(port=port)
             server_state['last_health_check'] = datetime.now().isoformat()
 
@@ -519,6 +530,7 @@ def stream_comfyui_output(process: subprocess.Popen):
             line = line.rstrip()
             if line:
                 logger.info(f"[ComfyUI] {line}")
+                server_state['last_output_time'] = time.time()
 
                 if "Prompt executed in" in line:
                     server_state.increment('jobs_completed')

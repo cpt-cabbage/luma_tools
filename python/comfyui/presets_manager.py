@@ -562,6 +562,10 @@ def get_workflow_preset_subworkflows(name: str) -> Dict[str, Any]:
 
 def get_workflow_preset_note(name: str, selected_workflow: Optional[str] = None) -> str:
     """Get the note for a workflow preset (displayed in model group box)."""
+    if selected_workflow and is_workflow_preset_multi(name):
+        workflows = _get_workflow_preset_field(name, "workflows", {})
+        if selected_workflow in workflows:
+            return workflows[selected_workflow].get("note", "")
     return _get_workflow_preset_field(name, "note", "")
 
 
