@@ -130,7 +130,7 @@ class CanvasSyncManager(QObject):
         """
         Acquire file lock for writing.
 
-        Uses a simple lock file with timeout. If lock is stale (>30s old),
+        Uses a simple lock file with timeout. If lock is stale (>10s old),
         it will be forcibly removed.
 
         Args:
@@ -150,17 +150,37 @@ class CanvasSyncManager(QObject):
 
         while True:
             try:
-                # Check for stale lock (>30 seconds old)
+                # Check for stale lock (>10 seconds old)
                 if os.path.exists(lock_path):
-                    lock_age = time.time() - os.path.getmtime(lock_path)
-                    if lock_age > 30:
-                        logger.warning(f"Removing stale lock file ({lock_age:.1f}s old)")
-                        os.remove(lock_path)
+                    try:
+                        mtime = os.path.getmtime(lock_path)
+                        lock_age = time.time() - mtime
+                        if lock_age > 10:
+                            # Read lock content to verify ownership before deleting
+                            try:
+                                with open(lock_path, 'r') as f:
+                                    lock_content = f.read()
+                            except (IOError, OSError):
+                                lock_content = ""
+                            # Re-check mtime to minimize TOCTOU window
+                            try:
+                                if os.path.getmtime(lock_path) == mtime:
+                                    logger.warning(
+                                        f"Removing stale lock file ({lock_age:.1f}s old, "
+                                        f"owner: {lock_content.split(':')[0] if lock_content else 'unknown'})"
+                                    )
+                                    os.remove(lock_path)
+                            except (FileNotFoundError, OSError):
+                                pass  # Another process already handled it
+                    except (FileNotFoundError, OSError):
+                        pass  # Another process already removed it or file changed
 
                 # Try to create lock file (exclusive)
                 fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, f"{self._username}:{time.time()}".encode())
-                os.close(fd)
+                try:
+                    os.write(fd, f"{self._username}:{time.time()}".encode())
+                finally:
+                    os.close(fd)
                 return True
 
             except FileExistsError:
@@ -233,15 +253,15 @@ class CanvasSyncManager(QObject):
                 for attempt in range(max_retries):
                     try:
                         os.replace(temp_path, state_path)
+                        self._last_local_save = time.time()
+                        # Read mtime immediately after replace to minimize race window
+                        self._last_state_mtime = os.path.getmtime(state_path)
                         break
                     except PermissionError:
                         if attempt < max_retries - 1:
                             time.sleep(0.1)
                         else:
                             raise
-
-                self._last_local_save = time.time()
-                self._last_state_mtime = os.path.getmtime(state_path)
                 self._is_dirty = False
 
                 logger.debug(f"Canvas state saved: {state_path}")
@@ -267,44 +287,46 @@ class CanvasSyncManager(QObject):
         if not state_path or not os.path.exists(state_path):
             return None
 
-        try:
-            with open(state_path, 'r', encoding='utf-8') as f:
-                state = json.load(f)
+        with self._file_lock:
+            try:
+                with open(state_path, 'r', encoding='utf-8') as f:
+                    state = json.load(f)
 
-            self._last_state_mtime = os.path.getmtime(state_path)
-            return state
+                self._last_state_mtime = os.path.getmtime(state_path)
+                return state
 
-        except Exception as e:
-            logger.error(f"Failed to load canvas state: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"Failed to load canvas state: {e}")
+                return None
 
     def _poll_state(self):
         """Poll for state changes from other users."""
-        if self._saving:
-            return  # Skip polling during active save to avoid file contention
+        with self._file_lock:
+            if self._saving:
+                return  # Skip polling during active save to avoid file contention
 
-        state_path = self.state_file_path
-        if not state_path or not os.path.exists(state_path):
-            return
+            state_path = self.state_file_path
+            if not state_path or not os.path.exists(state_path):
+                return
 
-        try:
-            current_mtime = os.path.getmtime(state_path)
+            try:
+                current_mtime = os.path.getmtime(state_path)
 
-            # Check if file was modified by someone else
-            if current_mtime > self._last_state_mtime:
-                # Don't reload if we just saved (prevents self-triggering)
-                if time.time() - self._last_local_save < 1.0:
-                    self._last_state_mtime = current_mtime
-                    return
+                # Check if file was modified by someone else
+                if current_mtime > self._last_state_mtime:
+                    # Don't reload if we just saved (prevents self-triggering)
+                    if time.time() - self._last_local_save < 1.0:
+                        self._last_state_mtime = current_mtime
+                        return
 
-                # Load remote state
-                state = self.load_state()
-                if state:
-                    logger.info(f"Remote canvas change detected (by {state.get('modified_by', 'unknown')})")
-                    self.state_changed.emit(state)
+                    # Load remote state
+                    state = self.load_state()
+                    if state:
+                        logger.info(f"Remote canvas change detected (by {state.get('modified_by', 'unknown')})")
+                        self.state_changed.emit(state)
 
-        except Exception as e:
-            logger.warning(f"State poll error: {e}")
+            except Exception as e:
+                logger.warning(f"State poll error: {e}")
 
     def mark_dirty(self):
         """Mark local state as changed (needs save)."""

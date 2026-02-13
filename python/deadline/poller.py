@@ -6,6 +6,7 @@ and task log analysis for ComfyUI workflows.
 """
 
 import os
+import re
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -33,6 +34,11 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
     Returns:
         Dict with status, progress, completed_tasks, total_tasks, error_message
     """
+    # Validate job ID format (Deadline uses 24-character hex IDs)
+    if not job_id or not re.match(r'^[a-fA-F0-9]{24}$', job_id):
+        logger.error(f"Invalid Deadline job ID format: {job_id}")
+        return {"status": "Unknown", "progress": 0}
+
     try:
         if not DEADLINE_PATH:
             return {"status": "Unknown", "progress": 0, "error_message": "Deadline not available"}
@@ -376,10 +382,12 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
         if not pending_job_ids:
             return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": ""}
 
-        # Get job details for all pending jobs to sort by priority/submission time
+        # Get job details for pending jobs to sort by priority/submission time
         # Filter to only luma_tools ComfyUI jobs
+        # Limit to prevent unbounded memory/time on busy farms
+        MAX_JOBS_TO_CHECK = 100
         jobs_info = []
-        for pending_id in pending_job_ids:
+        for pending_id in pending_job_ids[:MAX_JOBS_TO_CHECK]:
             job_result = run_command([DEADLINE_PATH, "GetJob", pending_id], timeout=15)
 
             if job_result.returncode == 0:

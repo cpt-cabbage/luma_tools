@@ -155,11 +155,8 @@ class OperationsManager(BaseGalleryManager):
         stacks_to_remove = []
 
         for stack_id in stack_ids:
-            if stack_id not in self.tab._manager._stack_widgets:
-                continue
-
-            stack_widget = self.tab._manager._stack_widgets[stack_id]
-            if not isValid(stack_widget):
+            stack_widget = self.tab._manager._stack_widgets.get(stack_id)
+            if not stack_widget or not isValid(stack_widget):
                 stacks_to_remove.append(stack_id)
                 continue
 

@@ -243,7 +243,9 @@ def save_json(path, data, pretty=True):
     Returns:
         bool: True if successful, False otherwise
     """
-    ensure_directory(os.path.dirname(path))
+    dirname = os.path.dirname(path)
+    if dirname:
+        ensure_directory(dirname)
     temp_path = path + ".tmp"
     try:
         with open(temp_path, 'w', encoding='utf-8') as f:
@@ -256,8 +258,8 @@ def save_json(path, data, pretty=True):
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                logger.debug(f"Could not remove temp file {temp_path}: {cleanup_err}")
         return False
 
 

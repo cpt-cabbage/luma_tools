@@ -43,11 +43,11 @@ class LogsTab(BaseTab):
     TAB_CONFIG = TabConfig(ui_file="logs.ui", tab_name="Logs", tab_id="logs")
 
     def __init__(self, main_window=None, app_state=None):
+        super().__init__(main_window, app_state)
         self._paused = False
         self._paused_messages = []
         self._show_debug = False
         self._all_messages = []
-        super().__init__(main_window, app_state)
 
     def connect_signals(self):
         """Connect log tab signals."""
@@ -61,7 +61,9 @@ class LogsTab(BaseTab):
     def initialize(self):
         """Initialize the logs tab with saved settings."""
         self._show_debug = get_setting("show_verbose_logs")
+        self.ui.VerboseLogsCheckbox.blockSignals(True)
         self.ui.VerboseLogsCheckbox.setChecked(self._show_debug)
+        self.ui.VerboseLogsCheckbox.blockSignals(False)
         self.ui.VerboseLogsCheckbox.setText("Show debug")
 
         # Use custom context menu to avoid Qt parenting bug in tab widgets
@@ -232,9 +234,11 @@ class LogsTab(BaseTab):
                 self._paused_messages.append(message)
             else:
                 self._append_to_log(message)
-        except (RuntimeError, AttributeError):
-            # Widget may not be fully initialized or may have been deleted
-            pass
+        except RuntimeError as e:
+            if "wrapped C/C++ object" not in str(e) and "deleted" not in str(e):
+                raise
+        except AttributeError:
+            pass  # Widget may not be fully initialized
 
     def _rerender_log(self):
         """Re-render the entire log applying the current debug filter.

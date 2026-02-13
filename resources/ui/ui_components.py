@@ -181,13 +181,13 @@ def get_cached_image_thumbnail(path):
 def cache_image_thumbnail(path, data):
     """Cache image thumbnail bytes (memory + disk).
 
-    Thread-safe: Uses lock for both memory cache and disk write to prevent
-    concurrent writes to the same file.
+    Thread-safe: Uses lock for memory cache only. Disk write happens outside
+    the lock to avoid blocking other threads during I/O.
     """
     if not data:
         return
 
-    # Memory cache with LRU-like eviction + disk write (thread-safe)
+    # Memory cache with LRU-like eviction (thread-safe)
     with _image_thumbnail_cache_lock:
         if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
             keys = list(_image_thumbnail_cache.keys())
@@ -195,13 +195,28 @@ def cache_image_thumbnail(path, data):
                 del _image_thumbnail_cache[key]
         _image_thumbnail_cache[path] = data
 
-        # Write to disk cache inside lock to prevent concurrent file writes
-        cache_path = _get_thumbnail_disk_path(path)
+    # Write to disk cache outside lock using atomic temp-file + rename
+    # to prevent corruption from concurrent writes or partial writes on crash
+    cache_path = _get_thumbnail_disk_path(path)
+    try:
+        import tempfile
+        cache_dir = os.path.dirname(cache_path)
+        temp_fd, temp_path = tempfile.mkstemp(dir=cache_dir, suffix='.tmp')
         try:
-            with open(cache_path, 'wb') as f:
-                f.write(data)
-        except (OSError, IOError):
-            pass  # Disk write failed, memory cache still works
+            os.write(temp_fd, data)
+            os.close(temp_fd)
+            temp_fd = None
+            # On Windows, dest must not exist for os.rename
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+            os.rename(temp_path, cache_path)
+        except Exception:
+            if temp_fd is not None:
+                os.close(temp_fd)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    except (OSError, IOError):
+        pass  # Disk write failed, memory cache still works
 
 
 # ============================================================================
@@ -240,19 +255,26 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     @classmethod
     def _ensure_settings_cache(cls):
-        """Initialize or refresh settings cache (call once, not per widget). Thread-safe."""
+        """Initialize or refresh settings cache (call once, not per widget). Thread-safe.
+
+        Returns:
+            Tuple of (liked_color, stack_colors) for immediate use without race.
+        """
         with cls._settings_cache_lock:
             if not cls._settings_cache_initialized:
                 from core.settings_manager import get_setting
                 cls._cached_liked_color = get_setting("gallery_liked_color") or "#55ff9c"
                 cls._cached_stack_colors = get_setting("gallery_stack_colors") or {}
                 cls._settings_cache_initialized = True
+            return cls._cached_liked_color, cls._cached_stack_colors
 
     @classmethod
     def invalidate_settings_cache(cls):
         """Call this when settings change to refresh the cache. Thread-safe."""
         with cls._settings_cache_lock:
             cls._settings_cache_initialized = False
+            cls._cached_liked_color = None
+            cls._cached_stack_colors = None
 
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,
@@ -462,6 +484,14 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     # --- Likes and Groups ---
     def set_favorites_manager(self, manager):
         """Set the favorites manager and update visual state."""
+        # Disconnect from old manager to prevent duplicate signal connections
+        if self._favorites_manager:
+            try:
+                self._favorites_manager.item_groups_changed.disconnect(self._on_item_groups_changed)
+                self._favorites_manager.like_changed.disconnect(self._on_like_changed)
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected or manager deleted
+
         self._favorites_manager = manager
 
         # Connect to signals for live updates
@@ -505,8 +535,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         from PySide6.QtGui import QColor
 
         # Use cached liked color (avoid get_setting() on every update)
-        self._ensure_settings_cache()
-        liked_color = self._cached_liked_color
+        liked_color, _ = self._ensure_settings_cache()
         hex_color = liked_color.lstrip('#')
         r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
 
@@ -609,8 +638,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         # Priority 2: Stack color (if has job_prefix and custom stack color)
         if self._job_prefix:
             # Use cached stack colors instead of get_setting() every call
-            self._ensure_settings_cache()
-            stack_color = self._cached_stack_colors.get(self._job_prefix)
+            _, stack_colors = self._ensure_settings_cache()
+            stack_color = stack_colors.get(self._job_prefix)
             if stack_color:
                 self._styler.group_color = stack_color
                 self._apply_thumbnail_style()

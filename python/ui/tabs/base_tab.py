@@ -300,13 +300,30 @@ class BaseTab(ABC):
             )
         """
         from workers import start_worker_thread
-        self._worker = start_worker_thread(
+        worker = start_worker_thread(
             func, *args,
             on_result=on_result,
             on_error=on_error,
             on_progress=on_progress,
             worker_kwargs=worker_kwargs
         )
+        # Store on self to prevent GC. Use a list so concurrent workers
+        # don't overwrite each other (previous code used self._worker which
+        # could GC the first worker if a second was started before it finished).
+        self._worker = worker  # Keep for backwards compatibility
+        if not hasattr(self, '_active_workers'):
+            self._active_workers = []
+        self._active_workers.append(worker)
+        # Clean up finished workers to prevent unbounded memory growth
+        worker.signals.finished.connect(lambda w=worker: self._cleanup_finished_worker(w))
+
+    def _cleanup_finished_worker(self, worker):
+        """Remove a finished worker from the active list to prevent memory leaks."""
+        try:
+            if hasattr(self, '_active_workers'):
+                self._active_workers = [w for w in self._active_workers if w is not worker]
+        except (ValueError, RuntimeError):
+            pass
 
     def update_status_with_spinner(self, message: str, color, start: bool = True):
         """

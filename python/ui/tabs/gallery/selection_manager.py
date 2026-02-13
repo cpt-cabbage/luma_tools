@@ -312,8 +312,13 @@ class SelectionManager(BaseGalleryManager):
         """
         had_selection = len(self.tab._selected_items) > 0
 
-        # Update all selected widgets in widget cache (thread-safe access)
-        for path in list(self.tab._selected_items):
+        # Snapshot and clear selection state first to prevent callbacks from
+        # re-adding items during iteration (set_selected triggers _on_selection_changed)
+        selected_paths = list(self.tab._selected_items)
+        self.tab._selected_items.clear()
+
+        # Update all previously selected widgets
+        for path in selected_paths:
             widget = self.get_cached_widget(path)
             if widget:
                 widget.set_selected(False)
@@ -330,7 +335,6 @@ class SelectionManager(BaseGalleryManager):
                         if hasattr(widget, 'set_selected') and widget.is_selected():
                             widget.set_selected(False)
 
-        self.tab._selected_items.clear()
         self._update_toolbar()
 
     def _on_selection_changed(self, image_path, is_selected):
@@ -363,8 +367,11 @@ class SelectionManager(BaseGalleryManager):
         visual_order = []  # List of (path_or_id, widget, is_stack) tuples
 
         if hasattr(self.tab, '_flow_layout'):
-            for i in range(self.tab._flow_layout.count()):
-                item = self.tab._flow_layout.itemAt(i)
+            # Snapshot layout widgets to avoid issues if layout changes during iteration
+            layout = self.tab._flow_layout
+            layout_count = layout.count()
+            for i in range(layout_count):
+                item = layout.itemAt(i)
                 if not item:
                     continue
                 widget = item.widget()
@@ -575,7 +582,7 @@ class SelectionManager(BaseGalleryManager):
         if not show_checkmarks:
             # Hide all currently visible checkmarks
             for path in list(self._widgets_with_checkmarks_shown):
-                widget = self.tab._widget_cache.get(path)
+                widget = self.get_cached_widget(path)
                 if widget and hasattr(widget, 'selection_indicator'):
                     widget.selection_indicator.hide()
             self._widgets_with_checkmarks_shown.clear()
@@ -584,14 +591,14 @@ class SelectionManager(BaseGalleryManager):
             # Hide checkmarks on items that were showing but are no longer selected
             to_hide = self._widgets_with_checkmarks_shown - current_selected
             for path in to_hide:
-                widget = self.tab._widget_cache.get(path)
+                widget = self.get_cached_widget(path)
                 if widget and hasattr(widget, 'selection_indicator'):
                     widget.selection_indicator.hide()
 
             # Show checkmarks on newly selected items
             to_show = current_selected - self._widgets_with_checkmarks_shown
             for path in to_show:
-                widget = self.tab._widget_cache.get(path)
+                widget = self.get_cached_widget(path)
                 if widget and hasattr(widget, 'selection_indicator'):
                     widget.selection_indicator.show()
 

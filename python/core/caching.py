@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
+# Module-level lock for CachedProperty per-instance lock creation
+_lock_creation_lock = threading.Lock()
+
 
 def cached_with_ttl(seconds: int, maxsize: int = 128):
     """
@@ -70,14 +73,25 @@ def cached_with_ttl(seconds: int, maxsize: int = 128):
 
             current_time = time.time()
 
+            # Fast path: check cache without lock. Safe under CPython because
+            # dict.get() is atomic (GIL) and returns an immutable tuple reference.
+            entry = cache.get(key)
+            if entry is not None:
+                result, timestamp = entry
+                if current_time - timestamp < seconds:
+                    return result
+
+            # Slow path: acquire lock and re-check before computing
             with lock:
-                # Check if cached and not expired
+                # Double-check after acquiring lock (another thread may have computed)
+                current_time = time.time()
                 if key in cache:
                     result, timestamp = cache[key]
                     if current_time - timestamp < seconds:
                         return result
 
-                # Cache miss or expired - call function
+                # Cache miss or expired - call function INSIDE lock to prevent
+                # thundering herd (multiple threads computing same value)
                 result = func(*args, **kwargs)
 
                 # Evict oldest entries if at capacity
@@ -302,13 +316,19 @@ class CachedProperty:
         self.lock_attr = f"_cached_{name}_lock"
 
     def _get_lock(self, obj) -> threading.RLock:
-        """Get or create the lock for this property on the instance."""
+        """Get or create the lock for this property on the instance.
+
+        Uses double-checked locking to prevent two threads from creating
+        separate locks for the same property (which would defeat mutual exclusion).
+        """
         lock = getattr(obj, self.lock_attr, None)
         if lock is None:
-            # Create lock atomically using object's __dict__ to avoid recursion
-            lock = threading.RLock()
-            # Use object.__setattr__ to avoid any custom __setattr__ that might cause issues
-            object.__setattr__(obj, self.lock_attr, lock)
+            with _lock_creation_lock:
+                # Double-check after acquiring creation lock
+                lock = getattr(obj, self.lock_attr, None)
+                if lock is None:
+                    lock = threading.RLock()
+                    object.__setattr__(obj, self.lock_attr, lock)
         return lock
 
     def __get__(self, obj, objtype=None):
@@ -317,7 +337,8 @@ class CachedProperty:
 
         cache_attr = self.attr_name
 
-        # Fast path: check cache without lock (read is atomic for simple objects)
+        # Fast path: check cache without lock. Safe under CPython because
+        # getattr() is atomic (GIL) and returns an immutable tuple reference.
         cached = getattr(obj, cache_attr, None)
         if cached is not None:
             value, timestamp = cached

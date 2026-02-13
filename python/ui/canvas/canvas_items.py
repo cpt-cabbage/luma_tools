@@ -246,8 +246,12 @@ class ImageNode(QGraphicsItem):
             Qt.SmoothTransformation
         )
 
-        # Cache it
+        # Cache with LRU eviction (limit to 5 entries per node)
         self._lod_cache[scale_factor] = lod_pixmap
+        if len(self._lod_cache) > 5:
+            # Remove oldest entry (first key in insertion order)
+            oldest_key = next(iter(self._lod_cache))
+            del self._lod_cache[oldest_key]
 
         return lod_pixmap
 
@@ -574,9 +578,7 @@ class ImageNode(QGraphicsItem):
         # Use filename as the item ID
         cmd = ResizeItemCommand(view, self.filename, old_size, new_size)
         # Don't execute - the resize already happened, just record it
-        view._undo_stack._undo_stack.append(cmd)
-        view._undo_stack._redo_stack.clear()
-        view._undo_stack._emit_changes()
+        view._undo_stack.record(cmd)
         logger.debug(f"Pushed resize command: {old_size} -> {new_size}")
 
     def _do_resize(self, pos: QPointF, modifiers: Qt.KeyboardModifiers = Qt.NoModifier):
@@ -799,11 +801,6 @@ class ImageNode(QGraphicsItem):
         self._grayscale = False
         self.update()
 
-    def reset_crop(self):
-        """Reset crop to show full image."""
-        self._crop_rect = None
-        self.update()
-
     def _reset_all_transforms(self):
         """Context menu handler to reset all transforms."""
         self.reset_transforms()
@@ -882,6 +879,8 @@ class ImageNode(QGraphicsItem):
 
     def _get_gallery_border_color(self, favorites_manager) -> Optional[QColor]:
         """Get the border color based on group membership or like status."""
+        if not favorites_manager:
+            return None
         path = self.image_path
         content_hash = self.content_hash
 
@@ -917,13 +916,16 @@ class ImageNode(QGraphicsItem):
             return new_pos
 
         if change == QGraphicsItem.ItemPositionHasChanged:
-            # Notify connected lines to update
+            # Notify connected lines to update (snapshot to prevent iteration issues)
             scene = self.scene()
             if scene:
-                for item in scene.items():
-                    if isinstance(item, ConnectionLine):
-                        if item.source_node == self or item.target_node == self:
-                            item.update_path()
+                for item in list(scene.items()):
+                    try:
+                        if isinstance(item, ConnectionLine):
+                            if item.source_node == self or item.target_node == self:
+                                item.update_path()
+                    except RuntimeError:
+                        pass  # C++ object deleted during iteration
 
         return super().itemChange(change, value)
 
@@ -1020,7 +1022,8 @@ class ImageNode(QGraphicsItem):
 
     def _get_favorites_manager(self):
         """Get the FavoritesManager from the view."""
-        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
         if view and hasattr(view, '_get_favorites_manager'):
             return view._get_favorites_manager()
         return None
@@ -1129,7 +1132,8 @@ class ImageNode(QGraphicsItem):
 
     def _show_in_gallery(self):
         """Show this image in the gallery tab."""
-        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
         if view and hasattr(view, '_show_in_gallery'):
             view._show_in_gallery(self.image_path)
 
@@ -1143,7 +1147,8 @@ class ImageNode(QGraphicsItem):
 
     def _show_properties(self):
         """Show properties dialog for this image."""
-        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
         if view and hasattr(view, '_show_properties'):
             view._show_properties(self.image_path)
 
@@ -1838,6 +1843,9 @@ class VideoNode(QGraphicsItem):
         self._border_color: Optional[QColor] = None
         self._group_ids: List[str] = []
 
+        # Worker reference — must be stored on self to prevent GC
+        self._thumb_worker = None
+
         # Setup item flags
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -2262,6 +2270,12 @@ class VideoNode(QGraphicsItem):
             self._player_proxy.deleteLater()
             self._player_proxy = None
 
+    def cleanup(self):
+        """Release media resources. Call before removing from scene."""
+        if self._is_active:
+            self._cleanup_player()
+            self._is_active = False
+
     # -------------------------------------------------------------------------
     # Interaction
     # -------------------------------------------------------------------------
@@ -2402,9 +2416,7 @@ class VideoNode(QGraphicsItem):
 
         from .canvas_undo import ResizeItemCommand
         cmd = ResizeItemCommand(view, self.filename, old_size, new_size)
-        view._undo_stack._undo_stack.append(cmd)
-        view._undo_stack._redo_stack.clear()
-        view._undo_stack._emit_changes()
+        view._undo_stack.record(cmd)
 
     # -------------------------------------------------------------------------
     # Size & State
@@ -2464,6 +2476,8 @@ class VideoNode(QGraphicsItem):
 
     def _get_gallery_border_color(self, favorites_manager) -> Optional[QColor]:
         """Get the border color based on group membership or like status."""
+        if not favorites_manager:
+            return None
         path = self.video_path
         content_hash = self.content_hash
 
@@ -2481,7 +2495,8 @@ class VideoNode(QGraphicsItem):
 
     def _get_favorites_manager(self):
         """Get the FavoritesManager from the view."""
-        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
         if view and hasattr(view, '_get_favorites_manager'):
             return view._get_favorites_manager()
         return None
@@ -2504,13 +2519,16 @@ class VideoNode(QGraphicsItem):
             return new_pos
 
         if change == QGraphicsItem.ItemPositionHasChanged:
-            # Update connected lines
+            # Update connected lines (snapshot list to prevent iteration issues)
             scene = self.scene()
             if scene:
-                for item in scene.items():
-                    if isinstance(item, ConnectionLine):
-                        if item.source_node == self or item.target_node == self:
-                            item.update_path()
+                for item in list(scene.items()):
+                    try:
+                        if isinstance(item, ConnectionLine):
+                            if item.source_node == self or item.target_node == self:
+                                item.update_path()
+                    except RuntimeError:
+                        pass  # C++ object deleted during iteration
 
         return super().itemChange(change, value)
 
@@ -2611,7 +2629,8 @@ class VideoNode(QGraphicsItem):
 
     def _show_in_gallery(self):
         """Show this video in the gallery tab."""
-        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
         if view and hasattr(view, '_show_in_gallery'):
             view._show_in_gallery(self.video_path)
 
@@ -2626,14 +2645,25 @@ class VideoNode(QGraphicsItem):
                 creationflags=creationflags)
 
     def _remove_from_canvas(self):
-        """Remove this node from the canvas."""
+        """Remove this node from the canvas via the canvas's remove_video() for proper cleanup."""
+        scene = self.scene()
+        if scene and scene.views():
+            canvas = scene.views()[0]
+            if hasattr(canvas, 'remove_video') and hasattr(canvas, '_video_nodes'):
+                # Find our node_id and use the canvas's remove method for proper cleanup
+                for node_id, node in list(canvas._video_nodes.items()):
+                    if node is self:
+                        canvas.remove_video(node_id)
+                        return
+        # Fallback: direct removal if canvas API not available
         if self._is_active:
             self.deactivate_player()
-        scene = self.scene()
         if scene:
-            # Remove connected lines
             for item in list(scene.items()):
-                if isinstance(item, ConnectionLine):
-                    if item.source_node == self or item.target_node == self:
-                        scene.removeItem(item)
+                try:
+                    if isinstance(item, ConnectionLine):
+                        if item.source_node == self or item.target_node == self:
+                            scene.removeItem(item)
+                except RuntimeError:
+                    pass
             scene.removeItem(self)

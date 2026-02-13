@@ -219,6 +219,9 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
         return {'status': 'unreachable'}
 
 
+_queue_check_failures = 0
+
+
 def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
     """Check if a prompt is still in the ComfyUI queue (running or pending).
 
@@ -229,10 +232,13 @@ def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
     Returns:
         True if the prompt is found in running or pending queue
     """
+    global _queue_check_failures
     try:
         queue_url = f"{server_url}/queue"
         with urllib.request.urlopen(queue_url, timeout=5) as response:
             queue_data = json.loads(response.read().decode('utf-8'))
+
+        _queue_check_failures = 0  # Reset on success
 
         running = queue_data.get('queue_running', [])
         pending = queue_data.get('queue_pending', [])
@@ -245,10 +251,15 @@ def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
                 return True
 
         return False
-    except Exception:
-        # If we can't reach the queue endpoint, assume still running
-        # (conservative — avoids false completion)
-        return True
+    except Exception as e:
+        _queue_check_failures += 1
+        if _queue_check_failures < 3:
+            # Conservative fallback — avoids false completion
+            return True
+        else:
+            # Queue endpoint repeatedly failing — stop assuming it's running
+            logger.warning(f"Queue endpoint failed {_queue_check_failures} times, assuming not in queue: {e}")
+            return False
 
 
 # =============================================================================
@@ -448,83 +459,95 @@ def wait_for_completion_websocket(
     ws_thread.daemon = True
     ws_thread.start()
 
+    def _cleanup_ws():
+        """Close WebSocket and join thread to prevent resource leaks."""
+        ws.close()
+        ws_thread.join(timeout=5.0)
+
     # Hybrid: WebSocket for progress, HTTP polling for completion
     last_poll = 0
     poll_interval = 2
     not_found_count = 0
 
-    while result['success'] is None and result['error'] is None:
-        elapsed = time.time() - start_time
-        if elapsed > timeout:
-            logger.warning(f"Timeout after {int(elapsed)}s")
-            ws.close()
-            return False
+    try:
+        while result['success'] is None and result['error'] is None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                logger.warning(f"Timeout after {int(elapsed)}s")
+                return False
 
-        if time.time() - last_poll >= poll_interval:
-            last_poll = time.time()
-            history_result = check_history_for_completion(prompt_id, server_url=base_url)
+            if time.time() - last_poll >= poll_interval:
+                last_poll = time.time()
+                history_result = check_history_for_completion(prompt_id, server_url=base_url)
 
-            if history_result['status'] == 'success':
-                elapsed_int = int(elapsed)
-                logger.info(f"Workflow completed successfully ({elapsed_int}s)")
-                outputs = history_result.get('outputs', {})
-                for node_id, output in outputs.items():
-                    if 'images' in output:
-                        for img in output['images']:
-                            fname = img.get('filename', 'unknown')
-                            if fname not in downloaded_files:
-                                logger.info(f"  Output: {fname}")
-                                if output_dir and on_image_output:
-                                    on_image_output(img, base_url, output_dir)
-                result['success'] = True
-                ws.close()
-                break
-            elif history_result['status'] == 'error':
-                logger.error(f"Workflow failed")
-                for msg in history_result.get('messages', []):
-                    logger.error(f"  Error: {msg}")
-                result['error'] = '; '.join(history_result.get('messages', ['Unknown error']))
-                ws.close()
-                break
-            elif history_result['status'] == 'not_found':
-                # Server is up but prompt_id gone from history.
-                # During NORMAL execution, the prompt is in the queue (not
-                # history) — so not_found is expected while nodes are running.
-                # Check the queue endpoint to see if the prompt is still active.
-                still_in_queue = _is_prompt_in_queue(prompt_id, base_url)
-                had_execution = bool(node_timing) or bool(result.get('outputs'))
+                if history_result['status'] == 'success':
+                    elapsed_int = int(elapsed)
+                    logger.info(f"Workflow completed successfully ({elapsed_int}s)")
+                    outputs = history_result.get('outputs', {})
+                    for node_id, output in outputs.items():
+                        if 'images' in output:
+                            for img in output['images']:
+                                fname = img.get('filename', 'unknown')
+                                if fname not in downloaded_files:
+                                    logger.info(f"  Output: {fname}")
+                                    if output_dir and on_image_output:
+                                        on_image_output(img, base_url, output_dir)
+                    result['success'] = True
+                    break
+                elif history_result['status'] == 'error':
+                    logger.error(f"Workflow failed")
+                    for msg in history_result.get('messages', []):
+                        logger.error(f"  Error: {msg}")
+                    result['error'] = '; '.join(history_result.get('messages', ['Unknown error']))
+                    break
+                elif history_result['status'] == 'not_found':
+                    # Server is up but prompt_id gone from history.
+                    # During NORMAL execution, the prompt is in the queue (not
+                    # history) — so not_found is expected while nodes are running.
+                    # Check the queue endpoint to see if the prompt is still active.
+                    still_in_queue = _is_prompt_in_queue(prompt_id, base_url)
+                    had_execution = bool(node_timing) or bool(result.get('outputs'))
 
-                if still_in_queue:
-                    # Prompt is in the queue (running or pending) — not_found
-                    # in history is completely normal during execution
-                    not_found_count = 0
-                    logger.debug(
-                        f"Prompt not in history but still in queue, executing..."
-                    )
-                elif had_execution:
-                    # Prompt gone from both history AND queue, but we saw
-                    # execution — server likely restarted after completion
-                    not_found_count += 1
-                    if not_found_count >= 3:
-                        elapsed_int = int(elapsed)
-                        logger.info(
-                            f"Server restarted after execution — treating as "
-                            f"completed ({elapsed_int}s, saw {len(node_timing)} nodes)"
-                        )
-                        result['success'] = True
-                        ws.close()
-                        break
-                    else:
+                    if still_in_queue:
+                        # Prompt is in the queue (running or pending) — not_found
+                        # in history is completely normal during execution
+                        not_found_count = 0
                         logger.debug(
-                            f"Prompt gone from history and queue "
-                            f"(count={not_found_count}), waiting..."
+                            f"Prompt not in history but still in queue, executing..."
                         )
+                    elif had_execution:
+                        # Prompt gone from both history AND queue, but we saw
+                        # execution — server likely restarted after completion
+                        not_found_count += 1
+                        if not_found_count >= 3:
+                            # Verify server is actually healthy before treating as completed
+                            if check_server_health(server_url=base_url, timeout=5):
+                                elapsed_int = int(elapsed)
+                                logger.info(
+                                    f"Server restarted after execution — treating as "
+                                    f"completed ({elapsed_int}s, saw {len(node_timing)} nodes)"
+                                )
+                                result['success'] = True
+                                break
+                            else:
+                                # Server is down — reset and keep waiting
+                                not_found_count = 0
+                                logger.debug(
+                                    "Server unreachable, resetting not_found counter"
+                                )
+                        else:
+                            logger.debug(
+                                f"Prompt gone from history and queue "
+                                f"(count={not_found_count}), waiting..."
+                            )
+                    else:
+                        not_found_count = 0
                 else:
                     not_found_count = 0
-            else:
-                not_found_count = 0
 
-        time.sleep(0.1)
+            time.sleep(0.1)
+    finally:
+        _cleanup_ws()
 
     success = result['success'] == True
 
@@ -626,8 +649,6 @@ def wait_for_completion_http(
                         logger.debug(f"Waiting for result... ({elapsed}s)")
                         last_print_time = elapsed
 
-            consecutive_errors = 0
-
         except (urllib.error.URLError, urllib.error.HTTPError) as e:
             consecutive_errors += 1
             if consecutive_errors >= 10:
@@ -655,7 +676,7 @@ def wait_for_completion(
     track_node_timing: bool = False,
     client_id: str = None,
     workflow_dict: dict = None
-):
+) -> "Union[bool, dict]":
     """Wait for workflow execution to complete using WebSocket or HTTP polling.
 
     Args:
@@ -670,8 +691,9 @@ def wait_for_completion(
         workflow_dict: API-format workflow dict for node type lookup
 
     Returns:
-        bool if track_node_timing=False
-        dict with 'success', 'node_timing', 'total_duration_ms' if track_node_timing=True
+        bool: Success/failure if track_node_timing=False
+        dict: {'success': bool, 'node_timing': list, 'total_duration_ms': int|None}
+              if track_node_timing=True
     """
     if WEBSOCKET_AVAILABLE:
         try:
@@ -1161,8 +1183,9 @@ try:
     _hash_cache = ThreadSafeCache(max_size=256)
     _HASH_CACHE_TYPE = "threadsafe"
 except ImportError:
-    # Farm environment — use simple dict with lock
-    _hash_cache = {}
+    # Farm environment — use OrderedDict with lock for LRU-like eviction
+    from collections import OrderedDict
+    _hash_cache = OrderedDict()
     _hash_cache_lock = threading.Lock()
     _HASH_CACHE_TYPE = "dict"
 
@@ -1201,6 +1224,9 @@ def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str
     else:
         with _hash_cache_lock:
             cached = _hash_cache.get(cache_key)
+            if cached is not None:
+                # Move to end on access (LRU: most recently used at end)
+                _hash_cache.move_to_end(cache_key)
         if cached is not None:
             cached_mtime, cached_hash = cached
             if cached_mtime == current_mtime:
@@ -1225,6 +1251,9 @@ def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str
         _hash_cache.set(cache_key, (current_mtime, file_hash))
     else:
         with _hash_cache_lock:
+            # LRU eviction: remove oldest entries (first in OrderedDict)
+            while len(_hash_cache) >= 256:
+                _hash_cache.popitem(last=False)
             _hash_cache[cache_key] = (current_mtime, file_hash)
 
     return file_hash

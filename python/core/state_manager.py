@@ -40,11 +40,32 @@ class ThreadSafeProperty:
         if obj is None:
             return self
         with obj._lock:
-            return getattr(obj, self._attr, self._default)
+            try:
+                value = getattr(obj, self._attr)
+                # Return copies of mutable types to prevent lock-free mutation
+                if isinstance(value, (list, dict, set)):
+                    return type(value)(value)
+                return value
+            except AttributeError:
+                # Attribute not yet set — return default
+                if isinstance(self._default, (list, dict, set)):
+                    return type(self._default)(self._default)
+                return self._default
 
     def __set__(self, obj, value):
         with obj._lock:
             setattr(obj, self._attr, value)
+
+
+class _UserProperty(ThreadSafeProperty):
+    """ThreadSafeProperty that invalidates role caches when user changes."""
+
+    def __set__(self, obj, value):
+        with obj._lock:
+            setattr(obj, self._attr, value)
+            # Invalidate cached role status so it's re-evaluated for the new user
+            obj._is_admin = None
+            obj._is_sup = None
 
 
 class ApplicationState:
@@ -60,7 +81,7 @@ class ApplicationState:
     shot = ThreadSafeProperty('shot', '')
     task = ThreadSafeProperty('task', '')
     shotpath = ThreadSafeProperty('shotpath', '')
-    user = ThreadSafeProperty('user', '')
+    user = _UserProperty('user', '')
     output_subdirectory = ThreadSafeProperty('output_subdirectory', '')
 
     # Pass Builder state
@@ -149,11 +170,15 @@ class ApplicationState:
         """
         with self._lock:
             # Return False if user not initialized yet
-            if not self._user:
+            user = getattr(self, '_user', '') or ''
+            if not user:
                 return False
             if self._is_admin is None:
-                from core.settings_manager import is_user_in_role
-                self._is_admin = is_user_in_role(self._user, "admin")
+                try:
+                    from core.settings_manager import is_user_in_role
+                    self._is_admin = is_user_in_role(user, "admin")
+                except Exception:
+                    self._is_admin = False
             return self._is_admin
 
     @property
@@ -168,11 +193,15 @@ class ApplicationState:
         """
         with self._lock:
             # Return False if user not initialized yet
-            if not self._user:
+            user = getattr(self, '_user', '') or ''
+            if not user:
                 return False
             if self._is_sup is None:
-                from core.settings_manager import is_user_in_role
-                self._is_sup = is_user_in_role(self._user, "sup")
+                try:
+                    from core.settings_manager import is_user_in_role
+                    self._is_sup = is_user_in_role(user, "sup")
+                except Exception:
+                    self._is_sup = False
             return self._is_sup
 
     @property
@@ -195,7 +224,11 @@ class ApplicationState:
     def has_shot_context(self):
         """Check if shot context is available (job, shot, shotpath)."""
         with self._lock:
-            return bool(self._jobname and self._shot and self._shotpath)
+            return bool(
+                getattr(self, '_jobname', '') and
+                getattr(self, '_shot', '') and
+                getattr(self, '_shotpath', '')
+            )
 
     # =========================================================================
     # Cross-Tab Awareness Helpers
@@ -209,14 +242,15 @@ class ApplicationState:
             path: Path to the output file
             max_count: Maximum number of recent outputs to keep
         """
-        # Use property accessor (not _attr) to go through descriptor
-        outputs = list(self.comfyui_recent_outputs or [])
-        # Add to front, remove duplicates
-        if path in outputs:
-            outputs.remove(path)
-        outputs.insert(0, path)
-        # Trim to max
-        self.comfyui_recent_outputs = outputs[:max_count]
+        # Hold lock for entire read-modify-write to prevent lost updates
+        with self._lock:
+            outputs = list(getattr(self, '_comfyui_recent_outputs', None) or [])
+            # Add to front, remove duplicates
+            if path in outputs:
+                outputs.remove(path)
+            outputs.insert(0, path)
+            # Trim to max
+            self._comfyui_recent_outputs = outputs[:max_count]
 
     def update_session_stats(self, outputs_added: int = 0, time_seconds: float = 0.0,
                              job_completed: bool = False) -> None:
@@ -228,17 +262,18 @@ class ApplicationState:
             time_seconds: Time taken for the generation
             job_completed: Whether a job was completed
         """
-        # Use property accessor (not _attr) to go through descriptor
-        stats = dict(self.comfyui_session_stats or {
-            'total_generated': 0,
-            'total_time_seconds': 0.0,
-            'jobs_completed': 0
-        })
-        stats['total_generated'] = stats.get('total_generated', 0) + outputs_added
-        stats['total_time_seconds'] = stats.get('total_time_seconds', 0.0) + time_seconds
-        if job_completed:
-            stats['jobs_completed'] = stats.get('jobs_completed', 0) + 1
-        self.comfyui_session_stats = stats
+        # Hold lock for entire read-modify-write to prevent lost updates
+        with self._lock:
+            stats = dict(getattr(self, '_comfyui_session_stats', None) or {
+                'total_generated': 0,
+                'total_time_seconds': 0.0,
+                'jobs_completed': 0
+            })
+            stats['total_generated'] = stats.get('total_generated', 0) + outputs_added
+            stats['total_time_seconds'] = stats.get('total_time_seconds', 0.0) + time_seconds
+            if job_completed:
+                stats['jobs_completed'] = stats.get('jobs_completed', 0) + 1
+            self._comfyui_session_stats = stats
 
     def get_session_stats(self) -> dict:
         """Get session generation statistics."""
@@ -251,9 +286,10 @@ class ApplicationState:
 
     def increment_gallery_new_count(self, count: int = 1) -> None:
         """Increment the count of new items since gallery was last viewed."""
-        # Use property accessor (not _attr) to go through descriptor
-        current = self.gallery_new_since_view or 0
-        self.gallery_new_since_view = current + count
+        # Hold lock for entire read-modify-write to prevent lost updates
+        with self._lock:
+            current = getattr(self, '_gallery_new_since_view', 0) or 0
+            self._gallery_new_since_view = current + count
 
     def reset_gallery_new_count(self) -> None:
         """Reset the new items count (called when gallery becomes visible)."""
@@ -268,10 +304,11 @@ class ApplicationState:
             entry: Dict with workflow_name, generation_count, seed, prompt, etc.
             max_count: Maximum history entries to keep
         """
-        # Use property accessor (not _attr) to go through descriptor
-        history = list(self.workflow_generation_history or [])
-        history.insert(0, entry)
-        self.workflow_generation_history = history[:max_count]
+        # Hold lock for entire read-modify-write to prevent lost updates
+        with self._lock:
+            history = list(getattr(self, '_workflow_generation_history', None) or [])
+            history.insert(0, entry)
+            self._workflow_generation_history = history[:max_count]
 
     def get_workflow_defaults(self, workflow_name: str) -> dict:
         """

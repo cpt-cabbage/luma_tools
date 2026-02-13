@@ -468,8 +468,34 @@ class UndoStack(QObject):
 
                 self._emit_changes()
                 logger.debug(f"Pushed command: {command.description}")
+        except Exception as e:
+            logger.error(f"Command execution failed ({command.description}): {e}")
         finally:
             self._is_executing = False
+
+    def record(self, command: CanvasCommand):
+        """
+        Record an already-executed command onto the undo stack without executing it.
+
+        Use this for operations that have already been performed (e.g., interactive
+        resize) and only need to be recorded for undo/redo support.
+
+        Args:
+            command: The already-executed command to record
+        """
+        if self._is_executing:
+            logger.warning("Cannot record command while executing")
+            return
+
+        self._undo_stack.append(command)
+        self._redo_stack.clear()
+
+        # Limit stack size
+        if len(self._undo_stack) > self.MAX_STACK_SIZE:
+            self._undo_stack.pop(0)
+
+        self._emit_changes()
+        logger.debug(f"Recorded command: {command.description}")
 
     def undo(self) -> bool:
         """

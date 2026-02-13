@@ -11,6 +11,7 @@ Handles likes and groups functionality for the gallery:
 
 import os
 import logging
+import threading
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Any
@@ -83,6 +84,7 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         BaseGalleryManager.__init__(self, tab)
         QObject.__init__(self)
+        self._favorites_lock = threading.RLock()
         self._liked_items: Set[str] = set()
         self._groups: Dict[str, GroupDef] = {}
         self._item_groups: Dict[str, Set[str]] = {}  # path -> set of group_ids
@@ -91,10 +93,13 @@ class FavoritesManager(BaseGalleryManager, QObject):
         self._loaded = False
 
     def _ensure_loaded(self):
-        """Lazy load settings on first access."""
-        if not self._loaded:
-            self._load_from_settings()
-            self._loaded = True
+        """Lazy load settings on first access. Thread-safe."""
+        if self._loaded:
+            return  # Fast path: already loaded
+        with self._favorites_lock:
+            if not self._loaded:  # Double-check under lock
+                self._load_from_settings()
+                self._loaded = True
 
     def _load_from_settings(self):
         """Load likes and groups from user settings."""
@@ -162,6 +167,7 @@ class FavoritesManager(BaseGalleryManager, QObject):
 
         Called during gallery scan to associate current file hash with path.
         Does not save immediately (batched during scan) — saved on next mutation.
+        Thread-safe: called from both worker threads (scan) and UI thread.
 
         Args:
             path: File path
@@ -169,20 +175,21 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         if content_hash:
             self._ensure_loaded()
-            self._hash_index[content_hash] = os.path.normpath(path)
+            with self._favorites_lock:
+                self._hash_index[content_hash] = os.path.normpath(path)
 
     def _resolve_and_migrate(self, path: str, content_hash: str = None) -> str:
         """Resolve a path using hash index, auto-migrating if file was renamed.
 
+        Note: Caller must hold self._favorites_lock when calling this method.
+
         Args:
-            path: Current file path
+            path: Current file path (must be normpath'd)
             content_hash: Optional content hash for the file
 
         Returns:
             The resolved path (may be the same or migrated)
         """
-        path = os.path.normpath(path)
-
         # Fast path: already known by current path
         if path in self._liked_items or path in self._item_groups:
             return path
@@ -257,14 +264,15 @@ class FavoritesManager(BaseGalleryManager, QObject):
         if content_hash:
             self.register_hash(path, content_hash)
         path = os.path.normpath(path)
-        path = self._resolve_and_migrate(path, content_hash)
-        if path in self._liked_items:
-            self._liked_items.discard(path)
-            is_liked = False
-        else:
-            self._liked_items.add(path)
-            is_liked = True
-        self._save_liked_items()
+        with self._favorites_lock:
+            path = self._resolve_and_migrate(path, content_hash)
+            if path in self._liked_items:
+                self._liked_items.discard(path)
+                is_liked = False
+            else:
+                self._liked_items.add(path)
+                is_liked = True
+            self._save_liked_items()
         self.like_changed.emit(path, is_liked)
         return is_liked
 
@@ -277,14 +285,16 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
         path = os.path.normpath(path)
-        if content_hash:
-            path = self._resolve_and_migrate(path, content_hash)
-        return path in self._liked_items
+        with self._favorites_lock:
+            if content_hash:
+                path = self._resolve_and_migrate(path, content_hash)
+            return path in self._liked_items
 
     def get_liked_items(self) -> List[str]:
         """Get list of all liked item paths."""
         self._ensure_loaded()
-        return list(self._liked_items)
+        with self._favorites_lock:
+            return list(self._liked_items)
 
     def like_items(self, paths: List[str]):
         """Like multiple items (batch operation).
@@ -293,14 +303,16 @@ class FavoritesManager(BaseGalleryManager, QObject):
         per-item signals for performance.
         """
         self._ensure_loaded()
-        affected_paths = []
-        for path in paths:
-            path = os.path.normpath(path)
-            if path not in self._liked_items:
-                self._liked_items.add(path)
-                affected_paths.append(path)
+        with self._favorites_lock:
+            affected_paths = []
+            for path in paths:
+                path = os.path.normpath(path)
+                if path not in self._liked_items:
+                    self._liked_items.add(path)
+                    affected_paths.append(path)
+            if affected_paths:
+                self._save_liked_items()
         if affected_paths:
-            self._save_liked_items()
             self.items_liked_batch.emit(affected_paths)
 
     def unlike_items(self, paths: List[str]):
@@ -310,20 +322,23 @@ class FavoritesManager(BaseGalleryManager, QObject):
         per-item signals for performance.
         """
         self._ensure_loaded()
-        affected_paths = []
-        for path in paths:
-            path = os.path.normpath(path)
-            if path in self._liked_items:
-                self._liked_items.discard(path)
-                affected_paths.append(path)
+        with self._favorites_lock:
+            affected_paths = []
+            for path in paths:
+                path = os.path.normpath(path)
+                if path in self._liked_items:
+                    self._liked_items.discard(path)
+                    affected_paths.append(path)
+            if affected_paths:
+                self._save_liked_items()
         if affected_paths:
-            self._save_liked_items()
             self.items_unliked_batch.emit(affected_paths)
 
     def get_liked_count(self) -> int:
         """Get number of liked items."""
         self._ensure_loaded()
-        return len(self._liked_items)
+        with self._favorites_lock:
+            return len(self._liked_items)
 
     # =========================================================================
     # GROUPS
@@ -438,7 +453,8 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def get_group_count(self) -> int:
         """Get number of groups."""
         self._ensure_loaded()
-        return len(self._groups)
+        with self._favorites_lock:
+            return len(self._groups)
 
     # =========================================================================
     # ITEM-GROUP ASSIGNMENT
@@ -460,33 +476,35 @@ class FavoritesManager(BaseGalleryManager, QObject):
         if content_hash:
             self.register_hash(path, content_hash)
         path = os.path.normpath(path)
-        path = self._resolve_and_migrate(path, content_hash)
-        if group_id not in self._groups:
-            return False
 
-        # Check multi-group setting
+        # Check multi-group setting outside lock (read-only, no race concern)
         from core.settings_manager import get_setting
         multi_group_enabled = get_setting("gallery_multi_group_enabled")
 
-        if path not in self._item_groups:
-            self._item_groups[path] = set()
+        with self._favorites_lock:
+            path = self._resolve_and_migrate(path, content_hash)
+            if group_id not in self._groups:
+                return False
 
-        if not multi_group_enabled:
-            # Clear existing groups first - also update reverse index
-            for old_gid in list(self._item_groups[path]):
-                if old_gid in self._group_items:
-                    self._group_items[old_gid].discard(path)
-            self._item_groups[path].clear()
+            if path not in self._item_groups:
+                self._item_groups[path] = set()
 
-        if group_id in self._item_groups[path]:
-            return False
+            if not multi_group_enabled:
+                # Clear existing groups first - also update reverse index
+                for old_gid in list(self._item_groups[path]):
+                    if old_gid in self._group_items:
+                        self._group_items[old_gid].discard(path)
+                self._item_groups[path].clear()
 
-        self._item_groups[path].add(group_id)
-        # Update reverse index
-        if group_id not in self._group_items:
-            self._group_items[group_id] = set()
-        self._group_items[group_id].add(path)
-        self._save_item_groups()
+            if group_id in self._item_groups[path]:
+                return False
+
+            self._item_groups[path].add(group_id)
+            # Update reverse index
+            if group_id not in self._group_items:
+                self._group_items[group_id] = set()
+            self._group_items[group_id].add(path)
+            self._save_item_groups()
         self.item_groups_changed.emit(path)
         return True
 
@@ -503,19 +521,20 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
         path = os.path.normpath(path)
-        if path not in self._item_groups:
-            return False
+        with self._favorites_lock:
+            if path not in self._item_groups:
+                return False
 
-        if group_id not in self._item_groups[path]:
-            return False
+            if group_id not in self._item_groups[path]:
+                return False
 
-        self._item_groups[path].discard(group_id)
-        # Update reverse index
-        if group_id in self._group_items:
-            self._group_items[group_id].discard(path)
-        if not self._item_groups[path]:
-            del self._item_groups[path]
-        self._save_item_groups()
+            self._item_groups[path].discard(group_id)
+            # Update reverse index
+            if group_id in self._group_items:
+                self._group_items[group_id].discard(path)
+            if not self._item_groups[path]:
+                del self._item_groups[path]
+            self._save_item_groups()
         self.item_groups_changed.emit(path)
         return True
 
@@ -532,12 +551,15 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
         path = os.path.normpath(path)
-        if path in self._item_groups and group_id in self._item_groups[path]:
-            self.remove_from_group(path, group_id)
-            return False
-        else:
-            self.add_to_group(path, group_id)
-            return True
+        # Atomic check-then-act under lock (_favorites_lock is RLock, so
+        # the nested acquisition in add/remove_from_group is safe)
+        with self._favorites_lock:
+            if path in self._item_groups and group_id in self._item_groups[path]:
+                self.remove_from_group(path, group_id)
+                return False
+            else:
+                self.add_to_group(path, group_id)
+                return True
 
     def get_item_groups(self, path: str, content_hash: str = None) -> List[str]:
         """Get list of group IDs an item belongs to.
@@ -548,11 +570,12 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
         path = os.path.normpath(path)
-        if content_hash:
-            path = self._resolve_and_migrate(path, content_hash)
-        if path not in self._item_groups:
-            return []
-        return list(self._item_groups[path])
+        with self._favorites_lock:
+            if content_hash:
+                path = self._resolve_and_migrate(path, content_hash)
+            if path not in self._item_groups:
+                return []
+            return list(self._item_groups[path])
 
     def get_item_group_colors(self, path: str) -> List[str]:
         """Get list of colors for groups an item belongs to (for visual display)."""
@@ -604,28 +627,31 @@ class FavoritesManager(BaseGalleryManager, QObject):
         from core.settings_manager import get_setting
         multi_group_enabled = get_setting("gallery_multi_group_enabled")
 
-        # Ensure reverse index entry exists
-        if group_id not in self._group_items:
-            self._group_items[group_id] = set()
+        with self._favorites_lock:
+            # Ensure reverse index entry exists
+            if group_id not in self._group_items:
+                self._group_items[group_id] = set()
 
-        affected_paths = []
-        for path in paths:
-            path = os.path.normpath(path)
-            if path not in self._item_groups:
-                self._item_groups[path] = set()
-            if not multi_group_enabled:
-                # Clear existing groups - update reverse index
-                for old_gid in list(self._item_groups[path]):
-                    if old_gid in self._group_items:
-                        self._group_items[old_gid].discard(path)
-                self._item_groups[path].clear()
-            self._item_groups[path].add(group_id)
-            # Update reverse index
-            self._group_items[group_id].add(path)
-            affected_paths.append(path)
+            affected_paths = []
+            for path in paths:
+                path = os.path.normpath(path)
+                if path not in self._item_groups:
+                    self._item_groups[path] = set()
+                if not multi_group_enabled:
+                    # Clear existing groups - update reverse index
+                    for old_gid in list(self._item_groups[path]):
+                        if old_gid in self._group_items:
+                            self._group_items[old_gid].discard(path)
+                    self._item_groups[path].clear()
+                self._item_groups[path].add(group_id)
+                # Update reverse index
+                self._group_items[group_id].add(path)
+                affected_paths.append(path)
+
+            if affected_paths:
+                self._save_item_groups()
 
         if affected_paths:
-            self._save_item_groups()
             self.items_groups_changed_batch.emit(affected_paths)
 
     def remove_items_from_group(self, paths: List[str], group_id: str):
@@ -635,19 +661,22 @@ class FavoritesManager(BaseGalleryManager, QObject):
         per-item signals for performance.
         """
         self._ensure_loaded()
-        affected_paths = []
-        for path in paths:
-            path = os.path.normpath(path)
-            if path in self._item_groups and group_id in self._item_groups[path]:
-                self._item_groups[path].discard(group_id)
-                # Update reverse index
-                if group_id in self._group_items:
-                    self._group_items[group_id].discard(path)
-                if not self._item_groups[path]:
-                    del self._item_groups[path]
-                affected_paths.append(path)
+        with self._favorites_lock:
+            affected_paths = []
+            for path in paths:
+                path = os.path.normpath(path)
+                if path in self._item_groups and group_id in self._item_groups[path]:
+                    self._item_groups[path].discard(group_id)
+                    # Update reverse index
+                    if group_id in self._group_items:
+                        self._group_items[group_id].discard(path)
+                    if not self._item_groups[path]:
+                        del self._item_groups[path]
+                    affected_paths.append(path)
+            if affected_paths:
+                self._save_item_groups()
+
         if affected_paths:
-            self._save_item_groups()
             self.items_groups_changed_batch.emit(affected_paths)
 
     # =========================================================================
@@ -776,15 +805,16 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
 
-        # Clean liked items
-        missing_likes = self._liked_items - existing_paths
-        if missing_likes:
-            self._liked_items -= missing_likes
-            self._save_liked_items()
+        with self._favorites_lock:
+            # Clean liked items
+            missing_likes = self._liked_items - existing_paths
+            if missing_likes:
+                self._liked_items -= missing_likes
+                self._save_liked_items()
 
-        # Clean item groups
-        missing_groups = [p for p in self._item_groups if p not in existing_paths]
-        if missing_groups:
-            for path in missing_groups:
-                del self._item_groups[path]
-            self._save_item_groups()
+            # Clean item groups
+            missing_groups = [p for p in self._item_groups if p not in existing_paths]
+            if missing_groups:
+                for path in missing_groups:
+                    del self._item_groups[path]
+                self._save_item_groups()

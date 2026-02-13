@@ -45,9 +45,13 @@ def _is_path_under_directory(file_path: str, directory: str) -> bool:
     Returns:
         True if file_path is under directory
     """
-    file_path = os.path.normpath(os.path.abspath(file_path)).lower()
-    directory = os.path.normpath(os.path.abspath(directory)).lower()
-    return file_path.startswith(directory)
+    # Use realpath to resolve symlinks and prevent path traversal
+    file_path = os.path.normpath(os.path.realpath(file_path)).lower()
+    directory = os.path.normpath(os.path.realpath(directory)).lower()
+    # Ensure directory ends with separator to prevent "dir_extra" matching "dir"
+    if not directory.endswith(os.sep):
+        directory += os.sep
+    return file_path.startswith(directory) or file_path == directory.rstrip(os.sep)
 
 
 def _generate_unique_filename(directory: str, filename: str) -> str:

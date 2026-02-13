@@ -177,7 +177,7 @@ class GalleryManager(BaseGalleryManager):
 
         # Full refresh - clear and rebuild everything
         # Ensure layout guard is released in case an animation was in progress
-        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout._animation_active:
+        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout and getattr(self.tab._flow_layout, '_animation_active', False):
             self.tab._flow_layout.end_animation()
 
         container.setUpdatesEnabled(False)
@@ -312,7 +312,7 @@ class GalleryManager(BaseGalleryManager):
         container = self.tab.ui.galleryThumbnailContainer
 
         # Ensure layout guard is released in case an animation was in progress
-        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout._animation_active:
+        if hasattr(self.tab, '_flow_layout') and self.tab._flow_layout and getattr(self.tab._flow_layout, '_animation_active', False):
             self.tab._flow_layout.end_animation()
 
         # Save expanded stack ID BEFORE clearing (collapse triggers signal that clears it)
@@ -394,8 +394,8 @@ class GalleryManager(BaseGalleryManager):
                     content_hash = item.get('content_hash')
                     if content_hash and hasattr(self.tab, '_hash_to_path'):
                         self.tab._hash_to_path[content_hash] = item['path']
-                    if content_hash and hasattr(self.tab, 'favorites_manager'):
-                        self.tab.favorites_manager.register_hash(item['path'], content_hash)
+                    if content_hash and hasattr(self.tab, '_favorites_manager'):
+                        self.tab._favorites_manager.register_hash(item['path'], content_hash)
                     self.tab._flow_layout.addWidget(thumbnail)
                     # Track in section_items so incremental sync can find this prefix
                     self.tab._section_items[prefix] = [item['path']]
@@ -537,8 +537,8 @@ class GalleryManager(BaseGalleryManager):
                         content_hash = item.get('content_hash')
                         if content_hash and hasattr(self.tab, '_hash_to_path'):
                             self.tab._hash_to_path[content_hash] = item['path']
-                        if content_hash and hasattr(self.tab, 'favorites_manager'):
-                            self.tab.favorites_manager.register_hash(item['path'], content_hash)
+                        if content_hash and hasattr(self.tab, '_favorites_manager'):
+                            self.tab._favorites_manager.register_hash(item['path'], content_hash)
                         self.tab._flow_layout.addWidget(thumbnail)
                         new_widgets.append(thumbnail)
                 elif not was_stack and should_be_stack:
@@ -582,8 +582,8 @@ class GalleryManager(BaseGalleryManager):
                             content_hash = new_items[0].get('content_hash')
                             if content_hash and hasattr(self.tab, '_hash_to_path'):
                                 self.tab._hash_to_path[content_hash] = new_path
-                            if content_hash and hasattr(self.tab, 'favorites_manager'):
-                                self.tab.favorites_manager.register_hash(new_path, content_hash)
+                            if content_hash and hasattr(self.tab, '_favorites_manager'):
+                                self.tab._favorites_manager.register_hash(new_path, content_hash)
                             self.tab._flow_layout.addWidget(thumbnail)
                             new_widgets.append(thumbnail)
 
@@ -626,8 +626,8 @@ class GalleryManager(BaseGalleryManager):
                         content_hash = item.get('content_hash')
                         if content_hash and hasattr(self.tab, '_hash_to_path'):
                             self.tab._hash_to_path[content_hash] = item['path']
-                        if content_hash and hasattr(self.tab, 'favorites_manager'):
-                            self.tab.favorites_manager.register_hash(item['path'], content_hash)
+                        if content_hash and hasattr(self.tab, '_favorites_manager'):
+                            self.tab._favorites_manager.register_hash(item['path'], content_hash)
                         self.tab._flow_layout.addWidget(thumbnail)
                         new_widgets.append(thumbnail)
                         self.tab._section_items[prefix] = [item['path']]
@@ -749,6 +749,9 @@ class GalleryManager(BaseGalleryManager):
         if cache_size > ANIMATION_THRESHOLD:
             return
 
+        # Clean up any in-progress animations before starting new batch
+        self._cleanup_new_item_animations()
+
         # Store references to prevent GC
         if not hasattr(self, '_new_item_animations'):
             self._new_item_animations = []
@@ -775,16 +778,22 @@ class GalleryManager(BaseGalleryManager):
             delay = idx * stagger
             QTimer.singleShot(delay, anim.start)
 
-        # Cleanup after animations complete (guarded by generation)
+        # Cleanup after animations complete (always clean up to prevent memory leak)
         total_time = min(len(widgets), max_animated) * stagger + duration + 50
-        gen = self._display_generation
-        QTimer.singleShot(total_time, lambda g=gen: (
-            self._cleanup_new_item_animations() if g == self._display_generation else None
-        ))
+        QTimer.singleShot(total_time, self._cleanup_new_item_animations)
 
     def _cleanup_new_item_animations(self):
-        """Clean up new item animation references and remove opacity effects."""
+        """Clean up new item animation references and remove opacity effects.
+
+        Always cleans up regardless of display generation to prevent memory leaks
+        from accumulated QPropertyAnimation and QGraphicsOpacityEffect objects.
+        """
         for anim in getattr(self, '_new_item_animations', []):
+            if not anim:
+                continue
+            # Stop animation to release resources
+            if hasattr(anim, 'stop'):
+                anim.stop()
             target = anim.targetObject()
             if target:
                 # Find the widget that has this opacity effect
@@ -928,12 +937,11 @@ class GalleryManager(BaseGalleryManager):
         if hasattr(self.tab, '_section_items') and hasattr(self.tab, '_cache_lock'):
             with self.tab._cache_lock:
                 for section_id in list(self.tab._section_items.keys()):
-                    paths = self.tab._section_items[section_id]
-                    self.tab._section_items[section_id] = [
-                        p for p in paths if p not in stale_paths
-                    ]
-                    # Remove empty sections
-                    if not self.tab._section_items[section_id]:
+                    paths = list(self.tab._section_items[section_id])  # Defensive copy
+                    filtered = [p for p in paths if p not in stale_paths]
+                    if filtered:
+                        self.tab._section_items[section_id] = filtered
+                    else:
                         del self.tab._section_items[section_id]
 
     def _insert_new_items_incrementally(self, sorted_items, new_items):
@@ -972,8 +980,8 @@ class GalleryManager(BaseGalleryManager):
                 content_hash = item.get('content_hash')
                 if content_hash and hasattr(self.tab, '_hash_to_path'):
                     self.tab._hash_to_path[content_hash] = path
-                if content_hash and hasattr(self.tab, 'favorites_manager'):
-                    self.tab.favorites_manager.register_hash(path, content_hash)
+                if content_hash and hasattr(self.tab, '_favorites_manager'):
+                    self.tab._favorites_manager.register_hash(path, content_hash)
                 self.tab._flow_layout.insertWidget(target_index, thumbnail)
 
             # Update status count
@@ -1033,8 +1041,14 @@ class GalleryManager(BaseGalleryManager):
             while self.tab._flow_layout.count():
                 self.tab._flow_layout.takeAt(0)
 
-            # Add widgets back in sorted order
+            # Add widgets back in sorted order (re-check validity)
             for widget in ordered_widgets:
+                if not isValid(widget):
+                    # Widget deleted during reorder - fall back to full rebuild
+                    container.setUpdatesEnabled(True)
+                    logging.warning("[Gallery] Widget invalidated during reorder, falling back to full rebuild")
+                    self.display_items(items, self.tab._view_mode)
+                    return
                 self.tab._flow_layout.addWidget(widget)
 
         finally:
@@ -1133,8 +1147,8 @@ class GalleryManager(BaseGalleryManager):
             if content_hash and hasattr(self.tab, '_hash_to_path'):
                 self.tab._hash_to_path[content_hash] = path
             # Register hash with favorites manager for auto-migration
-            if content_hash and hasattr(self.tab, 'favorites_manager'):
-                self.tab.favorites_manager.register_hash(path, content_hash)
+            if content_hash and hasattr(self.tab, '_favorites_manager'):
+                self.tab._favorites_manager.register_hash(path, content_hash)
             self.tab._flow_layout.addWidget(thumbnail)
 
         self.tab._widget_create_index = end_index

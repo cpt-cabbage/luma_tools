@@ -69,7 +69,22 @@ def remove_nodes_from_api_workflow(
     pending = set(node_ids_to_remove)
 
     # Cascade: keep removing until no new nodes are affected
+    max_iterations = 100
+    iteration = 0
     while pending:
+        iteration += 1
+        if iteration > max_iterations:
+            logger.warning(
+                f"Node removal exceeded {max_iterations} iterations, "
+                f"possible circular reference — force-removing {len(pending)} remaining node(s)"
+            )
+            # Force-remove remaining pending nodes to avoid inconsistent state
+            for nid in pending:
+                if nid in workflow:
+                    class_type = workflow[nid].get('class_type', 'unknown')
+                    del workflow[nid]
+                    logger.info(f"  Force-removed node {nid} ({class_type})")
+            break
         # Build pass-through maps for pending nodes:
         # {node_id: {output_slot: (upstream_node_id, upstream_slot)}}
         passthrough = {}
@@ -105,10 +120,10 @@ def remove_nodes_from_api_workflow(
                 if ref_node not in pending:
                     continue
                 # Trace through chain of removed nodes
-                visited = set()
+                visited = set()  # Track (node, slot) pairs to detect slot-based cycles
                 cur_node, cur_slot = ref_node, ref_slot
-                while cur_node in all_removed and cur_node not in visited:
-                    visited.add(cur_node)
+                while cur_node in all_removed and (cur_node, cur_slot) not in visited:
+                    visited.add((cur_node, cur_slot))
                     upstream = passthrough.get(cur_node, {}).get(cur_slot)
                     if upstream:
                         cur_node, cur_slot = upstream
@@ -174,6 +189,11 @@ def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]
                 basename = os.path.basename(input_value)
                 # Only convert if it looks like an absolute/relative path (has separators)
                 if '/' in input_value or '\\' in input_value:
+                    # Validate file exists and reject suspicious paths
+                    abs_path = os.path.abspath(input_value)
+                    if not os.path.isfile(abs_path):
+                        logger.warning(f"  Skipping non-existent file path in node {node_id}.{input_name}: {input_value}")
+                        continue
                     # Rewrite basename to .png if format needs conversion
                     if needs_conversion(input_value):
                         dest_basename = get_png_basename(basename)
@@ -430,7 +450,11 @@ def modify_workflow_api_format(
                 # Extract base name (remove _editable suffix)
                 base_name = title.replace('_editable', '').strip()
                 value = bool(data.get('value'))
-                toggle_values[base_name.lower()] = value
+                base_key = base_name.lower()
+                if base_key in toggle_values:
+                    logger.warning(f"[Toggle] Duplicate toggle name '{base_name}' "
+                                   f"(node {node_id}), overwriting with value: {value}")
+                toggle_values[base_key] = value
                 logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
 
     # Process nodes with @if_ conditional in their title
@@ -505,7 +529,8 @@ def modify_workflow_api_format(
         node_title = meta.get('title', '')
 
         # Check if this node was already modified by editable_values
-        node_already_handled = int(node_id) in editable_by_node_id
+        # Use str() for consistent key type comparison
+        node_already_handled = str(node_id) in editable_by_node_id or int(node_id) in editable_by_node_id
 
         # LoadImage nodes - set input image filename (only if we have a legacy image and not already handled)
         if class_type == 'LoadImage' and image_basename and not node_already_handled:

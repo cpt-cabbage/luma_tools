@@ -218,24 +218,26 @@ def _normalize_link(link: Any) -> Optional[List]:
     # Dictionary format
     if isinstance(link, dict):
         # Try integer keys first (common in some JSON serializations)
+        # Use explicit None checks to handle falsy values like 0 correctly
         if 0 in link or '0' in link:
-            link_id = link.get(0) or link.get('0')
-            from_node = link.get(1) or link.get('1')
-            from_slot = link.get(2) or link.get('2') or 0
-            to_node = link.get(3) or link.get('3')
-            to_slot = link.get(4) or link.get('4') or 0
-            link_type = link.get(5) or link.get('5') or '*'
+            link_id = link.get(0) if link.get(0) is not None else link.get('0')
+            from_node = link.get(1) if link.get(1) is not None else link.get('1')
+            from_slot = link.get(2) if link.get(2) is not None else (link.get('2') if link.get('2') is not None else 0)
+            to_node = link.get(3) if link.get(3) is not None else link.get('3')
+            to_slot = link.get(4) if link.get(4) is not None else (link.get('4') if link.get('4') is not None else 0)
+            link_type = link.get(5) if link.get(5) is not None else (link.get('5') if link.get('5') is not None else '*')
 
             if link_id is not None and from_node is not None and to_node is not None:
                 return [link_id, from_node, from_slot, to_node, to_slot, link_type]
 
         # Try string key naming conventions
-        link_id = link.get('id') or link.get('link_id')
-        from_node = link.get('origin_id') or link.get('from_node')
-        from_slot = link.get('origin_slot') or link.get('from_slot') or 0
-        to_node = link.get('target_id') or link.get('to_node')
-        to_slot = link.get('target_slot') or link.get('to_slot') or 0
-        link_type = link.get('type') or '*'
+        # Use explicit None checks to handle falsy values like 0 correctly
+        link_id = link.get('id') if link.get('id') is not None else link.get('link_id')
+        from_node = link.get('origin_id') if link.get('origin_id') is not None else link.get('from_node')
+        from_slot = link.get('origin_slot') if link.get('origin_slot') is not None else (link.get('from_slot') if link.get('from_slot') is not None else 0)
+        to_node = link.get('target_id') if link.get('target_id') is not None else link.get('to_node')
+        to_slot = link.get('target_slot') if link.get('target_slot') is not None else (link.get('to_slot') if link.get('to_slot') is not None else 0)
+        link_type = link.get('type') if link.get('type') is not None else '*'
 
         if link_id is not None and from_node is not None and to_node is not None:
             return [link_id, from_node, from_slot, to_node, to_slot, link_type]
@@ -297,7 +299,7 @@ def _apply_boundary_overrides(
     return applied
 
 
-def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
+def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any]:
     """
     Expand all subgraph/component nodes into their constituent nodes.
 
@@ -306,6 +308,7 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         workflow: Workflow in UI/nodes format (with 'nodes' array)
+        _depth: Internal recursion depth counter (do not pass manually)
 
     Returns:
         Workflow with all subgraphs expanded into individual nodes
@@ -462,6 +465,10 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
                 from_slot = il[2]  # The subgraph input slot
                 to_node = il[3]    # The internal node receiving the input
                 to_slot = il[4]    # The input slot on the internal node
+                if from_slot < 0 or from_slot >= len(sg_inputs):
+                    logger.warning(f"    Boundary input slot {from_slot} out of range "
+                                   f"(subgraph has {len(sg_inputs)} inputs), skipping")
+                    continue
                 if from_slot not in boundary_input_map:
                     boundary_input_map[from_slot] = []
                 boundary_input_map[from_slot].append((to_node, to_slot, il))
@@ -784,11 +791,13 @@ def expand_subgraphs(workflow: Dict[str, Any]) -> Dict[str, Any]:
     expanded['nodes'].extend(new_nodes)
     expanded['links'] = expanded_links + new_links
 
-    # Recursively expand in case of nested subgraphs
-    if any(_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
+    # Recursively expand in case of nested subgraphs (with depth limit)
+    if _depth >= 10:
+        logger.warning("  Subgraph expansion depth limit reached (10), stopping expansion")
+    elif any(_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
            for n in expanded['nodes']):
         logger.debug("  Checking for nested subgraphs...")
-        return expand_subgraphs(expanded)
+        return expand_subgraphs(expanded, _depth=_depth + 1)
 
     logger.info(f"  Expansion complete: {len(expanded['nodes'])} nodes, {len(expanded['links'])} links")
     return expanded

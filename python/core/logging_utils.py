@@ -12,6 +12,7 @@ This module is used during early startup before settings_manager is available,
 so it reads global settings directly from file for path resolution.
 """
 
+import atexit
 import sys
 import os
 import json
@@ -40,12 +41,17 @@ def cleanup_tee_writers():
         _active_tee_writers.clear()
 
 
+# Register cleanup on interpreter exit to prevent file handle leaks on Windows
+atexit.register(cleanup_tee_writers)
+
+
 # =============================================================================
 # PATH RESOLUTION
 # =============================================================================
 
 # Cached values
 _network_output_path_cache: Optional[str] = None
+_network_cache_lock = threading.RLock()
 
 
 def _get_global_settings_paths() -> list:
@@ -87,19 +93,20 @@ def get_network_output_path() -> Optional[str]:
     """
     global _network_output_path_cache
 
-    if _network_output_path_cache is not None:
-        # Empty string means we already checked and found nothing
-        return _network_output_path_cache if _network_output_path_cache else None
+    with _network_cache_lock:
+        if _network_output_path_cache is not None:
+            # Empty string means we already checked and found nothing
+            return _network_output_path_cache if _network_output_path_cache else None
 
-    settings = _load_global_settings_raw()
-    path = settings.get('network_output_path', '')
+        settings = _load_global_settings_raw()
+        path = settings.get('network_output_path', '')
 
-    if path and os.path.isdir(path):
-        _network_output_path_cache = path
-        return path
+        if path and os.path.isdir(path):
+            _network_output_path_cache = path
+            return path
 
-    _network_output_path_cache = ""  # Cache the negative result too
-    return None
+        _network_output_path_cache = ""  # Cache the negative result too
+        return None
 
 
 def get_network_log_dir(subdirectory: str = "users") -> Optional[str]:
@@ -138,7 +145,8 @@ def get_local_log_dir() -> str:
 def clear_path_cache():
     """Clear cached paths. Call after settings changes."""
     global _network_output_path_cache
-    _network_output_path_cache = None
+    with _network_cache_lock:
+        _network_output_path_cache = None
 
 
 # =============================================================================
@@ -262,6 +270,7 @@ def setup_file_logging(
     log_filename = "_".join(parts) + ".log"
 
     # Get log directory (network with fallback to local)
+    from .utils import ensure_directory
     log_dir = get_network_log_dir(subdirectory)
     if not log_dir and fallback_dir and os.path.isdir(fallback_dir):
         log_dir = os.path.join(fallback_dir, "logs")
@@ -284,22 +293,37 @@ def setup_file_logging(
         )
 
         if redirect_stdout:
+            # Clean up any existing tee writers before creating new ones
+            # to prevent file handle leaks if setup_file_logging is called multiple times
+            cleanup_tee_writers()
+
             if tee_mode == "stream":
                 sys.stdout = TeeStream(sys.__stdout__, logging.info)
                 sys.stderr = TeeStream(sys.__stderr__, logging.error)
             elif tee_mode == "writer":
-                log_file = open(log_path, 'a', encoding='utf-8')
-                log_file.write(f"{'='*60}\n")
-                log_file.write(f"Log started - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                log_file.write(f"{'='*60}\n\n")
-                log_file.flush()
-                stdout_tee = TeeWriter(sys.__stdout__, log_file)
-                stderr_tee = TeeWriter(sys.__stderr__, log_file)
-                sys.stdout = stdout_tee
-                sys.stderr = stderr_tee
-                # Track for cleanup (thread-safe)
-                with _tee_writers_lock:
-                    _active_tee_writers.extend([stdout_tee, stderr_tee])
+                log_file = None
+                try:
+                    log_file = open(log_path, 'a', encoding='utf-8')
+                    log_file.write(f"{'='*60}\n")
+                    log_file.write(f"Log started - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    log_file.write(f"{'='*60}\n\n")
+                    log_file.flush()
+                    # Hold lock during both assignment and tracking to prevent
+                    # cleanup_tee_writers() from missing these writers
+                    with _tee_writers_lock:
+                        stdout_tee = TeeWriter(sys.__stdout__, log_file)
+                        stderr_tee = TeeWriter(sys.__stderr__, log_file)
+                        sys.stdout = stdout_tee
+                        sys.stderr = stderr_tee
+                        _active_tee_writers.extend([stdout_tee, stderr_tee])
+                except Exception:
+                    # Clean up file handle if setup failed
+                    if log_file:
+                        try:
+                            log_file.close()
+                        except Exception:
+                            pass
+                    raise
 
                 # Update logging StreamHandler to use the tee'd stderr
                 for handler in logging.getLogger().handlers:

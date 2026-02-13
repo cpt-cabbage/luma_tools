@@ -128,6 +128,9 @@ class CollaborativeCanvas(QGraphicsView):
         # Flag to suppress canvas_modified signals during load
         self._loading_state = False
 
+        # Undo stack (set by set_undo_stack())
+        self._undo_stack = None
+
         # Tab reference for gallery integration (set by CanvasTab)
         self._tab = None
 
@@ -2257,6 +2260,19 @@ class CollaborativeCanvas(QGraphicsView):
 
         super().keyReleaseEvent(event)
 
+    def focusOutEvent(self, event):
+        """Reset keyboard state when focus is lost to prevent stuck keys."""
+        if self._space_pressed:
+            self._space_pressed = False
+            if self._was_panning_with_space:
+                self._is_panning = False
+                self._was_panning_with_space = False
+            self._restore_cursor_for_tool()
+        if self._is_sampling_color:
+            self._is_sampling_color = False
+            self.setCursor(Qt.ArrowCursor)
+        super().focusOutEvent(event)
+
     # -------------------------------------------------------------------------
     # Alignment and Auto-Arrange
     # -------------------------------------------------------------------------
@@ -2333,7 +2349,7 @@ class CollaborativeCanvas(QGraphicsView):
                 target_value = sum(w for w, h in sizes) / len(sizes)
             for img in selected_images:
                 w, h = img.get_size()
-                aspect = w / h
+                aspect = w / max(1, h)
                 new_h = target_value / aspect
                 img.set_size(target_value, new_h)
 
@@ -2342,7 +2358,7 @@ class CollaborativeCanvas(QGraphicsView):
                 target_value = sum(h for w, h in sizes) / len(sizes)
             for img in selected_images:
                 w, h = img.get_size()
-                aspect = w / h
+                aspect = w / max(1, h)
                 new_w = target_value * aspect
                 img.set_size(new_w, target_value)
 
@@ -2352,7 +2368,7 @@ class CollaborativeCanvas(QGraphicsView):
             import math
             for img in selected_images:
                 w, h = img.get_size()
-                aspect = w / h
+                aspect = w / max(1, h)
                 # area = w * h, w = aspect * h, so area = aspect * h^2
                 new_h = math.sqrt(target_value / aspect)
                 new_w = aspect * new_h
@@ -2599,12 +2615,13 @@ class CollaborativeCanvas(QGraphicsView):
             'groups': []
         }
 
-        # Image nodes
-        for node_id, node in self._image_nodes.items():
+        # Image nodes — snapshot dict to prevent RuntimeError if items change during iteration
+        for node_id, node in list(self._image_nodes.items()):
             width, height = node.get_size()
             state['nodes'][node_id] = {
                 'x': node.x(),
                 'y': node.y(),
+                'z': node.zValue(),
                 'width': width,
                 'height': height,
                 'liked': node.is_liked(),
@@ -2612,12 +2629,13 @@ class CollaborativeCanvas(QGraphicsView):
                 'content_hash': node.content_hash,
             }
 
-        # Video nodes
-        for node_id, node in self._video_nodes.items():
+        # Video nodes — snapshot dict
+        for node_id, node in list(self._video_nodes.items()):
             width, height = node.get_size()
             state['videos'][node_id] = {
                 'x': node.x(),
                 'y': node.y(),
+                'z': node.zValue(),
                 'width': width,
                 'height': height,
                 'liked': node.is_liked(),
@@ -2625,53 +2643,60 @@ class CollaborativeCanvas(QGraphicsView):
                 'content_hash': node.content_hash,
             }
 
-        # Connections
-        for conn_id, conn in self._connections.items():
-            source_id = target_id = None
-            for nid, node in self._image_nodes.items():
-                if node == conn.source_node:
-                    source_id = nid
-                if node == conn.target_node:
-                    target_id = nid
+        # Connections — snapshot dict
+        for conn_id, conn in list(self._connections.items()):
+            try:
+                source_id = target_id = None
+                for nid, node in self._image_nodes.items():
+                    if node == conn.source_node:
+                        source_id = nid
+                    if node == conn.target_node:
+                        target_id = nid
 
-            if source_id and target_id:
-                state['connections'].append({
-                    'id': conn_id,
-                    'from': source_id,
-                    'to': target_id,
-                    'label': conn.label,
-                    'type': conn.connection_type
-                })
+                if source_id and target_id:
+                    state['connections'].append({
+                        'id': conn_id,
+                        'from': source_id,
+                        'to': target_id,
+                        'label': conn.label,
+                        'type': conn.connection_type
+                    })
+            except RuntimeError:
+                # Skip orphaned connections where C++ node object was deleted
+                logger.warning(f"Skipping orphaned connection {conn_id}")
 
-        # Sticky notes
-        for note_id, note in self._sticky_notes.items():
+        # Sticky notes — snapshot dict
+        for note_id, note in list(self._sticky_notes.items()):
             state['annotations'].append({
                 'id': note_id,
                 'type': 'sticky',
                 'x': note.x(),
                 'y': note.y(),
+                'z': note.zValue(),
                 'text': note.text,
                 'color': note.color_name,
                 'font_size': note.font_size
             })
 
-        # Groups
-        for group_id, group in self._groups.items():
+        # Groups — snapshot dict
+        for group_id, group in list(self._groups.items()):
             rect = group.rect()
             state['groups'].append({
                 'id': group_id,
                 'name': group.name,
                 'color': group.color_hex,
                 'bounds': [group.x(), group.y(), rect.width(), rect.height()],
-                'collapsed': group._collapsed
+                'collapsed': group._collapsed,
+                'z': group.zValue()
             })
 
         # Drawings
         state['drawings'] = []
-        for drawing_id, drawing in self._drawings.items():
+        for drawing_id, drawing in list(self._drawings.items()):
             try:
                 drawing_state = drawing.get_state()
                 drawing_state['id'] = drawing_id
+                drawing_state['z'] = drawing.zValue()
                 state['drawings'].append(drawing_state)
 
                 # Debug logging
@@ -2714,6 +2739,10 @@ class CollaborativeCanvas(QGraphicsView):
             self._scene.addItem(drawing)
             self._drawings[drawing_id] = drawing
 
+            # Restore z-order
+            if 'z' in drawing_data:
+                drawing.setZValue(drawing_data['z'])
+
             # Debug logging
             if drawing_type == 'path':
                 points_count = len(drawing_data.get('points', []))
@@ -2735,6 +2764,10 @@ class CollaborativeCanvas(QGraphicsView):
             # Clear current state
             self.clear()
 
+            # Clear undo stack since we're loading fresh state
+            if hasattr(self, '_undo_stack') and self._undo_stack:
+                self._undo_stack.clear()
+
             # Load nodes
             nodes_data = state.get('nodes', {})
             for node_id, node_data in nodes_data.items():
@@ -2749,7 +2782,7 @@ class CollaborativeCanvas(QGraphicsView):
                         image_path = recovered
                         logger.info(f"Canvas: recovered moved file by hash: {image_path}")
 
-                self.add_image(
+                node = self.add_image(
                     image_path,
                     x=node_data.get('x', 0),
                     y=node_data.get('y', 0),
@@ -2759,6 +2792,8 @@ class CollaborativeCanvas(QGraphicsView):
                     node_id=node_id,
                     content_hash=content_hash,
                 )
+                if 'z' in node_data:
+                    node.setZValue(node_data['z'])
 
             # Load video nodes
             videos_data = state.get('videos', {})
@@ -2783,6 +2818,8 @@ class CollaborativeCanvas(QGraphicsView):
                     content_hash=content_hash,
                 )
                 node.set_liked(node_data.get('liked', False))
+                if 'z' in node_data:
+                    node.setZValue(node_data['z'])
 
             # Load connections
             for conn_data in state.get('connections', []):
@@ -2797,7 +2834,7 @@ class CollaborativeCanvas(QGraphicsView):
             # Load annotations
             for ann_data in state.get('annotations', []):
                 if ann_data.get('type') == 'sticky':
-                    self.add_sticky_note(
+                    note = self.add_sticky_note(
                         ann_data.get('x', 0),
                         ann_data.get('y', 0),
                         text=ann_data.get('text', ''),
@@ -2805,6 +2842,8 @@ class CollaborativeCanvas(QGraphicsView):
                         font_size=ann_data.get('font_size', 10),
                         note_id=ann_data.get('id')
                     )
+                    if 'z' in ann_data:
+                        note.setZValue(ann_data['z'])
 
             # Load groups
             for group_data in state.get('groups', []):
@@ -2817,6 +2856,8 @@ class CollaborativeCanvas(QGraphicsView):
                 )
                 if group_data.get('collapsed', False):
                     group._toggle_collapse()
+                if 'z' in group_data:
+                    group.setZValue(group_data['z'])
 
             # Load drawings
             drawings_data = state.get('drawings', [])
@@ -2865,6 +2906,10 @@ class CollaborativeCanvas(QGraphicsView):
             # Clear current state
             self.clear()
 
+            # Clear undo stack since we're loading fresh state
+            if hasattr(self, '_undo_stack') and self._undo_stack:
+                self._undo_stack.clear()
+
             # Load nodes with pre-loaded images
             nodes_data = state.get('nodes', {})
             for node_id, node_data in nodes_data.items():
@@ -2880,7 +2925,7 @@ class CollaborativeCanvas(QGraphicsView):
                         logger.info(f"Canvas: recovered moved file by hash: {image_path}")
 
                 qimage = preloaded_images.get(node_id)
-                self.add_image(
+                node = self.add_image(
                     image_path,
                     x=node_data.get('x', 0),
                     y=node_data.get('y', 0),
@@ -2891,6 +2936,8 @@ class CollaborativeCanvas(QGraphicsView):
                     qimage=qimage,  # Use pre-loaded QImage to avoid disk I/O
                     content_hash=content_hash,
                 )
+                if 'z' in node_data:
+                    node.setZValue(node_data['z'])
 
             # Load video nodes (thumbnails loaded async, no preloading needed)
             videos_data = state.get('videos', {})
@@ -2914,6 +2961,8 @@ class CollaborativeCanvas(QGraphicsView):
                     content_hash=content_hash,
                 )
                 node.set_liked(node_data.get('liked', False))
+                if 'z' in node_data:
+                    node.setZValue(node_data['z'])
 
             # Load connections (same as load_state)
             for conn_data in state.get('connections', []):
@@ -2928,7 +2977,7 @@ class CollaborativeCanvas(QGraphicsView):
             # Load annotations (same as load_state)
             for ann_data in state.get('annotations', []):
                 if ann_data.get('type') == 'sticky':
-                    self.add_sticky_note(
+                    note = self.add_sticky_note(
                         ann_data.get('x', 0),
                         ann_data.get('y', 0),
                         text=ann_data.get('text', ''),
@@ -2936,6 +2985,8 @@ class CollaborativeCanvas(QGraphicsView):
                         font_size=ann_data.get('font_size', 10),
                         note_id=ann_data.get('id')
                     )
+                    if 'z' in ann_data:
+                        note.setZValue(ann_data['z'])
 
             # Load groups (same as load_state)
             for group_data in state.get('groups', []):
@@ -2948,6 +2999,8 @@ class CollaborativeCanvas(QGraphicsView):
                 )
                 if group_data.get('collapsed', False):
                     group._toggle_collapse()
+                if 'z' in group_data:
+                    group.setZValue(group_data['z'])
 
             # Load drawings (same as load_state)
             drawings_data = state.get('drawings', [])
@@ -3127,14 +3180,14 @@ class CollaborativeCanvas(QGraphicsView):
         # Update or create cursors for active users
         for username, data in cursors.items():
             if username in self._remote_cursors:
-                cursor_item = self._remote_cursors[username]
                 try:
+                    cursor_item = self._remote_cursors[username]
                     # Update existing cursor position
                     cursor_item.setPos(data['x'], data['y'])
                 except RuntimeError:
                     # C++ object was deleted (e.g., by scene.clear())
                     # Remove stale reference and recreate
-                    del self._remote_cursors[username]
+                    self._remote_cursors.pop(username, None)
                     cursor_item = CursorItem(username, data['color'])
                     cursor_item.setPos(data['x'], data['y'])
                     self._scene.addItem(cursor_item)

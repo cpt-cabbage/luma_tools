@@ -10,6 +10,7 @@ import os
 import hashlib
 import base64
 import logging
+import threading
 from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ class ModelThumbnailService:
     """
 
     def __init__(self):
+        self._lock = threading.RLock()
         self._cache: Dict[str, QPixmap] = {}  # In-memory cache
         self._pending: Dict[str, bool] = {}   # Tracks pending generations
 
@@ -87,11 +89,12 @@ class ModelThumbnailService:
         Returns:
             QPixmap if cached, None otherwise
         """
-        # Check in-memory cache first
-        if model_path in self._cache:
-            return self._cache[model_path]
+        with self._lock:
+            # Check in-memory cache first
+            if model_path in self._cache:
+                return self._cache[model_path]
 
-        # Check disk cache
+        # Check disk cache (outside lock - disk I/O can be slow)
         cache_path = self.get_cache_path(model_path)
         if os.path.exists(cache_path):
             # Check if cache is still valid (model file hasn't been modified)
@@ -108,24 +111,28 @@ class ModelThumbnailService:
 
             pixmap = QPixmap(cache_path)
             if not pixmap.isNull():
-                self._cache[model_path] = pixmap
+                with self._lock:
+                    self._cache[model_path] = pixmap
                 return pixmap
 
         return None
 
     def is_cached(self, model_path: str) -> bool:
         """Check if a thumbnail is cached (memory or disk)."""
-        if model_path in self._cache:
-            return True
+        with self._lock:
+            if model_path in self._cache:
+                return True
         return os.path.exists(self.get_cache_path(model_path))
 
     def is_pending(self, model_path: str) -> bool:
         """Check if thumbnail generation is already pending for this path."""
-        return self._pending.get(model_path, False)
+        with self._lock:
+            return self._pending.get(model_path, False)
 
     def set_pending(self, model_path: str, pending: bool = True):
         """Mark a path as pending generation."""
-        self._pending[model_path] = pending
+        with self._lock:
+            self._pending[model_path] = pending
 
     def is_supported(self, model_path: str) -> bool:
         """Check if the file format is supported."""
@@ -238,7 +245,8 @@ class ModelThumbnailService:
                         pixmap = QPixmap(cache_path)
                         if not pixmap.isNull():
                             result['pixmap'] = pixmap
-                            self._cache[model_path] = pixmap
+                            with self._lock:
+                                self._cache[model_path] = pixmap
                             result['captured'] = True
                     except Exception as e:
                         logger.error(f"[ThumbnailService] Error saving thumbnail: {e}")
@@ -249,51 +257,58 @@ class ModelThumbnailService:
             viewer.modelLoaded.connect(on_model_loaded)
             viewer.loadError.connect(on_load_error)
 
-            # Wait for viewer to be ready
-            if not viewer._viewer_ready:
-                ready_loop = QEventLoop()
-                ready_timer = QTimer()
-                ready_timer.setSingleShot(True)
-                ready_timer.timeout.connect(ready_loop.quit)
-
-                def on_viewer_ready():
-                    ready_loop.quit()
-
-                viewer._bridge.viewerReady.connect(on_viewer_ready)
-                ready_timer.start(10000)  # 10s timeout for viewer ready
-                ready_loop.exec()
-                viewer._bridge.viewerReady.disconnect(on_viewer_ready)
-
-            if not viewer._viewer_ready:
-                logger.warning("[ThumbnailService] Viewer failed to initialize")
-                # Clean up the failed viewer
-                self._cleanup_viewer(viewer)
-                return None
-
-            # Load the model
-            viewer.load_file(model_path)
-
-            # Start timeout and wait
-            timeout_timer.start(30000)  # 30s timeout
-            loop.exec()
-            timeout_timer.stop()
-
-            # Disconnect signals
             try:
-                viewer.modelLoaded.disconnect(on_model_loaded)
-                viewer.loadError.disconnect(on_load_error)
-            except RuntimeError:
-                pass  # Signals already disconnected
+                # Wait for viewer to be ready
+                if not viewer._viewer_ready:
+                    ready_loop = QEventLoop()
+                    ready_timer = QTimer()
+                    ready_timer.setSingleShot(True)
+                    ready_timer.timeout.connect(ready_loop.quit)
 
-            # Clean up viewer
-            self._cleanup_viewer(viewer)
+                    def on_viewer_ready():
+                        ready_loop.quit()
 
-            return result['pixmap']
+                    viewer._bridge.viewerReady.connect(on_viewer_ready)
+                    ready_timer.start(10000)  # 10s timeout for viewer ready
+                    ready_loop.exec()
+                    ready_timer.stop()
+                    viewer._bridge.viewerReady.disconnect(on_viewer_ready)
+
+                if not viewer._viewer_ready:
+                    logger.warning("[ThumbnailService] Viewer failed to initialize")
+                    return None
+
+                # Load the model
+                viewer.load_file(model_path)
+
+                # Start timeout and wait
+                timeout_timer.start(30000)  # 30s timeout
+                loop.exec()
+                timeout_timer.stop()
+
+                # Disconnect signals
+                try:
+                    viewer.modelLoaded.disconnect(on_model_loaded)
+                    viewer.loadError.disconnect(on_load_error)
+                except RuntimeError:
+                    pass  # Signals already disconnected
+
+                return result['pixmap']
+
+            finally:
+                # Always clean up viewer, even if event loop hangs or exception occurs
+                try:
+                    self._cleanup_viewer(viewer)
+                except Exception as cleanup_err:
+                    logger.warning(f"[ThumbnailService] Viewer cleanup error: {cleanup_err}")
+                finally:
+                    viewer = None  # Always set to None, even if cleanup itself fails
 
         except Exception as e:
             logger.error(f"[ThumbnailService] Thumbnail generation error: {e}", exc_info=True)
-            # Clean up viewer on error
-            self._cleanup_viewer(viewer)
+            # Clean up viewer on error (if not already cleaned up by inner finally)
+            if viewer is not None:
+                self._cleanup_viewer(viewer)
             return None
 
     def clear_cache(self, model_path: str = None):
@@ -306,10 +321,9 @@ class ModelThumbnailService:
         """
         if model_path:
             # Clear specific entry
-            if model_path in self._cache:
-                del self._cache[model_path]
-            if model_path in self._pending:
-                del self._pending[model_path]
+            with self._lock:
+                self._cache.pop(model_path, None)
+                self._pending.pop(model_path, None)
             cache_path = self.get_cache_path(model_path)
             if os.path.exists(cache_path):
                 try:
@@ -318,8 +332,9 @@ class ModelThumbnailService:
                     pass  # File already removed or no permission
         else:
             # Clear all model thumbnails (those starting with 'model_')
-            self._cache.clear()
-            self._pending.clear()
+            with self._lock:
+                self._cache.clear()
+                self._pending.clear()
             for cache_file in os.listdir(CACHE_DIR):
                 if cache_file.startswith("model_"):
                     try:
@@ -333,11 +348,14 @@ class ModelThumbnailService:
 # ============================================================================
 
 _model_thumbnail_service_instance: Optional[ModelThumbnailService] = None
+_service_creation_lock = threading.Lock()
 
 
 def get_model_thumbnail_service() -> ModelThumbnailService:
-    """Get the global model thumbnail service instance."""
+    """Get the global model thumbnail service instance (thread-safe)."""
     global _model_thumbnail_service_instance
     if _model_thumbnail_service_instance is None:
-        _model_thumbnail_service_instance = ModelThumbnailService()
+        with _service_creation_lock:
+            if _model_thumbnail_service_instance is None:
+                _model_thumbnail_service_instance = ModelThumbnailService()
     return _model_thumbnail_service_instance

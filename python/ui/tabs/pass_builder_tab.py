@@ -144,11 +144,13 @@ class PassBuilderTab(BaseTab):
             else:
                 self.ui.BuildPasses.setEnabled(False)
 
-        def on_error(error_msg, traceback_str):
+        def on_error(error_tuple):
             """Called when pass detection fails."""
+            error_msg, _ = self.unpack_worker_error(error_tuple)
             self.passes_spinner.stop()
             logging.error(f"Pass detection error: {error_msg}")
             self.ui.BuildPasses.setEnabled(False)
+            self.show_status(f"Pass detection failed: {error_msg}", "error")
 
         # Use BaseTab helper for worker management
         self.start_worker(detect_passes, render_file, on_result=on_result, on_error=on_error)
@@ -219,8 +221,9 @@ class PassBuilderTab(BaseTab):
             )
             self.show_status("Build completed successfully", "success")
 
-        def on_error(error_msg, traceback_str):
+        def on_error(error_tuple):
             """Called when build fails."""
+            error_msg, _ = self.unpack_worker_error(error_tuple)
             logging.error(f"Build failed: {error_msg}")
             self.update_status_with_spinner(
                 f"Pass Builder failed: {error_msg}",

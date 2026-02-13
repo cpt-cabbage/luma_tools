@@ -7,6 +7,7 @@ Emits events through the PipelineEventBus for cross-tab communication.
 import os
 import time
 import logging
+import threading
 from PySide6.QtCore import QTimer, QThreadPool, Qt
 from dialog_helpers import confirm_action
 
@@ -144,6 +145,7 @@ class PollingMixin:
         self._batch_poll_pending_results = 0
         self._batch_poll_results = {}
         self._batch_poll_workers = []
+        self._batch_poll_lock = threading.RLock()  # Protects pending counter + results dict
         self._batch_recovery_mode = False  # Track if we're recovering from app restart
         self._batch_jobs_seen_active = set()  # Per-job tracking of Active/Rendering
 
@@ -752,12 +754,12 @@ class PollingMixin:
             return
 
         # Guard: skip if previous poll cycle's workers haven't all reported back
-        if getattr(self, '_batch_poll_pending_results', 0) > 0:
-            logger.debug("[Batch] Skipping poll cycle — previous workers still pending")
-            return
-
-        self._batch_poll_pending_results = len(self._batch_pending_jobs)
-        self._batch_poll_results = {}
+        with self._batch_poll_lock:
+            if self._batch_poll_pending_results > 0:
+                logger.debug("[Batch] Skipping poll cycle — previous workers still pending")
+                return
+            self._batch_poll_pending_results = len(self._batch_pending_jobs)
+            self._batch_poll_results = {}
 
         # Store workers and callbacks to prevent garbage collection
         self._batch_poll_workers = []
@@ -765,7 +767,7 @@ class PollingMixin:
         output_dir = self._batch_network_output_dir
         for job_id in list(self._batch_pending_jobs):
             worker = Worker(poll_deadline_job_status, job_id, output_dir)
-            # Use bound methods instead of lambdas to avoid GC issues
+            # Capture job_id by value using default argument to avoid closure bug
             worker.signals.result.connect(
                 lambda result, jid=job_id: self._on_batch_poll_result_collected(jid, result)
             )
@@ -778,26 +780,24 @@ class PollingMixin:
     def _on_batch_poll_error(self, job_id, error_msg):
         """Handle poll error for a single job."""
         logger.warning(f"[Batch] Poll error for {job_id}: {error_msg}")
-        self._batch_poll_results[job_id] = {"status": "PollError", "error_message": error_msg}
-        self._batch_poll_pending_results -= 1
-        if self._batch_poll_pending_results <= 0:
+        with self._batch_poll_lock:
+            self._batch_poll_results[job_id] = {"status": "PollError", "error_message": error_msg}
+            self._batch_poll_pending_results -= 1
+            should_process = self._batch_poll_pending_results <= 0
+        if should_process:
             self._process_collected_poll_results()
 
     def _on_batch_poll_result_collected(self, job_id, result):
         """Collect a single job's poll result, then process all when complete."""
-        import traceback
-        import sys
         try:
-            # Early log with immediate flush to capture any crash point
             status = result.get('status', 'Unknown') if isinstance(result, dict) else 'InvalidResult'
-            pending = self._batch_poll_pending_results - 1
-            logger.debug(f"[Batch Poll] Result for {job_id}: {status}, pending={pending}")
-
-            logger.debug(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
-            self._batch_poll_results[job_id] = result
-            self._batch_poll_pending_results -= 1
-
-            if self._batch_poll_pending_results <= 0:
+            with self._batch_poll_lock:
+                self._batch_poll_results[job_id] = result
+                self._batch_poll_pending_results -= 1
+                pending = self._batch_poll_pending_results
+                should_process = pending <= 0
+                logger.debug(f"[Batch] Poll result collected for {job_id}: {status}, pending={pending}")
+            if should_process:
                 self._process_collected_poll_results()
         except Exception as e:
             logger.error(f"ERROR in _on_batch_poll_result_collected: {e}", exc_info=True)
@@ -806,11 +806,14 @@ class PollingMixin:
         """Process all collected poll results and update status bar once."""
         import sys
         try:
-            logger.debug(f"[Batch Poll] Processing {len(self._batch_poll_results)} results...")
+            # Snapshot results under lock to prevent concurrent modification
+            with self._batch_poll_lock:
+                poll_results = dict(self._batch_poll_results)
+            logger.debug(f"[Batch Poll] Processing {len(poll_results)} results...")
 
             from ui_components import StatusColors
 
-            logger.debug(f"[Batch] Processing {len(self._batch_poll_results)} poll results")
+            logger.debug(f"[Batch] Processing {len(poll_results)} poll results")
             had_new_frames = False
             total_new_frames = 0  # Track total new frames for gallery count
             total_jobs = len(self._batch_job_ids)
@@ -818,7 +821,7 @@ class PollingMixin:
 
             active_job_loading_model = False
 
-            for job_id, result in self._batch_poll_results.items():
+            for job_id, result in poll_results.items():
                 status = result.get("status", "Unknown")
                 completed_tasks = result.get("completed_tasks", 0)
                 total_tasks = result.get("total_tasks", 1)
@@ -926,17 +929,17 @@ class PollingMixin:
             # Calculate TASK-level counts (more meaningful to user than job counts)
             # Each job has multiple tasks (generations), so sum across all jobs
             rendering_tasks_all = sum(
-                result.get("rendering_tasks", 0) for result in self._batch_poll_results.values()
+                result.get("rendering_tasks", 0) for result in poll_results.values()
             )
             queued_tasks_all = sum(
-                result.get("queued_tasks", 0) for result in self._batch_poll_results.values()
+                result.get("queued_tasks", 0) for result in poll_results.values()
             )
             # Remaining tasks = total - completed - rendering
             remaining_tasks = total_frames_all - completed_frames_all
 
             # Get total farm queue info from poll results
             total_farm_queued = 0
-            for result in self._batch_poll_results.values():
+            for result in poll_results.values():
                 tq = result.get("total_queued", 0)
                 if tq > 0:
                     total_farm_queued = tq
@@ -1466,9 +1469,11 @@ class PollingMixin:
                             self.show_status("Previous ComfyUI batch completed while app was closed", "success")
                         # Reset to "Ready" after showing the completion message briefly
                         from ui_components import StatusColors
-                        QTimer.singleShot(4000, lambda: self.animator.update_status_animated(
-                            "Ready", StatusColors.INFO
-                        ) if self.animator else None)
+                        from shiboken6 import isValid
+                        QTimer.singleShot(4000, lambda: (
+                            self.animator.update_status_animated("Ready", StatusColors.INFO)
+                            if isValid(self) and self.animator else None
+                        ))
                 return
 
             logger.info(f"[Recovery] Found {len(running_jobs)} running job(s) on Deadline")

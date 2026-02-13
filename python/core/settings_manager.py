@@ -209,6 +209,24 @@ def clear_settings_cache():
         _global_settings_path_cache = None
 
 
+def reload_settings():
+    """Clear and reload all settings caches atomically within a single lock hold.
+
+    Prevents races within this function (another thread cannot populate the cache
+    with stale data between the clear and reload). External callers of
+    load_*_settings() can still see stale data if settings files haven't been
+    updated on disk yet. Call immediately after saving settings to disk.
+    """
+    global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
+    with _settings_cache_lock:
+        _user_settings_cache = None
+        _global_settings_cache = None
+        _global_settings_path_cache = None
+        # Immediately reload under the same lock hold
+        load_user_settings()
+        load_global_settings()
+
+
 def ensure_settings_dir():
     """Ensure settings directory exists."""
     from .utils import ensure_directory
@@ -261,25 +279,24 @@ def get_global_settings_path() -> str:
         if _global_settings_path_cache is not None:
             return _global_settings_path_cache
 
-    settings = load_user_settings()
-    path = settings.get("global_settings_path")
-    if path and os.path.isdir(path):
-        with _settings_cache_lock:
+        # Load inside lock to prevent TOCTOU race between cache check and load
+        settings = load_user_settings()
+        path = settings.get("global_settings_path")
+        if path and os.path.isdir(path):
             _global_settings_path_cache = path
-        return path
+            return path
 
-    with _settings_cache_lock:
         _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
-    return DEFAULT_GLOBAL_SETTINGS_PATH
+        return DEFAULT_GLOBAL_SETTINGS_PATH
 
 
 def set_global_settings_path(path: str):
-    """Set a custom global settings path."""
+    """Set a custom global settings path. Atomic load-modify-save under lock."""
     global _global_settings_path_cache, _global_settings_cache
-    settings = load_user_settings()
-    settings["global_settings_path"] = path
-    save_user_settings(settings)
     with _settings_cache_lock:
+        settings = load_user_settings()
+        settings["global_settings_path"] = path
+        save_user_settings(settings)
         _global_settings_path_cache = None
         _global_settings_cache = None
     logger.info(f"Set global settings path to: {path}")
@@ -350,7 +367,11 @@ class SettingsAccessor:
         self._save_fn = save_global_settings if settings_type == 'global' else save_user_settings
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a settings value by key."""
+        """Get a settings value by key.
+
+        The underlying load functions return a shallow copy of the cache,
+        so callers get isolated values without needing deep copy here.
+        """
         return self._load_fn().get(key, default)
 
     def set(self, key: str, value: Any, verbose: bool = True):
@@ -400,7 +421,7 @@ def set_setting(name: str, value: Any, verbose: bool = True):
     accessor.set(defn.key, value, verbose=verbose)
 
 
-def safe_get_setting(name: str, default: Any = None) -> Any:
+def safe_get_setting(name: str, default: Any = _SENTINEL) -> Any:
     """
     Get a setting with a guaranteed default if not found.
 
@@ -409,7 +430,7 @@ def safe_get_setting(name: str, default: Any = None) -> Any:
 
     Args:
         name: Setting key (may or may not be in SETTINGS_REGISTRY)
-        default: Fallback value if setting not found (default: None)
+        default: Fallback value if setting not found (default: registry default or None)
 
     Returns:
         Setting value or default
@@ -425,9 +446,9 @@ def safe_get_setting(name: str, default: Any = None) -> Any:
     """
     defn = SETTINGS_REGISTRY.get(name)
     if not defn:
-        return default
+        return default if default is not _SENTINEL else None
     accessor = _global_settings if defn.scope == "global" else _user_settings
-    return accessor.get(defn.key, defn.default if default is None else default)
+    return accessor.get(defn.key, defn.default if default is _SENTINEL else default)
 
 
 def safe_set_setting(name: str, value: Any, verbose: bool = False) -> bool:

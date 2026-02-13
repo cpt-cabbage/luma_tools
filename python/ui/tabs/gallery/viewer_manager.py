@@ -8,9 +8,13 @@ Handles embedded and fullscreen viewer lifecycle:
 - Media navigation
 """
 
+import logging
+
 from PySide6.QtCore import QTimer
 
 from .base_manager import BaseGalleryManager
+
+logger = logging.getLogger(__name__)
 
 
 class ViewerManager(BaseGalleryManager):
@@ -103,12 +107,11 @@ class ViewerManager(BaseGalleryManager):
         if hasattr(self.tab.ui, 'galleryFooterLayout'):
             self._set_layout_visible(self.tab.ui.galleryFooterLayout, False)
 
-        # Check if viewer creation is already in progress
-        if self._viewer_creation_pending:
-            # Update the pending parameters for when creation completes
-            self._pending_media_paths = media_paths
-            self._pending_start_index = start_index
-            return
+        # Guard against duplicate creation requests (rapid double-click)
+        if self._viewer_creation_pending or (self._embedded_viewer is not None and not self._embedded_viewer.isVisible()):
+            logger.debug("[Viewer] Creation already pending or viewer exists, ignoring subsequent request")
+            if self._viewer_creation_pending:
+                return
 
         # Create embedded viewer if not exists
         if self._embedded_viewer is None:

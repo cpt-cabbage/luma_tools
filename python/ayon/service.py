@@ -8,6 +8,7 @@ Includes publish strategy pattern for farm vs local publishing.
 import os
 import subprocess
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Callable
 
@@ -19,7 +20,9 @@ from core.config import (
     AYON_COLORSPACE, AYON_CONSOLE, AYON_DEFAULT_FPS, AYON_DEFAULT_HEIGHT,
     AYON_DEFAULT_WIDTH, AYON_DISPLAY, AYON_FAMILY, AYON_PRODUCT_TYPE, AYON_VIEW,
     DEADLINE_CHUNK_SIZE, DEADLINE_DEPARTMENT, DEADLINE_GROUP, DEADLINE_PATH,
-    DEADLINE_POOL, DEADLINE_PRIORITY_BUILD, DEADLINE_PRIORITY_PUBLISH
+    DEADLINE_POOL, DEADLINE_PRIORITY_BUILD, DEADLINE_PRIORITY_PUBLISH,
+    get_ocio_config,
+    get_ayon_bundle,
 )
 
 # AYON imports
@@ -560,6 +563,7 @@ def publish_to_ayon_local(
     """
     import threading
     import queue
+    from collections import deque
 
     if not AYON_AVAILABLE:
         logger.warning("AYON not available, skipping publish")
@@ -630,11 +634,23 @@ def publish_to_ayon_local(
         stdout_thread.start()
         stderr_thread.start()
 
-        # Collect output while process runs
-        stdout_lines = []
-        stderr_lines = []
+        # Collect output while process runs (with timeout to prevent hanging)
+        stdout_lines = deque(maxlen=1000)
+        stderr_lines = deque(maxlen=1000)
+        publish_start_time = time.monotonic()
+        max_publish_seconds = 600  # 10 minute safety timeout
 
         while process.poll() is None or not output_queue.empty():
+            # Safety timeout to prevent indefinite hanging
+            if time.monotonic() - publish_start_time > max_publish_seconds:
+                logger.error(f"AYON publish timed out after {max_publish_seconds}s, killing process")
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                return False
+
             try:
                 prefix, line = output_queue.get(timeout=0.1)
                 if line:
@@ -680,7 +696,7 @@ def publish_to_ayon_local(
         else:
             # Check for SiteAlreadyPresentError - this error occurs AFTER successful integration
             # The IntegrateAsset plugin completes before IntegrateSiteSync fails
-            all_output = "\n".join(stdout_lines + stderr_lines)
+            all_output = "\n".join(list(stdout_lines) + list(stderr_lines))
             if "SiteAlreadyPresentError" in all_output and "IntegrateAsset" in all_output:
                 logger.info('AYON Publish completed successfully')
                 return True

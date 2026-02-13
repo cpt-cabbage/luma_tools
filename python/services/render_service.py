@@ -7,6 +7,7 @@ Handles pass detection, channel parsing, and render configuration.
 import logging
 import os
 import re
+import shlex
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,20 @@ def detect_passes(render_file):
     Returns:
         dict: Dictionary mapping pass names to channel lists
     """
+    if not OIIO_INFO_PATH:
+        logger.error("OIIO not available (standalone mode)")
+        return {}
+
+    if not os.path.exists(render_file):
+        logger.error(f"Render file not found: {render_file}")
+        return {}
+
     # Look for passes in file using OIIO
     result = run_command([OIIO_INFO_PATH, '-v', '-m', 'channel', render_file])
+    if result.returncode != 0:
+        logger.error(f"OIIO command failed: {result.stderr}")
+        return {}
+
     choutput = result.stdout
 
     channelsraw = substring_after(choutput, "channel list:")
@@ -203,11 +216,11 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     """
     # If no frame range specified, execute once
     if start_frame is None or end_frame is None:
-        local_command = f'"{oiio_path}" {oiio_args}'
+        local_command = [oiio_path] + shlex.split(oiio_args, posix=False)
         logger.info(f"Local Command: {local_command}")
 
         try:
-            result = run_command(local_command, shell=True)
+            result = run_command(local_command, shell=False)
             logger.info(f"STDOUT: {result.stdout}")
             if result.stderr:
                 logger.info(f"STDERR: {result.stderr}")
@@ -240,7 +253,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         # Example: <STARTFRAME%4> becomes 1001 (4-digit padding)
         frame_args = replace_frame_tokens(oiio_args, frame_num)
 
-        local_command = f'"{oiio_path}" -v {frame_args}'
+        local_command = [oiio_path, '-v'] + shlex.split(frame_args, posix=False)
 
         # Print first command for debugging
         if frame_num == start_frame:
@@ -250,7 +263,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         report_progress(progress_callback, progress, f"Processing frame {frame_num}/{end_frame}...")
 
         try:
-            result = run_command(local_command, shell=True)
+            result = run_command(local_command, shell=False)
 
             if result.returncode != 0:
                 error_msg = f"Frame {frame_num} failed with code {result.returncode}"

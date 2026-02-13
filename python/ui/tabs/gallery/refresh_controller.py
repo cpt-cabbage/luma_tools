@@ -92,6 +92,12 @@ class RefreshController(BaseGalleryManager):
         if self._scan_in_progress:
             return
 
+        # Don't refresh if prewarm processing is in progress (prevents cache corruption)
+        with self.tab._cache_lock:
+            if getattr(self, '_deferred_prewarm_items', None):
+                logger.info("[Gallery] Skipping refresh - prewarm processing in progress")
+                return
+
         self._scan_in_progress = True
 
         # Get show_status flag (default True for backward compatibility)

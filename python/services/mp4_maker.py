@@ -8,9 +8,11 @@ Handles MP4 video generation from image sequences.
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import shutil
+import time
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,10 @@ def convert_exr_to_png_with_oiio(
     Returns:
         True if successful, False otherwise
     """
+    if not OIIO_PATH or not os.path.exists(OIIO_PATH):
+        logger.error("OIIO not available for EXR conversion")
+        return False
+
     try:
         frame_count = end_frame - start_frame + 1
 
@@ -229,9 +235,10 @@ def generate_mp4(
         filters = []
 
         if burn_in_timecode:
+            safe_start_frame = int(start_frame)  # Ensure integer for FFmpeg filter
             timecode_filter = (
                 f"drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:"
-                f"text='Frame\\: %{{expr\\:n+{start_frame}}}':"
+                f"text='Frame\\: %{{expr\\:n+{safe_start_frame}}}':"
                 f"fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:"
                 f"boxborderw=5:x=10:y=10"
             )
@@ -287,8 +294,19 @@ def generate_mp4(
                 except (ValueError, IndexError):
                     pass
 
-        # Wait for completion
-        return_code = process.wait()
+        # Wait for completion with timeout to prevent hanging
+        try:
+            return_code = process.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg process timed out after 300 seconds, killing process")
+            process.kill()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.error("FFmpeg process failed to terminate after kill")
+            if progress_callback:
+                progress_callback(0, "FFmpeg timed out after 5 minutes")
+            return False
 
         if return_code != 0:
             stderr_output = "".join(stderr_lines)
@@ -318,13 +336,18 @@ def generate_mp4(
         return False
 
     finally:
-        # Clean up temporary directory
+        # Clean up temporary directory with retry for file handle release
         if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-                logger.info(f"Cleaned up temporary directory: {temp_dir}")
-            except Exception as e:
-                logger.warning(f"Warning: Could not delete temp directory {temp_dir}: {e}")
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.info(f"Cleaned up temporary directory: {temp_dir}")
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        time.sleep(0.5)  # Wait for file handles to release
+                    else:
+                        logger.warning(f"Could not delete temp directory after 3 attempts: {temp_dir}: {e}")
 
 
 def get_output_filename(render_name: str, shot: str) -> str:
@@ -390,8 +413,11 @@ def copy_mp4_to_gallery(
         if not gallery_base:
             return (False, "Gallery path not configured in settings")
 
+        # Sanitize username to prevent path traversal
+        safe_user = re.sub(r'[^\w\-]', '_', user or "standalone")
+
         # Construct user subfolder
-        gallery_user_dir = os.path.join(gallery_base, user or "standalone")
+        gallery_user_dir = os.path.join(gallery_base, safe_user)
 
         # Ensure directory exists
         ensure_directory(gallery_user_dir)

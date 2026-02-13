@@ -129,6 +129,9 @@ class SettingsTab(BaseTab):
         """Initialize settings tab."""
         from option_button import OptionButtonManager
 
+        # Initialize optional UI attributes unconditionally
+        self._version_badge = None
+
         # ComfyUI mode option manager
         self._comfyui_mode_manager = OptionButtonManager(
             button=self.ui.ComfyUIModeButton,
@@ -417,6 +420,15 @@ class SettingsTab(BaseTab):
         """
         from core.settings_manager import get_setting
 
+        # Snapshot all values first to avoid partial reads during external changes
+        values = {}
+        for entry in settings_map:
+            key = entry[0]
+            try:
+                values[key] = get_setting(key)
+            except (KeyError, Exception):
+                values[key] = None
+
         for entry in settings_map:
             key, widget_name, widget_type = entry[0], entry[1], entry[2]
             load_converter = entry[3] if len(entry) > 3 else None
@@ -425,7 +437,9 @@ class SettingsTab(BaseTab):
             if not widget:
                 continue
 
-            value = get_setting(key)
+            value = values[key]
+            if value is None:
+                continue
             if load_converter:
                 value = load_converter(value)
 

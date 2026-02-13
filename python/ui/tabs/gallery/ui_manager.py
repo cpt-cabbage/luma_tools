@@ -551,11 +551,12 @@ class UIManager(BaseGalleryManager):
                 all_items = os.listdir(base_path)
                 logger.info(f"[Gallery] User discovery - found {len(all_items)} items in base path")
 
+                import re
                 for name in all_items:
                     full_path = os.path.join(base_path, name)
                     if os.path.isdir(full_path):
-                        # Skip hidden/system directories
-                        if not name.startswith('.') and not name.startswith('_'):
+                        # Skip hidden/system directories and validate username safety
+                        if not name.startswith('.') and not name.startswith('_') and re.match(r'^[\w.\-]+$', name):
                             users.append(name)
                             logger.debug(f"[Gallery] User discovery - added user: {name}")
                         else:

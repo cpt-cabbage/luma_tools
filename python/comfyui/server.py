@@ -83,6 +83,18 @@ class ThreadSafeState:
         with self._lock:
             return dict(self._state)
 
+    def test_and_clear(self, key: str) -> bool:
+        """Atomically test a boolean flag and clear it.
+
+        Returns True if the flag was set (and clears it), False otherwise.
+        Prevents multiple threads from both acting on the same flag.
+        """
+        with self._lock:
+            value = bool(self._state.get(key, False))
+            if value:
+                self._state[key] = False
+            return value
+
 
 def kill_process_on_port(port: int) -> bool:
     """Kill any process using the specified port (Windows only).
@@ -380,16 +392,23 @@ def health_monitor_thread(port: int):
     while not server_state['shutdown_requested']:
         time.sleep(20)
 
-        if server_state['is_ready']:
+        # Snapshot for consistent multi-value read across threads
+        state = server_state.snapshot()
+
+        if state['is_ready']:
             # If ComfyUI has produced stdout output recently, it's alive and working.
             # Heavy operations (model loading, GPU inference) can block the HTTP
             # server from responding, causing false-positive health check failures.
-            last_output = server_state.get('last_output_time')
+            # Still perform occasional checks (every 2 min) to detect HTTP-specific failures.
+            last_output = state.get('last_output_time')
+            last_actual_check = state.get('last_actual_health_check', 0)
             if last_output and (time.time() - last_output) < activity_grace_period:
-                consecutive_failures = 0
-                server_state['last_health_check'] = datetime.now().isoformat()
-                continue
+                if time.time() - last_actual_check < 120:
+                    consecutive_failures = 0
+                    server_state['last_health_check'] = datetime.now().isoformat()
+                    continue
 
+            server_state['last_actual_health_check'] = time.time()
             healthy = check_server_health(port=port)
             server_state['last_health_check'] = datetime.now().isoformat()
 
@@ -399,8 +418,9 @@ def health_monitor_thread(port: int):
                 consecutive_failures += 1
                 logger.warning(f"ComfyUI health check failed ({consecutive_failures}/{max_consecutive_failures})")
 
-                if server_state['comfyui_process']:
-                    ret = server_state['comfyui_process'].poll()
+                process = state['comfyui_process']
+                if process:
+                    ret = process.poll()
                     if ret is not None:
                         logger.error(f"ComfyUI process died with exit code {ret}")
                         server_state['is_ready'] = False
@@ -593,7 +613,10 @@ def restart_comfyui(reason: str = "manual"):
         except subprocess.TimeoutExpired:
             logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
-            server_state['comfyui_process'].wait()
+            try:
+                server_state['comfyui_process'].wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.error("ComfyUI process did not exit after kill")
 
     # Also kill any orphaned processes on the port (from self-restarts)
     kill_process_on_port(config['port'])
@@ -714,6 +737,10 @@ def shutdown(signum=None, frame=None):
         except subprocess.TimeoutExpired:
             logger.warning("Force killing ComfyUI...")
             server_state['comfyui_process'].kill()
+            try:
+                server_state['comfyui_process'].wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.error("ComfyUI process did not exit after kill")
 
     # Also kill any orphaned ComfyUI processes on the port
     # (e.g., from self-restarts where we lost the process handle)
@@ -938,7 +965,8 @@ def main():
     output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
     output_thread.start()
 
-    if not wait_for_comfyui(args.port, timeout=3000):
+    COMFYUI_STARTUP_TIMEOUT = 3000  # 50 minutes for initial model loading
+    if not wait_for_comfyui(args.port, timeout=COMFYUI_STARTUP_TIMEOUT):
         logger.error("ComfyUI failed to start")
         shutdown()
         sys.exit(1)
@@ -980,24 +1008,28 @@ def main():
                     logger.error("Restart failed, server will exit")
                     break
 
+            # Always refresh process reference from server_state to stay in sync
+            # with restarts triggered by other threads (health monitor, etc.)
+            process = server_state['comfyui_process']
+
             # Check process status (may be None after self-restart)
             if process is not None:
                 ret = process.poll()
             else:
-                # No process handle - rely on health checks
-                # If we're not ready, trigger a restart
+                # No process handle - always validate health to detect dead processes
+                # (not just when is_ready=False, since is_ready could be stale)
                 ret = None
-                if not server_state['is_ready']:
-                    config = server_state.get('startup_config', {})
-                    port = config.get('port', 8188)
-                    if not check_server_health(port):
-                        logger.warning("No process handle and ComfyUI not responding, restarting...")
-                        if restart_comfyui(reason="orphaned"):
-                            process = server_state['comfyui_process']
-                            last_stable_check = time.time()
-                        else:
-                            logger.error("Failed to restart orphaned ComfyUI")
-                            break
+                config = server_state.get('startup_config', {})
+                port = config.get('port', 8188)
+                if not check_server_health(port):
+                    logger.warning("No process handle and ComfyUI not responding, restarting...")
+                    server_state['is_ready'] = False
+                    if restart_comfyui(reason="orphaned"):
+                        process = server_state['comfyui_process']
+                        last_stable_check = time.time()
+                    else:
+                        logger.error("Failed to restart orphaned ComfyUI")
+                        break
 
             if ret is not None:
                 # ComfyUI exited - check if it was a self-restart or a crash
@@ -1005,9 +1037,8 @@ def main():
 
                 # Handle ComfyUI self-restart (exit code 0 with restart pending)
                 # ComfyUI already spawned a new process - just wait for it to be ready
-                if ret == 0 and server_state['self_restart_pending']:
+                if ret == 0 and server_state.test_and_clear('self_restart_pending'):
                     logger.info("ComfyUI self-restart in progress, waiting for new instance...")
-                    server_state['self_restart_pending'] = False
                     server_state['comfyui_process'] = None  # Old process is gone
                     process = None
 
@@ -1046,10 +1077,16 @@ def main():
                     break
 
             # Reset crash counter after stable uptime period
-            if server_state['is_ready'] and server_state['crash_count'] > 0:
-                if time.time() - last_stable_check > stable_uptime_threshold:
-                    reset_crash_counter()
-                    last_stable_check = time.time()
+            # Only count time while continuously ready (not time since last restart)
+            if server_state['is_ready']:
+                if server_state['crash_count'] > 0:
+                    if time.time() - last_stable_check > stable_uptime_threshold:
+                        reset_crash_counter()
+                        last_stable_check = time.time()
+            else:
+                # Not ready — reset the stable timer so it must be ready for the
+                # full threshold duration before crash counter resets
+                last_stable_check = time.time()
 
             time.sleep(2)  # Check more frequently (was 5s)
 
