@@ -206,8 +206,14 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
 # SERVER RESTART SUPPORT
 # =============================================================================
 
-def signal_server_restart(port: int, health_port: int = None) -> bool:
-    """Signal the persistent ComfyUI server to perform a full restart."""
+def signal_server_restart(port: int, health_port: int = None, lowvram: bool = False) -> bool:
+    """Signal the persistent ComfyUI server to perform a full restart.
+
+    Args:
+        port: ComfyUI server port.
+        health_port: Health check server port (defaults to port + 1000).
+        lowvram: If True, request server restart with --lowvram for this one restart.
+    """
     import urllib.request
     import urllib.error
 
@@ -217,11 +223,18 @@ def signal_server_restart(port: int, health_port: int = None) -> bool:
     url = f"http://127.0.0.1:{health_port}/restart"
     logger.info(f"\n{'='*60}")
     logger.info("SIGNALING SERVER RESTART")
+    if lowvram:
+        logger.info("  with --lowvram override")
     logger.info(f"Sending restart request to {url}")
     logger.info(f"{'='*60}")
 
     try:
-        req = urllib.request.Request(url, method='POST')
+        body = None
+        headers = {}
+        if lowvram:
+            body = json.dumps({"lowvram": True}).encode('utf-8')
+            headers['Content-Type'] = 'application/json'
+        req = urllib.request.Request(url, data=body, method='POST', headers=headers)
         response = urllib.request.urlopen(req, timeout=10)
         result = json.loads(response.read().decode('utf-8'))
         logger.info(f"Restart response: {result.get('message', 'OK')}")
@@ -288,6 +301,7 @@ def main():
     parser.add_argument('--batch', action='store_true', help='Process all generations in a single session')
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files)')
     parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs')
+    parser.add_argument('--restart-lowvram', action='store_true', help='Restart server with --lowvram (only used with --full-restart)')
     parser.add_argument('--server-not-found', choices=['fail', 'wait'], default='fail',
                         help='Behavior when server not found')
     parser.add_argument('--server-wait-timeout', type=int, default=300,
@@ -389,7 +403,7 @@ def main():
 
     if args.full_restart:
         logger.info("\nFull restart requested")
-        if signal_server_restart(args.port):
+        if signal_server_restart(args.port, lowvram=args.restart_lowvram):
             if not wait_for_server_restart(args.port, timeout=300):
                 logger.error("Server restart failed")
                 sys.exit(1)

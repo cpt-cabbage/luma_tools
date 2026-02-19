@@ -221,6 +221,7 @@ def save_comfyui_workflow_preset(
     iteratable: bool = False,
     note: str = "",
     full_restart: bool = False,
+    restart_lowvram: bool = False,
     node_overrides: Optional[Dict] = None,
     is_multi: bool = False,
     workflows: Optional[Dict] = None,
@@ -236,6 +237,7 @@ def save_comfyui_workflow_preset(
         iteratable: Whether preset supports iterate mode
         note: User note/description
         full_restart: Whether to restart ComfyUI server before running
+        restart_lowvram: Whether to restart server with --lowvram (requires full_restart)
         node_overrides: Dict of node overrides
         is_multi: Whether this is a multi-workflow preset
         workflows: Dict of workflows for multi-workflow presets
@@ -278,6 +280,7 @@ def save_comfyui_workflow_preset(
         "iteratable": iteratable,
         "note": note,
         "full_restart": full_restart,
+        "restart_lowvram": restart_lowvram,
         "node_overrides": node_overrides or {},
         "is_multi": is_multi,
         "output_type": output_type,

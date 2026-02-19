@@ -250,6 +250,7 @@ server_state = ThreadSafeState({
     'crash_cooldown_seconds': 60,
     'self_restart_pending': False,  # Set when ComfyUI initiates its own restart
     'last_output_time': None,  # Timestamp of last stdout activity from ComfyUI
+    'restart_lowvram_override': False,  # One-time --lowvram override for next restart (per-model)
 })
 
 
@@ -277,6 +278,19 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         logger.info("\n" + "=" * 60)
         logger.info("RESTART REQUESTED via API")
         logger.info("=" * 60)
+
+        # Parse optional JSON body for one-time overrides
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length > 0:
+            try:
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode('utf-8'))
+                if data.get('lowvram'):
+                    server_state['restart_lowvram_override'] = True
+                    logger.info("Restart override: --lowvram enabled for this restart")
+            except Exception as e:
+                logger.warning(f"Could not parse restart request body: {e}")
+
         server_state['restart_requested'] = True
 
         self.send_response(200)
@@ -604,6 +618,19 @@ def restart_comfyui(reason: str = "manual"):
     server_state['restart_requested'] = False
     server_state['self_restart_pending'] = False
 
+    # Apply one-time lowvram override if requested (per-model restart setting)
+    extra_args = list(config['extra_args'])
+    if server_state.get('restart_lowvram_override'):
+        server_state['restart_lowvram_override'] = False
+        for flag in ('--highvram', '--normalvram'):
+            if flag in extra_args:
+                extra_args.remove(flag)
+        if '--lowvram' not in extra_args:
+            extra_args.append('--lowvram')
+        logger.info("Applying one-time --lowvram override for this restart")
+    else:
+        extra_args = config['extra_args']
+
     if server_state['comfyui_process']:
         logger.info("Terminating existing ComfyUI process...")
         server_state['comfyui_process'].terminate()
@@ -627,7 +654,7 @@ def restart_comfyui(reason: str = "manual"):
         process = start_comfyui(
             config['comfyui_path'],
             config['port'],
-            config['extra_args'],
+            extra_args,
             mode=config['mode'],
             python_path=config['python_path'],
             skip_dep_check=True

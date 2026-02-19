@@ -199,6 +199,18 @@ class ModelDialog(QDialog):
         )
         options_layout.addWidget(self._full_restart_check)
 
+        self._restart_lowvram_check = QCheckBox("Low VRAM on Restart (--lowvram)")
+        self._restart_lowvram_check.setChecked(self.preset_data.get("restart_lowvram", False))
+        self._restart_lowvram_check.setToolTip(
+            "Restart the ComfyUI server with --lowvram for this model.\n"
+            "Only active when Full Restart is enabled.\n"
+            "Reduces VRAM usage at the cost of performance."
+        )
+        self._restart_lowvram_check.setVisible(self._full_restart_check.isChecked())
+        options_layout.addWidget(self._restart_lowvram_check)
+
+        self._full_restart_check.toggled.connect(self._restart_lowvram_check.setVisible)
+
         layout.addWidget(options_group)
         layout.addStretch()
 
@@ -351,8 +363,17 @@ class ModelDialog(QDialog):
         wf_iteratable.setChecked(wf_config.get("iteratable", False))
         wf_full_restart = QCheckBox("Full Restart")
         wf_full_restart.setChecked(wf_config.get("full_restart", False))
+        wf_restart_lowvram = QCheckBox("Low VRAM on Restart")
+        wf_restart_lowvram.setChecked(wf_config.get("restart_lowvram", False))
+        wf_restart_lowvram.setToolTip(
+            "Restart server with --lowvram for this workflow.\n"
+            "Only active when Full Restart is enabled."
+        )
+        wf_restart_lowvram.setVisible(wf_full_restart.isChecked())
+        wf_full_restart.toggled.connect(wf_restart_lowvram.setVisible)
         options_row.addWidget(wf_iteratable)
         options_row.addWidget(wf_full_restart)
+        options_row.addWidget(wf_restart_lowvram)
         options_row.addStretch()
         entry_layout.addLayout(options_row)
 
@@ -378,6 +399,7 @@ class ModelDialog(QDialog):
             "path_edit": wf_path_edit,
             "iteratable_check": wf_iteratable,
             "full_restart_check": wf_full_restart,
+            "restart_lowvram_check": wf_restart_lowvram,
             "note_edit": wf_note_edit,
             "node_overrides": wf_config.get("node_overrides", {})
         }
@@ -960,6 +982,7 @@ class ModelDialog(QDialog):
                     "note": wf_widgets["note_edit"].text().strip(),
                     "iteratable": wf_widgets["iteratable_check"].isChecked(),
                     "full_restart": wf_widgets["full_restart_check"].isChecked(),
+                    "restart_lowvram": wf_widgets["restart_lowvram_check"].isChecked(),
                     "node_overrides": wf_overrides
                 }
 
@@ -971,6 +994,7 @@ class ModelDialog(QDialog):
             new_path = None
             new_iteratable = False
             new_full_restart = False
+            new_restart_lowvram = False
             new_node_overrides = {}
             # But description and note apply to the overall model
         else:
@@ -983,6 +1007,7 @@ class ModelDialog(QDialog):
             new_workflows = None
             new_iteratable = self._iteratable_check.isChecked()
             new_full_restart = self._full_restart_check.isChecked()
+            new_restart_lowvram = self._restart_lowvram_check.isChecked() if new_full_restart else False
             # Use exposed param overrides if the tab was visited, otherwise keep existing
             if self._exposed_param_widgets:
                 new_node_overrides = self._collect_exposed_param_overrides()
@@ -1011,6 +1036,7 @@ class ModelDialog(QDialog):
             iteratable=new_iteratable,
             note=new_note,
             full_restart=new_full_restart,
+            restart_lowvram=new_restart_lowvram,
             node_overrides=new_node_overrides,
             is_multi=is_multi,
             workflows=new_workflows,

@@ -1175,8 +1175,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         logger.info(f"[ComfyUI] Network output path: {network_output_dir}")
 
-        # Get full_restart from workflow config
+        # Get full_restart and restart_lowvram from workflow config
         full_restart = workflow_config.get("full_restart", False) if workflow_config else False
+        restart_lowvram = workflow_config.get("restart_lowvram", False) if workflow_config else False
 
         # Get output_type from workflow config (for metadata)
         output_type = workflow_config.get("output_type", "image") if workflow_config else "image"
@@ -1204,6 +1205,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 "network_output_dir": network_output_dir,
                 "workflow_preset": self.state_manager.current_preset_name,
                 "full_restart": full_restart,
+                "restart_lowvram": restart_lowvram,
                 "output_type": output_type,
                 "custom_name": custom_name if custom_name else None,
             },

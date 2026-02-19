@@ -70,6 +70,7 @@ def submit_comfyui_to_deadline(
     group: Optional[str] = None,
     use_server_mode: bool = False,
     full_restart: bool = False,
+    restart_lowvram: bool = False,
 ) -> Optional[str]:
     """
     Submit ComfyUI job to Deadline using CommandLine plugin.
@@ -91,6 +92,7 @@ def submit_comfyui_to_deadline(
         group: Deadline group (default from config)
         use_server_mode: If True, keep ComfyUI server running between jobs.
         full_restart: If True, completely restart the ComfyUI server before processing.
+        restart_lowvram: If True (and full_restart is True), restart server with --lowvram.
 
     Returns:
         Deadline job ID or None if failed
@@ -154,6 +156,8 @@ def submit_comfyui_to_deadline(
 
     if full_restart:
         runner_args += ' --full-restart'
+        if restart_lowvram:
+            runner_args += ' --restart-lowvram'
 
     comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
@@ -242,6 +246,7 @@ def submit_comfyui_job(
     use_server_mode: bool = True,
     workflow_preset: Optional[str] = None,
     full_restart: bool = False,
+    restart_lowvram: bool = False,
     output_type: Optional[str] = None,
     custom_name: Optional[str] = None,
 ) -> Tuple[List[str], str]:
@@ -266,6 +271,7 @@ def submit_comfyui_job(
         use_server_mode: Deprecated - server mode is always enabled
         workflow_preset: Full preset name for metadata
         full_restart: If True, restart ComfyUI server before processing
+        restart_lowvram: If True (and full_restart is True), restart server with --lowvram
         output_type: Type of output (image, video, 3d, audio, other)
 
     Returns:
@@ -484,6 +490,7 @@ def submit_comfyui_job(
             job_data_dir=job_data_dir,
             use_server_mode=True,
             full_restart=full_restart,
+            restart_lowvram=restart_lowvram,
         )
 
         if job_id:
