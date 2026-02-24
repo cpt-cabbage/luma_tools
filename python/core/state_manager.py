@@ -230,6 +230,18 @@ class ApplicationState:
                 getattr(self, '_shotpath', '')
             )
 
+    def has_ayon_context(self):
+        """Check if AYON publish context is available (job + shotpath).
+
+        Less restrictive than has_shot_context() — works for both shots and
+        assets since AYON folder path is derived from shotpath + jobname only.
+        """
+        with self._lock:
+            return bool(
+                getattr(self, '_jobname', '') and
+                getattr(self, '_shotpath', '')
+            )
+
     # =========================================================================
     # Cross-Tab Awareness Helpers
     # =========================================================================

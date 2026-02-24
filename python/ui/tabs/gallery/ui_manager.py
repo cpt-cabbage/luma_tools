@@ -585,7 +585,7 @@ class UIManager(BaseGalleryManager):
 
     def update_user_button_text(self):
         """Update user selector button text."""
-        if self.tab._selected_user == self.tab.app_state.user:
+        if self.tab._is_own_gallery():
             self.tab.ui.GalleryUserButton.setText(f"{self.tab._selected_user} (You)")
         else:
             self.tab.ui.GalleryUserButton.setText(self.tab._selected_user)
@@ -606,17 +606,18 @@ class UIManager(BaseGalleryManager):
 
         # Add current user at top
         current_user = self.tab.app_state.user
+        current_user_lower = (current_user or "").strip().lower()
         action = menu.addAction(f"{current_user} (You)")
         action.setCheckable(True)
-        action.setChecked(self.tab._selected_user == current_user)
+        action.setChecked(self.tab._is_own_gallery())
         action.triggered.connect(lambda: self._select_user(current_user))
 
         if self.tab._available_users:
             menu.addSeparator()
 
-            # Add other users
+            # Add other users (skip current user's directory by case-insensitive match)
             for user in self.tab._available_users:
-                if user != current_user:
+                if user.strip().lower() != current_user_lower:
                     action = menu.addAction(user)
                     action.setCheckable(True)
                     action.setChecked(self.tab._selected_user == user)

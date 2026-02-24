@@ -258,6 +258,35 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="MP4PublishToAyon">
+          <property name="text">
+           <string>Publish to AYON</string>
+          </property>
+          <property name="toolTip">
+           <string>Publish the generated MP4 as a review file to AYON</string>
+          </property>
+          <property name="checked">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="MP4PublishOnFarm">
+          <property name="text">
+           <string>Publish on Farm</string>
+          </property>
+          <property name="toolTip">
+           <string>Submit the AYON publish job to Deadline farm instead of publishing locally</string>
+          </property>
+          <property name="checked">
+           <bool>false</bool>
+          </property>
+          <property name="visible">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="mp4OptionsSpacer2">
           <property name="orientation">
            <enum>Qt::Vertical</enum>

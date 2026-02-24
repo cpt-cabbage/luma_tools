@@ -1849,7 +1849,7 @@ class GallerySelectionToolbar(QWidget):
         layout.addWidget(self.view_btn)
 
         # Publish to AYON button
-        self.publish_btn = QPushButton("Publish")
+        self.publish_btn = QPushButton("Publish to AYON")
         self.publish_btn.setToolTip("Publish selected images to AYON")
         self.publish_btn.clicked.connect(self.publish_selected.emit)
         self.publish_btn.setStyleSheet(self._get_button_style())

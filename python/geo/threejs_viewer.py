@@ -280,10 +280,32 @@ class ThreeJSViewerWidget(QWidget):
         # Set minimum size
         self.setMinimumSize(400, 300)
 
+        self._cleaned_up = False
+
         # For prewarm: force native window creation now (during splash)
         # This ensures all GPU/rendering initialization happens while splash covers screen
         if prewarm:
             self._web_view.winId()  # Forces native window handle creation
+
+    def cleanup(self):
+        """Explicitly clean up QWebEngineView before application exit.
+
+        Must be called before sys.exit() to prevent Chromium subprocess crash
+        (access violation 0xC0000005) during Qt's C++ destructor chain.
+        """
+        if self._cleaned_up:
+            return
+        self._cleaned_up = True
+        try:
+            if hasattr(self, '_web_view') and self._web_view is not None:
+                self._web_view.setUrl(QUrl("about:blank"))
+                page = self._web_view.page()
+                if page:
+                    page.deleteLater()
+                self._web_view.deleteLater()
+                self._web_view = None
+        except RuntimeError:
+            pass  # Widget already deleted by Qt
 
     def _load_viewer(self):
         """Load the Three.js viewer HTML."""

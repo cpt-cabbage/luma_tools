@@ -45,6 +45,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.ui.MP4Generate.clicked.connect(self._on_generate_clicked)
         # Add to Gallery checkbox state persistence
         self.ui.MP4AddToGallery.stateChanged.connect(self._on_add_to_gallery_changed)
+        # Publish to AYON checkbox signals
+        self.ui.MP4PublishToAyon.stateChanged.connect(self._on_publish_to_ayon_changed)
+        self.ui.MP4PublishOnFarm.stateChanged.connect(self._on_publish_on_farm_changed)
 
     def initialize(self):
         """Initialize MP4 maker tab."""
@@ -72,6 +75,15 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         # Load "Add to Gallery" checkbox state from user settings
         add_to_gallery = get_setting("mp4_maker_add_to_gallery")
         self.ui.MP4AddToGallery.setChecked(add_to_gallery)
+
+        # Load Publish to AYON checkbox states
+        from core.settings_manager import safe_get_setting
+        publish_to_ayon = safe_get_setting("mp4_maker_publish_to_ayon", False)
+        publish_on_farm = safe_get_setting("mp4_maker_publish_on_farm", False)
+        self.ui.MP4PublishToAyon.setChecked(publish_to_ayon)
+        self.ui.MP4PublishOnFarm.setChecked(publish_on_farm)
+        self.ui.MP4PublishOnFarm.setVisible(publish_to_ayon)
+        self._update_publish_availability()
 
     @property
     def _quality_index(self):
@@ -208,17 +220,26 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 StatusColors.INFO
             )
 
+        want_gallery = self.ui.MP4AddToGallery.isChecked()
+        want_publish = self.ui.MP4PublishToAyon.isChecked() and self.ui.MP4PublishToAyon.isEnabled()
+
         def on_result(success):
             """Called when MP4 generation completes."""
             if success:
-                # Check if we should copy to gallery
-                if self.ui.MP4AddToGallery.isChecked():
+                if want_gallery:
                     self.update_status_with_spinner(
-                        f"MP4 generated. Copying to gallery...",
+                        "MP4 generated. Copying to gallery...",
                         StatusColors.INFO,
                         start=True
                     )
-                    self._copy_to_gallery(input_pattern)
+                    self._copy_to_gallery(input_pattern, publish_after=want_publish)
+                elif want_publish:
+                    self.update_status_with_spinner(
+                        "MP4 generated. Publishing to AYON...",
+                        StatusColors.INFO,
+                        start=True
+                    )
+                    self._publish_mp4_to_ayon()
                 else:
                     self.update_status_with_spinner(
                         f"MP4 generated: {os.path.basename(self.app_state.mp4_output_path)}",
@@ -265,17 +286,73 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         from PySide6.QtCore import Qt
         set_setting("mp4_maker_add_to_gallery", state == Qt.Checked, verbose=False)
 
-    def _copy_to_gallery(self, source_path: str):
-        """Copy the generated MP4 to the gallery folder with metadata."""
+    def _update_publish_availability(self):
+        """Enable/disable publish checkboxes based on AYON/Deadline availability and context."""
+        from ayon.service import AYON_AVAILABLE, DEADLINE_AVAILABLE
+
+        # Publish to AYON requires AYON and AYON context (shot or asset)
+        ayon_enabled = AYON_AVAILABLE and self.app_state.has_ayon_context()
+        self.ui.MP4PublishToAyon.setEnabled(ayon_enabled)
+        if not AYON_AVAILABLE:
+            self.ui.MP4PublishToAyon.setToolTip("AYON is not available in this environment")
+        elif not self.app_state.has_ayon_context():
+            self.ui.MP4PublishToAyon.setToolTip("Publish requires AYON context (launch from AYON)")
+        else:
+            self.ui.MP4PublishToAyon.setToolTip("Publish the generated MP4 as a review file to AYON")
+
+        # Publish on Farm additionally requires Deadline
+        farm_enabled = ayon_enabled and DEADLINE_AVAILABLE
+        self.ui.MP4PublishOnFarm.setEnabled(farm_enabled)
+        if not DEADLINE_AVAILABLE:
+            self.ui.MP4PublishOnFarm.setToolTip("Deadline is not available in this environment")
+        else:
+            self.ui.MP4PublishOnFarm.setToolTip("Submit the AYON publish job to Deadline farm instead of publishing locally")
+
+    def _on_publish_to_ayon_changed(self, state):
+        """Save Publish to AYON checkbox state and toggle farm checkbox visibility."""
+        from core.settings_manager import safe_set_setting
+        from PySide6.QtCore import Qt
+        checked = state == Qt.Checked
+        safe_set_setting("mp4_maker_publish_to_ayon", checked)
+        self.ui.MP4PublishOnFarm.setVisible(checked)
+
+    def _on_publish_on_farm_changed(self, state):
+        """Save Publish on Farm checkbox state."""
+        from core.settings_manager import safe_set_setting
+        from PySide6.QtCore import Qt
+        safe_set_setting("mp4_maker_publish_on_farm", state == Qt.Checked)
+
+    def _copy_to_gallery(self, source_path: str, publish_after: bool = False):
+        """Copy the generated MP4 to the gallery folder with metadata.
+
+        Args:
+            source_path: EXR input pattern used for gallery metadata.
+            publish_after: If True, chain AYON publish after gallery copy completes.
+        """
         from ui_components import StatusColors
         from services.mp4_maker import copy_mp4_to_gallery
 
         def on_gallery_result(result):
             """Handle gallery copy completion."""
             success, path_or_error = result
-            if success:
+            if publish_after:
+                if success:
+                    self.update_status_with_spinner(
+                        "Added to gallery. Publishing to AYON...",
+                        StatusColors.INFO,
+                        start=True
+                    )
+                else:
+                    logging.warning(f"Gallery copy failed: {path_or_error}")
+                    self.update_status_with_spinner(
+                        "Gallery copy failed. Publishing to AYON...",
+                        StatusColors.INFO,
+                        start=True
+                    )
+                self._publish_mp4_to_ayon()
+            elif success:
                 self.update_status_with_spinner(
-                    f"MP4 generated and added to gallery",
+                    "MP4 generated and added to gallery",
                     StatusColors.SUCCESS,
                     start=False
                 )
@@ -290,12 +367,21 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         def on_gallery_error(error_msg, traceback_str):
             """Handle gallery copy error."""
-            self.update_status_with_spinner(
-                f"MP4 generated (gallery error: {error_msg})",
-                StatusColors.WARNING,
-                start=False
-            )
             logging.error(f"Gallery copy error: {error_msg}")
+            if publish_after:
+                # Still attempt publish even if gallery copy errored
+                self.update_status_with_spinner(
+                    "Gallery error. Publishing to AYON...",
+                    StatusColors.INFO,
+                    start=True
+                )
+                self._publish_mp4_to_ayon()
+            else:
+                self.update_status_with_spinner(
+                    f"MP4 generated (gallery error: {error_msg})",
+                    StatusColors.WARNING,
+                    start=False
+                )
 
         # Run gallery copy on worker thread
         self.start_worker(
@@ -312,3 +398,170 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             on_result=on_gallery_result,
             on_error=on_gallery_error
         )
+
+    def _publish_mp4_to_ayon(self):
+        """Publish the generated MP4 to AYON as a review file."""
+        from ui_components import StatusColors
+
+        use_farm = self.ui.MP4PublishOnFarm.isChecked() and self.ui.MP4PublishOnFarm.isEnabled()
+        mp4_path = self.app_state.mp4_output_path
+
+        def on_publish_result(result):
+            """Handle AYON publish completion."""
+            success, detail = result
+            if success:
+                if use_farm:
+                    self.update_status_with_spinner(
+                        f"MP4 published to AYON (Deadline job: {detail})",
+                        StatusColors.SUCCESS,
+                        start=False
+                    )
+                    self.show_status(f"MP4 published to AYON via Deadline farm", "success")
+                else:
+                    self.update_status_with_spinner(
+                        "MP4 published to AYON",
+                        StatusColors.SUCCESS,
+                        start=False
+                    )
+                    self.show_status("MP4 published to AYON successfully!", "success")
+            else:
+                self.update_status_with_spinner(
+                    f"AYON publish failed: {detail}",
+                    StatusColors.ERROR,
+                    start=False
+                )
+                self.show_status(f"AYON publish failed: {detail}", "error")
+
+        def on_publish_error(error_msg, traceback_str):
+            """Handle AYON publish error."""
+            self.update_status_with_spinner(
+                f"AYON publish error: {error_msg}",
+                StatusColors.ERROR,
+                start=False
+            )
+            logging.error(f"AYON publish error: {error_msg}")
+            logging.debug(traceback_str)
+
+        def on_publish_progress(progress, message):
+            """Update UI with publish progress."""
+            self.animator.update_status_animated(
+                f"AYON: {message} ({progress}%)",
+                StatusColors.INFO
+            )
+
+        self.start_worker(
+            self._publish_mp4_worker,
+            worker_kwargs={
+                "mp4_path": mp4_path,
+                "use_farm": use_farm,
+            },
+            on_result=on_publish_result,
+            on_error=on_publish_error,
+            on_progress=on_publish_progress,
+        )
+
+    @staticmethod
+    def _publish_mp4_worker(mp4_path, use_farm, progress_callback=None):
+        """Worker thread function for publishing MP4 to AYON.
+
+        Args:
+            mp4_path: Path to the MP4 file to publish.
+            use_farm: If True, submit publish to Deadline; otherwise publish locally.
+            progress_callback: Optional callback(percent, message).
+
+        Returns:
+            Tuple of (success: bool, detail: str).
+        """
+        from ayon.service import (
+            create_ayon_metadata_single_file,
+            write_metadata_file,
+            publish_to_ayon_local,
+            submit_ayon_publish_to_deadline,
+            convert_to_ayon_folder_path,
+        )
+        from core.state_manager import app_state
+
+        if progress_callback:
+            progress_callback(10, "Preparing metadata...")
+
+        # Build product name from MP4 filename
+        mp4_basename = os.path.basename(mp4_path)
+        render_name = os.path.splitext(mp4_basename)[0]
+        product_name = f"review_{render_name}"
+
+        # Build AYON folder path from shot context
+        folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
+        task = app_state.task or "compositing"
+
+        logging.info(f"[MP4 AYON Publish] File: {mp4_path}")
+        logging.info(f"[MP4 AYON Publish] Product: {product_name}, Task: {task}")
+        logging.info(f"[MP4 AYON Publish] Folder: {folder_path}, Farm: {use_farm}")
+
+        if progress_callback:
+            progress_callback(20, "Creating AYON metadata...")
+
+        # Create metadata for single MP4 file
+        metadata = create_ayon_metadata_single_file(
+            project_name=app_state.jobname,
+            file_path=mp4_path,
+            product_name=product_name,
+            product_type="review",
+            folder_path=folder_path,
+            task=task,
+            user=app_state.user,
+        )
+
+        if not metadata:
+            return (False, "Failed to create AYON metadata")
+
+        if progress_callback:
+            progress_callback(40, "Writing metadata file...")
+
+        # Write metadata file next to the MP4
+        mp4_dir = os.path.dirname(mp4_path)
+        metadata_filename = f"ayon_mp4_{product_name}.json"
+        metadata_path = os.path.join(mp4_dir, metadata_filename)
+        metadata_path = write_metadata_file(metadata, metadata_path)
+
+        if not metadata_path:
+            return (False, "Failed to write metadata file")
+
+        if progress_callback:
+            progress_callback(60, "Publishing to AYON..." if not use_farm else "Submitting to Deadline...")
+
+        if use_farm:
+            job_id = submit_ayon_publish_to_deadline(
+                project_name=app_state.jobname,
+                render_name=product_name,
+                render_file=mp4_basename,
+                metadata_path=metadata_path,
+                folder_path=folder_path,
+                task=task,
+                user=app_state.user,
+            )
+            if job_id:
+                if progress_callback:
+                    progress_callback(100, "Submitted to Deadline")
+                return (True, job_id)
+            else:
+                return (False, "Deadline submission failed")
+        else:
+            # For local publish, ensure farm flag is False
+            if "instances" in metadata and metadata["instances"]:
+                metadata["instances"][0]["farm"] = False
+                # Re-write metadata with farm=False
+                write_metadata_file(metadata, metadata_path)
+
+            success = publish_to_ayon_local(
+                metadata_path=metadata_path,
+                project_name=app_state.jobname,
+                folder_path=folder_path,
+                task=task,
+                user=app_state.user,
+            )
+            if progress_callback:
+                progress_callback(100, "Publish complete" if success else "Publish failed")
+            if success:
+                return (True, "Published locally")
+            else:
+                return (False, "Local publish failed")

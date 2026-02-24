@@ -1,5 +1,30 @@
 # Luma Tools Changelog
 
+## Version 0.6.4
+
+- Remove single-instance mutex check that could prevent the app from launching
+- Gallery: Fix case-insensitive username matching when comparing selected user to current user
+- UI: Rename "Publish" buttons and labels to "Publish to AYON" across the app for clarity
+- Fix version history null check in Settings tab preventing it from sometimes opening
+- rePublish tab now uses broader AYON context check instead of strict shot context
+- MP4 Maker AYON Publishing:
+  - Add "Publish to AYON" checkbox to publish generated MP4s as review files directly from the MP4 Maker tab
+  - Add "Publish on Farm" option to submit AYON publish jobs to Deadline instead of publishing locally
+  - Supports chaining: generate MP4 → copy to gallery → publish to AYON in one click
+  - Settings are persisted per user
+- Canvas Browser Drag-Drop & Clipboard Paste:
+  - Drag images from a web browser directly onto the canvas (downloads and saves automatically)
+  - Paste images from clipboard with Ctrl+V (screenshots, browser "Copy image", URLs)
+  - Images paste at cursor position when hovering over canvas, or at view center otherwise
+  - Downloads run in background worker threads with size limits and content-type validation
+  - Saved images are stored in the user's gallery folder and trigger gallery refresh
+- 3D Viewer Stability:
+  - Remove pre-warm initialization at startup to fix intermittent access violation crashes on some GPU drivers
+  - 3D viewer now initializes lazily on first use instead of during splash screen
+  - Add explicit QWebEngineView cleanup before exit to prevent Chromium subprocess crashes
+  - Use os._exit() to bypass Qt/Chromium destructor chain that caused exit crashes
+
+
 ## Version 0.6.3.6
 - Lots of bug fixes
 

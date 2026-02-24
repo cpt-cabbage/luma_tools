@@ -2872,7 +2872,7 @@ class FullscreenImageViewer(QWidget):
             )
             if success:
                 logger.info(f"Successfully published image to AYON: {image_path}")
-                self.filename_label.setText(f"{os.path.basename(image_path)} - Published!")
+                self.filename_label.setText(f"{os.path.basename(image_path)} - Published to AYON!")
                 QTimer.singleShot(1500, self._update_info)
         except Exception as e:
             logger.error(f"Failed to publish image to AYON: {e}", exc_info=True)

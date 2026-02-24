@@ -5,15 +5,20 @@ Provides mixins and utilities for enabling drag-and-drop between widgets:
 - DraggableMixin: Add drag source capability to widgets
 - DropTargetMixin: Add drop target capability to widgets
 - Specialized drop handlers for images, videos, 3D models, and file paths
+- Browser drag-drop and clipboard paste utilities
 
 Supported MIME types:
 - application/x-luma-files: Internal file paths (images, videos, models)
 - text/uri-list: External file drops from file explorer
 - text/plain: Fallback for file paths as text
+- image/png, image/jpeg: Raw image data from clipboard/browser
+- text/html: HTML with embedded image URLs from browser
 """
 import os
+import re
 import logging
-from typing import List, Optional, Set, Callable
+from datetime import datetime
+from typing import List, Optional, Set, Callable, Dict, Any
 
 from PySide6.QtCore import Qt, QMimeData, QPoint
 from PySide6.QtGui import QDrag, QPixmap, QPainter, QColor
@@ -144,6 +149,266 @@ def can_accept_files(mime_data: QMimeData, accepted_categories: Set[str]) -> boo
     paths = extract_files_from_mime_data(mime_data)
     filtered = filter_files_by_category(paths, accepted_categories)
     return len(filtered) > 0
+
+
+# ============================================================================
+# BROWSER / CLIPBOARD IMAGE UTILITIES
+# ============================================================================
+
+# Image URL extensions recognized when extracting from HTML or URLs
+_IMAGE_URL_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff')
+
+# Maximum download size (50 MB)
+_MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024
+
+# Download timeout in seconds
+_DOWNLOAD_TIMEOUT = 15
+
+
+def extract_browser_image_data(mime_data: QMimeData) -> Dict[str, Any]:
+    """Inspect MIME data and return what browser image data is available.
+
+    Priority order:
+    1. Raw image data (mime.hasImage() / image/png format) — screenshots, copy-image
+    2. HTTP/HTTPS URLs pointing to images
+    3. Local file paths (existing behavior)
+
+    Returns:
+        Dict with keys:
+        - "type": "image_data" | "url" | "local_files" | None
+        - "image": QImage or None (only for type="image_data")
+        - "urls": list of HTTP image URLs (only for type="url")
+        - "local_paths": list of local file paths (only for type="local_files")
+    """
+    from PySide6.QtGui import QImage
+
+    result = {"type": None, "image": None, "urls": [], "local_paths": []}
+
+    # Priority 1: Raw image data (screenshots, browser "Copy image")
+    if mime_data.hasImage():
+        image = mime_data.imageData()
+        if isinstance(image, QImage) and not image.isNull():
+            result["type"] = "image_data"
+            result["image"] = image
+            return result
+
+    # Priority 2: HTTP URLs (browser drag of image elements)
+    if mime_data.hasUrls():
+        http_urls = []
+        local_paths = []
+        for url in mime_data.urls():
+            url_str = url.toString()
+            if url.isLocalFile():
+                local_path = url.toLocalFile()
+                if local_path and os.path.isfile(local_path):
+                    local_paths.append(local_path)
+            elif url_str.startswith(('http://', 'https://')):
+                http_urls.append(url_str)
+
+        if http_urls:
+            result["type"] = "url"
+            result["urls"] = http_urls
+            return result
+
+        if local_paths:
+            result["type"] = "local_files"
+            result["local_paths"] = local_paths
+            return result
+
+    # Priority 2b: Check text/html for <img src="..."> URLs
+    if mime_data.hasHtml():
+        img_url = extract_image_url_from_html(mime_data.html())
+        if img_url:
+            result["type"] = "url"
+            result["urls"] = [img_url]
+            return result
+
+    # Priority 3: Plain text that looks like an image URL
+    if mime_data.hasText():
+        text = mime_data.text().strip()
+        if text.startswith(('http://', 'https://')):
+            # Check if URL looks like an image
+            lower = text.split('?')[0].lower()
+            if any(lower.endswith(ext) for ext in _IMAGE_URL_EXTENSIONS):
+                result["type"] = "url"
+                result["urls"] = [text]
+                return result
+
+    return result
+
+
+def can_accept_browser_media(mime_data: QMimeData) -> bool:
+    """Gate check for dragEnterEvent — True if any image data is present.
+
+    This covers raw image data, HTTP image URLs, and local image files.
+    More permissive than can_accept_files() which only checks local paths.
+    """
+    data = extract_browser_image_data(mime_data)
+    return data["type"] is not None
+
+
+def save_image_data_to_file(image, directory: str, filename: str = None) -> Optional[str]:
+    """Save a QImage to a PNG file.
+
+    Args:
+        image: QImage to save
+        directory: Directory to save into
+        filename: Filename (generated if None)
+
+    Returns:
+        Full path to saved file, or None on failure
+    """
+    from PySide6.QtGui import QImage
+
+    if not isinstance(image, QImage) or image.isNull():
+        logger.warning("Cannot save null or invalid QImage")
+        return None
+
+    if not filename:
+        filename = generate_image_filename(prefix="canvas_paste")
+
+    filepath = os.path.join(directory, filename)
+
+    try:
+        from core.utils import ensure_directory
+        ensure_directory(directory)
+    except Exception as e:
+        logger.error(f"Cannot create directory {directory}: {e}")
+        return None
+
+    if image.save(filepath, "PNG"):
+        logger.info(f"Saved image data to: {filepath}")
+        return filepath
+    else:
+        logger.error(f"Failed to save QImage to: {filepath}")
+        return None
+
+
+def generate_image_filename(url: str = None, prefix: str = "canvas_paste") -> str:
+    """Generate a timestamp-based filename for saved images.
+
+    Args:
+        url: Optional source URL (used to extract extension)
+        prefix: Filename prefix
+
+    Returns:
+        Filename like 'canvas_paste_20260223_143052_123.png'
+    """
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond // 1000:03d}"
+
+    ext = ".png"
+    if url:
+        # Try to get extension from URL (strip query params)
+        clean_url = url.split('?')[0].split('#')[0]
+        url_ext = os.path.splitext(clean_url)[1].lower()
+        if url_ext in _IMAGE_URL_EXTENSIONS:
+            ext = url_ext
+
+    return f"{prefix}_{timestamp}{ext}"
+
+
+def download_image_from_url(url: str, save_directory: str) -> Optional[str]:
+    """Download an image from a URL and save to directory.
+
+    Designed for worker thread use. Validates content-type, enforces size limit.
+
+    Args:
+        url: HTTP/HTTPS URL to download
+        save_directory: Directory to save the downloaded image
+
+    Returns:
+        Full path to saved file, or None on failure
+    """
+    import urllib.request
+    import urllib.error
+
+    if not url.startswith(('http://', 'https://')):
+        logger.warning(f"Invalid URL scheme: {url}")
+        return None
+
+    filename = generate_image_filename(url=url, prefix="canvas_drop")
+    filepath = os.path.join(save_directory, filename)
+
+    try:
+        from core.utils import ensure_directory
+        ensure_directory(save_directory)
+    except Exception as e:
+        logger.error(f"Cannot create directory {save_directory}: {e}")
+        return None
+
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) LumaTools/1.0'
+        })
+        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as response:
+            # Check content type
+            content_type = response.headers.get('Content-Type', '')
+            if not content_type.startswith('image/'):
+                logger.warning(f"Non-image content type: {content_type} from {url}")
+                return None
+
+            # Check content length if available
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > _MAX_DOWNLOAD_SIZE:
+                logger.warning(f"Image too large: {content_length} bytes from {url}")
+                return None
+
+            # Read with size limit
+            data = response.read(_MAX_DOWNLOAD_SIZE + 1)
+            if len(data) > _MAX_DOWNLOAD_SIZE:
+                logger.warning(f"Image exceeded {_MAX_DOWNLOAD_SIZE} bytes from {url}")
+                return None
+
+            # Determine extension from content-type if filename has generic .png
+            ct_ext_map = {
+                'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
+                'image/gif': '.gif', 'image/bmp': '.bmp',
+            }
+            ct_base = content_type.split(';')[0].strip().lower()
+            if ct_base in ct_ext_map:
+                correct_ext = ct_ext_map[ct_base]
+                base, current_ext = os.path.splitext(filepath)
+                if current_ext != correct_ext:
+                    filepath = base + correct_ext
+                    filename = os.path.basename(filepath)
+
+            with open(filepath, 'wb') as f:
+                f.write(data)
+
+            logger.info(f"Downloaded image from {url} -> {filepath}")
+            return filepath
+
+    except urllib.error.URLError as e:
+        logger.error(f"URL error downloading {url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error downloading image from {url}: {e}")
+        return None
+
+
+def extract_image_url_from_html(html: str) -> Optional[str]:
+    """Extract the first image URL from an HTML fragment.
+
+    Used for browser drags that provide text/html with <img> tags.
+
+    Args:
+        html: HTML string from MIME data
+
+    Returns:
+        First HTTP/HTTPS image URL found, or None
+    """
+    if not html:
+        return None
+
+    # Match <img src="..."> — handles single and double quotes
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+    if match:
+        url = match.group(1)
+        if url.startswith(('http://', 'https://')):
+            return url
+
+    return None
 
 
 # ============================================================================

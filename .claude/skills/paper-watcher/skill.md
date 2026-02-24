@@ -17,6 +17,7 @@ The user passes an action as the argument:
 - `list` - List all tracked papers with their last known status
 - `check` - Check all papers for code availability and ComfyUI support
 - `check <url or name>` - Check a specific paper only
+- `discover` - Scan curated sources for new papers not yet in the watchlist
 
 If no argument is given, default to `check` (check all papers).
 
@@ -162,6 +163,78 @@ Classify ComfyUI support as:
 - Do NOT repeat the paper URL (user already knows it from the watchlist)
 - If a section is empty, skip it entirely
 - Sort papers alphabetically within each section
+
+### For `discover`
+
+Scan curated discovery sources for new papers that match the studio's interests and aren't already tracked.
+
+#### Step 1: Load the existing watchlist
+
+Read `.claude/paper_watchlist.json` and collect all tracked URLs and paper names into a known set for deduplication.
+
+#### Step 2: Define topic interests
+
+The studio focuses on these areas (inferred from the existing watchlist):
+- **Video generation** — text-to-video, image-to-video, camera control, motion
+- **Image generation & editing** — diffusion models, instruction-based editing, text rendering
+- **3D / 4D reconstruction** — NeRF, Gaussian splatting, 4D synthesis, novel view synthesis
+- **Character & motion** — motion capture, human animation, rigging, pose estimation
+- **Audio-video** — synchronized audio generation with video
+- **Depth & scene understanding** — depth estimation, inverse rendering, lighting
+- **Multimodal models** — vision-language models relevant to generation pipelines
+
+#### Step 3: Check discovery sources
+
+Run these in order. For each source, extract paper titles, URLs, and brief descriptions.
+
+**Source 1 — HuggingFace Papers (trending):**
+- WebFetch `https://huggingface.co/papers` — extract the list of trending paper titles and arXiv links shown on the page
+
+**Source 2 — Papers With Code (latest computer vision):**
+- WebFetch `https://paperswithcode.com/latest` — extract recently added papers with code, focusing on CV/generation tasks
+
+**Source 3 — Targeted recent paper searches:**
+Run these WebSearches to catch papers that may not be trending yet:
+- `site:arxiv.org 2026 video generation camera control`
+- `site:arxiv.org 2026 image editing diffusion transformer`
+- `site:arxiv.org 2026 4D generation gaussian splatting`
+- `site:arxiv.org 2026 motion capture human animation`
+
+#### Step 4: Filter and score candidates
+
+For each discovered paper:
+1. **Skip** if its URL or title closely matches anything already in the watchlist (case-insensitive substring match on title, exact match on URL)
+2. **Skip** if it's clearly off-topic (NLP-only, medical, robotics control theory, etc.)
+3. **Score relevance** — prefer papers that:
+   - Match multiple topic areas from Step 2
+   - Have a project page or GitHub link already (higher chance of imminent code release)
+   - Come from known labs (Adobe, NVIDIA, Google, Meta, ByteDance, Alibaba/Qwen, Tencent, Kuaishou, etc.)
+   - Are less than 60 days old
+
+#### Step 5: Present candidates
+
+Do NOT automatically add papers to the watchlist. Present candidates for the user to review:
+
+```
+## Paper Watcher Discover — <date>
+
+### Highly Relevant
+**[Paper Title](url)** — one-sentence description. [code/no code]
+
+### Possibly Relevant
+**[Paper Title](url)** — one-sentence description.
+
+---
+Sources checked: HuggingFace Papers, Papers With Code, arXiv search
+New candidates: X · Already tracked: X skipped
+```
+
+**Rules:**
+- Group into "Highly Relevant" (directly matches 2+ topic areas or is from a top lab) and "Possibly Relevant" (tangential but interesting)
+- Max 15 candidates total — be selective, quality over quantity
+- One line per candidate: title as link + one sentence + note if code/repo already exists
+- End with a tip: `To add any of these: /paper-watcher add <url>`
+- If nothing new is found, say so clearly
 
 ## Important Notes
 

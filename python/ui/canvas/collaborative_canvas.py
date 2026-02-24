@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
 
 # Drag-drop utilities
 from drag_drop import (
-    extract_files_from_mime_data, filter_files_by_category, IMAGE_EXTENSIONS
+    extract_files_from_mime_data, filter_files_by_category, IMAGE_EXTENSIONS,
+    can_accept_browser_media, extract_browser_image_data,
+    save_image_data_to_file, generate_image_filename, download_image_from_url,
 )
 
 from .canvas_items import ImageNode, VideoNode, ConnectionLine, StickyNote, GroupRegion
@@ -174,6 +176,7 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Drag-drop state
         self._drop_highlight_active = False
+        self._browser_download_worker = None  # Prevent GC of download workers
         self.setAcceptDrops(True)
 
     def set_tab(self, tab):
@@ -1073,22 +1076,32 @@ class CollaborativeCanvas(QGraphicsView):
     # -------------------------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        """Handle drag enter - accept if contains image or video files."""
+        """Handle drag enter - accept local files or browser image data."""
+        # Check local files first (fast path)
         paths = extract_files_from_mime_data(event.mimeData())
         media_paths = filter_files_by_category(paths, {'image', 'video'})
         if media_paths:
             event.acceptProposedAction()
             self._drop_highlight_active = True
             self.viewport().update()
-            logger.debug(f"Canvas drag enter: {len(media_paths)} file(s)")
-        else:
-            event.ignore()
+            logger.debug(f"Canvas drag enter: {len(media_paths)} local file(s)")
+            return
+
+        # Check browser image data (raw images, HTTP URLs)
+        if can_accept_browser_media(event.mimeData()):
+            event.acceptProposedAction()
+            self._drop_highlight_active = True
+            self.viewport().update()
+            logger.debug("Canvas drag enter: browser image data")
+            return
+
+        event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent):
         """Handle drag move - continue accepting if valid."""
         paths = extract_files_from_mime_data(event.mimeData())
         media_paths = filter_files_by_category(paths, {'image', 'video'})
-        if media_paths:
+        if media_paths or can_accept_browser_media(event.mimeData()):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1100,36 +1113,153 @@ class CollaborativeCanvas(QGraphicsView):
         event.accept()
 
     def dropEvent(self, event: QDropEvent):
-        """Handle drop - add images and videos to canvas."""
+        """Handle drop - add images and videos to canvas.
+
+        Handles local files (existing) and browser data (raw images, HTTP URLs).
+        """
         self._drop_highlight_active = False
         self.viewport().update()
 
+        drop_pos = self.mapToScene(event.position().toPoint())
+
+        # Try local files first (existing behavior)
         paths = extract_files_from_mime_data(event.mimeData())
         media_paths = filter_files_by_category(paths, {'image', 'video'})
 
-        if not media_paths:
-            event.ignore()
+        if media_paths:
+            logger.info(f"Dropped {len(media_paths)} file(s) at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
+
+            from drag_drop import get_file_category
+            offset = 0
+            for path in media_paths:
+                category = get_file_category(path)
+                if category == 'video':
+                    self.add_video(path, drop_pos.x() + offset, drop_pos.y() + offset)
+                else:
+                    self.add_image(path, drop_pos.x() + offset, drop_pos.y() + offset)
+                offset += 50
+
+            self.files_dropped_on_canvas.emit(media_paths)
+            event.acceptProposedAction()
             return
 
-        # Get drop position in scene coordinates
-        drop_pos = self.mapToScene(event.position().toPoint())
-        logger.info(f"Dropped {len(media_paths)} file(s) at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
+        # Fallback: browser image data (raw images, HTTP URLs)
+        if self._handle_browser_drop(event.mimeData(), drop_pos):
+            event.acceptProposedAction()
+            return
 
-        # Add files to canvas, routing by type, staggering position if multiple
-        from drag_drop import get_file_category
-        offset = 0
-        for path in media_paths:
-            category = get_file_category(path)
-            if category == 'video':
-                self.add_video(path, drop_pos.x() + offset, drop_pos.y() + offset)
+        event.ignore()
+
+    # -------------------------------------------------------------------------
+    # Browser Drag-Drop and Image Download
+    # -------------------------------------------------------------------------
+
+    def _get_gallery_save_dir(self) -> Optional[str]:
+        """Get the gallery directory for saving pasted/dropped images.
+
+        Returns the user's gallery folder (network_output_path/username).
+        """
+        try:
+            from core.settings_manager import safe_get_setting
+            from core.state_manager import app_state
+
+            network_path = safe_get_setting("network_output_path", "")
+            if not network_path:
+                logger.warning("No network_output_path configured")
+                return None
+
+            username = app_state.user
+            if not username or not username.strip():
+                logger.warning("No username available for gallery save directory")
+                return None
+
+            save_dir = os.path.join(network_path, username.strip())
+
+            from core.utils import ensure_directory
+            ensure_directory(save_dir)
+            return save_dir
+
+        except Exception as e:
+            logger.error(f"Error getting gallery save directory: {e}")
+            return None
+
+    def _handle_browser_drop(self, mime_data, drop_pos: QPointF) -> bool:
+        """Handle browser-sourced drop data (raw images or HTTP URLs).
+
+        Args:
+            mime_data: QMimeData from the drop event
+            drop_pos: Scene position where the drop occurred
+
+        Returns:
+            True if the drop was handled, False otherwise
+        """
+        data = extract_browser_image_data(mime_data)
+
+        if data["type"] == "image_data":
+            # Raw image data — save directly to gallery folder
+            save_dir = self._get_gallery_save_dir()
+            if not save_dir:
+                logger.warning("Cannot save dropped image: no gallery directory")
+                return False
+
+            saved_path = save_image_data_to_file(
+                data["image"], save_dir, generate_image_filename(prefix="canvas_drop")
+            )
+            if saved_path:
+                self.add_image(saved_path, drop_pos.x(), drop_pos.y())
+                self.files_dropped_on_canvas.emit([saved_path])
+                logger.info(f"Added browser image to canvas at ({drop_pos.x():.0f}, {drop_pos.y():.0f})")
+                return True
+            return False
+
+        elif data["type"] == "url":
+            # HTTP URL — download in background worker
+            save_dir = self._get_gallery_save_dir()
+            if not save_dir:
+                logger.warning("Cannot download dropped image: no gallery directory")
+                return False
+
+            for url in data["urls"]:
+                self._download_and_add_image(url, save_dir, drop_pos)
+            return True
+
+        return False
+
+    def _download_and_add_image(self, url: str, save_dir: str, position: QPointF):
+        """Download an image from URL in a worker thread and add to canvas.
+
+        Args:
+            url: HTTP/HTTPS URL to download
+            save_dir: Directory to save the downloaded image
+            position: Scene position to place the image
+        """
+        from ui_components import Worker
+        from PySide6.QtCore import QThreadPool
+
+        logger.info(f"Starting download of: {url}")
+
+        def _do_download():
+            return download_image_from_url(url, save_dir)
+
+        worker = Worker(_do_download)
+        # Store position for callback via closure
+        pos_x, pos_y = position.x(), position.y()
+
+        def _on_result(saved_path):
+            if saved_path:
+                self.add_image(saved_path, pos_x, pos_y)
+                self.files_dropped_on_canvas.emit([saved_path])
+                logger.info(f"Downloaded and added image to canvas: {os.path.basename(saved_path)}")
             else:
-                self.add_image(path, drop_pos.x() + offset, drop_pos.y() + offset)
-            offset += 50
+                logger.warning(f"Failed to download image from: {url}")
 
-        # Emit signal for gallery integration (to copy external files to gallery)
-        self.files_dropped_on_canvas.emit(media_paths)
+        def _on_error(error_tuple):
+            logger.error(f"Error downloading image from {url}: {error_tuple}")
 
-        event.acceptProposedAction()
+        worker.signals.result.connect(_on_result)
+        worker.signals.error.connect(_on_error)
+        self._browser_download_worker = worker  # Prevent GC
+        QThreadPool.globalInstance().start(worker)
 
     def _start_connection(self, event: QMouseEvent):
         """Start creating a connection from clicked node."""
@@ -1973,8 +2103,8 @@ class CollaborativeCanvas(QGraphicsView):
         # Canvas context menu (empty space)
         menu = QMenu(self)
 
-        paste_action = menu.addAction("Paste Image")
-        paste_action.triggered.connect(self._paste_image)
+        paste_action = menu.addAction("Paste Image (Ctrl+V)")
+        paste_action.triggered.connect(lambda: self._paste_image(scene_pos=pos))
 
         menu.addSeparator()
 
@@ -1990,17 +2120,65 @@ class CollaborativeCanvas(QGraphicsView):
 
         menu.exec_(event.globalPos())
 
-    def _paste_image(self):
-        """Paste image from clipboard."""
+    def _paste_image(self, scene_pos: QPointF = None):
+        """Paste image from clipboard.
+
+        Handles: raw image data (screenshots, copy-image), local file URLs,
+        and HTTP image URLs. Saves to gallery folder and adds to canvas.
+
+        Args:
+            scene_pos: Scene position to place the image. If None, uses center of view.
+        """
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
 
-        if mime.hasUrls():
-            for url in mime.urls():
-                if url.isLocalFile():
-                    path = url.toLocalFile()
-                    if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                        self.add_image(path)
+        if scene_pos is None:
+            scene_pos = self.mapToScene(self.viewport().rect().center())
+
+        data = extract_browser_image_data(mime)
+
+        if data["type"] == "image_data":
+            # Raw image data (screenshots, browser "Copy image")
+            save_dir = self._get_gallery_save_dir()
+            if not save_dir:
+                logger.warning("Cannot paste image: no gallery directory configured")
+                return
+
+            saved_path = save_image_data_to_file(
+                data["image"], save_dir, generate_image_filename(prefix="canvas_paste")
+            )
+            if saved_path:
+                self.add_image(saved_path, scene_pos.x(), scene_pos.y())
+                self.files_dropped_on_canvas.emit([saved_path])
+                logger.info(f"Pasted clipboard image to canvas")
+
+        elif data["type"] == "local_files":
+            # Local file URLs from clipboard
+            from drag_drop import get_file_category
+            offset = 0
+            added_paths = []
+            for path in data["local_paths"]:
+                category = get_file_category(path)
+                if category == 'image':
+                    self.add_image(path, scene_pos.x() + offset, scene_pos.y() + offset)
+                    added_paths.append(path)
+                    offset += 50
+                elif category == 'video':
+                    self.add_video(path, scene_pos.x() + offset, scene_pos.y() + offset)
+                    added_paths.append(path)
+                    offset += 50
+            if added_paths:
+                self.files_dropped_on_canvas.emit(added_paths)
+
+        elif data["type"] == "url":
+            # HTTP URL — download in background
+            save_dir = self._get_gallery_save_dir()
+            if not save_dir:
+                logger.warning("Cannot paste URL image: no gallery directory configured")
+                return
+
+            for url in data["urls"]:
+                self._download_and_add_image(url, save_dir, scene_pos)
 
     # -------------------------------------------------------------------------
     # Keyboard Shortcuts
@@ -2049,6 +2227,19 @@ class CollaborativeCanvas(QGraphicsView):
         if key == Qt.Key_Z and modifiers == (Qt.ControlModifier | Qt.ShiftModifier):
             if hasattr(self, '_undo_stack') and self._undo_stack:
                 self._undo_stack.redo()
+            return
+
+        # Paste image (Ctrl+V)
+        if key == Qt.Key_V and modifiers == Qt.ControlModifier:
+            # Paste at mouse position if cursor is over the canvas, else center of view
+            from PySide6.QtGui import QCursor
+            global_pos = QCursor.pos()
+            local_pos = self.viewport().mapFromGlobal(global_pos)
+            if self.viewport().rect().contains(local_pos):
+                scene_pos = self.mapToScene(local_pos)
+            else:
+                scene_pos = self.mapToScene(self.viewport().rect().center())
+            self._paste_image(scene_pos=scene_pos)
             return
 
         # Fit all (Ctrl+Space)

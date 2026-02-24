@@ -370,7 +370,7 @@ class SettingsTab(BaseTab):
         from PySide6.QtWidgets import QHBoxLayout, QPushButton
 
         # Hide notification badge when clicked
-        if hasattr(self, '_version_badge'):
+        if hasattr(self, '_version_badge') and self._version_badge is not None:
             self._version_badge.hide_badge()
 
         # Start with latest changelog only

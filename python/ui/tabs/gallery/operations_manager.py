@@ -238,7 +238,7 @@ class OperationsManager(BaseGalleryManager):
 
         # Confirm publish
         if not confirm_action(
-            "Publish Selected Items",
+            "Publish to AYON",
             f"Publish {count} selected item(s) to AYON?",
             parent=self.tab.main_window
         ):

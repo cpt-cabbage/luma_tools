@@ -1126,9 +1126,9 @@ class ImageNode(QGraphicsItem):
         favorites_manager = self._get_favorites_manager()
         if favorites_manager:
             if new_liked:
-                favorites_manager.like_item(self.image_path)
+                favorites_manager.like_items([self.image_path])
             else:
-                favorites_manager.unlike_item(self.image_path)
+                favorites_manager.unlike_items([self.image_path])
 
     def _show_in_gallery(self):
         """Show this image in the gallery tab."""
@@ -2589,9 +2589,9 @@ class VideoNode(QGraphicsItem):
         favorites_manager = self._get_favorites_manager()
         if favorites_manager:
             if new_liked:
-                favorites_manager.like_item(self.video_path)
+                favorites_manager.like_items([self.video_path])
             else:
-                favorites_manager.unlike_item(self.video_path)
+                favorites_manager.unlike_items([self.video_path])
 
     def _populate_groups_menu(self, menu: QMenu):
         """Populate the groups submenu."""

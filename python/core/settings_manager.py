@@ -152,6 +152,8 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "show_statusbar_log": SettingDef("show_statusbar_log", False, "user"),
     # MP4 Maker settings
     "mp4_maker_add_to_gallery": SettingDef("mp4_maker_add_to_gallery", True, "user"),
+    "mp4_maker_publish_to_ayon": SettingDef("mp4_maker_publish_to_ayon", False, "user"),
+    "mp4_maker_publish_on_farm": SettingDef("mp4_maker_publish_on_farm", False, "user"),
     # ComfyUI-Gallery integration settings
     "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
     # ComfyUI Model Picker settings

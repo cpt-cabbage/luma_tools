@@ -437,7 +437,9 @@ class GalleryTab(BaseTab):
 
     def _is_own_gallery(self):
         """Check if currently viewing own gallery."""
-        return self._selected_user == self.app_state.user
+        selected = (self._selected_user or "").strip().lower()
+        current = (self.app_state.user or "").strip().lower()
+        return selected == current
 
     def _get_network_user_path(self, username=None):
         """Get the network gallery path for a user."""

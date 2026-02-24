@@ -48,46 +48,11 @@ setup_exception_hook()
 # Set up Windows things
 if sys.platform == 'win32':
     import ctypes
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
     user32 = ctypes.WinDLL('user32')
     SW_HIDE = 0
-    hWnd = kernel32.GetConsoleWindow()
+    hWnd = ctypes.WinDLL('kernel32').GetConsoleWindow()
     user32.ShowWindow(hWnd, SW_HIDE)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
-
-    # Single instance check using Windows named mutex
-    MUTEX_NAME = "Global\\LumaToolsSingleInstance"
-    ERROR_ALREADY_EXISTS = 183
-
-    mutex_handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
-    last_error = ctypes.get_last_error()
-
-    if last_error == ERROR_ALREADY_EXISTS:
-        # Another instance is already running - find and focus it
-        WINDOW_TITLE_PREFIX = APP_TITLE
-        EnumWindows = user32.EnumWindows
-        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-        GetWindowText = user32.GetWindowTextW
-        GetWindowTextLength = user32.GetWindowTextLengthW
-        IsWindowVisible = user32.IsWindowVisible
-        SetForegroundWindow = user32.SetForegroundWindow
-        ShowWindow = user32.ShowWindow
-        SW_RESTORE = 9
-
-        def foreach_window(hwnd, _lParam):
-            if IsWindowVisible(hwnd):
-                length = GetWindowTextLength(hwnd)
-                if length > 0:
-                    buff = ctypes.create_unicode_buffer(length + 1)
-                    GetWindowText(hwnd, buff, length + 1)
-                    if buff.value.startswith(WINDOW_TITLE_PREFIX):
-                        ShowWindow(hwnd, SW_RESTORE)
-                        SetForegroundWindow(hwnd)
-                        return False  # Stop enumeration
-            return True
-
-        EnumWindows(EnumWindowsProc(foreach_window), 0)
-        sys.exit(0)
 
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1505,28 +1470,11 @@ def main():
         # Enable log redirection after window is shown
         window.enable_log_redirect()
 
-        # Initialize 3D viewer asynchronously in the background (100ms delay)
-        # This prevents blocking the splash screen closure
-        def init_threejs_viewer():
-            """Initialize Three.js viewer in the background after UI is ready."""
-            try:
-                from geo.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, set_prewarm_viewer
-                if is_threejs_viewer_available():
-                    logging.info("Starting async 3D viewer initialization...")
-                    _threejs_prewarm_viewer = ThreeJSViewerWidget(prewarm=True)
-
-                    # Add to window's layout hierarchy (hidden) to prevent window flash
-                    _threejs_prewarm_viewer.hide()
-                    window.layout().addWidget(_threejs_prewarm_viewer)
-
-                    # Store globally - will be retrieved and reparented by gallery later
-                    set_prewarm_viewer(_threejs_prewarm_viewer)
-                    logging.info("3D viewer initialization started (running in background)")
-            except Exception as e:
-                logging.warning(f"Could not initialize 3D viewer: {e}")
-
-        # Schedule viewer initialization to run after event loop starts
-        QtCore.QTimer.singleShot(100, init_threejs_viewer)
+        # 3D viewer (QWebEngineView/Chromium) is initialized lazily on first
+        # use rather than pre-warmed at startup. Chromium's GPU initialization
+        # causes intermittent access violations (0xC0000005) on some GPU
+        # drivers. Lazy init means startup never crashes; the viewer is only
+        # created when the user actually opens a 3D model in the gallery.
 
         # Apply debug CLI arguments
         if _DEBUG_ARGS.get('tab'):
@@ -1543,11 +1491,30 @@ def main():
                 app.quit()
             ))
 
+        # Clean up QWebEngineView instances before exit to prevent Chromium
+        # subprocess crash (access violation 0xC0000005) during Qt destructor chain
+        def _cleanup_web_engines():
+            try:
+                from geo.threejs_viewer import ThreeJSViewerWidget
+                for widget in app.allWidgets():
+                    if isinstance(widget, ThreeJSViewerWidget):
+                        widget.cleanup()
+                app.processEvents()
+            except Exception as e:
+                logging.debug(f"WebEngine cleanup: {e}")
+
+        app.aboutToQuit.connect(_cleanup_web_engines)
+
         # Run the application
         logging.info("Application window shown, entering event loop")
         exit_code = app.exec()
         logging.info(f"Application exiting with code {exit_code}")
-        sys.exit(exit_code)
+
+        # Use os._exit() to bypass Python/Qt destructor chain that causes
+        # access violation (0xC0000005) during Chromium/QWebEngine cleanup.
+        # The aboutToQuit handler above does orderly cleanup; os._exit()
+        # prevents the remaining C++ destructors from crashing.
+        os._exit(exit_code)
     except Exception as e:
         logging.error(f"FATAL ERROR in main: {e}")
         traceback.print_exc()

@@ -1194,42 +1194,53 @@ class CanvasTab(BaseTab):
         logger.debug(f"Item added to canvas: {item_id}")
 
     def _on_files_dropped_to_canvas(self, paths: list):
-        """Handle files dropped to canvas - copy external files to gallery.
+        """Handle files dropped/pasted to canvas - copy external files to gallery.
+
+        Files already in the gallery folder (e.g. saved by browser paste/drop)
+        trigger a refresh without copying. External files are copied first.
 
         Args:
             paths: List of file paths that were dropped onto the canvas
         """
         import shutil
-        from core.settings_manager import get_setting
+        from core.settings_manager import safe_get_setting
 
         try:
-            gallery_path = get_setting("network_output_path")
+            gallery_path = safe_get_setting("network_output_path", "")
             if not gallery_path:
                 logger.warning("Cannot copy dropped files: no gallery path configured")
                 return
 
-            # Copy external files (ones not already in gallery) to gallery
+            # Separate files already in gallery from external files
             copied = 0
+            already_in_gallery = 0
             for path in paths:
-                # Skip files already in the gallery folder
-                if path.startswith(gallery_path):
+                norm_path = os.path.normpath(path)
+                norm_gallery = os.path.normpath(gallery_path)
+                if norm_path.startswith(norm_gallery):
+                    already_in_gallery += 1
                     continue
 
-                # Copy to gallery
+                # Copy external file to gallery
                 dest = os.path.join(gallery_path, os.path.basename(path))
                 if not os.path.exists(dest):
                     shutil.copy2(path, dest)
                     copied += 1
                     logger.info(f"Copied dropped file to gallery: {os.path.basename(path)}")
 
-            # Trigger gallery refresh if files were copied
-            if copied > 0:
+            # Trigger gallery refresh if any files were added or are already in gallery
+            total_new = copied + already_in_gallery
+            if total_new > 0:
                 try:
                     from core.event_bus import pipeline_events
                     pipeline_events.gallery_refresh_requested.emit(False)
-                    self.show_status(f"Added {copied} file(s) to gallery", "success")
                 except ImportError:
                     pass
+
+                if copied > 0:
+                    self.show_status(f"Added {copied} file(s) to gallery", "success")
+                elif already_in_gallery > 0:
+                    self.show_status(f"Added {already_in_gallery} file(s) to canvas", "success")
 
         except Exception as e:
             logger.error(f"Error copying dropped files to gallery: {e}")

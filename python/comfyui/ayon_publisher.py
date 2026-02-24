@@ -483,7 +483,7 @@ class ComfyUIPublishDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
 
-        self.publish_btn = QPushButton("Publish")
+        self.publish_btn = QPushButton("Publish to AYON")
         self.publish_btn.setObjectName("publishButton")
         self.publish_btn.clicked.connect(self.accept)
         button_layout.addWidget(self.publish_btn)

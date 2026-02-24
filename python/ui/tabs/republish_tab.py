@@ -99,9 +99,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.ui.RePublishVersionLabel.setVisible(not is_custom)
         self.ui.RePublishCurrentVer.setVisible(not is_custom)
 
-        # Enable "Use Current AYON Task" only when custom path is selected AND we have shot context
+        # Enable "Use Current AYON Task" only when custom path is selected AND we have AYON context
         if is_custom:
-            can_use_current_task = self.app_state.has_shot_context()
+            can_use_current_task = self.app_state.has_ayon_context()
             self.ui.RePublishUseCurrentTask.setEnabled(can_use_current_task)
             if not can_use_current_task:
                 self.ui.RePublishUseCurrentTask.setChecked(False)
@@ -247,7 +247,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
         use_current_task = (
             self._source == "custom" and
             self.ui.RePublishUseCurrentTask.isChecked() and
-            self.app_state.has_shot_context()
+            self.app_state.has_ayon_context()
         )
 
         # Use BaseTab helper for worker management
