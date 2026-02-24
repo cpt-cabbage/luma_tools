@@ -38,9 +38,6 @@ class CanvasTab(BaseTab):
 
     def connect_signals(self):
         """Connect canvas tab signals."""
-        # Directory controls
-        self.ui.CanvasOpenExplorer.clicked.connect(self._on_open_explorer)
-
         # Toolbar buttons - Basic tools
         self.ui.CanvasToolSelect.clicked.connect(lambda: self._set_tool("select"))
         # Pan button removed - use Space+drag instead (Photoshop-style)
@@ -95,7 +92,9 @@ class CanvasTab(BaseTab):
 
         # Tool state
         self._current_tool = "select"
-        self._toolbar_collapsed = False
+        self._toolbar_collapsed = True
+        self.ui.CanvasToolbarContent.setVisible(False)
+        self.ui.CanvasToolbarToggle.setText("+")
 
         # Sync state
         self._sync_viewport = False  # Off by default - users keep their own view
@@ -816,13 +815,6 @@ class CanvasTab(BaseTab):
         except Exception as e:
             logger.error(f"Failed to save canvas state: {e}")
 
-    def _on_open_explorer(self):
-        """Open current directory in file explorer."""
-        if self._current_path and os.path.exists(self._current_path):
-            import subprocess
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.Popen(f'explorer "{self._current_path}"', creationflags=creationflags)
-
     def _set_tool(self, tool: str):
         """Set the current canvas tool."""
         self._current_tool = tool
@@ -1107,14 +1099,7 @@ class CanvasTab(BaseTab):
         """Toggle secondary toolbar collapsed state."""
         self._toolbar_collapsed = not self._toolbar_collapsed
         self.ui.CanvasToolbarContent.setVisible(not self._toolbar_collapsed)
-
-        # Update toggle button icon/text
-        if self._toolbar_collapsed:
-            self.ui.CanvasToolbarToggle.setText("+")
-            self.ui.CanvasToolbarToggle.setToolTip("Expand secondary toolbar")
-        else:
-            self.ui.CanvasToolbarToggle.setText("-")
-            self.ui.CanvasToolbarToggle.setToolTip("Collapse secondary toolbar")
+        self.ui.CanvasToolbarToggle.setText("+" if self._toolbar_collapsed else "-")
 
     # =========================================================================
     # Zoom Controls

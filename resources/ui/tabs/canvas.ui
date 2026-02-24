@@ -378,20 +378,29 @@ QToolButton::menu-indicator { image: none; width: 0px; }</string>
        </spacer>
       </item>
 
-      <!-- OPEN IN EXPLORER -->
+      <!-- TOOLBAR TOGGLE -->
       <item>
-       <widget class="QPushButton" name="CanvasOpenExplorer">
+       <widget class="QPushButton" name="CanvasToolbarToggle">
         <property name="text">
-         <string>Open Folder</string>
+         <string>-</string>
         </property>
         <property name="toolTip">
-         <string>Open the current canvas folder in Windows Explorer</string>
+         <string>Toggle secondary toolbar</string>
         </property>
         <property name="minimumSize">
          <size>
-          <width>85</width>
+          <width>36</width>
           <height>26</height>
          </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>36</width>
+          <height>26</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string>padding: 0px;</string>
         </property>
        </widget>
       </item>
@@ -645,29 +654,6 @@ QToolButton::menu-indicator { image: none; width: 0px; }</string>
        </widget>
       </item>
 
-      <!-- TOOLBAR TOGGLE -->
-      <item>
-       <widget class="QPushButton" name="CanvasToolbarToggle">
-        <property name="text">
-         <string>-</string>
-        </property>
-        <property name="toolTip">
-         <string>Collapse secondary toolbar</string>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>24</width>
-          <height>24</height>
-         </size>
-        </property>
-        <property name="flat">
-         <bool>true</bool>
-        </property>
-        <property name="styleSheet">
-         <string>color: #888;</string>
-        </property>
-       </widget>
-      </item>
      </layout>
     </widget>
    </item>
