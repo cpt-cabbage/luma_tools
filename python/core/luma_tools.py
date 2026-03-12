@@ -1351,86 +1351,8 @@ def main():
         except Exception as e:
             logging.warning(f"Could not check for job recovery: {e}")
 
-        # Pre-scan gallery directory on worker thread while splash shows
-        splash.update_progress(30, "Loading", "Scanning gallery...")
-        app.processEvents()
-
-        # Shared state for progress updates from worker thread
-        gallery_data = {
-            'items': [],
-            'done': False,
-            'error': None,
-            'progress': 0,
-            'message': 'Starting scan...'
-        }
-
-        def progress_callback(pct, message):
-            """Callback for progress updates from prewarm (runs on worker thread)."""
-            # Map prewarm progress (0-100) to splash progress (30-75)
-            gallery_data['progress'] = 30 + int(pct * 0.45)
-            gallery_data['message'] = message
-
-        def scan_gallery_worker():
-            """Scan gallery directory (runs on worker thread)."""
-            try:
-                from ui.gallery_prewarm import prewarm_gallery
-                result = prewarm_gallery(progress_callback=progress_callback)
-                gallery_data['items'] = result.get('items', [])
-                gallery_data['thumbnails_generated'] = result.get('thumbnails_generated', 0)
-            except Exception as e:
-                gallery_data['error'] = str(e)
-                logging.warning(f"Gallery pre-scan failed: {e}")
-            finally:
-                gallery_data['done'] = True
-
-        # Start worker thread for gallery scanning
-        from PySide6.QtCore import QThreadPool, QRunnable
-
-        class ScanWorker(QRunnable):
-            def run(self):
-                scan_gallery_worker()
-
-        # NOTE: Worker reference is kept alive by the while loop below - the local
-        # variable remains in scope until the loop completes, preventing GC.
-        worker = ScanWorker()
-        QThreadPool.globalInstance().start(worker)
-
-        # Wait for gallery scan while keeping splash responsive
-        last_message = ""
-        while not gallery_data['done']:
-            app.processEvents()
-            time.sleep(0.016)  # ~60fps polling for smooth updates
-
-            # Update splash with progress from worker thread
-            current_progress = gallery_data['progress']
-            current_message = gallery_data['message']
-            if current_message != last_message:
-                splash.update_progress(current_progress, "Loading", current_message)
-                last_message = current_message
-
-        # Show final count
-        if gallery_data['items']:
-            item_count = len(gallery_data['items'])
-            thumb_count = gallery_data.get('thumbnails_generated', 0)
-            if thumb_count > 0:
-                splash.update_progress(75, "Loading", f"Found {item_count} items, generated {thumb_count} thumbnails")
-            else:
-                splash.update_progress(75, "Loading", f"Found {item_count} items")
-            app.processEvents()
-
-        # Store gallery data for the gallery tab to use (include username for validation)
-        try:
-            from ui.gallery_prewarm import set_prewarm_cache
-            # Get the username used during prewarm from app_state (matches prewarm logic)
-            prewarm_username = app_state.user
-            set_prewarm_cache({
-                'items': gallery_data['items'],
-                'username': prewarm_username
-            })
-        except Exception as e:
-            logging.warning(f"Could not set prewarm cache: {e}")
-
-
+        # Gallery loading is deferred until user opens the Gallery tab
+        # (scans network directory on-demand with a loading overlay)
 
         # Create main window (job recovery is deferred until after splash closes)
         splash.update_progress(88, "Loading", "Creating application window...")

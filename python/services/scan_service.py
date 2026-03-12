@@ -78,9 +78,9 @@ class DirectoryScanner:
         """
         self._update_progress(0, "Scanning Directories", "Initializing scan...")
 
-        # Get lookdev directory
-        self.state.lookdev_dir = get_lookdev_directory(self.state.shotpath)
-        logger.info(f"lookdev Dir: {self.state.lookdev_dir}")
+        # Get task directory (e.g., lighting, lookdev)
+        self.state.lookdev_dir = get_lookdev_directory(self.state.shotpath, self.state.task)
+        logger.info(f"Task Dir: {self.state.lookdev_dir}")
 
         # Scan render directory
         self._update_progress(10, "Scanning Render Files", "Searching for render directories...")
@@ -130,6 +130,8 @@ class DirectoryScanner:
         Returns:
             str: Path to render directory, or empty string if not found
         """
+        from core.config import RENDERS_SUBPATH
+
         try:
             dirs = fast_scandir(self.state.lookdev_dir)
         except Exception as e:
@@ -141,12 +143,12 @@ class DirectoryScanner:
 
         if len(dirs) > 0:
             for i in dirs:
-                if r"lookdev\img\renders" in i:
+                if RENDERS_SUBPATH in i:
                     render_folders.append(i)
 
             try:
                 render_directory = render_folders[0]
-                render_directory = truncate_at_suffix(render_directory, r"lookdev\img\renders")
+                render_directory = truncate_at_suffix(render_directory, RENDERS_SUBPATH)
                 self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
             except (IndexError, Exception) as e:
                 self.signals.set_widget_enabled.emit('RendersList', False)
@@ -165,6 +167,8 @@ class DirectoryScanner:
         Returns:
             str: Path to USD directory, or empty string if not found
         """
+        from core.config import USD_SUBPATH
+
         try:
             dirs = fast_scandir(self.state.lookdev_dir)
         except Exception as e:
@@ -176,12 +180,12 @@ class DirectoryScanner:
 
         if len(dirs) > 0:
             for i in dirs:
-                if r"lookdev\usd_files" in i:
+                if USD_SUBPATH in i:
                     usd_folders.append(i)
 
             try:
                 usd_directory = usd_folders[0]
-                usd_directory = truncate_at_suffix(usd_directory, r"lookdev\usd_files")
+                usd_directory = truncate_at_suffix(usd_directory, USD_SUBPATH)
                 self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
             except (IndexError, Exception) as e:
                 usd_directory = ""
@@ -201,13 +205,13 @@ class DirectoryScanner:
         Returns:
             str: Base name of HIP file (without version), or empty string if not found
         """
-        hipfiles = find_hip_files(self.state.lookdev_dir)
+        hipfiles = find_hip_files(self.state.lookdev_dir, self.state.task)
         hipcount = len(hipfiles)
         self.signals.set_label_text.emit('HipNumber', f'Amount of Hipfiles: {hipcount}')
 
         hip_file = ""
         if hipcount > 0:
-            sorted(hipfiles)
+            hipfiles = sorted(hipfiles)
             hip_file = hipfiles[0]
             temp = hip_file.rsplit("_", 1)
             hip_file = temp[0]
@@ -232,7 +236,7 @@ class DirectoryScanner:
         self.state.working_dir = ""
 
         if render_directory != "":
-            self.state.working_dir = truncate_at_suffix(render_directory, "lookdev")
+            self.state.working_dir = truncate_at_suffix(render_directory, self.state.task or "lookdev")
             renderdir = sorted(next(os.walk(render_directory))[1])
 
             if len(renderdir) < 2:

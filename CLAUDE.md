@@ -78,8 +78,6 @@ set PYTHONPATH=%CD%\python;%CD%\resources\ui;%PYTHONPATH%
 python python/core/luma_tools.py
 ```
 
-**Single Instance:** Uses Windows mutex `Global\\LumaToolsSingleInstance` to prevent multiple instances.
-
 ## Deployment
 
 `deploy_production.bat` runs `scripts/deploy.py` which auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Version in `resources/version.json`, changelog in `resources/changelog.md`.

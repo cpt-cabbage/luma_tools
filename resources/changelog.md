@@ -1,5 +1,12 @@
 # Luma Tools Changelog
 
+## Version 0.6.4.2
+- Improve startup times
+- Fix Pass Builder button calling wrong function
+
+## Version 0.6.4.1
+Fix Pass Builder using old openpype path finding for renders
+
 ## Version 0.6.4
 
 - Remove single-instance mutex check that could prevent the app from launching

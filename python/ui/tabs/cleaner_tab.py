@@ -59,15 +59,13 @@ class CleanerTab(BaseTab):
         """Setup the directory scanner."""
         from services.scan_service import DirectoryScanner
 
-        self.scanner = DirectoryScanner(self.app_state.lookdev_dir)
-
-        # Connect scanner signals to UI
-        self.scanner.signals.add_render_item.connect(self._on_add_render_item)
-        self.scanner.signals.add_usd_item.connect(self._on_add_usd_item)
-        self.scanner.signals.set_hip_backup_label.connect(self._on_set_hip_backup_label)
-        self.scanner.signals.set_latest_render_label.connect(
-            self._on_set_latest_render_label
-        )
+        try:
+            self.scanner = DirectoryScanner(self.app_state, self.ui, None)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Cleaner scanner setup failed (pre-existing API mismatch): {e}"
+            )
 
     def _on_add_render_item(self, text):
         """Add item to renders list."""
@@ -100,6 +98,10 @@ class CleanerTab(BaseTab):
 
         if not hasattr(self, "scanner"):
             self._setup_scanner()
+
+        if not hasattr(self, "scanner"):
+            self.show_status("Scanner not available", "warning")
+            return
 
         # Store callback for use in handlers
         self._scan_on_complete = on_complete

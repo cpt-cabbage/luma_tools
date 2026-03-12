@@ -301,6 +301,11 @@ class SettingsTab(BaseTab):
                 )
                 self._version_badge.show_badge()
 
+        # Show current AYON production bundle
+        if hasattr(self.ui, 'BundleLabel'):
+            from core.config import get_ayon_bundle
+            self.ui.BundleLabel.setText(get_ayon_bundle())
+
         # Load feature request UI
         self._load_feature_request_ui()
 

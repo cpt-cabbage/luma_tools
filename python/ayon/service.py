@@ -42,6 +42,32 @@ except ImportError as e:
     logger.warning(f"AYON imports failed: {e}")
     AYON_AVAILABLE = False
 
+def _resolve_production_bundle():
+    """Query AYON server API for the current production bundle name.
+
+    Called when get_ayon_bundle() returns the "production" fallback,
+    meaning env vars weren't set. Uses the already-imported ayon_api
+    which has server connection available at publish time.
+
+    Returns:
+        str or None: Production bundle name, or None if unavailable.
+    """
+    if not AYON_AVAILABLE:
+        return None
+    try:
+        from ayon_api import get_bundles, is_connection_created, create_connection
+        if not is_connection_created():
+            create_connection()
+        bundles_info = get_bundles()
+        production_bundle = bundles_info.get("productionBundle")
+        if production_bundle:
+            logger.info(f"Resolved production bundle from API: {production_bundle}")
+            return production_bundle
+    except Exception as e:
+        logger.warning(f"Could not resolve production bundle from API: {e}")
+    return None
+
+
 # Deadline imports
 try:
     from ayon_deadline import DeadlineAddon
@@ -569,17 +595,21 @@ def publish_to_ayon_local(
         logger.warning("AYON not available, skipping publish")
         return False
 
-    # Get bundle name
+    # Get bundle name — resolve via API if config returned the fallback
     bundle = get_ayon_bundle()
+    if bundle == "production":
+        bundle = _resolve_production_bundle() or bundle
+
+    logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console command
     cmd = [AYON_CONSOLE]
     cmd.extend(["--headless", "publish", metadata_path])
 
-    # Add bundle arguments
+    # Add bundle arguments — always pass explicit name
     if bundle == "staging":
         cmd.append("--use-staging")
-    elif bundle != "production":
+    else:
         cmd.extend(["--bundle", bundle])
 
     # Set environment variables for the process
@@ -705,11 +735,11 @@ def publish_to_ayon_local(
             # Log last few lines for debugging
             if stdout_lines:
                 logger.error("Last stdout lines:")
-                for line in stdout_lines[-10:]:
+                for line in list(stdout_lines)[-10:]:
                     logger.error(f"  {line}")
             if stderr_lines:
                 logger.error("Last stderr lines:")
-                for line in stderr_lines[-10:]:
+                for line in list(stderr_lines)[-10:]:
                     logger.error(f"  {line}")
             return False
 
@@ -758,8 +788,12 @@ def submit_ayon_publish_to_deadline(
         logger.error(f"Failed to initialize AYON/Deadline: {e}")
         return None
 
-    # Get bundle name
+    # Get bundle name — resolve via API if config returned the fallback
     bundle = get_ayon_bundle()
+    if bundle == "production":
+        bundle = _resolve_production_bundle() or bundle
+
+    logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console arguments
     args = [
@@ -770,10 +804,10 @@ def submit_ayon_publish_to_deadline(
         "--targets", "farm",
     ]
 
-    # Add bundle arguments
+    # Add bundle arguments — always pass explicit name
     if bundle == "staging":
         args.append("--use-staging")
-    elif bundle != "production":
+    else:
         args.extend(["--bundle", bundle])
 
     # Create Deadline job info

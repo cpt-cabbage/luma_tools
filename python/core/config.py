@@ -72,8 +72,33 @@ def get_ocio_config():
 
 
 def get_ayon_bundle():
-    """Get AYON bundle name from environment."""
-    return os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT", "LUMA-PRODUCTION-Bundle-2025-12-08-02")
+    """Get AYON bundle name from environment or API.
+
+    Priority:
+    1. AYON_DEFAULT_SETTINGS_VARIANT env var (set by AYON launcher)
+    2. AYON_BUNDLE_NAME env var (set by some AYON configurations)
+    3. Query AYON server API for the current production bundle
+    4. Fall back to "production"
+    """
+    env_bundle = (
+        os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT")
+        or os.environ.get("AYON_BUNDLE_NAME")
+    )
+    if env_bundle:
+        return env_bundle
+
+    try:
+        import ayon_api
+        if not ayon_api.is_connection_created():
+            ayon_api.create_connection()
+        bundles_info = ayon_api.get_bundles()
+        production_bundle = bundles_info.get("productionBundle")
+        if production_bundle:
+            return production_bundle
+    except Exception:
+        pass
+
+    return "production"
 
 
 def _safe_glob(pattern):
@@ -263,11 +288,11 @@ FRAME_PADDING = 4
 # FILE PATTERNS
 # ============================================================================
 
-# Directory structure expectations
-LOOKDEV_SUBPATH = "lookdev"
-RENDERS_SUBPATH = r"lookdev\img\renders"
-USD_SUBPATH = r"lookdev\usd_files"
-BACKUP_SUBPATH = r"lookdev\backup"
+# Directory structure expectations (relative to task directory)
+RENDERS_SUBPATH = r"img\renders"
+USD_SUBPATH = r"usd_files"
+BACKUP_SUBPATH = r"backup"
+DEFAULT_TASK = "lookdev"
 COMPOSITING_SUBPATH = "Compositing"
 
 # File extensions

@@ -101,7 +101,18 @@
       "Bash(git rm:*)",
       "Bash(git push:*)",
       "Bash(pythonvenvScriptspython.exe -c \"import py_compile; py_compile.compile\\(''resources/ui/media_viewers.py'', doraise=True\\); print\\(''media_viewers.py: OK''\\)\")",
-      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)"
+      "Bash(L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\python.exe:*)",
+      "Bash(git -C \"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools\" status --short)",
+      "Bash(git -C \"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools\" ls-files .gitignore)",
+      "Bash(git -C \"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools\" show HEAD:.gitignore)",
+      "Bash(git -C \"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools\" ls-files)",
+      "Bash(git -C \"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools\" show HEAD:global_settings/global_settings.json)",
+      "Bash(echo:*)",
+      "Bash(cd \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\" && python\\\\venv\\\\Scripts\\\\python.exe -c \"import ayon_api; print\\([m for m in dir\\(ayon_api\\) if 'bundle' in m.lower\\(\\)]\\)\")",
+      "Bash(\"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -c \"\nimport json\nwith open\\(r'C:\\\\Users\\\\christophe.leyder\\\\AppData\\\\Local\\\\Ynput\\\\AYON\\\\used_servers.json'\\) as f:\n    print\\(json.dumps\\(json.load\\(f\\), indent=2\\)\\)\n\")",
+      "Bash(\"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -c \"\nimport os\nos.environ['AYON_SERVER_URL'] = 'http://192.168.36.11:5000'\nimport ayon_api\nif not ayon_api.is_connection_created\\(\\):\n    ayon_api.create_connection\\(\\)\nbundles = ayon_api.get_bundles\\(\\)\nprint\\('productionBundle:', bundles.get\\('productionBundle'\\)\\)\n\")",
+      "Bash(\"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -c \"\nimport ayon_api\nimport inspect\nsrc = inspect.getsource\\(ayon_api.GlobalServerAPI.__init__\\)\nprint\\(src\\)\n\")",
+      "Bash(\"L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe\" -c \"\nfrom ayon_api.constants import SERVER_API_ENV_KEY, SERVER_URL_ENV_KEY\nprint\\('Token env key:', SERVER_API_ENV_KEY\\)\nprint\\('URL env key:', SERVER_URL_ENV_KEY\\)\n\")"
     ],
     "deny": [
       "Read(./python/venv/**)",

@@ -32,6 +32,8 @@ class PassBuilderTab(BaseTab):
         from option_button import OptionButtonManager
 
         self.ui.BuildPasses.setEnabled(False)
+        self._initial_scan_done = False
+
         # Create inline spinner for pass detection (will be positioned in showEvent)
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
 
@@ -44,6 +46,88 @@ class PassBuilderTab(BaseTab):
             label_prefix="Location: ",
             parent_window=self.main_window
         )
+
+        # Run initial scan if we have shot context
+        if self.app_state.has_shot_context():
+            self._run_initial_scan()
+
+    def _run_initial_scan(self):
+        """Find render directory and populate render path on startup."""
+        from services.file_operations import get_task_directory, fast_scandir, find_renders, find_hip_files
+        from core.config import RENDERS_SUBPATH
+        from core.utils import truncate_at_suffix, get_trailing_number
+
+        task = self.app_state.task
+        task_dir = get_task_directory(self.app_state.shotpath, task)
+        self.app_state.lookdev_dir = task_dir
+        logging.info(f"Pass Builder: Task Dir: {task_dir}")
+
+        if not os.path.isdir(task_dir):
+            logging.warning(f"Pass Builder: Task directory not found: {task_dir}")
+            return
+
+        # Find render directory
+        try:
+            dirs = fast_scandir(task_dir)
+        except Exception as e:
+            logging.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
+            return
+
+        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+        if not render_folders:
+            logging.warning(f"Pass Builder: No render directory found in {task_dir}")
+            return
+
+        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+        logging.info(f"Pass Builder: Render directory: {render_directory}")
+
+        # Find HIP files to match render versions
+        hip_files = find_hip_files(task_dir, task)
+        hip_file = ""
+        if hip_files:
+            hip_files = sorted(hip_files)
+            hip_file = hip_files[0].rsplit("_", 1)[0]
+
+        # Find render versions
+        try:
+            render_dirs = sorted(next(os.walk(render_directory))[1])
+        except StopIteration:
+            return
+
+        # Filter by HIP file name if available
+        if hip_file:
+            matching = [d for d in render_dirs if hip_file in d]
+            if matching:
+                render_dirs = matching
+
+        if not render_dirs:
+            return
+
+        # Find latest version with actual renders (denoised EXRs)
+        latest_render = None
+        for render_version in reversed(render_dirs):
+            version_path = os.path.join(render_directory, render_version)
+            test_renders = find_renders(version_path)
+            if len(test_renders) > 0:
+                latest_render = render_version
+                break
+
+        if not latest_render:
+            # Fall back to latest directory even if empty
+            latest_render = render_dirs[-1]
+
+        # Populate state and UI
+        self.app_state.latestrender = latest_render
+        self.app_state.searchpath = os.path.join(render_directory, latest_render)
+        self.app_state.working_dir = truncate_at_suffix(render_directory, task)
+
+        self.ui.RenderPath.setText(self.app_state.searchpath)
+        latest_ver = int(get_trailing_number(latest_render))
+        self.ui.CurrentVer.setRange(0, latest_ver)
+        self.ui.CurrentVer.setValue(latest_ver)
+
+        logging.info(f"Pass Builder: Found render path: {self.app_state.searchpath}")
+        self._initial_scan_done = True
 
     @property
     def _build_type(self):
@@ -178,18 +262,23 @@ class PassBuilderTab(BaseTab):
 
         # Get selected passes from the list
         selected_items = self.ui.Passes.selectedItems()
-        selected_passes = [item.text() for item in selected_items]
+        selected_pass_names = [item.text() for item in selected_items]
 
         # Add default passes (they're always included)
         default_passes = get_all_default_passes()
-        all_passes = list(set(selected_passes + default_passes))
+        all_pass_names = list(set(selected_pass_names + default_passes))
 
-        # Save pass selection for this render
-        save_pass_config(self.app_state.passesfile, selected_passes)
-        logging.info(f"Building with passes: {all_passes}")
+        # Build the full channel dict for selected passes (needed by OIIO)
+        channels = self.app_state.channels
+        final_channels = {k: channels[k] for k in all_pass_names if k in channels}
+
+        # Save pass config as channel dict (consumed by AYON plugin's build_oiio_command)
+        save_pass_config(self.app_state.passesfile, final_channels)
+        logging.info(f"Building with passes: {list(final_channels.keys())}")
 
         # Get build location (Local or Farm)
         build_type = self._build_type
+        use_farm = build_type == "farm"
 
         # Get display name for status
         build_type_display = "Local" if build_type == "local" else "Farm"
@@ -200,20 +289,39 @@ class PassBuilderTab(BaseTab):
             StatusColors.INFO
         )
 
-        def do_build():
+        # Disable button to prevent double-clicks
+        self.ui.BuildPasses.setEnabled(False)
+
+        def do_build(progress_callback=None):
             """Run the pass building operation."""
-            return pass_builder(
-                self.app_state.renders[self.ui.RendersList.currentRow()],
-                self.app_state.channels,
-                all_passes,
-                self.app_state.startframe,
-                self.app_state.endframe,
-                build_type
+            return pass_builder.build_passes(
+                passes_file=self.app_state.passesfile,
+                renders_path=self.app_state.searchpath,
+                start_frame=self.app_state.startframe,
+                end_frame=self.app_state.endframe,
+                use_farm=use_farm,
+                project_name=self.app_state.jobname,
+                shot=self.app_state.shot,
+                parent_job_id="NONE",
+                task=self.app_state.task,
+                user=self.app_state.user,
+                output_subdirectory=self.app_state.output_subdirectory,
+                do_publish=True,
+                progress_callback=progress_callback
             )
+
+        def on_progress(percent, message):
+            """Update status bar with build progress."""
+            self.update_status_with_spinner(
+                f"Pass Builder: {message}",
+                StatusColors.INFO
+            )
+            self.show_status(f"{message} ({percent}%)", "info")
 
         def on_result(result):
             """Called when build completes."""
             logging.info(f"Build completed: {result}")
+            self.ui.BuildPasses.setEnabled(True)
             self.update_status_with_spinner(
                 "Pass Builder: Build completed successfully",
                 StatusColors.SUCCESS,
@@ -225,6 +333,7 @@ class PassBuilderTab(BaseTab):
             """Called when build fails."""
             error_msg, _ = self.unpack_worker_error(error_tuple)
             logging.error(f"Build failed: {error_msg}")
+            self.ui.BuildPasses.setEnabled(True)
             self.update_status_with_spinner(
                 f"Pass Builder failed: {error_msg}",
                 StatusColors.ERROR,
@@ -233,4 +342,4 @@ class PassBuilderTab(BaseTab):
             self.show_status(f"Build failed: {error_msg}", "error")
 
         # Use BaseTab helper for worker management
-        self.start_worker(do_build, on_result=on_result, on_error=on_error)
+        self.start_worker(do_build, on_result=on_result, on_error=on_error, on_progress=on_progress)

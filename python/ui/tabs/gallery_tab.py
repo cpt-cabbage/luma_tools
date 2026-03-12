@@ -328,8 +328,9 @@ class GalleryTab(BaseTab):
         if self._current_path:
             self._start_watcher(self._current_path)
 
-        # If no initial scan done yet, do one now
+        # If no initial scan done yet, show loading overlay and scan
         if not self._initial_scan_done:
+            self.show_loading_overlay("Loading gallery...")
             self._on_refresh()
             self._initial_scan_done = True
 

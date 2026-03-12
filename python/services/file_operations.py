@@ -12,9 +12,9 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 from core.config import (
-    LOOKDEV_SUBPATH,
     RENDERS_SUBPATH,
     USD_SUBPATH,
+    DEFAULT_TASK,
     COMP_EXTENSIONS,
     HIP_EXTENSION,
     EXR_EXTENSION,
@@ -117,21 +117,24 @@ def find_renders(render_path):
     return scan_exr_sequences(denoised_path)
 
 
-def find_hip_files(dirname):
+def find_hip_files(dirname, task=None):
     """
-    Find Houdini HIP files containing 'lookdev' in the name.
+    Find Houdini HIP files containing the task name in the filename.
 
     Args:
         dirname: Directory to search
+        task: Task name to match in filename (e.g., 'lighting', 'lookdev').
+              Falls back to DEFAULT_TASK if not provided.
 
     Returns:
         list: List of HIP file names
     """
+    search_term = (task or DEFAULT_TASK).lower()
     hipfiles = []
     for root, dirs, files in os.walk(dirname):
         for file in files:
             if file.endswith(HIP_EXTENSION):
-                if "lookdev" in file:
+                if search_term in file.lower():
                     hipfiles.append(file)
     return hipfiles
 
@@ -190,21 +193,21 @@ def read_comp_file(compfile, hip_file_name):
     return renders_in_comp
 
 
-def find_render_directory(shot_path):
+def find_render_directory(shot_path, task=None):
     """
     Find the render directory for a given shot path.
 
     Args:
         shot_path: Path to shot
+        task: Task name (e.g., 'lighting', 'lookdev'). Falls back to DEFAULT_TASK.
 
     Returns:
         tuple: (render_directory, all_render_folders) or (None, [])
     """
     try:
-        lookdev_dir = truncate_at_suffix(shot_path, "work")
-        lookdev_dir = lookdev_dir + LOOKDEV_SUBPATH
+        task_dir = get_task_directory(shot_path, task)
 
-        dirs = fast_scandir(lookdev_dir)
+        dirs = fast_scandir(task_dir)
         render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
 
         if render_folders:
@@ -217,21 +220,21 @@ def find_render_directory(shot_path):
     return None, []
 
 
-def find_usd_directory(shot_path):
+def find_usd_directory(shot_path, task=None):
     """
     Find the USD files directory for a given shot path.
 
     Args:
         shot_path: Path to shot
+        task: Task name (e.g., 'lighting', 'lookdev'). Falls back to DEFAULT_TASK.
 
     Returns:
         tuple: (usd_directory, all_usd_folders) or (None, [])
     """
     try:
-        lookdev_dir = truncate_at_suffix(shot_path, "work")
-        lookdev_dir = lookdev_dir + LOOKDEV_SUBPATH
+        task_dir = get_task_directory(shot_path, task)
 
-        dirs = fast_scandir(lookdev_dir)
+        dirs = fast_scandir(task_dir)
         usd_folders = [d for d in dirs if USD_SUBPATH in d]
 
         if usd_folders:
@@ -276,32 +279,45 @@ def scan_usd_versions(usd_directory):
     return usd_dirs
 
 
-def get_lookdev_directory(shot_path):
+def get_task_directory(shot_path, task=None):
     """
-    Get the lookdev directory from shot path.
+    Get the task directory from shot path.
+
+    Builds the path: <work_root>/<task_name>
+    e.g., W:/Solensia/shots/sh0030/work/lighting
 
     Args:
-        shot_path: Path to shot
+        shot_path: Path to shot (may include task subdirectory)
+        task: Task name (e.g., 'lighting', 'lookdev'). Falls back to DEFAULT_TASK.
 
     Returns:
-        str: Path to lookdev directory
+        str: Path to task directory
     """
-    lookdev_dir = truncate_at_suffix(shot_path, "work")
-    lookdev_dir = lookdev_dir + "\\lookdev"
-    return lookdev_dir
+    task_name = task or DEFAULT_TASK
+    task_dir = truncate_at_suffix(shot_path, "work")
+    task_dir = task_dir + "\\" + task_name
+    return task_dir
 
 
-def get_working_directory(shot_path):
+# Keep backward-compatible alias
+def get_lookdev_directory(shot_path, task=None):
+    """Get the task directory from shot path. Alias for get_task_directory."""
+    return get_task_directory(shot_path, task)
+
+
+def get_working_directory(shot_path, task=None):
     """
     Get the working directory from shot path.
 
     Args:
         shot_path: Path to shot
+        task: Task name to truncate at. Falls back to DEFAULT_TASK.
 
     Returns:
-        str: Path to working directory
+        str: Path to working directory (up to and including task dir)
     """
-    working_dir = truncate_at_suffix(shot_path, LOOKDEV_SUBPATH)
+    task_name = task or DEFAULT_TASK
+    working_dir = truncate_at_suffix(shot_path, task_name)
     return working_dir
 
 
