@@ -377,10 +377,11 @@ def create_ayon_metadata(
     working_dir,
     render_file,
     project_code=None,
-    task_type=None
+    task_type=None,
+    farm=True
 ):
     """
-    Create AYON metadata JSON for farm publishing.
+    Create AYON metadata JSON for publishing.
 
     Args:
         project_name: AYON project name
@@ -396,6 +397,7 @@ def create_ayon_metadata(
         render_file: Render file name
         project_code: Optional project code (defaults to project_name)
         task_type: Optional task type (defaults to "Compositing")
+        farm: Whether this is a farm publish (True) or local publish (False)
 
     Returns:
         dict: Metadata dictionary
@@ -472,8 +474,9 @@ def create_ayon_metadata(
         "fps": AYON_DEFAULT_FPS,
         "source": "{root[work]}/" + working_dir.split("work/")[-1] + render_file,
         "representations": representations,
-        # Mark this as farm/local publish to help sitesync plugin logic
-        "farm": True,
+        # farm=True tells AYON to defer file integration to a farm job
+        # farm=False tells AYON to integrate files immediately (local publish)
+        "farm": farm,
         # Required fields
         "aov": "",
         "colorspace": AYON_COLORSPACE,
@@ -1068,7 +1071,8 @@ class LocalPublishStrategy(PublishStrategy):
             working_dir,
             render_file,
             project_code=None,
-            task_type=task_type
+            task_type=task_type,
+            farm=False  # Local publish — integrate files immediately
         )
 
         # Write metadata file

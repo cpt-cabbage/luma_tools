@@ -2,43 +2,29 @@
 Tab modules for Luma Tools.
 
 Each tab is a separate module that handles its own UI and signal connections.
+Tab classes are imported lazily during window creation, not at import time,
+to speed up application startup.
 """
 
 from .base_tab import BaseTab, TabSignals
-from .logs_tab import LogsTab
-from .pass_builder_tab import PassBuilderTab
-from .mp4_maker_tab import MP4MakerTab
-from .republish_tab import RePublishTab
-from .cleaner_tab import CleanerTab
-from .comfyui import ComfyUITab
-from .gallery_tab import GalleryTab
-from .canvas_tab import CanvasTab
-from .settings_tab import SettingsTab
 
 __all__ = [
     'BaseTab',
     'TabSignals',
-    'LogsTab',
-    'PassBuilderTab',
-    'MP4MakerTab',
-    'RePublishTab',
-    'CleanerTab',
-    'ComfyUITab',
-    'GalleryTab',
-    'CanvasTab',
-    'SettingsTab',
+    'TAB_REGISTRY',
 ]
 
-# Tab configuration for dynamic loading
+# Tab registry: (relative_module, class_name, restrict_key)
+# Tab modules are NOT imported here — they're loaded on demand in _load_tabs()
 # Order determines default tab order in the UI
-TAB_CONFIG = [
-    {'class': ComfyUITab, 'restrict_key': 'comfyui'},
-    {'class': GalleryTab, 'restrict_key': 'gallery'},
-    {'class': CanvasTab, 'restrict_key': 'canvas'},
-    {'class': PassBuilderTab, 'restrict_key': 'passbuilder'},
-    {'class': RePublishTab, 'restrict_key': 'republish'},
-    {'class': MP4MakerTab, 'restrict_key': 'mp4maker'},
-    {'class': CleanerTab, 'restrict_key': 'cleaner'},
-    {'class': SettingsTab, 'restrict_key': 'settings'},
-    {'class': LogsTab, 'restrict_key': 'logs'},
+TAB_REGISTRY = [
+    ('.comfyui', 'ComfyUITab', 'comfyui'),
+    ('.gallery_tab', 'GalleryTab', 'gallery'),
+    ('.canvas_tab', 'CanvasTab', 'canvas'),
+    ('.pass_builder_tab', 'PassBuilderTab', 'passbuilder'),
+    ('.republish_tab', 'RePublishTab', 'republish'),
+    ('.mp4_maker_tab', 'MP4MakerTab', 'mp4maker'),
+    ('.cleaner_tab', 'CleanerTab', 'cleaner'),
+    ('.settings_tab', 'SettingsTab', 'settings'),
+    ('.logs_tab', 'LogsTab', 'logs'),
 ]

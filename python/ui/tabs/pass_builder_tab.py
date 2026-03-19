@@ -313,10 +313,9 @@ class PassBuilderTab(BaseTab):
         def on_progress(percent, message):
             """Update status bar with build progress."""
             self.update_status_with_spinner(
-                f"Pass Builder: {message}",
+                f"Pass Builder: {message} ({percent}%)",
                 StatusColors.INFO
             )
-            self.show_status(f"{message} ({percent}%)", "info")
 
         def on_result(result):
             """Called when build completes."""

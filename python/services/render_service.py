@@ -259,9 +259,11 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         if frame_num == start_frame:
             logger.info(f"First frame command: {local_command}")
 
-        # Update progress at start only (per-frame updates are too noisy)
-        if frame_num == start_frame:
-            report_progress(progress_callback, progress, f"Processing frames {start_frame}-{end_frame} ({total_frames} frames)...")
+        # Report per-frame progress (50-90% range)
+        report_progress(
+            progress_callback, progress,
+            f"Processing frame {frame_num} ({frame_index + 1}/{total_frames})"
+        )
 
         try:
             result = run_command(local_command, shell=False)

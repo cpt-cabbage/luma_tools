@@ -1048,7 +1048,7 @@ def main():
                 ret = None
                 config = server_state.get('startup_config', {})
                 port = config.get('port', 8188)
-                if not check_server_health(port):
+                if not check_server_health(port=port):
                     logger.warning("No process handle and ComfyUI not responding, restarting...")
                     server_state['is_ready'] = False
                     if restart_comfyui(reason="orphaned"):

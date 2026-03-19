@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.4.5
+- Fix pass builder local publishing
+
 ## Version 0.6.4.2
 - Improve startup times
 - Fix Pass Builder button calling wrong function

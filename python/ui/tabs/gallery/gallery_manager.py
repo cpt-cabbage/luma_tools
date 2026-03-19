@@ -291,6 +291,14 @@ class GalleryManager(BaseGalleryManager):
             for stack in list(self._stack_widgets.values()):
                 if not isValid(stack):
                     continue
+                # Disconnect favorites signals to prevent callbacks on zombie widgets
+                stack.blockSignals(True)
+                if hasattr(stack, '_favorites_manager') and stack._favorites_manager:
+                    try:
+                        stack._favorites_manager.like_changed.disconnect(stack._on_like_changed)
+                        stack._favorites_manager.item_groups_changed.disconnect(stack._on_item_groups_changed)
+                    except (RuntimeError, TypeError):
+                        pass  # Already disconnected
                 # Collapse without animation to avoid blocking the layout guard
                 if stack.is_expanded():
                     stack.collapse(animated=False)
@@ -326,7 +334,13 @@ class GalleryManager(BaseGalleryManager):
         while self.tab._flow_layout.count():
             item = self.tab._flow_layout.takeAt(0)
             if item.widget():
+                item.widget().blockSignals(True)
                 item.widget().deleteLater()
+
+        # Let Qt process pending deletions before creating new widgets
+        # This prevents old zombie widgets from interfering with new ones
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
 
         # Reset caches
         self.tab._widget_cache = {}
@@ -355,6 +369,9 @@ class GalleryManager(BaseGalleryManager):
 
         # Create stack widgets for groups with multiple items
         # Single items are shown as regular thumbnails
+        # Defer favorites_manager setup to after all widgets are created
+        # to avoid redundant _apply_stack_colors calls during bulk creation
+        new_stacks = []
         for prefix, group_items in groups.items():
             if len(group_items) > 1:
                 # Get group color if available
@@ -368,9 +385,6 @@ class GalleryManager(BaseGalleryManager):
                     gallery_tab=self.tab,
                     group_color=group_color
                 )
-                # Set favorites manager for likes/groups functionality
-                if favorites_manager:
-                    stack.set_favorites_manager(favorites_manager)
 
                 # Connect signals for tracking expanded state
                 stack.expanded.connect(self._on_stack_expanded)
@@ -382,6 +396,7 @@ class GalleryManager(BaseGalleryManager):
 
                 self._stack_widgets[prefix] = stack
                 self.tab._flow_layout.addWidget(stack)
+                new_stacks.append(stack)
 
                 # Track items for this stack
                 self.tab._section_items[prefix] = [item['path'] for item in group_items]
@@ -399,6 +414,13 @@ class GalleryManager(BaseGalleryManager):
                     self.tab._flow_layout.addWidget(thumbnail)
                     # Track in section_items so incremental sync can find this prefix
                     self.tab._section_items[prefix] = [item['path']]
+
+        # Set favorites manager on all stacks after creation is complete
+        # This avoids calling _apply_stack_colors twice per widget during init
+        if favorites_manager and new_stacks:
+            for stack in new_stacks:
+                if isValid(stack):
+                    stack.set_favorites_manager(favorites_manager)
 
         container.setUpdatesEnabled(True)
 
@@ -489,6 +511,14 @@ class GalleryManager(BaseGalleryManager):
                 if prefix in self._stack_widgets:
                     stack = self._stack_widgets.pop(prefix)
                     if isValid(stack):
+                        # Disconnect favorites signals before deletion
+                        stack.blockSignals(True)
+                        if hasattr(stack, '_favorites_manager') and stack._favorites_manager:
+                            try:
+                                stack._favorites_manager.like_changed.disconnect(stack._on_like_changed)
+                                stack._favorites_manager.item_groups_changed.disconnect(stack._on_item_groups_changed)
+                            except (RuntimeError, TypeError):
+                                pass
                         if stack.is_expanded():
                             stack.collapse(animated=False)
                         self.tab._flow_layout.removeWidget(stack)
@@ -526,6 +556,14 @@ class GalleryManager(BaseGalleryManager):
                     had_transitions = True
                     stack = self._stack_widgets.pop(prefix)
                     if isValid(stack):
+                        # Disconnect favorites signals before deletion
+                        stack.blockSignals(True)
+                        if hasattr(stack, '_favorites_manager') and stack._favorites_manager:
+                            try:
+                                stack._favorites_manager.like_changed.disconnect(stack._on_like_changed)
+                                stack._favorites_manager.item_groups_changed.disconnect(stack._on_item_groups_changed)
+                            except (RuntimeError, TypeError):
+                                pass
                         if stack.is_expanded():
                             stack.collapse(animated=False)
                         self.tab._flow_layout.removeWidget(stack)

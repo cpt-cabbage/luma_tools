@@ -94,8 +94,8 @@ from icons import IconManager, TAB_COLORS, DEFAULT_ICON_COLOR
 # Import state manager
 from core.state_manager import app_state
 
-# Import tab configuration
-from ui.tabs import TAB_CONFIG
+# Import tab registry (tab classes are imported lazily during _load_tabs)
+from ui.tabs import TAB_REGISTRY
 
 # Tabs that appear as fixed utility buttons instead of reorderable tabs
 UTILITY_TAB_KEYS = {'settings', 'logs'}
@@ -442,6 +442,10 @@ class LumaShotTools(QtWidgets.QWidget):
         # Restore saved tab order
         self._restore_tab_order()
 
+        # Eagerly initialize the tab that's visible after order is restored
+        # (other tabs will be initialized on first activation)
+        self._initialize_active_tab()
+
         # Hide restricted tabs for non-admin users
         self._hide_restricted_tabs()
 
@@ -533,26 +537,33 @@ class LumaShotTools(QtWidgets.QWidget):
         status_widget.setLayout(status_layout)
         layout.addWidget(status_widget, 0)  # stretch factor 0
 
-        # Instantiate and load each tab
-        for tab_config in TAB_CONFIG:
-            tab_class = tab_config['class']
-            restrict_key = tab_config['restrict_key']
+        # Lazily import and instantiate each tab
+        # Tab modules are imported on demand, and initialize() is deferred
+        # until first activation to speed up startup
+        import time as _time
+        import importlib as _importlib
+        _total_start = _time.perf_counter()
 
+        for module_path, class_name, restrict_key in TAB_REGISTRY:
             # Skip ComfyUI and Gallery tabs for users without elevated access
             # Admins and Supervisors can access these tabs
             if not app_state.has_elevated_access and restrict_key in ['comfyui', 'gallery']:
-                logging.info(f"Skipping initialization of '{restrict_key}' tab for regular user")
+                logging.info(f"Skipping '{restrict_key}' tab for regular user")
                 continue
 
             # Skip settings tab for regular users (admins and supervisors can access)
             if not app_state.has_elevated_access and restrict_key == 'settings':
-                logging.info(f"Skipping initialization of '{restrict_key}' tab for regular user")
+                logging.info(f"Skipping '{restrict_key}' tab for regular user")
                 continue
 
-            # Create tab instance
-            tab_instance = tab_class(self, app_state)
+            _tab_start = _time.perf_counter()
 
-            # Load the tab's UI
+            # Import tab class lazily (module loaded here, not at app import time)
+            _module = _importlib.import_module(module_path, 'ui.tabs')
+            tab_class = getattr(_module, class_name)
+
+            # Create tab instance and load UI (uses precompiled .py when available)
+            tab_instance = tab_class(self, app_state)
             tab_widget = tab_instance.load_ui(self.tab_widget)
             tab_widget.setObjectName(restrict_key)
 
@@ -571,12 +582,18 @@ class LumaShotTools(QtWidgets.QWidget):
                 lambda ti=tab_instance: self._on_tab_request_attention(ti)
             )
 
-            # Initialize tab
-            tab_instance.initialize()
+            # initialize() is deferred until first tab activation
+            # (see _ensure_initialized in BaseTab and _on_tab_changed)
 
             # Store special reference to logs tab
             if restrict_key == 'logs':
                 self.logs_tab = tab_instance
+
+            _tab_elapsed = _time.perf_counter() - _tab_start
+            logging.info(f"[Startup] {tab_instance.tab_name}: {_tab_elapsed*1000:.0f}ms")
+
+        _total_elapsed = _time.perf_counter() - _total_start
+        logging.info(f"[Startup] Tab loading total: {_total_elapsed*1000:.0f}ms ({len(self.tabs)} tabs, init deferred)")
 
         # Setup utility buttons (Settings, Logs) in the corner of the tab bar
         self._setup_utility_buttons()
@@ -756,6 +773,14 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tab_glow_manager.start_glow(tab_index, color)
         logging.info(f"Tab '{tab_instance.tab_name}' is requesting attention")
 
+    def _initialize_active_tab(self):
+        """Eagerly initialize the currently visible tab after tab order is restored."""
+        current_index = self.tab_widget.currentIndex()
+        for restrict_key, tab_instance in self.tabs.items():
+            if self.tab_widget.indexOf(tab_instance.ui) == current_index:
+                tab_instance._ensure_initialized()
+                break
+
     def _on_tab_changed(self, index):
         """Handle tab change - notify tabs and sync utility button states."""
         # Skip activation/deactivation while user is dragging tabs around
@@ -768,12 +793,15 @@ class LumaShotTools(QtWidgets.QWidget):
                 tab_index = self.tab_widget.indexOf(tab_instance.ui)
                 if tab_index == index:
                     logging.debug(f"[MainWindow] activating tab: {tab_name}")
+                    tab_instance._ensure_initialized()
                     tab_instance.on_tab_activated()
                     logging.debug(f"[MainWindow] tab activated: {tab_name}")
                 else:
-                    logging.debug(f"[MainWindow] deactivating tab: {tab_name}")
-                    tab_instance.on_tab_deactivated()
-                    logging.debug(f"[MainWindow] tab deactivated: {tab_name}")
+                    # Only deactivate tabs that have been initialized
+                    if tab_instance._initialized:
+                        logging.debug(f"[MainWindow] deactivating tab: {tab_name}")
+                        tab_instance.on_tab_deactivated()
+                        logging.debug(f"[MainWindow] tab deactivated: {tab_name}")
 
             # Sync utility button checked states
             self._update_utility_button_states(index)
@@ -809,7 +837,7 @@ class LumaShotTools(QtWidgets.QWidget):
         """Select a tab by its restrict_key name (e.g. 'gallery').
 
         Args:
-            restrict_key: Tab identifier from TAB_CONFIG (e.g. 'gallery',
+            restrict_key: Tab identifier from TAB_REGISTRY (e.g. 'gallery',
                          'comfyui', 'settings', 'logs', 'passbuilder', etc.)
 
         Returns:
@@ -1284,9 +1312,42 @@ class LumaShotTools(QtWidgets.QWidget):
             self._log_redirect_pending = False
             logging.info("Log redirection enabled")
 
+    def _get_running_tasks(self):
+        """Check all tabs for running tasks and return a list of descriptions."""
+        running = []
+        for key, tab in self.tabs.items():
+            # Check BaseTab active workers
+            if hasattr(tab, 'has_active_workers') and tab.has_active_workers():
+                tab_name = getattr(tab, 'tab_name', key)
+                running.append(f"{tab_name}: background task running")
+
+            # Check ComfyUI polling timers (farm jobs being monitored)
+            if key == 'comfyui':
+                iterate_timer = getattr(tab, '_iterate_poll_timer', None)
+                batch_timer = getattr(tab, '_batch_poll_timer', None)
+                if (iterate_timer and iterate_timer.isActive()) or \
+                   (batch_timer and batch_timer.isActive()):
+                    if f"{getattr(tab, 'tab_name', key)}: background task running" not in running:
+                        running.append("ComfyUI: farm job in progress")
+        return running
+
     def closeEvent(self, event):
         """Handle window close event - save window state and version."""
         from core.user_preferences import set_last_opened_version
+
+        # Check for running tasks before closing
+        running = self._get_running_tasks()
+        if running:
+            from dialog_helpers import confirm_action
+            detail = "\n".join(f"  - {task}" for task in running)
+            if not confirm_action(
+                "Tasks Still Running",
+                "There are tasks still running. Are you sure you want to exit?",
+                parent=self,
+                detail="\n".join(running),
+            ):
+                event.ignore()
+                return
 
         self._save_window_state()
 
@@ -1359,7 +1420,10 @@ def main():
         app.processEvents()
 
         global _main_window
+        t_start = time.perf_counter()
         window = LumaShotTools()
+        t_elapsed = time.perf_counter() - t_start
+        logging.info(f"[Startup] Window creation total: {t_elapsed*1000:.0f}ms")
         _main_window = window  # Store reference for cross-widget access
 
         splash.update_progress(95, "Loading", "Finalizing...")

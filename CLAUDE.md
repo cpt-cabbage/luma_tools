@@ -82,6 +82,13 @@ python python/core/luma_tools.py
 
 `deploy_production.bat` runs `scripts/deploy.py` which auto-increments version, updates changelog, copies code/venv to production, updates global_settings.json paths (dev→prod). Version in `resources/version.json`, changelog in `resources/changelog.md`.
 
+**Version increment strategies** (deploy script prompts for type):
+- **`b` (big):** `0.4` → `0.5` (major feature)
+- **`s` (small):** `0.4` → `0.4.1`, or `0.4.1` → `0.4.2` (bug fix, minor enhancement)
+- **`m` (minor):** `0.4` → `0.4.0.1`, `0.4.1` → `0.4.1.1` (hotfix)
+
+**Details:** Venv is never deleted/overwritten in target. `.pyc`/`__pycache__` are not copied. All network paths in `global_settings.json` are rewritten from dev to prod. Changelog entry uses latest git commit message (full body). `.ui` files are precompiled to Python via `pyside6-uic` after resource copy.
+
 ## Project Structure
 
 ```
@@ -101,6 +108,7 @@ python/
 resources/
 ├── ui/           # Shared widgets, dialogs, styles, workers, thumbnails
 │   └── tabs/     # .ui files for each tab (Qt Designer)
+│       └── _compiled/  # Precompiled .ui → .py (pyside6-uic, auto-generated)
 ├── version.json
 └── changelog.md
 scripts/          # deploy.py, install_venv.py
@@ -136,7 +144,9 @@ from ui_components import Worker  # resources/ui/ in PYTHONPATH
 ## Architecture Patterns
 
 ### Tabs (BaseTab)
-Inherit from `ui/tabs/base_tab.py`, define `ui_file`, `tab_name`, implement `connect_signals()`, `initialize()`. Register in `TAB_CONFIG` (`ui/tabs/__init__.py`) with `restrict_key` for access control. See `python/ui/tabs/CLAUDE.md` for BaseTab helpers and mixin patterns.
+Inherit from `ui/tabs/base_tab.py`, define `TAB_CONFIG` (with `ui_file`, `tab_name`), implement `connect_signals()`, `initialize()`. Register in `TAB_REGISTRY` (`ui/tabs/__init__.py`) with `(module_path, class_name, restrict_key)`. See `python/ui/tabs/CLAUDE.md` for BaseTab helpers, mixin patterns, and startup optimization details.
+
+**Important:** `initialize()` is deferred until first tab activation (not called during startup). Only `load_ui()` and `connect_signals()` run eagerly. Do not access state created in `initialize()` from `connect_signals()` handlers unless guarded.
 
 **Key BaseTab helpers beyond `start_worker`:**
 - `spinner_context(message, success_msg, error_msg)` — context manager for automatic spinner lifecycle
@@ -324,7 +334,7 @@ if main:
 
 ## Development
 
-**Setup:** Python 3.10+, PySide6, pre-configured venv in `python/venv/`. No build process.
+**Setup:** Python 3.10+, PySide6, pre-configured venv in `python/venv/`. Build step: precompile `.ui` files (see below).
 **Key deps:** PySide6 ≥6.6, open3d ≥0.18, trimesh ≥4.10, usd-core ≥25.11, PyOpenGL ≥3.1, pyenchant ≥3.3
 
 **Testing:**
@@ -341,6 +351,21 @@ python\venv\Scripts\python.exe -m pytest tests\ -v                    # All test
 powershell -ExecutionPolicy Bypass -File _run_tests.ps1
 ```
 Note: `pytest-timeout` is NOT installed — do not use `--timeout` flag.
+
+**Test infrastructure (`tests/conftest.py`):**
+- Auto-adds `python/` and `resources/ui/` to `sys.path`
+- `NUMPY_WORKS` flag — skips `test_animation_controller.py` and `test_loaders.py` if numpy import fails (broken venv)
+- Use `@pytest.mark.skipif()` or `pytest.skip()` for environment-dependent tests
+
+**Farm isolation tests (`tests/test_farm_isolation.py`):**
+The Deadline runner copies scripts from `python/comfyui/` to a flat `_job_data/` dir with `comfyui_` prefix (e.g., `utils.py` → `comfyui_utils.py`). These must import **without** the `comfyui` package on `sys.path`. The farm isolation test validates this by purging all `comfyui.*` from `sys.modules` and importing from a temp dir. If this test fails, a farm script has introduced a dependency on other comfyui modules that won't be available on the farm.
+
+**Helper scripts** (root directory):
+- `_run_tests.ps1` — Run full pytest suite with proper PYTHONPATH
+- `_check_logs.ps1` — Stability test: 10 back-to-back app launches (10s each)
+- `_find_logs.ps1` — Find latest log file path
+- `_find_workflow.ps1` — Search for workflow files
+- `_check_analytics.ps1` — Check analytics data
 
 ### Debugging
 
@@ -414,9 +439,15 @@ When a bug appears during testing, **always determine if it's pre-existing befor
 ### UI Modifications
 Edit `.ui` files in Qt Designer, update tab logic in `python/ui/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.
 
+**After editing any `.ui` file**, recompile its Python equivalent:
+```bash
+python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/<name>.ui -o resources/ui/tabs/_compiled/ui_<name>.py -g python
+```
+If compiled files are missing, `BaseTab.load_ui()` falls back to `QUiLoader` (slower first startup due to ~5s initialization penalty). The deploy script recompiles automatically.
+
 ### Adding Features
 1. Create service in domain package, add config to `core/config.py`
-2. For tabs: inherit BaseTab, register in `TAB_CONFIG` (`ui/tabs/__init__.py`)
+2. For tabs: inherit BaseTab, add entry to `TAB_REGISTRY` (`ui/tabs/__init__.py`), create `.ui` file and compile it
 3. For new settings: add `SettingDef` to `SETTINGS_REGISTRY` in `core/settings_manager.py`
 4. For new app state: add `ThreadSafeProperty` to `ApplicationState` in `core/state_manager.py`
 5. Long ops: wrap in Worker (store on self), use signals

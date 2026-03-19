@@ -82,6 +82,9 @@ class CanvasTab(BaseTab):
             CanvasMetadataManager, CanvasScope
         )
 
+        # Tab active state (guards sync timers on hidden tab)
+        self._tab_active = False
+
         # Path state
         self._current_path = ""
 
@@ -755,10 +758,11 @@ class CanvasTab(BaseTab):
 
     def _on_canvas_loaded(self):
         """Finalize after canvas loading completes (success or failure)."""
-        # Configure and start sync for current canvas
+        # Configure and start sync for current canvas (only if tab is active)
         if hasattr(self, '_sync_manager') and self._current_canvas_id:
             self._configure_sync_managers()
-            self._start_sync()
+            if getattr(self, '_tab_active', True):
+                self._start_sync()
 
         canvas_name = self._current_canvas_name or "(none)"
         logger.info(f"Canvas loaded: {canvas_name}")
@@ -1345,13 +1349,15 @@ class CanvasTab(BaseTab):
 
     def on_tab_activated(self):
         """Called when canvas tab becomes visible."""
+        self._tab_active = True
+
         # Give canvas focus for keyboard shortcuts
         if hasattr(self, '_canvas'):
             self._canvas.setFocus()
 
-        # Refresh sync if enabled
-        if hasattr(self, '_sync_timer') and self._sync_timer.isActive():
-            self._on_sync_poll()
+        # Restart sync if we have an active canvas
+        if hasattr(self, '_sync_manager') and self._current_canvas_id:
+            self._start_sync()
 
         # Connect to gallery favorites signals if not already connected
         self._connect_gallery_signals()
@@ -1397,6 +1403,12 @@ class CanvasTab(BaseTab):
 
     def on_tab_deactivated(self):
         """Called when switching away from canvas tab."""
+        self._tab_active = False
+
+        # Stop sync timers to prevent background file I/O on hidden tab
+        if hasattr(self, '_sync_manager'):
+            self._stop_sync()
+
         # Hide floating panels that shouldn't persist across tabs
         if hasattr(self, '_drawing_panel') and self._drawing_panel:
             self._drawing_panel.hide()
