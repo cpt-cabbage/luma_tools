@@ -357,27 +357,29 @@ class FavoritesManager(BaseGalleryManager, QObject):
         """
         self._ensure_loaded()
 
-        if color is None:
-            # Pick next available color
-            used_colors = {g.color for g in self._groups.values()}
-            for c in UIColors.GROUP_COLORS:
-                if c not in used_colors:
-                    color = c
-                    break
+        with self._favorites_lock:
             if color is None:
-                color = UIColors.GROUP_COLORS[len(self._groups) % len(UIColors.GROUP_COLORS)]
+                # Pick next available color
+                used_colors = {g.color for g in self._groups.values()}
+                for c in UIColors.GROUP_COLORS:
+                    if c not in used_colors:
+                        color = c
+                        break
+                if color is None:
+                    color = UIColors.GROUP_COLORS[len(self._groups) % len(UIColors.GROUP_COLORS)]
 
-        group_id = str(uuid.uuid4())
-        order = max((g.order for g in self._groups.values()), default=-1) + 1
-        group = GroupDef(
-            group_id=group_id,
-            name=name,
-            color=color,
-            created=datetime.now().isoformat(),
-            order=order
-        )
-        self._groups[group_id] = group
-        self._save_groups()
+            group_id = str(uuid.uuid4())
+            order = max((g.order for g in self._groups.values()), default=-1) + 1
+            group = GroupDef(
+                group_id=group_id,
+                name=name,
+                color=color,
+                created=datetime.now().isoformat(),
+                order=order
+            )
+            self._groups[group_id] = group
+            self._save_groups()
+
         self.group_created.emit(group_id)
         return group_id
 
@@ -389,27 +391,30 @@ class FavoritesManager(BaseGalleryManager, QObject):
             group_id: ID of the group to delete
         """
         self._ensure_loaded()
-        if group_id not in self._groups:
-            return
 
-        # Use reverse index to get affected paths (O(1) instead of O(n))
-        affected_paths = list(self._group_items.get(group_id, set()))
+        with self._favorites_lock:
+            if group_id not in self._groups:
+                return
 
-        # Remove group from all affected items
-        for path in affected_paths:
-            if path in self._item_groups:
-                self._item_groups[path].discard(group_id)
+            # Use reverse index to get affected paths (O(1) instead of O(n))
+            affected_paths = list(self._group_items.get(group_id, set()))
 
-        # Clean up empty sets
-        self._item_groups = {p: gids for p, gids in self._item_groups.items() if gids}
+            # Remove group from all affected items
+            for path in affected_paths:
+                if path in self._item_groups:
+                    self._item_groups[path].discard(group_id)
 
-        # Clean up reverse index
-        if group_id in self._group_items:
-            del self._group_items[group_id]
+            # Clean up empty sets
+            self._item_groups = {p: gids for p, gids in self._item_groups.items() if gids}
 
-        del self._groups[group_id]
-        self._save_groups()
-        self._save_item_groups()
+            # Clean up reverse index
+            if group_id in self._group_items:
+                del self._group_items[group_id]
+
+            del self._groups[group_id]
+            self._save_groups()
+            self._save_item_groups()
+
         self.group_deleted.emit(group_id)
 
         # Notify about affected items
@@ -419,26 +424,29 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def rename_group(self, group_id: str, new_name: str):
         """Rename a group."""
         self._ensure_loaded()
-        if group_id in self._groups:
-            self._groups[group_id].name = new_name
-            self._save_groups()
-            self.group_updated.emit(group_id)
+        with self._favorites_lock:
+            if group_id in self._groups:
+                self._groups[group_id].name = new_name
+                self._save_groups()
+        self.group_updated.emit(group_id)
 
     def change_group_color(self, group_id: str, new_color: str):
         """Change a group's color."""
         self._ensure_loaded()
-        if group_id in self._groups:
-            self._groups[group_id].color = new_color
-            self._save_groups()
-            self.group_updated.emit(group_id)
+        with self._favorites_lock:
+            if group_id in self._groups:
+                self._groups[group_id].color = new_color
+                self._save_groups()
+        self.group_updated.emit(group_id)
 
     def reorder_group(self, group_id: str, new_order: int):
         """Change a group's order position."""
         self._ensure_loaded()
-        if group_id in self._groups:
-            self._groups[group_id].order = new_order
-            self._save_groups()
-            self.group_updated.emit(group_id)
+        with self._favorites_lock:
+            if group_id in self._groups:
+                self._groups[group_id].order = new_order
+                self._save_groups()
+        self.group_updated.emit(group_id)
 
     def get_groups(self) -> List[GroupDef]:
         """Get list of all groups sorted by order."""
@@ -812,9 +820,13 @@ class FavoritesManager(BaseGalleryManager, QObject):
                 self._liked_items -= missing_likes
                 self._save_liked_items()
 
-            # Clean item groups
+            # Clean item groups and reverse index
             missing_groups = [p for p in self._item_groups if p not in existing_paths]
             if missing_groups:
                 for path in missing_groups:
+                    # Update reverse index before removing
+                    for gid in self._item_groups[path]:
+                        if gid in self._group_items:
+                            self._group_items[gid].discard(path)
                     del self._item_groups[path]
                 self._save_item_groups()

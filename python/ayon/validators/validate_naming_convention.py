@@ -15,7 +15,7 @@ PRODUCT_NAME_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_]*$')
 
 # Reserved names that shouldn't be used
 RESERVED_NAMES = {
-    'main', 'master', 'default', 'none', 'null', 'undefined',
+    'master', 'default', 'none', 'null', 'undefined',
     'test', 'temp', 'tmp', 'new', 'copy',
 }
 

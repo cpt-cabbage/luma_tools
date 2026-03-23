@@ -154,9 +154,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         else:
             logger.warning("Node info not available (farm server may not have run yet)")
 
-    def _on_node_info_error(self, error):
+    def _on_node_info_error(self, error_msg, traceback_str=""):
         """Handle node info refresh failure."""
-        logger.warning(f"Failed to refresh node info cache: {error}")
+        logger.warning(f"Failed to refresh node info cache: {error_msg}")
 
     # =========================================================================
     # CONTEXTUAL TOOLTIPS & GUIDANCE
@@ -1259,11 +1259,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             logger.error(f"[ComfyUI] ERROR in on_result: {e}")
             logger.error(traceback.format_exc())
 
-    def _on_submit_error(self, error_tuple):
+    def _on_submit_error(self, error_msg, traceback_str=""):
         """Handle ComfyUI job submission error."""
         from ui_components import StatusColors
-
-        error_msg, traceback_str = self.unpack_worker_error(error_tuple)
 
         self.main_window.stop_status_spinner()
         self.show_status(f"Submission error: {error_msg}", "error")

@@ -102,6 +102,7 @@ def import_from_luma(db_path: str, extract_path: str = None) -> Optional[Dict[st
     Returns:
         Canvas state dict, or None if failed
     """
+    conn = None
     try:
         if not os.path.exists(db_path):
             logger.error(f"File not found: {db_path}")
@@ -168,10 +169,12 @@ def import_from_luma(db_path: str, extract_path: str = None) -> Optional[Dict[st
         state['groups'] = [json.loads(row[0]) for row in cursor.fetchall()]
 
         # Load drawings
-        cursor.execute("SELECT data FROM drawings")
-        state['drawings'] = [json.loads(row[0]) for row in cursor.fetchall()]
-
-        conn.close()
+        try:
+            cursor.execute("SELECT data FROM drawings")
+            state['drawings'] = [json.loads(row[0]) for row in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            # Table may not exist in older .luma files
+            state['drawings'] = []
 
         logger.info(f"Imported canvas from: {db_path}")
         return state
@@ -179,6 +182,9 @@ def import_from_luma(db_path: str, extract_path: str = None) -> Optional[Dict[st
     except Exception as e:
         logger.error(f"Failed to import canvas: {e}")
         return None
+    finally:
+        if conn:
+            conn.close()
 
 
 def _create_tables(cursor):

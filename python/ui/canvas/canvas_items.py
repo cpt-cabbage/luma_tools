@@ -1943,10 +1943,10 @@ class VideoNode(QGraphicsItem):
 
         self.update()
 
-    def _on_thumbnail_error(self, error):
+    def _on_thumbnail_error(self, error_msg, traceback_str=""):
         """Handle thumbnail extraction error."""
         self._thumbnail_loading = False
-        logger.warning(f"Video thumbnail extraction failed for {self.filename}: {error}")
+        logger.warning(f"Video thumbnail extraction failed for {self.filename}: {error_msg}")
 
     # -------------------------------------------------------------------------
     # Rendering

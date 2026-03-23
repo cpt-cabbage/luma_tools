@@ -281,15 +281,17 @@ class PipelineEventBus(QObject):
             error_message: Error message if failed
         """
         output_paths = []
+        job_found = False
         with self._jobs_lock:
             if job_id in self._active_jobs:
+                job_found = True
                 job = self._active_jobs[job_id]
                 job.status = "completed" if success else "failed"
                 job.progress = 100 if success else job.progress
                 output_paths = list(job.output_paths)
 
         # Emit signals outside lock to avoid deadlock
-        if output_paths or job_id in self._active_jobs:
+        if job_found:
             if success:
                 self.job_completed.emit(job_id, output_paths)
                 logger.info(f"Job {job_id} completed: {len(output_paths)} outputs")

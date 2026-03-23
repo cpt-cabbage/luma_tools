@@ -124,3 +124,18 @@ def format_error(operation_name, error, variable=None, include_traceback=False):
         msg = f"{msg}\n{tb}"
 
     return msg
+
+
+class CancellationError(Exception):
+    """Raised when an operation is cancelled by the user."""
+    pass
+
+
+def check_cancelled(cancel_event):
+    """Check if operation was cancelled and raise CancellationError if so.
+
+    Args:
+        cancel_event: threading.Event or None. If set, raises CancellationError.
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        raise CancellationError("Operation cancelled by user")

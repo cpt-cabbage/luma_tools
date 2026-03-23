@@ -1489,6 +1489,13 @@ def main():
             except Exception as e:
                 logging.debug(f"WebEngine cleanup: {e}")
 
+            # Clean up TeeWriters here since os._exit() skips atexit handlers
+            try:
+                from core.logging_utils import cleanup_tee_writers
+                cleanup_tee_writers()
+            except Exception as e:
+                logging.debug(f"TeeWriter cleanup: {e}")
+
         app.aboutToQuit.connect(_cleanup_web_engines)
 
         # Run the application

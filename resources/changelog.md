@@ -1,5 +1,59 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.5
+- Fix Publish path resolving to publishes instead of source renders
+
+## Version 0.6.5.4
+- Fix product name detection
+
+## Version 0.6.5.3
+- Add Ability to find renders based on Ayon Publish
+
+## Version 0.6.5.2
+- Improve Ayon product selection for publishing
+- Add product selection dropdown for publishing
+
+## Version 0.6.5
+Optimize startup with lazy tab loading and precompiled UI
+
+Startup Performance:
+- Defer tab initialize() to first activation instead of
+  startup (BaseTab._ensure_initialized with loading overlay)
+- Lazy-import tab modules via TAB_REGISTRY instead of
+  importing all at package level
+- Load precompiled .ui Python files (pyside6-uic) in
+  BaseTab.load_ui(), falling back to QUiLoader if missing
+- Add startup timing instrumentation to _load_tabs and
+  main window creation
+- Deploy script now precompiles .ui files and cleans stale
+  _compiled/ dir before regenerating
+
+Canvas Tab:
+- Stop sync timers when tab deactivated, restart on
+  activation to avoid background file I/O on hidden tab
+
+Gallery:
+- Disconnect favorites signals before widget deletion to
+  prevent callbacks on zombie widgets
+- Block signals and processEvents() during bulk widget
+  cleanup to avoid stale references
+- Defer favorites_manager setup to after all stacks are
+  created (avoids redundant _apply_stack_colors during init)
+
+AYON Publishing:
+- Add farm parameter to create_ayon_metadata() (default True)
+- LocalPublishStrategy now passes farm=False for immediate
+  file integration instead of deferring to farm job
+
+Pass Builder:
+- Show per-frame progress in spinner with percentage
+- Consolidate dual status updates into single spinner call
+
+Bug Fixes:
+- Fix check_server_health(port) missing keyword argument
+- Add close confirmation dialog when tasks are still running
+- Add has_active_workers() to BaseTab for task tracking
+
 ## Version 0.6.4.5
 - Fix pass builder local publishing
 

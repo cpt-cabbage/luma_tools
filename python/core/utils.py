@@ -274,7 +274,13 @@ def get_folder_size(folder):
         ByteSize: Formatted size object
     """
     folder_path = Path(folder)
-    return ByteSize(sum(file.stat().st_size for file in folder_path.rglob('*')))
+    total = 0
+    for f in folder_path.rglob('*'):
+        try:
+            total += f.stat().st_size
+        except (PermissionError, FileNotFoundError, OSError):
+            pass
+    return ByteSize(total)
 
 
 class ByteSize(int):

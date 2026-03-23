@@ -5,14 +5,14 @@ Handles MP4 generation from EXR sequences.
 """
 
 import os
-
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QTimer
+import logging
+import threading
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
 from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
-import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MP4MakerTab(RenderScanMixin, BaseTab):
@@ -24,6 +24,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
     _render_list_widget = "MP4RendersList"
     _render_path_widget = "MP4RenderPath"
     _version_widget = "MP4CurrentVer"
+    _version_label_widget = "mp4VersionLabel"
     _action_button = "MP4Generate"
     _source_button = "MP4SourceButton"
     _custom_path_label = "MP4CustomPathLabel"
@@ -58,6 +59,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         # Source manager from mixin
         self._init_source_manager()
+
+        # Publish source widgets (product/version combos)
+        self._init_publish_widgets(self.ui.MP4CurrentVer)
 
         # Quality option manager (indexed options) - MP4-specific
         self._quality_manager = IndexedOptionButtonManager(
@@ -102,7 +106,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.app_state.mp4_startframe = render_seq.start()
         self.app_state.mp4_endframe = render_seq.end()
 
-        logging.info(f"MP4 Maker: Selected render from '{subdir}' - frames {self.app_state.mp4_startframe} to {self.app_state.mp4_endframe}")
+        logger.info(f"MP4 Maker: Selected render from '{subdir}' - frames {self.app_state.mp4_startframe} to {self.app_state.mp4_endframe}")
 
         # Automatically set output path to user's Videos folder
         framename = render_seq.frame(render_seq.start())
@@ -159,8 +163,16 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 self.pulse_button(self.ui.MP4Generate)
 
     def _on_generate_clicked(self):
-        """Generate MP4 from selected render - runs on background thread."""
-        from ui_components import Worker, StatusColors
+        """Generate MP4 from selected render, or cancel if already generating."""
+        from ui_components import StatusColors
+
+        # If already generating, cancel the operation
+        if getattr(self, '_is_generating', False):
+            self._cancel_event.set()
+            self.ui.MP4Generate.setEnabled(False)
+            self.show_status("Cancelling MP4 generation...", "warning")
+            return
+
         from services.mp4_maker import generate_mp4
 
         # Show status bar progress (no overlay so user can still interact)
@@ -181,10 +193,11 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             return
 
         # Get render info
-        self.animator.update_status_animated(
-            "MP4: Analyzing render sequence...",
-            StatusColors.INFO
-        )
+        if self.animator:
+            self.animator.update_status_animated(
+                "MP4: Analyzing render sequence...",
+                StatusColors.INFO
+            )
 
         subdir, render_seq = selected
         framename = render_seq.frame(self.app_state.mp4_startframe)
@@ -201,30 +214,49 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             )
             return
 
-        # Format: name.####.exr
-        input_pattern = os.path.join(base_dir, f"{parts[0]}.%04d.exr")
+        # Format: name.####.ext — derive padding and extension from actual filename
+        ext = parts[-1] if len(parts) >= 3 else "exr"
+        actual_padding = len(parts[1]) if len(parts) >= 3 else 4
+        input_pattern = os.path.join(base_dir, f"{parts[0]}.%0{actual_padding}d.{ext}")
 
         # Get settings
-        self.animator.update_status_animated(
-            "MP4: Configuring conversion settings...",
-            StatusColors.INFO
-        )
+        if self.animator:
+            self.animator.update_status_animated(
+                "MP4: Configuring conversion settings...",
+                StatusColors.INFO
+            )
 
         quality_index = self._quality_index
         burn_in_timecode = self.ui.MP4BurnInTimecode.isChecked()
 
+        # Set up cancellation
+        self._cancel_event = threading.Event()
+        self._is_generating = True
+        cancel_event = self._cancel_event
+
+        # Switch button to Cancel mode
+        self.ui.MP4Generate.setText("Cancel")
+
         def on_progress(progress, message):
             """Update UI with MP4 generation progress."""
-            self.animator.update_status_animated(
-                f"MP4: {message} ({progress}%)",
-                StatusColors.INFO
-            )
+            if self.animator:
+                self.animator.update_status_animated(
+                    f"MP4: {message} ({progress}%)",
+                    StatusColors.INFO
+                )
 
         want_gallery = self.ui.MP4AddToGallery.isChecked()
         want_publish = self.ui.MP4PublishToAyon.isChecked() and self.ui.MP4PublishToAyon.isEnabled()
 
+        def _reset_button():
+            """Reset button to Generate state."""
+            self._is_generating = False
+            self.ui.MP4Generate.setText("Generate MP4")
+            self.ui.MP4Generate.setEnabled(True)
+
         def on_result(success):
             """Called when MP4 generation completes."""
+            _reset_button()
             if success:
                 if want_gallery:
                     self.update_status_with_spinner(
@@ -255,14 +287,25 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 )
 
         def on_error(error_msg, traceback_str):
-            """Called when MP4 generation fails."""
+            """Called when MP4 generation fails or is cancelled."""
+            _reset_button()
+
+            if cancel_event.is_set():
+                self.update_status_with_spinner(
+                    "MP4: Generation cancelled",
+                    StatusColors.WARNING,
+                    start=False
+                )
+                self.show_status("MP4 generation cancelled", "warning")
+                return
+
             self.update_status_with_spinner(
                 f"MP4 generation failed: {error_msg}",
                 StatusColors.ERROR,
                 start=False
             )
-            logging.error(f"MP4 generation error: {error_msg}")
-            logging.debug(traceback_str)
+            logger.error(f"MP4 generation error: {error_msg}")
+            logger.debug(traceback_str)
 
         # Use BaseTab helper for worker management
         self.start_worker(
@@ -274,6 +317,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             worker_kwargs={
                 "quality_index": quality_index,
                 "burn_in_timecode": burn_in_timecode,
+                "cancel_event": cancel_event,
             },
             on_result=on_result,
             on_error=on_error,
@@ -343,7 +387,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                         start=True
                     )
                 else:
-                    logging.warning(f"Gallery copy failed: {path_or_error}")
+                    logger.warning(f"Gallery copy failed: {path_or_error}")
                     self.update_status_with_spinner(
                         "Gallery copy failed. Publishing to AYON...",
                         StatusColors.INFO,
@@ -367,7 +411,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         def on_gallery_error(error_msg, traceback_str):
             """Handle gallery copy error."""
-            logging.error(f"Gallery copy error: {error_msg}")
+            logger.error(f"Gallery copy error: {error_msg}")
             if publish_after:
                 # Still attempt publish even if gallery copy errored
                 self.update_status_with_spinner(
@@ -439,11 +483,13 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 StatusColors.ERROR,
                 start=False
             )
-            logging.error(f"AYON publish error: {error_msg}")
-            logging.debug(traceback_str)
+            logger.error(f"AYON publish error: {error_msg}")
+            logger.debug(traceback_str)
 
         def on_publish_progress(progress, message):
             """Update UI with publish progress."""
+            if not self.animator:
+                return
             self.animator.update_status_animated(
                 f"AYON: {message} ({progress}%)",
                 StatusColors.INFO
@@ -493,9 +539,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
         task = app_state.task or "compositing"
 
-        logging.info(f"[MP4 AYON Publish] File: {mp4_path}")
-        logging.info(f"[MP4 AYON Publish] Product: {product_name}, Task: {task}")
-        logging.info(f"[MP4 AYON Publish] Folder: {folder_path}, Farm: {use_farm}")
+        logger.info(f"[MP4 AYON Publish] File: {mp4_path}")
+        logger.info(f"[MP4 AYON Publish] Product: {product_name}, Task: {task}")
+        logger.info(f"[MP4 AYON Publish] Folder: {folder_path}, Farm: {use_farm}")
 
         if progress_callback:
             progress_callback(20, "Creating AYON metadata...")
@@ -519,7 +565,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         # Write metadata file next to the MP4
         mp4_dir = os.path.dirname(mp4_path)
-        metadata_filename = f"ayon_mp4_{product_name}.json"
+        from ayon.service import build_ayon_metadata_filename
+        metadata_filename = build_ayon_metadata_filename(product_name, prefix="mp4")
         metadata_path = os.path.join(mp4_dir, metadata_filename)
         metadata_path = write_metadata_file(metadata, metadata_path)
 

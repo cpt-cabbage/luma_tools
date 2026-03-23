@@ -210,6 +210,42 @@
          </widget>
         </item>
         <item>
+         <spacer name="buildOptionsSpacer1">
+          <property name="orientation">
+           <enum>Qt::Vertical</enum>
+          </property>
+          <property name="sizeType">
+           <enum>QSizePolicy::Fixed</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>20</width>
+            <height>16</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QLabel" name="publishToLabel">
+          <property name="text">
+           <string>Publish To:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="PublishProductCombo">
+          <property name="editable">
+           <bool>true</bool>
+          </property>
+          <property name="toolTip">
+           <string>Select an existing AYON product or type a new name</string>
+          </property>
+          <property name="placeholderText">
+           <string>Select or type product name</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="verticalSpacer">
           <property name="orientation">
            <enum>Qt::Vertical</enum>

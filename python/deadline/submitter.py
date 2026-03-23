@@ -18,6 +18,7 @@ from core.config import (
     DEADLINE_GROUP_COMPFYUI,
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
+    DEADLINE_JOB_NAME_PREFIX,
 )
 from core.settings_manager import get_setting, safe_get_setting
 from core.utils import ensure_directory, save_json
@@ -164,7 +165,7 @@ def submit_comfyui_to_deadline(
 
     job_info_path = os.path.join(job_data_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine
-Name=LUMA TOOLS - {render_name}
+Name={DEADLINE_JOB_NAME_PREFIX}{render_name}
 Department={DEADLINE_DEPARTMENT}
 BatchName={batch_name}
 Pool={pool}

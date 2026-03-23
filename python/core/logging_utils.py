@@ -164,22 +164,25 @@ class TeeStream:
         self.original = original_stream
         self.log_func = log_func
         self.buffer = ""
+        self._lock = threading.RLock()
 
     def write(self, text):
-        if self.original:
-            self.original.write(text)
-        self.buffer += text
-        while '\n' in self.buffer:
-            line, self.buffer = self.buffer.split('\n', 1)
-            if line.strip():
-                self.log_func(line)
+        with self._lock:
+            if self.original:
+                self.original.write(text)
+            self.buffer += text
+            while '\n' in self.buffer:
+                line, self.buffer = self.buffer.split('\n', 1)
+                if line.strip():
+                    self.log_func(line)
 
     def flush(self):
-        if self.original:
-            self.original.flush()
-        if self.buffer.strip():
-            self.log_func(self.buffer)
-            self.buffer = ""
+        with self._lock:
+            if self.original:
+                self.original.flush()
+            if self.buffer.strip():
+                self.log_func(self.buffer)
+                self.buffer = ""
 
 
 class TeeWriter:

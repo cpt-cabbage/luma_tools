@@ -24,7 +24,7 @@ def run_deadline_command(deadline_command: List[str], log_prefix: str = "") -> T
         Tuple of (success: bool, output: str, error_message: str)
     """
     try:
-        result = run_command(deadline_command)
+        result = run_command(deadline_command, timeout=60)
         result_output = result.stdout.strip()
 
         prefix = f"{log_prefix} " if log_prefix else ""

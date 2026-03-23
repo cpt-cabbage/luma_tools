@@ -113,7 +113,7 @@ def find_renders(render_path):
         list: List of fileseq.FileSequence objects for found sequences
     """
     from core.utils import scan_exr_sequences
-    denoised_path = os.path.join(render_path, "denoised")
+    denoised_path = os.path.join(render_path, DENOISED_SUBDIRECTORY)
     return scan_exr_sequences(denoised_path)
 
 
@@ -295,7 +295,7 @@ def get_task_directory(shot_path, task=None):
     """
     task_name = task or DEFAULT_TASK
     task_dir = truncate_at_suffix(shot_path, "work")
-    task_dir = task_dir + "\\" + task_name
+    task_dir = os.path.join(task_dir, task_name)
     return task_dir
 
 
@@ -332,5 +332,5 @@ def get_comp_directory(shot_path):
         str: Path to compositing directory
     """
     comp_dir = truncate_at_suffix(shot_path, "work")
-    comp_dir = comp_dir + "\\Compositing"
+    comp_dir = os.path.join(comp_dir, "Compositing")
     return comp_dir

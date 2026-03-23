@@ -6,14 +6,17 @@ Handles render scanning, pass detection, and pass building functionality.
 
 import os
 import logging
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import Qt, QThreadPool
+import threading
+from PySide6 import QtWidgets
 
 from .base_tab import BaseTab, TabConfig
+from .mixins.publish_source_mixin import PublishSourceMixin
+
+logger = logging.getLogger(__name__)
 
 
 
-class PassBuilderTab(BaseTab):
+class PassBuilderTab(PublishSourceMixin, BaseTab):
     """Tab for building render passes."""
 
     TAB_CONFIG = TabConfig(ui_file="pass_builder.ui", tab_name="Pass Builder", tab_id="passbuilder")
@@ -26,10 +29,17 @@ class PassBuilderTab(BaseTab):
         self.ui.CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
         # Build type button connected in initialize() via manager
 
+    # Widget names used by PublishSourceMixin for render list population
+    _render_list_widget = "RendersList"
+    _render_path_widget = "RenderPath"
+    _action_button = "BuildPasses"
+    _renders_attr = "renders"
+
     def initialize(self):
         """Initialize pass builder tab."""
         from ui_components import InlineSpinner
         from option_button import OptionButtonManager
+        from core.import_utils import safe_import
 
         self.ui.BuildPasses.setEnabled(False)
         self._initial_scan_done = False
@@ -47,94 +57,266 @@ class PassBuilderTab(BaseTab):
             parent_window=self.main_window
         )
 
-        # Run initial scan if we have shot context
-        if self.app_state.has_shot_context():
+        # Source selection (File vs Publish) - only show if AYON is available
+        ayon_service, _ = safe_import("ayon.service")
+        ayon_available = getattr(ayon_service, 'AYON_AVAILABLE', False) if ayon_service else False
+        if ayon_available and self.app_state.has_ayon_context():
+            self._pb_source_button = QtWidgets.QPushButton("Source: File")
+            self._pb_source_button.setMinimumSize(140, 28)
+            self._pb_source_button.setToolTip("Click to choose render source (filesystem or AYON publish)")
+
+            # Insert source button into the version layout
+            version_layout = self._find_layout_containing(self.ui.CurrentVer)
+            if version_layout:
+                version_layout.insertWidget(0, self._pb_source_button)
+
+            self._pb_source_manager = OptionButtonManager(
+                button=self._pb_source_button,
+                options=[("File", "file"), ("Publish", "publish")],
+                initial_value="publish",
+                on_changed=self._on_pb_source_changed,
+                label_prefix="Source: ",
+                parent_window=self.main_window
+            )
+
+            # Publish source widgets (product/version combos)
+            self._init_publish_widgets(self.ui.CurrentVer)
+
+            # Make product combo dropdown wide enough to show full names
+            from PySide6.QtWidgets import QComboBox
+            self.ui.PublishProductCombo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToContents
+            )
+            self.ui.PublishProductCombo.setMinimumWidth(200)
+
+            # Start in publish mode - hide file widgets, show publish widgets
+            self._on_pb_source_changed("publish")
+
+        # Run initial scan if we have shot context (only for file mode)
+        if self.app_state.has_shot_context() and not hasattr(self, '_pb_source_manager'):
             self._run_initial_scan()
 
     def _run_initial_scan(self):
-        """Find render directory and populate render path on startup."""
-        from services.file_operations import get_task_directory, fast_scandir, find_renders, find_hip_files
-        from core.config import RENDERS_SUBPATH
-        from core.utils import truncate_at_suffix, get_trailing_number
+        """Find render directory and populate render path on startup (async)."""
+        from services.file_operations import get_task_directory
 
         task = self.app_state.task
         task_dir = get_task_directory(self.app_state.shotpath, task)
         self.app_state.lookdev_dir = task_dir
-        logging.info(f"Pass Builder: Task Dir: {task_dir}")
+        logger.info(f"Pass Builder: Task Dir: {task_dir}")
 
         if not os.path.isdir(task_dir):
-            logging.warning(f"Pass Builder: Task directory not found: {task_dir}")
+            logger.warning(f"Pass Builder: Task directory not found: {task_dir}")
             return
 
-        # Find render directory
-        try:
-            dirs = fast_scandir(task_dir)
-        except Exception as e:
-            logging.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
-            return
+        def _scan_worker(task_dir, task, shotpath):
+            """Background worker for initial render scan."""
+            from services.file_operations import fast_scandir, find_renders, find_hip_files
+            from core.config import RENDERS_SUBPATH
+            from core.utils import truncate_at_suffix, get_trailing_number
 
-        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-        if not render_folders:
-            logging.warning(f"Pass Builder: No render directory found in {task_dir}")
-            return
+            try:
+                dirs = fast_scandir(task_dir)
+            except Exception as e:
+                logger.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
+                return None
 
-        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-        logging.info(f"Pass Builder: Render directory: {render_directory}")
+            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+            if not render_folders:
+                logger.warning(f"Pass Builder: No render directory found in {task_dir}")
+                return None
 
-        # Find HIP files to match render versions
-        hip_files = find_hip_files(task_dir, task)
-        hip_file = ""
-        if hip_files:
-            hip_files = sorted(hip_files)
-            hip_file = hip_files[0].rsplit("_", 1)[0]
+            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
 
-        # Find render versions
-        try:
-            render_dirs = sorted(next(os.walk(render_directory))[1])
-        except StopIteration:
-            return
+            hip_files = find_hip_files(task_dir, task)
+            hip_file = ""
+            if hip_files:
+                hip_files = sorted(hip_files)
+                hip_file = hip_files[0].rsplit("_", 1)[0]
 
-        # Filter by HIP file name if available
-        if hip_file:
-            matching = [d for d in render_dirs if hip_file in d]
-            if matching:
-                render_dirs = matching
+            try:
+                render_dirs = sorted(next(os.walk(render_directory))[1])
+            except StopIteration:
+                return None
 
-        if not render_dirs:
-            return
+            if hip_file:
+                matching = [d for d in render_dirs if hip_file in d]
+                if matching:
+                    render_dirs = matching
 
-        # Find latest version with actual renders (denoised EXRs)
-        latest_render = None
-        for render_version in reversed(render_dirs):
-            version_path = os.path.join(render_directory, render_version)
-            test_renders = find_renders(version_path)
-            if len(test_renders) > 0:
-                latest_render = render_version
-                break
+            if not render_dirs:
+                return None
 
-        if not latest_render:
-            # Fall back to latest directory even if empty
-            latest_render = render_dirs[-1]
+            latest_render = None
+            for render_version in reversed(render_dirs):
+                version_path = os.path.join(render_directory, render_version)
+                test_renders = find_renders(version_path)
+                if len(test_renders) > 0:
+                    latest_render = render_version
+                    break
 
-        # Populate state and UI
-        self.app_state.latestrender = latest_render
-        self.app_state.searchpath = os.path.join(render_directory, latest_render)
-        self.app_state.working_dir = truncate_at_suffix(render_directory, task)
+            if not latest_render:
+                latest_render = render_dirs[-1]
 
-        self.ui.RenderPath.setText(self.app_state.searchpath)
-        latest_ver = int(get_trailing_number(latest_render))
-        self.ui.CurrentVer.setRange(0, latest_ver)
-        self.ui.CurrentVer.setValue(latest_ver)
+            return {
+                'latest_render': latest_render,
+                'render_directory': render_directory,
+                'task': task,
+            }
 
-        logging.info(f"Pass Builder: Found render path: {self.app_state.searchpath}")
-        self._initial_scan_done = True
+        def _on_scan_result(result):
+            if not result:
+                return
+            from core.utils import truncate_at_suffix, get_trailing_number
+
+            self.app_state.latestrender = result['latest_render']
+            self.app_state.searchpath = os.path.join(result['render_directory'], result['latest_render'])
+            self.app_state.working_dir = truncate_at_suffix(result['render_directory'], result['task'])
+
+            self.ui.RenderPath.setText(self.app_state.searchpath)
+            ver_str = get_trailing_number(result['latest_render'])
+            if ver_str is not None:
+                latest_ver = int(ver_str)
+                self.ui.CurrentVer.setRange(0, latest_ver)
+                self.ui.CurrentVer.setValue(latest_ver)
+
+            logger.info(f"Pass Builder: Found render path: {self.app_state.searchpath}")
+            self._initial_scan_done = True
+
+        self.start_worker(
+            _scan_worker, task_dir, task, self.app_state.shotpath,
+            on_result=_on_scan_result
+        )
 
     @property
     def _build_type(self):
         return self._build_type_manager.value
 
+    def _on_pb_source_changed(self, value):
+        """Handle source toggle between File and Publish modes."""
+        is_publish = value == "publish"
+
+        # Toggle filesystem widgets
+        self.ui.CurrentVer.setVisible(not is_publish)
+        self.ui.label_3.setVisible(not is_publish)  # "Version:" label
+        self.ui.ScanRenders.setVisible(not is_publish)
+
+        # Toggle publish widgets
+        self._show_publish_widgets(is_publish)
+
+        if is_publish:
+            self._on_publish_source_selected()
+
+    def _resolve_and_scan_publish(self, version_id):
+        """Override: resolve AYON publish back to the WORK directory with denoised renders.
+
+        Instead of using the publish path directly (which contains the already-combined EXR),
+        we extract the render name from the published files and search the work directory
+        for the matching render folder with denoised renders.
+        """
+        from ayon.service import resolve_version_render_path
+        from services.file_operations import get_task_directory, fast_scandir, find_renders
+        from core.config import RENDERS_SUBPATH
+        from core.utils import truncate_at_suffix, extract_render_name
+
+        # Step 1: Get published file info from AYON
+        result = resolve_version_render_path(self.app_state.jobname, version_id)
+        if not result:
+            raise ValueError("Could not resolve filesystem path from AYON version")
+
+        pub_files = result.get("files", [])
+        pub_dir = result["path"]
+
+        # Step 2: Extract render name from published filename
+        # e.g., "Cha_sh0080_Main_v001.1001.exr" → "Cha_sh0080_Main_v001"
+        render_name = None
+        if pub_files:
+            first_file = os.path.basename(pub_files[0])
+            render_name = extract_render_name(first_file)
+            logger.info(f"Pass Builder: Extracted render name from publish: {render_name}")
+
+        # Step 3: Find the work directory render path
+        task = self.app_state.task
+        task_dir = get_task_directory(self.app_state.shotpath, task)
+
+        if not os.path.isdir(task_dir):
+            raise FileNotFoundError(f"Task directory not found: {task_dir}")
+
+        dirs = fast_scandir(task_dir)
+        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+        if not render_folders:
+            raise FileNotFoundError(f"No render directory found in {task_dir}")
+
+        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+
+        # Step 4: Find matching render version folder
+        try:
+            render_dirs = sorted(next(os.walk(render_directory))[1])
+        except StopIteration:
+            raise FileNotFoundError(f"No render versions in {render_directory}")
+
+        # Match by render name if available, otherwise use latest
+        matched_dir = None
+        if render_name:
+            for d in render_dirs:
+                if render_name in d:
+                    matched_dir = d
+                    break
+
+        if not matched_dir:
+            # Fallback: find latest with denoised renders
+            for d in reversed(render_dirs):
+                version_path = os.path.join(render_directory, d)
+                if find_renders(version_path):
+                    matched_dir = d
+                    break
+
+        if not matched_dir:
+            raise FileNotFoundError(
+                f"Could not find render folder matching '{render_name}' in {render_directory}"
+            )
+
+        work_render_path = os.path.join(render_directory, matched_dir)
+        logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
+
+        # Step 5: Set working_dir for pass file cache
+        self.app_state.working_dir = truncate_at_suffix(render_directory, task)
+
+        # Step 6: Scan for denoised renders
+        renders = find_renders(work_render_path)
+        if not renders:
+            raise FileNotFoundError(f"No denoised renders found in {work_render_path}")
+
+        return work_render_path, renders
+
+    def _on_publish_scan_complete(self, result):
+        """Override: Pass Builder stores plain FileSequence objects, not tuples."""
+        staging_dir, sequences = result
+
+        self.ui.RenderPath.setText(staging_dir)
+        self.app_state.searchpath = staging_dir
+
+        # Store as plain FileSequence list (Pass Builder convention)
+        self.app_state.renders = sequences
+        self.ui.BuildPasses.setEnabled(False)
+
+        self.ui.RendersList.clear()
+        if sequences:
+            for render_seq in sequences:
+                self.ui.RendersList.addItem(os.path.basename(str(render_seq)))
+            self.ui.RendersList.setEnabled(True)
+            self.show_status(f"Found {len(sequences)} render(s)", "info")
+        else:
+            self.ui.RendersList.addItem("No Renders Found")
+            self.ui.RendersList.setEnabled(False)
+            self.show_status("No renders at resolved path", "warning")
+
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
+        # If in publish mode, don't do filesystem scan
+        if hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
+            return
+
         from core.utils import update_path_version
         from services.file_operations import find_renders
 
@@ -167,7 +349,6 @@ class PassBuilderTab(BaseTab):
 
     def _on_render_selection_changed(self):
         """Update passes when selected render changes."""
-        import os
         from services.render_service import get_pass_file_path
 
         sel0 = self.ui.RendersList.currentRow()
@@ -181,16 +362,23 @@ class PassBuilderTab(BaseTab):
         filename = os.path.basename(framename)
         from core.utils import extract_render_name
         self.app_state.currentrender = extract_render_name(filename)
-        denoisedpath = os.path.dirname(framename) + f"\\{filename}"
+        denoisedpath = framename
 
         # Find passes (shows inline spinner automatically)
-        self.app_state.passesfile = get_pass_file_path(
-            self.app_state.working_dir, self.app_state.currentrender
-        )
+        if self.app_state.working_dir:
+            self.app_state.passesfile = get_pass_file_path(
+                self.app_state.working_dir, self.app_state.currentrender
+            )
         self._detect_passes(denoisedpath)
+
+        # Populate AYON product selector
+        self._populate_product_combo()
 
     def _detect_passes(self, render_file):
         """Detect passes in render file with spinner animation - runs on background thread."""
+        if not hasattr(self, 'passes_spinner'):
+            return  # Tab not yet initialized
+
         from services.render_service import detect_passes
 
         self.ui.Passes.clear()
@@ -228,11 +416,10 @@ class PassBuilderTab(BaseTab):
             else:
                 self.ui.BuildPasses.setEnabled(False)
 
-        def on_error(error_tuple):
+        def on_error(error_msg, traceback_str=""):
             """Called when pass detection fails."""
-            error_msg, _ = self.unpack_worker_error(error_tuple)
             self.passes_spinner.stop()
-            logging.error(f"Pass detection error: {error_msg}")
+            logger.error(f"Pass detection error: {error_msg}")
             self.ui.BuildPasses.setEnabled(False)
             self.show_status(f"Pass detection failed: {error_msg}", "error")
 
@@ -245,7 +432,7 @@ class PassBuilderTab(BaseTab):
         from core.user_preferences import get_all_default_passes
 
         selectedpasses = load_pass_config(passes_file)
-        logging.info(f"Loaded passes from file: {selectedpasses}")
+        logger.info(f"Loaded passes from file: {selectedpasses}")
 
         # Select items in UI
         for i in range(self.ui.Passes.count()):
@@ -253,12 +440,76 @@ class PassBuilderTab(BaseTab):
             if item.text() in selectedpasses:
                 item.setSelected(True)
 
+    def _populate_product_combo(self):
+        """Populate the publish product combo box with existing AYON products.
+
+        Queries AYON for all products in the current shot folder, then
+        auto-selects the product that matches the selected render.
+        """
+        combo = self.ui.PublishProductCombo
+
+        # In publish mode, use the selected AYON product name directly
+        if hasattr(self, '_publish_product_combo') and hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
+            product_name = self._publish_product_combo.currentText()
+            if product_name:
+                combo.setCurrentText(product_name)
+                return
+
+        render_name = self.app_state.currentrender
+
+        # Set the auto-derived name as current text immediately
+        combo.setCurrentText(render_name)
+
+        # Query AYON for existing products in background
+        if not self.app_state.has_shot_context():
+            return
+
+        def _query_products():
+            from ayon.service import (
+                AYON_AVAILABLE, convert_to_ayon_folder_path,
+                get_folder_product_names, find_product_for_render,
+            )
+            if not AYON_AVAILABLE:
+                return [], render_name
+
+            project_name = self.app_state.jobname
+            folder_path = convert_to_ayon_folder_path(
+                self.app_state.shotpath, project_name
+            )
+            product_names = get_folder_product_names(project_name, folder_path)
+            matched = find_product_for_render(
+                project_name, folder_path, render_name
+            )
+            return product_names, matched
+
+        def _on_products(result):
+            product_names, matched_name = result
+            combo.clear()
+            for name in product_names:
+                combo.addItem(name)
+            # Select the matched product from the dropdown
+            idx = combo.findText(matched_name)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setCurrentText(matched_name)
+
+        self.start_worker(_query_products, on_result=_on_products)
+
     def _on_build_passes_clicked(self):
-        """Build passes for the selected render."""
-        from services.pass_builder import pass_builder
+        """Build passes for the selected render, or cancel if already building."""
+        from ui_components import StatusColors
+
+        # If already building, cancel the operation
+        if getattr(self, '_is_building', False):
+            self._cancel_event.set()
+            self.ui.BuildPasses.setEnabled(False)
+            self.show_status("Cancelling build...", "warning")
+            return
+
+        from services.pass_builder import create_pass_builder
         from services.render_service import save_pass_config
         from core.user_preferences import get_all_default_passes
-        from ui_components import Worker, StatusColors
 
         # Get selected passes from the list
         selected_items = self.ui.Passes.selectedItems()
@@ -273,15 +524,24 @@ class PassBuilderTab(BaseTab):
         final_channels = {k: channels[k] for k in all_pass_names if k in channels}
 
         # Save pass config as channel dict (consumed by AYON plugin's build_oiio_command)
-        save_pass_config(self.app_state.passesfile, final_channels)
-        logging.info(f"Building with passes: {list(final_channels.keys())}")
+        if self.app_state.passesfile:
+            save_pass_config(self.app_state.passesfile, final_channels)
+        logger.info(f"Building with passes: {list(final_channels.keys())}")
 
         # Get build location (Local or Farm)
         build_type = self._build_type
         use_farm = build_type == "farm"
 
+        # Get selected product name (empty string means auto-derive from render name)
+        selected_product = self.ui.PublishProductCombo.currentText().strip() or None
+
         # Get display name for status
         build_type_display = "Local" if build_type == "local" else "Farm"
+
+        # Set up cancellation
+        self._cancel_event = threading.Event()
+        self._is_building = True
+        cancel_event = self._cancel_event
 
         # Show status bar progress (no overlay so user can still interact)
         self.update_status_with_spinner(
@@ -289,12 +549,12 @@ class PassBuilderTab(BaseTab):
             StatusColors.INFO
         )
 
-        # Disable button to prevent double-clicks
-        self.ui.BuildPasses.setEnabled(False)
+        # Switch button to Cancel mode
+        self.ui.BuildPasses.setText("Cancel")
 
         def do_build(progress_callback=None):
             """Run the pass building operation."""
-            return pass_builder.build_passes(
+            return create_pass_builder().build_passes(
                 passes_file=self.app_state.passesfile,
                 renders_path=self.app_state.searchpath,
                 start_frame=self.app_state.startframe,
@@ -307,7 +567,9 @@ class PassBuilderTab(BaseTab):
                 user=self.app_state.user,
                 output_subdirectory=self.app_state.output_subdirectory,
                 do_publish=True,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                product_name=selected_product,
+                cancel_event=cancel_event,
             )
 
         def on_progress(percent, message):
@@ -317,10 +579,16 @@ class PassBuilderTab(BaseTab):
                 StatusColors.INFO
             )
 
+        def _reset_button():
+            """Reset button to Build state."""
+            self._is_building = False
+            self.ui.BuildPasses.setText("Build")
+            self.ui.BuildPasses.setEnabled(True)
+
         def on_result(result):
             """Called when build completes."""
-            logging.info(f"Build completed: {result}")
-            self.ui.BuildPasses.setEnabled(True)
+            logger.info(f"Build completed: {result}")
+            _reset_button()
             self.update_status_with_spinner(
                 "Pass Builder: Build completed successfully",
                 StatusColors.SUCCESS,
@@ -328,11 +596,20 @@ class PassBuilderTab(BaseTab):
             )
             self.show_status("Build completed successfully", "success")
 
-        def on_error(error_tuple):
-            """Called when build fails."""
-            error_msg, _ = self.unpack_worker_error(error_tuple)
-            logging.error(f"Build failed: {error_msg}")
-            self.ui.BuildPasses.setEnabled(True)
+        def on_error(error_msg, traceback_str=""):
+            """Called when build fails or is cancelled."""
+            _reset_button()
+
+            if cancel_event.is_set():
+                self.update_status_with_spinner(
+                    "Pass Builder: Build cancelled",
+                    StatusColors.WARNING,
+                    start=False
+                )
+                self.show_status("Build cancelled", "warning")
+                return
+
+            logger.error(f"Build failed: {error_msg}")
             self.update_status_with_spinner(
                 f"Pass Builder failed: {error_msg}",
                 StatusColors.ERROR,

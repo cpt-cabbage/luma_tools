@@ -235,8 +235,8 @@ def signal_server_restart(port: int, health_port: int = None, lowvram: bool = Fa
             body = json.dumps({"lowvram": True}).encode('utf-8')
             headers['Content-Type'] = 'application/json'
         req = urllib.request.Request(url, data=body, method='POST', headers=headers)
-        response = urllib.request.urlopen(req, timeout=10)
-        result = json.loads(response.read().decode('utf-8'))
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
         logger.info(f"Restart response: {result.get('message', 'OK')}")
         return True
     except urllib.error.HTTPError as e:
@@ -270,11 +270,11 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
     logger.info("Waiting for server to become ready...")
     while time.time() - start_time < timeout:
         try:
-            req = urllib.request.urlopen(url, timeout=5)
-            if req.status == 200:
-                elapsed = int(time.time() - start_time)
-                logger.info(f"Server restart complete after {elapsed}s")
-                return True
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    elapsed = int(time.time() - start_time)
+                    logger.info(f"Server restart complete after {elapsed}s")
+                    return True
         except (urllib.error.URLError, OSError):
             pass  # Server not ready yet
         time.sleep(2)
@@ -372,9 +372,9 @@ def main():
     # Some ComfyUI nodes ignore the server's configured input directory
     # and always look in the hardcoded default location
     images_to_upload = get_workflow_images(base_workflow)
-    logger.info(f"DEBUG: Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
-    logger.info(f"DEBUG: args.comfyui_path = {args.comfyui_path}")
-    logger.info(f"DEBUG: args.input_directory = {args.input_directory}")
+    logger.debug(f"Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
+    logger.debug(f"args.comfyui_path = {args.comfyui_path}")
+    logger.debug(f"args.input_directory = {args.input_directory}")
     if images_to_upload:
         comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
         if os.path.isdir(comfyui_input_dir):

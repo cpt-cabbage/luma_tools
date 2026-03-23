@@ -5,10 +5,12 @@ Handles user-specific settings like window state, tab order, default passes,
 version tracking, and workflow execution time tracking.
 """
 
+import threading
 from typing import Dict, Any, List, Optional
 from .settings_manager import (
     get_setting, set_setting,
-    load_user_settings, save_user_settings
+    load_user_settings, save_user_settings,
+    _settings_cache_lock
 )
 from .config import DEFAULT_PASSES
 
@@ -70,9 +72,10 @@ def get_all_default_passes() -> List[str]:
 
 def set_default_passes(passes_list: List[str]):
     """Set the user's default passes."""
-    settings = load_user_settings()
-    settings["default_passes"] = passes_list
-    save_user_settings(settings)
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        settings["default_passes"] = passes_list
+        save_user_settings(settings)
 
 
 # ============================================================================
@@ -131,14 +134,15 @@ def record_workflow_execution_time(workflow_preset: str, per_frame_seconds: floa
 
     Stores the last 10 execution times to calculate median estimates.
     """
-    settings = load_user_settings()
-    times = settings.get("comfyui_workflow_times", {})
-    if workflow_preset not in times:
-        times[workflow_preset] = []
-    times[workflow_preset].append(per_frame_seconds)
-    times[workflow_preset] = times[workflow_preset][-10:]  # Keep last 10
-    settings["comfyui_workflow_times"] = times
-    save_user_settings(settings)
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        times = settings.get("comfyui_workflow_times", {})
+        if workflow_preset not in times:
+            times[workflow_preset] = []
+        times[workflow_preset].append(per_frame_seconds)
+        times[workflow_preset] = times[workflow_preset][-10:]  # Keep last 10
+        settings["comfyui_workflow_times"] = times
+        save_user_settings(settings)
 
 
 def get_workflow_estimated_time_per_frame(workflow_preset: str) -> Optional[float]:
@@ -168,11 +172,12 @@ def set_last_browse_directory(context: str, directory: str):
     """Save the last browsed directory for a specific context."""
     if not directory:
         return
-    settings = load_user_settings()
-    if "last_browse_directories" not in settings:
-        settings["last_browse_directories"] = {}
-    settings["last_browse_directories"][context] = directory
-    save_user_settings(settings)
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        if "last_browse_directories" not in settings:
+            settings["last_browse_directories"] = {}
+        settings["last_browse_directories"][context] = directory
+        save_user_settings(settings)
 
 
 # ============================================================================
@@ -199,13 +204,14 @@ def save_comfyui_running_jobs(job_state: Optional[Dict[str, Any]]):
                 - generation_count: int
                 - start_time: float
     """
-    settings = load_user_settings()
-    if job_state is None:
-        # Clear running jobs
-        settings.pop("comfyui_running_jobs", None)
-    else:
-        settings["comfyui_running_jobs"] = job_state
-    save_user_settings(settings)
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        if job_state is None:
+            # Clear running jobs
+            settings.pop("comfyui_running_jobs", None)
+        else:
+            settings["comfyui_running_jobs"] = job_state
+        save_user_settings(settings)
 
 
 def get_comfyui_running_jobs() -> Optional[Dict[str, Any]]:
@@ -285,19 +291,20 @@ def save_gallery_settings(
         sort_mode: Sort mode - "date_desc", "date_asc", "name_asc", "name_desc", "workflow"
         type_filters: Dict of file type -> bool for filtering by type
     """
-    settings = load_user_settings()
-    if "gallery_settings" not in settings:
-        settings["gallery_settings"] = {}
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        if "gallery_settings" not in settings:
+            settings["gallery_settings"] = {}
 
-    if show_inputs is not None:
-        settings["gallery_settings"]["show_inputs"] = show_inputs
-    if view_mode is not None:
-        settings["gallery_settings"]["view_mode"] = view_mode
-    if collapsed_sections is not None:
-        settings["gallery_settings"]["collapsed_sections"] = collapsed_sections
-    if sort_mode is not None:
-        settings["gallery_settings"]["sort_mode"] = sort_mode
-    if type_filters is not None:
-        settings["gallery_settings"]["type_filters"] = type_filters
+        if show_inputs is not None:
+            settings["gallery_settings"]["show_inputs"] = show_inputs
+        if view_mode is not None:
+            settings["gallery_settings"]["view_mode"] = view_mode
+        if collapsed_sections is not None:
+            settings["gallery_settings"]["collapsed_sections"] = collapsed_sections
+        if sort_mode is not None:
+            settings["gallery_settings"]["sort_mode"] = sort_mode
+        if type_filters is not None:
+            settings["gallery_settings"]["type_filters"] = type_filters
 
-    save_user_settings(settings)
+        save_user_settings(settings)

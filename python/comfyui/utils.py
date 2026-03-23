@@ -277,6 +277,9 @@ def wait_for_completion_websocket(
     client_id: str = None,
     workflow_dict: dict = None
 ) -> bool:
+    # Reset queue check failure counter for each new prompt
+    global _queue_check_failures
+    _queue_check_failures = 0
     """Wait for workflow execution using WebSocket for progress + HTTP polling for completion.
 
     Args:
@@ -864,7 +867,7 @@ def upload_image_to_server(image_path: str, server_url: str = None, port: int = 
 
     body = (
         f'--{boundary}\r\n'
-        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'
+        f'Content-Disposition: form-data; name="image"; filename="{filename.replace(chr(34), "_")}"\r\n'
         f'Content-Type: {mime_type}\r\n\r\n'
     ).encode('utf-8')
     body += file_data

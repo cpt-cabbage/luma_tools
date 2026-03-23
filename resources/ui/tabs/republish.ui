@@ -282,17 +282,20 @@
         <item>
          <widget class="QLabel" name="republishProductNameLabel">
           <property name="text">
-           <string>Product Name:</string>
+           <string>Publish To:</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QLineEdit" name="RePublishProductName">
-          <property name="readOnly">
+         <widget class="QComboBox" name="RePublishProductName">
+          <property name="editable">
            <bool>true</bool>
           </property>
+          <property name="toolTip">
+           <string>Select an existing AYON product or type a new name</string>
+          </property>
           <property name="placeholderText">
-           <string>Auto-generated from render name</string>
+           <string>Select or type product name</string>
           </property>
          </widget>
         </item>

@@ -12,7 +12,7 @@ from typing import Optional, Callable
 logger = logging.getLogger(__name__)
 
 # Import our modular services
-from core.config import OIIO_PATH, FRAME_PADDING
+from core.config import OIIO_PATH, FRAME_PADDING, DENOISED_SUBDIRECTORY
 from core.utils import normalize_path
 from core.progress_utils import report_progress
 from services.render_service import build_oiio_command, execute_oiio_local, load_pass_config
@@ -51,7 +51,9 @@ class PassBuilder:
         user: str,
         output_subdirectory: str,
         do_publish: bool = True,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        product_name: Optional[str] = None,
+        cancel_event=None,
     ) -> None:
         """
         Build passes for rendering with optional farm submission and AYON publishing.
@@ -71,6 +73,8 @@ class PassBuilder:
             do_publish: Whether to publish to AYON
             progress_callback: Optional callback function(progress, message) for progress updates
         """
+        from core.error_handling import check_cancelled
+
         # Report initial progress
         if progress_callback:
             progress_callback(30, "Validating configuration...")
@@ -106,7 +110,7 @@ class PassBuilder:
         # Build paths
         denoised = os.path.join(
             renders_path,
-            "denoised",
+            DENOISED_SUBDIRECTORY,
             f"{os.path.basename(self.render_name)}.<STARTFRAME%{FRAME_PADDING}>.exr"
         )
         renders = os.path.join(
@@ -118,6 +122,9 @@ class PassBuilder:
             output_subdirectory,
             f"{os.path.basename(self.render_name)}.<STARTFRAME%{FRAME_PADDING}>.exr"
         )
+
+        # Check cancellation before building command
+        check_cancelled(cancel_event)
 
         # Build OIIO command
         report_progress(progress_callback, 40, "Building OIIO command...")
@@ -156,7 +163,8 @@ class PassBuilder:
                     output_subdirectory,
                     render_file,
                     self.build_job_id,
-                    progress_callback
+                    progress_callback,
+                    product_name=product_name,
                 )
 
                 if success and progress_callback:
@@ -171,13 +179,17 @@ class PassBuilder:
                 oiio_args,
                 start_frame,
                 end_frame,
-                progress_callback
+                progress_callback,
+                cancel_event=cancel_event
             )
 
             if not success:
                 raise RuntimeError("OIIO local execution failed")
 
             report_progress(progress_callback, 90, "OIIO execution complete!")
+
+            # Check cancellation before publishing
+            check_cancelled(cancel_event)
 
             # Handle publishing locally using strategy pattern
             if do_publish and AYON_AVAILABLE:
@@ -195,7 +207,8 @@ class PassBuilder:
                     output_subdirectory,
                     render_file,
                     None,  # No build_job_id for local
-                    progress_callback
+                    progress_callback,
+                    product_name=product_name,
                 )
 
                 if success and progress_callback:
@@ -205,7 +218,12 @@ class PassBuilder:
                     progress_callback(95, "Local execution complete!")
 
 
-# Create singleton instance for backward compatibility
+# Factory function instead of singleton — avoids shared mutable state between concurrent workers
+def create_pass_builder():
+    """Create a new PassBuilder instance for each build operation."""
+    return PassBuilder()
+
+# Keep backward-compatible reference (use create_pass_builder() for thread safety)
 pass_builder = PassBuilder()
 
 

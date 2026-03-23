@@ -140,11 +140,9 @@ class CleanerTab(BaseTab):
         if hasattr(self, "_scan_on_complete") and self._scan_on_complete:
             self._scan_on_complete()
 
-    def _on_scan_error(self, error_tuple):
+    def _on_scan_error(self, error_msg, traceback_str=""):
         """Handle scan error."""
         from ui_components import StatusColors
-
-        error_msg, traceback_str = self.unpack_worker_error(error_tuple)
 
         self.update_status_with_spinner(
             f"Shot Cleaner: Scan error - {error_msg}", StatusColors.ERROR, start=False
@@ -303,11 +301,9 @@ class CleanerTab(BaseTab):
             start=False,
         )
 
-    def _on_gallery_scan_error(self, error_tuple):
+    def _on_gallery_scan_error(self, error_msg, traceback_str=""):
         """Handle gallery scan error."""
         from ui_components import StatusColors
-
-        error_msg, _ = self.unpack_worker_error(error_tuple)
         self.ui.GalleryScanButton.setEnabled(True)
         self.ui.galleryProgressBar.setValue(0)
         self.update_status_with_spinner(
@@ -533,11 +529,9 @@ class CleanerTab(BaseTab):
         # Rescan to update stats
         self._on_gallery_scan()
 
-    def _on_gallery_cleanup_error(self, error_tuple):
+    def _on_gallery_cleanup_error(self, error_msg, traceback_str=""):
         """Handle gallery cleanup error."""
         from ui_components import StatusColors
-
-        error_msg, _ = self.unpack_worker_error(error_tuple)
         self.ui.GalleryCleanupButton.setEnabled(True)
         self.ui.galleryProgressBar.setValue(0)
         self.update_status_with_spinner(

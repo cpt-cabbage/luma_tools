@@ -10,7 +10,7 @@ import re
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 
-from core.config import DEADLINE_PATH
+from core.config import DEADLINE_PATH, DEADLINE_JOB_NAME_PREFIX
 from core.subprocess_utils import run_command
 from deadline.parser import (
     parse_job_info,
@@ -94,8 +94,8 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
             log_content = None
             if output_dir and job_name:
                 # Extract the output prefix from the job name (e.g., "LUMA TOOLS - luma_tools_job_xyz" -> "luma_tools_job_xyz")
-                if job_name.startswith("LUMA TOOLS - "):
-                    output_prefix = job_name[len("LUMA TOOLS - "):]
+                if job_name.startswith(DEADLINE_JOB_NAME_PREFIX):
+                    output_prefix = job_name[len(DEADLINE_JOB_NAME_PREFIX):]
                     log_content = get_runner_log_from_network(output_dir, output_prefix)
 
             # Fall back to Deadline task log if network log not available
@@ -397,8 +397,8 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
                 job_name = job_info.get("Name", "")
                 job_user = job_info.get("User", "")
 
-                # Only include luma_tools ComfyUI jobs (job names end with "_luma_tools" or equal "luma_tools_job")
-                if job_name.endswith("_luma_tools") or job_name == "luma_tools_job":
+                # Only include luma_tools jobs (matches submission name format)
+                if job_name.startswith(DEADLINE_JOB_NAME_PREFIX):
                     jobs_info.append({
                         "id": pending_id,
                         "priority": priority,
@@ -541,7 +541,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
 
                 # Check if this is a luma_tools job
                 is_luma_job = (
-                    job_name.startswith("LUMA TOOLS - ") or
+                    job_name.startswith(DEADLINE_JOB_NAME_PREFIX) or
                     job_name.endswith("_luma_tools") or
                     job_name == "luma_tools_job"
                 )

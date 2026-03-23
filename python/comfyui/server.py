@@ -377,11 +377,11 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
             return False
 
         try:
-            req = urllib.request.urlopen(url, timeout=5)
-            if req.status == 200:
-                elapsed = int(time.time() - start_time)
-                logger.info(f"ComfyUI ready after {elapsed}s")
-                return True
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    elapsed = int(time.time() - start_time)
+                    logger.info(f"ComfyUI ready after {elapsed}s")
+                    return True
         except urllib.error.URLError:
             elapsed = int(time.time() - start_time)
             status = f"Waiting... ({elapsed}s)"

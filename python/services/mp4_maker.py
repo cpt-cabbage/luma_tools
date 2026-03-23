@@ -17,7 +17,8 @@ from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
-from core.config import FFMPEG_PATH, OIIO_PATH, get_ocio_config
+from core.config import FFMPEG_PATH, OIIO_PATH, AYON_COLORSPACE, get_ocio_config
+from core.error_handling import CancellationError
 from core.utils import normalize_path, ensure_directory
 from core.subprocess_utils import run_command, start_process
 from core.progress_utils import report_progress
@@ -46,7 +47,8 @@ def convert_exr_to_png_with_oiio(
     output_dir: str,
     start_frame: int,
     end_frame: int,
-    progress_callback: Optional[Callable[[int, str], None]] = None
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    cancel_event=None,
 ) -> bool:
     """
     Convert EXR sequence to PNG using OIIO with proper ACES/OCIO color management.
@@ -57,10 +59,12 @@ def convert_exr_to_png_with_oiio(
         start_frame: Start frame number
         end_frame: End frame number
         progress_callback: Optional progress callback
+        cancel_event: Optional threading.Event to signal cancellation
 
     Returns:
         True if successful, False otherwise
     """
+    from core.error_handling import check_cancelled
     if not OIIO_PATH or not os.path.exists(OIIO_PATH):
         logger.error("OIIO not available for EXR conversion")
         return False
@@ -73,6 +77,9 @@ def convert_exr_to_png_with_oiio(
 
         # Convert per frame using OIIO
         for i, frame in enumerate(range(start_frame, end_frame + 1)):
+            # Check for cancellation before each frame
+            check_cancelled(cancel_event)
+
             # Build input/output paths
             input_file = input_pattern.replace("%04d", f"{frame:04d}")
             output_file = os.path.join(output_dir, f"frame_{frame:04d}.png")
@@ -89,7 +96,7 @@ def convert_exr_to_png_with_oiio(
                 # Use OCIO to convert from ACEScg (linear) to sRGB (display)
                 # This properly handles ACES color management
                 oiio_cmd.extend([
-                    "--colorconvert", "ACES - ACEScg", "sRGB",
+                    "--colorconvert", AYON_COLORSPACE, "sRGB",
                 ])
                 logger.info(f"Using OCIO config: {ocio_config}")
             else:
@@ -124,7 +131,7 @@ def convert_exr_to_png_with_oiio(
 
             # Update progress (10-50% range for conversion)
             if progress_callback:
-                progress = 10 + int((i / frame_count) * 40)
+                progress = 10 + int(((i + 1) / frame_count) * 40)
                 progress_callback(
                     min(progress, 50),
                     f"Converting frame {frame} to PNG ({i+1}/{frame_count})..."
@@ -132,6 +139,8 @@ def convert_exr_to_png_with_oiio(
 
         return True
 
+    except CancellationError:
+        raise
     except Exception as e:
         logger.error(f"Error in OIIO conversion: {e}")
         return False
@@ -144,7 +153,8 @@ def generate_mp4(
     end_frame: int,
     quality_index: int = 1,
     burn_in_timecode: bool = False,
-    progress_callback: Optional[Callable[[int, str], None]] = None
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    cancel_event=None,
 ) -> bool:
     """
     Generate MP4 from image sequence.
@@ -159,10 +169,12 @@ def generate_mp4(
         quality_index: Quality setting (0=high, 1=medium, 2=low)
         burn_in_timecode: Whether to burn in frame numbers
         progress_callback: Optional callback function(progress, message) for progress updates
+        cancel_event: Optional threading.Event to signal cancellation
 
     Returns:
         True if successful, False otherwise
     """
+    from core.error_handling import check_cancelled
     temp_dir = None
 
     try:
@@ -203,7 +215,8 @@ def generate_mp4(
                 temp_dir,
                 start_frame,
                 end_frame,
-                progress_callback
+                progress_callback,
+                cancel_event=cancel_event,
             )
 
             if not success:
@@ -216,11 +229,14 @@ def generate_mp4(
             logger.info(f"Detected {file_ext} format - will use directly with FFmpeg")
             ffmpeg_input_pattern = input_sequence_path
 
+        # Check cancellation before FFmpeg step
+        check_cancelled(cancel_event)
+
         # Step 2: Encode sequence to MP4 using FFmpeg
         report_progress(progress_callback, 55, "Encoding MP4 with FFmpeg...")
 
         # Build FFmpeg command
-        frame_count = end_frame - start_frame + 1
+        frame_count = max(end_frame - start_frame + 1, 1)
 
         cmd = [
             FFMPEG_PATH,
@@ -274,6 +290,14 @@ def generate_mp4(
         # Monitor progress and capture stderr
         stderr_lines = []
         for line in process.stderr:
+            # Check for cancellation - kill FFmpeg if cancelled
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("Cancellation requested, killing FFmpeg process")
+                process.kill()
+                process.wait(timeout=10)
+                from core.error_handling import CancellationError
+                raise CancellationError("MP4 generation cancelled by user")
+
             stderr_lines.append(line)
             logger.info(line.strip())
 
@@ -329,6 +353,8 @@ def generate_mp4(
         logger.info(f"MP4 successfully generated: {output_mp4_path}")
         return True
 
+    except CancellationError:
+        raise
     except Exception as e:
         logger.error(f"Error generating MP4: {e}")
         if progress_callback:
@@ -476,10 +502,6 @@ def copy_mp4_to_gallery(
         logger.error(f"Error copying MP4 to gallery: {e}")
         return (False, str(e))
 
-
-logger.info("=" * 60)
-logger.info("LOADING: mp4_maker.py")
-logger.info("=" * 60)
 
 if __name__ == "__main__":
     logger.info("MP4 Maker module loaded successfully")

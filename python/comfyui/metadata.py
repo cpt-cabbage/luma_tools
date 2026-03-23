@@ -107,10 +107,10 @@ def cleanup_job_temp_files(output_dir: str) -> int:
                             shutil.rmtree(entry.path)
                             deleted_count += 1
                             logger.debug(f"Cleaned up old job data: {entry.name}")
-                    except Exception:
-                        pass
-        except OSError:
-            pass
+                    except Exception as e:
+                        logger.debug(f"Could not clean up {entry.name}: {e}")
+        except OSError as e:
+            logger.debug(f"Could not scan for old job data: {e}")
 
         # Remove _job_data/ parent if empty
         try:
@@ -136,8 +136,8 @@ def cleanup_job_temp_files(output_dir: str) -> int:
             try:
                 os.remove(file_path)
                 deleted_count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not remove temp file {file_path}: {e}")
 
     return deleted_count
 
@@ -163,8 +163,8 @@ def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
                     'size': stat.st_size,
                     'extension': ext,
                 })
-            except Exception:
-                pass  # Skip files that can't be accessed
+            except Exception as e:
+                logger.debug(f"Skipping inaccessible file {path}: {e}")
 
     output_files.sort(key=lambda x: x['created'], reverse=True)
     return output_files

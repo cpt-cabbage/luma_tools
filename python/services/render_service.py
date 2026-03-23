@@ -171,9 +171,9 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
             render_passes += ","
         render_passes += "normal.x,normal.y,normal.z"
 
-    # Build OIIO Command
+    # Build OIIO Command (quote paths to handle spaces in directory names)
     oiio_args = ""
-    oiio_args += denoised_path
+    oiio_args += f'"{denoised_path}"'
     oiio_args += " --ch "
     # Defaults - Beauty and Alpha
     oiio_args += "Beauty.R,Beauty.G,Beauty.B,a.Z,"
@@ -181,7 +181,7 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
 
     # Add Passes from Raw Render
     if render_passes:
-        oiio_args += f" {renders_path}"
+        oiio_args += f' "{renders_path}"'
         oiio_args += ' --ch '
         oiio_args += render_passes
 
@@ -195,12 +195,12 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
         oiio_args += ","
     oiio_args += render_passes
     oiio_args += ' -o '
-    oiio_args += output_path
+    oiio_args += f'"{output_path}"'
 
     return oiio_args
 
 
-def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, progress_callback=None):
+def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, progress_callback=None, cancel_event=None):
     """
     Execute OIIO command locally, frame by frame (like the farm does).
 
@@ -210,10 +210,12 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         start_frame: Starting frame number (if None, executes command once)
         end_frame: Ending frame number (if None, executes command once)
         progress_callback: Optional callback function(progress, message) for progress updates
+        cancel_event: Optional threading.Event to signal cancellation
 
     Returns:
         bool: True if successful, False otherwise
     """
+    from core.error_handling import check_cancelled
     # If no frame range specified, execute once
     if start_frame is None or end_frame is None:
         local_command = [oiio_path] + shlex.split(oiio_args, posix=False)
@@ -236,6 +238,11 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
             logger.error(f'OIIO Local Process Failed: {e}')
             return False
 
+    # Validate frame range
+    if start_frame > end_frame:
+        logger.error(f"Invalid frame range: {start_frame} > {end_frame}")
+        return False
+
     # Execute frame by frame (like farm does)
     total_frames = end_frame - start_frame + 1
     failed_frames = []
@@ -244,6 +251,9 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     logger.info(f"OIIO args template: {oiio_args}")
 
     for frame_num in range(start_frame, end_frame + 1):
+        # Check for cancellation before each frame
+        check_cancelled(cancel_event)
+
         # Calculate progress (50-90% range for OIIO execution)
         frame_index = frame_num - start_frame
         progress = 50 + int((frame_index / total_frames) * 40)

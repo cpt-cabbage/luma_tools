@@ -177,11 +177,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
 }
 
-# Default constants (for external reference)
-DEFAULT_COMFYUI_TIMEOUT = 3600
-DEFAULT_SERVER_NOT_FOUND_WAIT = 300
-DEFAULT_RESTRICTED_TABS = ["comfyui", "gallery"]  # Settings is admin-only, not in restricted list
-
 TAB_RESTRICTION_MAP = {
     "comfyui": "RestrictComfyUI",
     "gallery": "RestrictGallery",
@@ -567,7 +562,7 @@ def is_user_in_role(username: str, role: str) -> bool:
     """
     if not username:
         return False
-    return username.lower() in [u.lower() for u in get_users_with_role(role)]
+    return any(u.lower() == username.lower() for u in get_users_with_role(role))
 
 
 def add_user_to_role(username: str, role: str):

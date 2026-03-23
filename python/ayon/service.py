@@ -31,7 +31,10 @@ try:
         get_project,
         get_folder_by_path,
         get_product_by_name,
+        get_products,
         get_last_version_by_product_id,
+        get_versions,
+        get_representations,
     )
     from ayon_core.pipeline import Anatomy
     from ayon_core.pipeline.version_start import get_versioning_start
@@ -71,11 +74,7 @@ def _resolve_production_bundle():
 # Deadline imports
 try:
     from ayon_deadline import DeadlineAddon
-    from ayon_deadline.lib import (
-        JobType,
-        DeadlineJobInfo,
-        get_instance_job_envs,
-    )
+    from ayon_deadline.lib import DeadlineJobInfo
     DEADLINE_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Deadline imports failed: {e}")
@@ -95,6 +94,52 @@ TASK_TYPE_MAP = {
     "animation": "Animation",
     "anim": "Animation",
 }
+
+
+def _resolve_project_code(project_name, project_code=None):
+    """Resolve AYON project code from project name. Reusable helper."""
+    if project_code is not None:
+        return project_code
+    if AYON_AVAILABLE:
+        try:
+            from ayon_api import get_project
+            project_entity = get_project(project_name)
+            return project_entity.get("code", project_name)
+        except Exception as e:
+            logger.warning(f"Could not resolve project code for '{project_name}': {e}")
+    return project_name
+
+
+def _get_resolved_bundle():
+    """Get the AYON bundle name, resolving 'production' to actual bundle name."""
+    bundle = get_ayon_bundle()
+    if bundle == "production":
+        resolved = _resolve_production_bundle()
+        if resolved:
+            return resolved
+    return bundle
+
+
+def _resolve_task_type(task, task_type=None):
+    """Resolve AYON task type from task name using TASK_TYPE_MAP."""
+    if task_type:
+        return task_type
+    return TASK_TYPE_MAP.get(task.lower(), task.capitalize()) if task else "Compositing"
+
+
+def build_ayon_metadata_filename(product_name, prefix=""):
+    """Build a standardized AYON metadata filename.
+
+    Args:
+        product_name: The product/render name
+        prefix: Optional prefix (e.g., "mp4", "comfyui")
+
+    Returns:
+        Filename like "ayon_mp4_productName.json" or "ayon_productName.json"
+    """
+    if prefix:
+        return f"ayon_{prefix}_{product_name}.json"
+    return f"ayon_{product_name}.json"
 
 
 def submit_oiio_to_deadline(
@@ -173,7 +218,7 @@ def convert_to_ayon_folder_path(filesystem_path, project_name):
         -> /shots/ChiefChickenTest/sh0010
     """
     # Normalize slashes
-    path = filesystem_path.replace("\\", "/")
+    path = normalize_path(filesystem_path)
 
     # Remove /work suffix if present
     if "/work" in path:
@@ -182,7 +227,11 @@ def convert_to_ayon_folder_path(filesystem_path, project_name):
     # Convert filesystem path to AYON hierarchy path
     if project_name in path:
         # Remove root and project name, keep only hierarchy
-        path = "/" + path.split(f"{project_name}/", 1)[1]
+        parts = path.split(f"{project_name}/", 1)
+        if len(parts) == 2:
+            path = "/" + parts[1]
+        else:
+            logger.warning(f"Project name '{project_name}' found in path but not followed by '/': {path}")
 
     return path
 
@@ -231,6 +280,318 @@ def get_next_version(project_name: str, folder_path: str, product_name: str) -> 
         return 1
 
 
+def get_folder_product_names(project_name: str, folder_path: str) -> list:
+    """
+    Get all product names for a given folder in AYON.
+
+    Args:
+        project_name: Name of the AYON project
+        folder_path: AYON folder path (e.g., /shots/seq01/sh0010)
+
+    Returns:
+        list[str]: Sorted list of product names in the folder
+    """
+    if not AYON_AVAILABLE:
+        logger.info("[get_folder_product_names] AYON not available")
+        return []
+
+    try:
+        folder = get_folder_by_path(project_name, folder_path)
+        if not folder:
+            logger.info(f"[get_folder_product_names] Folder not found: {folder_path}")
+            return []
+
+        products = get_products(
+            project_name,
+            folder_ids=[folder["id"]],
+            fields=["name"],
+        )
+        names = sorted(p["name"] for p in products)
+        logger.info(f"[get_folder_product_names] Found {len(names)} products in {folder_path}")
+        return names
+
+    except Exception as e:
+        logger.error(f"[get_folder_product_names] Error querying products: {e}")
+        return []
+
+
+def get_folder_render_products(project_name: str, folder_path: str) -> list:
+    """
+    Get render-type products with IDs for a folder.
+
+    Args:
+        project_name: Name of the AYON project
+        folder_path: AYON folder path (e.g., /shots/seq01/sh0010)
+
+    Returns:
+        list[dict]: Each dict has keys 'id', 'name', 'productType'.
+        Sorted by name. Empty list on error.
+    """
+    if not AYON_AVAILABLE:
+        logger.info("[get_folder_render_products] AYON not available")
+        return []
+
+    try:
+        folder = get_folder_by_path(project_name, folder_path)
+        if not folder:
+            logger.info(f"[get_folder_render_products] Folder not found: {folder_path}")
+            return []
+
+        products = list(get_products(
+            project_name,
+            folder_ids=[folder["id"]],
+            fields=["id", "name", "productType"],
+        ))
+        # Filter to render-type products only (exclude review — those are MP4/thumbnails)
+        render_products = [
+            p for p in products
+            if p.get("productType") in ("render", "image", "plate")
+        ]
+        render_products.sort(key=lambda p: p["name"])
+        logger.info(
+            f"[get_folder_render_products] Found {len(render_products)} render products "
+            f"(of {len(products)} total) in {folder_path}"
+        )
+        return render_products
+
+    except Exception as e:
+        logger.error(f"[get_folder_render_products] Error querying products: {e}")
+        return []
+
+
+def get_product_version_list(project_name: str, product_id: str) -> list:
+    """
+    Get all versions for a product, sorted latest-first.
+
+    Args:
+        project_name: Name of the AYON project
+        product_id: UUID of the product
+
+    Returns:
+        list[dict]: Each dict has keys 'id', 'version' (int).
+        Sorted by version descending. Empty list on error.
+    """
+    if not AYON_AVAILABLE:
+        return []
+
+    try:
+        versions = list(get_versions(
+            project_name,
+            product_ids=[product_id],
+            fields=["id", "version"],
+        ))
+        versions.sort(key=lambda v: v["version"], reverse=True)
+        logger.info(
+            f"[get_product_version_list] Found {len(versions)} versions for product {product_id}"
+        )
+        return versions
+
+    except Exception as e:
+        logger.error(f"[get_product_version_list] Error querying versions: {e}")
+        return []
+
+
+def resolve_version_render_path(project_name: str, version_id: str):
+    """
+    Resolve the filesystem path from an AYON version's EXR representation.
+
+    Looks for a representation named 'exr' in the given version and extracts
+    the path to the directory containing the published files.
+
+    Args:
+        project_name: Name of the AYON project
+        version_id: UUID of the version
+
+    Returns:
+        dict or None: {'path': str, 'files': list[str]} or None if not found.
+        'path' is the directory, 'files' is the list of filenames.
+    """
+    if not AYON_AVAILABLE:
+        return None
+
+    try:
+        reps = list(get_representations(
+            project_name,
+            version_ids=[version_id],
+        ))
+        if not reps:
+            logger.warning(f"[resolve_version_render_path] No representations found for version {version_id}")
+            return None
+
+        # Prefer 'exr' representation, then other image formats, skip thumbnails
+        target_rep = None
+        image_rep_names = ("exr", "png", "jpg", "jpeg", "tiff", "tif", "dpx")
+        for preferred in image_rep_names:
+            for rep in reps:
+                if rep.get("name") == preferred:
+                    target_rep = rep
+                    break
+            if target_rep:
+                break
+        if target_rep is None:
+            # Skip non-image representations (thumbnail, mp4, mov, etc.)
+            logger.warning(
+                f"[resolve_version_render_path] No image representation found for version {version_id}. "
+                f"Available: {[r.get('name') for r in reps]}"
+            )
+            return None
+
+        # Extract staging directory - check multiple possible locations
+        data = target_rep.get("data") or {}
+        attrib = target_rep.get("attrib") or {}
+
+        # Log available fields for debugging
+        logger.info(
+            f"[resolve_version_render_path] Rep '{target_rep.get('name')}': "
+            f"data keys={list(data.keys())}, attrib keys={list(attrib.keys())}, "
+            f"top-level keys={[k for k in target_rep.keys() if k not in ('data', 'attrib')]}"
+        )
+
+        resolved_path = None
+        source = None
+
+        # Priority 1: stagingDir in data (set by our publish code)
+        if data.get("stagingDir"):
+            resolved_path = data["stagingDir"]
+            source = "data.stagingDir"
+        # Priority 2: stagingDir at top level
+        elif target_rep.get("stagingDir"):
+            resolved_path = target_rep["stagingDir"]
+            source = "top-level stagingDir"
+        # Priority 3: attrib.path (AYON server stores published file path here)
+        elif attrib.get("path"):
+            resolved_path = attrib["path"]
+            source = "attrib.path"
+        # Priority 4: files list - reconstruct directory from first file path
+        elif target_rep.get("files"):
+            files = target_rep["files"]
+            if files:
+                first_file = files[0]
+                # files can be dict with 'path' key or plain string
+                if isinstance(first_file, dict):
+                    resolved_path = first_file.get("path", "")
+                else:
+                    resolved_path = str(first_file)
+                source = "files[0]"
+
+        if not resolved_path:
+            logger.warning(
+                f"[resolve_version_render_path] No path found in representation "
+                f"'{target_rep.get('name')}' for version {version_id}"
+            )
+            return None
+
+        # Normalize path separators
+        resolved_path = resolved_path.replace("/", os.sep).replace("\\", os.sep)
+
+        # If the resolved path points to a file (not a directory), use its parent
+        if os.path.splitext(resolved_path)[1]:
+            resolved_path = os.path.dirname(resolved_path)
+            source += " (extracted directory)"
+
+        # Extract file names from representation
+        rep_files = []
+        raw_files = target_rep.get("files") or []
+        for f in raw_files:
+            if isinstance(f, dict):
+                rep_files.append(f.get("path", ""))
+            else:
+                rep_files.append(str(f))
+
+        logger.info(f"[resolve_version_render_path] Resolved from {source}: {resolved_path} ({len(rep_files)} files)")
+        return {"path": resolved_path, "files": rep_files}
+
+    except Exception as e:
+        logger.error(f"[resolve_version_render_path] Error resolving path: {e}")
+        return None
+
+
+def find_product_for_render(project_name: str, folder_path: str, render_name: str, products: list = None) -> str:
+    """
+    Find the AYON product that matches a given render name.
+
+    AYON product names for renders follow the convention:
+        render{Task}{Variant}  (e.g., "renderLightingMain")
+    while render files on disk are named after the variant only
+    (e.g., "main.0001.exr").
+
+    Matching strategy (first match wins):
+    1. Exact match
+    2. Case-insensitive match
+    3. AYON render product ends with the render name (case-insensitive)
+       e.g., filename "main" -> product "renderLightingMain"
+    4. Render name starts with a product name
+       e.g., filename "renderMain_v2" -> product "renderMain"
+
+    Args:
+        project_name: Name of the AYON project
+        folder_path: AYON folder path
+        render_name: Derived render name from filename (e.g., "main")
+
+    Returns:
+        str: Matching product name, or the original render_name if no match found
+    """
+    if not AYON_AVAILABLE:
+        return render_name
+
+    try:
+        if products is None:
+            folder = get_folder_by_path(project_name, folder_path)
+            if not folder:
+                return render_name
+
+            products = list(get_products(
+                project_name,
+                folder_ids=[folder["id"]],
+                fields=["name", "productType"],
+            ))
+
+        if not products:
+            return render_name
+
+        product_names = [p["name"] for p in products]
+        render_products = [p["name"] for p in products if p.get("productType") == "render"]
+
+        # 1. Exact match
+        if render_name in product_names:
+            logger.info(f"[find_product_for_render] Exact match: {render_name}")
+            return render_name
+
+        # 2. Case-insensitive match
+        lower_map = {n.lower(): n for n in product_names}
+        if render_name.lower() in lower_map:
+            matched = lower_map[render_name.lower()]
+            logger.info(f"[find_product_for_render] Case-insensitive match: {render_name} -> {matched}")
+            return matched
+
+        # 3. AYON render product name ends with the render name (case-insensitive)
+        # This handles the common case: file "main" -> AYON product "renderLightingMain"
+        # Prefer render-type products; fall back to any product
+        for search_list, label in [(render_products, "render suffix"), (product_names, "suffix")]:
+            candidates = [n for n in search_list if n.lower().endswith(render_name.lower())]
+            if candidates:
+                # Prefer shortest match (most specific, e.g., "renderLightingMain" over
+                # "renderLightingMainExtra") — though typically there's only one
+                matched = min(candidates, key=len)
+                logger.info(f"[find_product_for_render] {label} match: {render_name} -> {matched}")
+                return matched
+
+        # 4. Render name starts with a product name (longest match wins)
+        # e.g., render "renderMain_v2" matches product "renderMain"
+        candidates = [n for n in product_names if render_name.lower().startswith(n.lower())]
+        if candidates:
+            matched = max(candidates, key=len)
+            logger.info(f"[find_product_for_render] Prefix match: {render_name} -> {matched}")
+            return matched
+
+        logger.info(f"[find_product_for_render] No match found for {render_name}")
+        return render_name
+
+    except Exception as e:
+        logger.error(f"[find_product_for_render] Error: {e}")
+        return render_name
+
+
 def create_ayon_metadata_single_file(
     project_name: str,
     file_path: str,
@@ -268,26 +629,13 @@ def create_ayon_metadata_single_file(
     logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
 
     # Normalize path
-    file_path = file_path.replace("\\", "/")
+    file_path = normalize_path(file_path)
     staging_dir = os.path.dirname(file_path)
     filename = os.path.basename(file_path)
     ext = os.path.splitext(filename)[1].lower().lstrip(".")
 
-    # Use defaults if not provided
-    if project_code is None:
-        if AYON_AVAILABLE:
-            try:
-                project_entity = get_project(project_name)
-                project_code = project_entity.get("code", project_name)
-            except Exception as e:
-                if logger:
-                    logger.warning(f"Could not get project code from AYON: {e}")
-                project_code = project_name
-        else:
-            project_code = project_name
-
-    if task_type is None:
-        task_type = TASK_TYPE_MAP.get(task.lower(), task.capitalize())
+    project_code = _resolve_project_code(project_name, project_code)
+    task_type = _resolve_task_type(task, task_type)
 
     # Determine families based on product type
     families = [product_type]
@@ -378,7 +726,8 @@ def create_ayon_metadata(
     render_file,
     project_code=None,
     task_type=None,
-    farm=True
+    farm=True,
+    product_name=None,
 ):
     """
     Create AYON metadata JSON for publishing.
@@ -404,19 +753,7 @@ def create_ayon_metadata(
     """
     logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
 
-    # Use defaults if not provided
-    if project_code is None:
-        # Try to get project code from AYON API
-        if AYON_AVAILABLE:
-            try:
-                project_entity = get_project(project_name)
-                project_code = project_entity.get("code", project_name)
-            except Exception as e:
-                if logger:
-                    logger.warning(f"Could not get project code from AYON: {e}")
-                project_code = project_name
-        else:
-            project_code = project_name
+    project_code = _resolve_project_code(project_name, project_code)
 
     if task_type is None:
         # Default to Compositing since this is for render compositing
@@ -429,7 +766,7 @@ def create_ayon_metadata(
 
     # Build staging directory
     staging_dir_path = os.path.join(renders_path, output_subdirectory)
-    staging_dir_path = staging_dir_path.replace("\\", "/")
+    staging_dir_path = normalize_path(staging_dir_path)
 
     # Create representations
     representations = [{
@@ -453,7 +790,8 @@ def create_ayon_metadata(
     }]
 
     # Get next version number
-    product_name = render_name.split('.')[0]
+    if not product_name:
+        product_name = render_name.split('.')[0]
     next_version = get_next_version(project_name, folder_path, product_name)
 
     # Create instance skeleton data
@@ -550,12 +888,15 @@ def write_metadata_file(metadata_dict, output_path):
         # If no directory in path, use current working directory
         output_path = os.path.join(os.getcwd(), output_path)
 
+    # Use module-level logger (local logger may be None when AYON unavailable)
+    _logger = logging.getLogger(__name__)
+
     # Write metadata
     if not save_json(output_path, metadata_dict):
-        logger.error(f"Failed to write metadata file: {output_path}")
+        _logger.error(f"Failed to write metadata file: {output_path}")
         return None
 
-    logger.info(f"Successfully wrote metadata to: {output_path}")
+    _logger.info(f"Successfully wrote metadata to: {output_path}")
 
     # Verify required fields
     root_keys = list(metadata_dict.keys())
@@ -563,9 +904,9 @@ def write_metadata_file(metadata_dict, output_path):
     missing_fields = [f for f in required_fields if f not in root_keys]
 
     if missing_fields:
-        logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
+        _logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
     else:
-        logger.info(f"All required fields present: {required_fields}")
+        _logger.info(f"All required fields present: {required_fields}")
 
     return output_path
 
@@ -598,11 +939,7 @@ def publish_to_ayon_local(
         logger.warning("AYON not available, skipping publish")
         return False
 
-    # Get bundle name — resolve via API if config returned the fallback
-    bundle = get_ayon_bundle()
-    if bundle == "production":
-        bundle = _resolve_production_bundle() or bundle
-
+    bundle = _get_resolved_bundle()
     logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console command
@@ -791,11 +1128,7 @@ def submit_ayon_publish_to_deadline(
         logger.error(f"Failed to initialize AYON/Deadline: {e}")
         return None
 
-    # Get bundle name — resolve via API if config returned the fallback
-    bundle = get_ayon_bundle()
-    if bundle == "production":
-        bundle = _resolve_production_bundle() or bundle
-
+    bundle = _get_resolved_bundle()
     logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console arguments
@@ -894,7 +1227,8 @@ class PublishStrategy(ABC):
         output_subdirectory: str,
         render_file: str,
         build_job_id: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        product_name: Optional[str] = None,
     ) -> bool:
         """
         Publish renders to AYON.
@@ -912,6 +1246,7 @@ class PublishStrategy(ABC):
             render_file: Render file name
             build_job_id: Optional build job ID for dependency
             progress_callback: Optional progress callback
+            product_name: Optional explicit product name (overrides render_name derivation)
 
         Returns:
             bool: True if publish successful, False otherwise
@@ -934,7 +1269,9 @@ class PublishStrategy(ABC):
 
     def _write_metadata(self, renders_path, output_subdirectory, render_file, render_name, metadata):
         """Write metadata file to disk."""
-        metadata_filename = f"ayon_{render_file}_{render_name.split('.')[0]}.json"
+        metadata_filename = build_ayon_metadata_filename(
+            f"{render_file}_{render_name.split('.')[0]}"
+        )
         metadata_path = os.path.join(renders_path, output_subdirectory, metadata_filename)
         metadata_path = normalize_path(metadata_path)
 
@@ -965,7 +1302,8 @@ class FarmPublishStrategy(PublishStrategy):
         output_subdirectory: str,
         render_file: str,
         build_job_id: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        product_name: Optional[str] = None,
     ) -> bool:
         """Publish to AYON via Deadline farm submission."""
         logger.info(f"Starting AYON farm publish setup for {render_name}")
@@ -976,7 +1314,7 @@ class FarmPublishStrategy(PublishStrategy):
 
         # Create metadata
         self._report_progress(progress_callback, 82, "Creating AYON metadata...")
-        task_type = TASK_TYPE_MAP.get(task.lower(), task.capitalize())
+        task_type = _resolve_task_type(task)
 
         metadata = create_ayon_metadata(
             project_name,
@@ -991,7 +1329,8 @@ class FarmPublishStrategy(PublishStrategy):
             working_dir,
             render_file,
             project_code=None,
-            task_type=task_type
+            task_type=task_type,
+            product_name=product_name,
         )
 
         # Write metadata file
@@ -1045,7 +1384,8 @@ class LocalPublishStrategy(PublishStrategy):
         output_subdirectory: str,
         render_file: str,
         build_job_id: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        product_name: Optional[str] = None,
     ) -> bool:
         """Publish to AYON locally (no Deadline submission)."""
         logger.info(f"Starting AYON local publish for {render_name}")
@@ -1056,7 +1396,7 @@ class LocalPublishStrategy(PublishStrategy):
 
         # Create metadata
         self._report_progress(progress_callback, 94, "Creating AYON metadata...")
-        task_type = TASK_TYPE_MAP.get(task.lower(), task.capitalize())
+        task_type = _resolve_task_type(task)
 
         metadata = create_ayon_metadata(
             project_name,
@@ -1072,7 +1412,8 @@ class LocalPublishStrategy(PublishStrategy):
             render_file,
             project_code=None,
             task_type=task_type,
-            farm=False  # Local publish — integrate files immediately
+            farm=False,  # Local publish — integrate files immediately
+            product_name=product_name,
         )
 
         # Write metadata file

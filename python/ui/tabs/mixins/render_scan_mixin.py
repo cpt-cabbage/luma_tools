@@ -2,10 +2,11 @@
 Render Scan Mixin for tabs that work with render sequences.
 
 Provides common functionality for:
-- Source selection via OptionButtonManager (for_comp, raw, custom)
+- Source selection via OptionButtonManager (for_comp, raw, custom, publish)
 - Version handling
 - Render scanning and list population
 - Custom path browsing
+- AYON publish-based render selection
 - Selection handling with frame range extraction
 
 Usage:
@@ -34,15 +35,17 @@ from typing import List, Tuple, Callable, Optional, Any
 logger = logging.getLogger(__name__)
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
+from .publish_source_mixin import PublishSourceMixin
 
 
-class RenderScanMixin:
+class RenderScanMixin(PublishSourceMixin):
     """Mixin providing render scanning functionality for tabs."""
 
     # Widget names - subclasses should override these
     _render_list_widget: str = "RendersList"
     _render_path_widget: str = "RenderPath"
     _version_widget: str = "CurrentVer"
+    _version_label_widget: str = ""  # Version label to hide in publish mode
     _action_button: str = "ActionButton"
     _source_button: str = "SourceButton"
     _custom_path_label: str = "CustomPathLabel"
@@ -58,14 +61,26 @@ class RenderScanMixin:
         Return source options as list of (label, value) tuples.
         Override in subclass to customize.
         """
-        return [
+        from core.import_utils import safe_import
+        ayon_service, _ = safe_import("ayon.service")
+
+        options = [
             ("For Comp", "for_comp"),
             ("Raw", "raw"),
             ("Custom", "custom"),
         ]
+        ayon_available = getattr(ayon_service, 'AYON_AVAILABLE', False) if ayon_service else False
+        if ayon_available and self.app_state.has_ayon_context():
+            options.append(("Publish", "publish"))
+        return options
 
     def _get_initial_source(self) -> str:
-        """Return the initial source value. Override for custom default."""
+        """Return the initial source value. Defaults to Publish when AYON available."""
+        from core.import_utils import safe_import
+        ayon_service, _ = safe_import("ayon.service")
+        ayon_available = getattr(ayon_service, 'AYON_AVAILABLE', False) if ayon_service else False
+        if ayon_available and self.app_state.has_ayon_context():
+            return "publish"
         return "for_comp"
 
     def _init_source_manager(self):
@@ -109,6 +124,7 @@ class RenderScanMixin:
         Default: toggle custom path visibility and trigger scan.
         """
         is_custom = self._source == "custom"
+        is_publish = self._source == "publish"
 
         # Show/hide custom path controls
         browse_button = self.get_widget(self._browse_custom_button)
@@ -119,8 +135,25 @@ class RenderScanMixin:
         if custom_label:
             custom_label.setVisible(is_custom)
 
-        # Trigger scan
-        self._on_scan_renders_clicked()
+        # Toggle version spinbox vs publish combos
+        version_widget = self.get_widget(self._version_widget)
+        if version_widget:
+            version_widget.setVisible(not is_publish)
+
+        # Hide version label in publish mode
+        if self._version_label_widget:
+            version_label = self.get_widget(self._version_label_widget)
+            if version_label:
+                version_label.setVisible(not is_publish)
+
+        # Toggle publish product/version combos
+        self._show_publish_widgets(is_publish)
+
+        # Trigger appropriate scan
+        if is_publish:
+            self._on_publish_source_selected()
+        else:
+            self._on_scan_renders_clicked()
 
     def _on_browse_custom_path(self):
         """Browse for custom directory containing render sequences."""
@@ -153,6 +186,9 @@ class RenderScanMixin:
         Default scan implementation using _scan_renders_base().
         Override if tab needs completely custom scanning logic.
         """
+        if self._source == "publish":
+            self._on_publish_source_selected()
+            return
         from core.utils import scan_exr_sequences
         self._scan_renders_base(scan_exr_sequences, self.tab_name)
 
@@ -265,6 +301,11 @@ class RenderScanMixin:
             return None
 
         return renders[sel_idx]
+
+    def _scan_publish_directory(self, staging_dir):
+        """Scan resolved AYON staging directory for EXR sequences."""
+        from core.utils import scan_exr_sequences
+        return scan_exr_sequences(staging_dir)
 
     def _get_selected_frame_range(self) -> Optional[Tuple[int, int]]:
         """

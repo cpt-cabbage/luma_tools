@@ -846,13 +846,20 @@ class AudioPlayerWidget(QWidget):
             result = subprocess.run(cmd, capture_output=True, timeout=30, creationflags=creationflags)
             if result.returncode != 0:
                 logger.warning(f"FFmpeg waveform extraction failed: {result.stderr.decode()}")
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
                 return None
 
             # Read PCM data
             with open(tmp_path, 'rb') as f:
                 pcm_data = f.read()
 
-            os.remove(tmp_path)
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
             if not pcm_data:
                 return None

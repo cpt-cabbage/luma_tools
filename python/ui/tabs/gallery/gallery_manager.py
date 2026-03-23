@@ -337,10 +337,11 @@ class GalleryManager(BaseGalleryManager):
                 item.widget().blockSignals(True)
                 item.widget().deleteLater()
 
-        # Let Qt process pending deletions before creating new widgets
-        # This prevents old zombie widgets from interfering with new ones
+        # Process only pending deferred deletions (not arbitrary events)
+        # Using processEvents() here risks re-entrant signal delivery during rebuild
         from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()
+        from PySide6.QtCore import QEvent
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
         # Reset caches
         self.tab._widget_cache = {}

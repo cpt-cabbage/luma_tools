@@ -177,7 +177,8 @@ def publish_comfyui_asset_to_ayon(
 
         # Write metadata file next to the source file
         logger.info("[AYON Publish] Writing metadata file...")
-        metadata_filename = f"ayon_comfyui_{full_product_name}.json"
+        from ayon.service import build_ayon_metadata_filename
+        metadata_filename = build_ayon_metadata_filename(full_product_name, prefix="comfyui")
         metadata_path = os.path.join(render_dir, metadata_filename)
 
         logger.info(f"[AYON Publish] Writing metadata to: {metadata_path}")

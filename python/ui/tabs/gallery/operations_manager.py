@@ -271,19 +271,31 @@ class OperationsManager(BaseGalleryManager):
 
             return results
 
+        if getattr(self, '_publish_in_progress', False):
+            return
+
+        self._publish_in_progress = True
         self._publish_worker = Worker(publish_batch, selected_paths)
         self._publish_worker.signals.result.connect(self._on_publish_complete)
         self._publish_worker.signals.error.connect(
-            lambda msg, tb: show_error("Publish Error", msg, parent=self.tab.main_window)
+            lambda msg, tb: self._on_publish_error(msg)
         )
         QThreadPool.globalInstance().start(self._publish_worker)
 
         self.tab.log(f"[Gallery] Publishing {count} items...")
 
+    def _on_publish_error(self, error_msg):
+        """Handle publish batch error."""
+        from dialog_helpers import show_error
+        self._publish_in_progress = False
+        show_error("Publish Error", error_msg, parent=self.tab.main_window)
+
     def _on_publish_complete(self, results):
         """Handle publish batch completion."""
         from dialog_helpers import show_warning
         from ui_components import StatusColors
+
+        self._publish_in_progress = False
 
         success_count = sum(1 for r in results if r['success'])
         failed_items = [os.path.basename(r['path']) for r in results if not r['success']]

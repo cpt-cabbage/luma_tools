@@ -558,19 +558,16 @@ class BaseTab(ABC):
             show_error("Error", error_msg, parent=self.main_window)
 
     @staticmethod
-    def unpack_worker_error(error_tuple) -> tuple:
-        """Unpack a worker error tuple into (error_msg, traceback_str).
+    def unpack_worker_error(error_msg, traceback_str="") -> tuple:
+        """Unpack worker error signal args into (error_msg, traceback_str).
 
-        Worker error signals emit a tuple of (exc_type, exc_value, traceback_str).
-        This helper safely extracts the message and traceback.
+        Worker error signal is Signal(str, str) — emits (error_msg, traceback_str).
+        Error handlers should use signature: def on_error(self, error_msg, traceback_str="")
+
+        This method is kept for backward compatibility but simply passes through
+        the arguments. New code should use the two-parameter signature directly.
         """
-        if isinstance(error_tuple, tuple) and len(error_tuple) >= 2:
-            error_msg = str(error_tuple[1])
-            traceback_str = error_tuple[2] if len(error_tuple) > 2 else ""
-        else:
-            error_msg = str(error_tuple)
-            traceback_str = ""
-        return error_msg, traceback_str
+        return str(error_msg), traceback_str
 
     def pulse_button(self, widget):
         """

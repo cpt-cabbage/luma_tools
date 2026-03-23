@@ -70,7 +70,6 @@ Luma Tools is a PySide6 suite of tools for an animation studio, tools are separa
 ```bash
 luma_tools.bat                  # With shot context (6 args: jobname, shot, task, shotpath, user, output_subdirectory)
 luma_tools_standalone.bat       # Standalone mode
-install.bat                     # Deploy to L:\tools\_studio_tools\luma_tools with version management
 
 # Direct Python
 python\venv\Scripts\activate.bat
@@ -139,6 +138,11 @@ from dialog_helpers import confirm_action, show_warning, show_error, show_info
 
 # UI components - MUST lazy import (inside functions) to avoid worker thread issues
 from ui_components import Worker  # resources/ui/ in PYTHONPATH
+
+# Safe optional imports (returns (module_or_attr, is_available) tuple)
+from core.import_utils import safe_import, get_event_bus
+pipeline_events, events_available = get_event_bus()
+ayon_api, AYON_AVAILABLE = safe_import("ayon_api")
 ```
 
 ## Architecture Patterns

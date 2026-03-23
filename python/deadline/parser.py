@@ -107,8 +107,8 @@ def is_job_not_found(returncode: int, stderr: str, stdout: str) -> bool:
         stderr_lower = stderr.lower()
         if "not found" in stderr_lower or "does not exist" in stderr_lower:
             return True
-        # Empty stderr with non-zero return code often means job not found
-        if not stderr.strip():
+        # Empty stderr AND empty stdout with non-zero return code means job not found
+        if not stderr.strip() and not stdout.strip():
             return True
     elif not stdout or "Status=" not in stdout:
         # Job query returned but no status - job doesn't exist

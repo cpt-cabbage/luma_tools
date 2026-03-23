@@ -301,6 +301,7 @@ class CanvasSyncManager(QObject):
 
     def _poll_state(self):
         """Poll for state changes from other users."""
+        state = None
         with self._file_lock:
             if self._saving:
                 return  # Skip polling during active save to avoid file contention
@@ -323,10 +324,13 @@ class CanvasSyncManager(QObject):
                     state = self.load_state()
                     if state:
                         logger.info(f"Remote canvas change detected (by {state.get('modified_by', 'unknown')})")
-                        self.state_changed.emit(state)
 
             except Exception as e:
                 logger.warning(f"State poll error: {e}")
+
+        # Emit signal outside lock to avoid deadlock if slot calls back into sync manager
+        if state:
+            self.state_changed.emit(state)
 
     def mark_dirty(self):
         """Mark local state as changed (needs save)."""
@@ -528,11 +532,6 @@ class CursorPresenceManager(QObject):
                         # Stale cursor - user might have left
                         if username in self._known_users:
                             self.user_left.emit(username)
-                            # Clean up stale file
-                            try:
-                                os.remove(filepath)
-                            except OSError:
-                                pass  # File already deleted or inaccessible
 
                 except Exception:
                     # Ignore individual file read errors

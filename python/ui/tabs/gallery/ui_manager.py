@@ -521,9 +521,7 @@ class UIManager(BaseGalleryManager):
         def discover_users():
             return self._discover_users_sync()
 
-        self._user_discovery_worker = Worker(discover_users)
-        self._user_discovery_worker.signals.result.connect(self._on_users_discovered)
-        QThreadPool.globalInstance().start(self._user_discovery_worker)
+        self.start_worker(discover_users, on_result=self._on_users_discovered)
 
     def _discover_users_sync(self):
         """Discover available users from the network gallery path.

@@ -117,7 +117,12 @@
       "Bash(L:tools_studio_toolsAYON_devchristophela_shot_toolsluma_toolspythonvenvScriptspython.exe -m PySide6.scripts.pyside_tool uic)",
       "Bash(mkdir -p resources/ui/tabs/compiled)",
       "Bash(\"python/venv/lib/site-packages/PySide6/uic.exe\" resources/ui/tabs/comfyui.ui -o resources/ui/tabs/compiled/ui_comfyui.py)",
-      "Bash(\"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pyside6-uic.exe\" \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\tabs\\\\comfyui.ui\" -o \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\tabs\\\\compiled\\\\ui_comfyui.py\" -g python 2>&1)"
+      "Bash(\"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\python\\\\venv\\\\Scripts\\\\pyside6-uic.exe\" \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\tabs\\\\comfyui.ui\" -o \"L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools\\\\resources\\\\ui\\\\tabs\\\\compiled\\\\ui_comfyui.py\" -g python 2>&1)",
+      "Bash(/tmp/ayon_publish_bug_analysis.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/pass_builder.ui -o resources/ui/tabs/_compiled/ui_pass_builder.py -g python)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/republish.ui -o resources/ui/tabs/_compiled/ui_republish.py -g python)",
+      "Bash(pythonvenvScriptspython.exe -c \"from ayon_core.pipeline import Anatomy; print\\(Anatomy.__doc__[:500]\\)\")"
     ],
     "deny": [
       "Read(./python/venv/**)",

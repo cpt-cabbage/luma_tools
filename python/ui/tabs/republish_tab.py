@@ -6,10 +6,8 @@ Handles republishing renders to AYON.
 
 import os
 import logging
+import threading
 
-from PySide6 import QtWidgets, QtCore
-
-from core.config import DEFAULT_VIDEOS_DIR, UIStyles
 from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
 from ui_components import StatusColors
@@ -46,7 +44,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.ui.RePublishPublish.clicked.connect(self._on_publish_clicked)
 
     def _get_source_options(self):
-        """Override: in standalone mode, only custom is available."""
+        """Override: in standalone mode, only custom is available.
+        Publish source not offered here — Republish is for publishing filesystem renders to AYON.
+        """
         if self.app_state.standalone_mode:
             return [("Custom", "custom")]
         return [("For Comp", "for_comp"), ("Raw", "raw"), ("Custom", "custom")]
@@ -68,6 +68,13 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         # Source manager from mixin
         self._init_source_manager()
+
+        # Make product combo dropdown wide enough to show full names
+        from PySide6.QtWidgets import QComboBox
+        self.ui.RePublishProductName.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+        self.ui.RePublishProductName.setMinimumWidth(200)
 
         # Task button manager - republish-specific
         self._task_manager = OptionButtonManager(
@@ -115,6 +122,14 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_scan_renders_clicked(self):
         """Override: republish has standalone mode check and custom display names."""
+        if not hasattr(self, '_source_manager'):
+            return  # Tab not yet initialized
+
+        # Publish source is handled by PublishSourceMixin
+        if self._source == "publish":
+            self._on_publish_source_selected()
+            return
+
         from core.utils import update_path_version, scan_exr_sequences
 
         # In standalone mode, only custom path is allowed
@@ -179,7 +194,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
 
         except Exception as e:
-            logging.error(f"Error scanning renders for republish: {e}")
+            logger.error(f"Error scanning renders for republish: {e}")
             self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {str(e)}")
 
     def _on_render_selection_changed(self):
@@ -204,17 +219,66 @@ class RePublishTab(RenderScanMixin, BaseTab):
             f"Frames: {self.app_state.republish_startframe}-{self.app_state.republish_endframe}"
         )
 
-        # Set product name from render
+        # Set product name from render and populate AYON products
         from core.utils import extract_render_name
         render_name = extract_render_name(seq.basename(), strip_frame_padding=True)
-        self.ui.RePublishProductName.setText(render_name)
+        self.ui.RePublishProductName.setCurrentText(render_name)
+        self._populate_product_combo(render_name)
 
         # Enable publish button
         self.ui.RePublishPublish.setEnabled(True)
         self.pulse_button(self.ui.RePublishPublish)
 
+    def _populate_product_combo(self, default_name):
+        """Populate the publish product combo box with existing AYON products.
+
+        Queries AYON for all products in the current shot folder, then
+        auto-selects the product that matches the selected render.
+        """
+        combo = self.ui.RePublishProductName
+
+        if not self.app_state.has_shot_context():
+            return
+
+        def _query_products():
+            from ayon.service import (
+                AYON_AVAILABLE, convert_to_ayon_folder_path,
+                get_folder_product_names, find_product_for_render,
+            )
+            if not AYON_AVAILABLE:
+                return [], default_name
+
+            project_name = self.app_state.jobname
+            folder_path = convert_to_ayon_folder_path(
+                self.app_state.shotpath, project_name
+            )
+            product_names = get_folder_product_names(project_name, folder_path)
+            matched = find_product_for_render(project_name, folder_path, default_name)
+            return product_names, matched
+
+        def _on_products(result):
+            product_names, matched_name = result
+            combo.clear()
+            for name in product_names:
+                combo.addItem(name)
+            # Select the matched product from the dropdown
+            idx = combo.findText(matched_name)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setCurrentText(matched_name)
+
+        self.start_worker(_query_products, on_result=_on_products)
+
     def _on_publish_clicked(self):
-        """Handle publish to AYON button click."""
+        """Handle publish to AYON button click, or cancel if already publishing."""
+        # If already publishing, cancel the operation
+        if getattr(self, '_is_publishing', False):
+            self._cancel_event.set()
+            self.ui.RePublishPublish.setEnabled(False)
+            self.show_status("Cancelling publish...", "warning")
+            return
+
         self.animate_button_click(self.ui.RePublishPublish)
 
         # Validate selection
@@ -225,7 +289,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
         # Get options
         task = self._task
         use_farm = self.ui.RePublishUseFarm.isChecked()
-        product_name = self.ui.RePublishProductName.text().strip()
+        product_name = self.ui.RePublishProductName.currentText().strip()
 
         if not product_name:
             from core.utils import extract_render_name
@@ -234,8 +298,13 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 strip_frame_padding=True
             )
 
-        # Disable button during processing
-        self.ui.RePublishPublish.setEnabled(False)
+        # Set up cancellation
+        self._cancel_event = threading.Event()
+        self._is_publishing = True
+        cancel_event = self._cancel_event
+
+        # Switch button to Cancel mode
+        self.ui.RePublishPublish.setText("Cancel")
 
         # Show status bar progress
         self.update_status_with_spinner(
@@ -257,17 +326,19 @@ class RePublishTab(RenderScanMixin, BaseTab):
             use_farm,
             product_name,
             use_current_task,
+            cancel_event,
             on_result=self._on_publish_complete,
             on_error=self._on_publish_error,
             on_progress=self._on_publish_progress
         )
 
-    def _publish_worker(self, task, use_farm, product_name, use_current_task, progress_callback):
+    def _publish_worker(self, task, use_farm, product_name, use_current_task, cancel_event, progress_callback):
         """Worker thread function for publishing to AYON."""
         from ayon.service import (
             convert_to_ayon_folder_path, create_ayon_metadata, write_metadata_file,
             publish_to_ayon_local, submit_ayon_publish_to_deadline
         )
+        from core.error_handling import check_cancelled
 
         # Get render path information
         seq = self.app_state.republish_selected_render
@@ -276,8 +347,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         source_basename = os.path.basename(source_dir)
 
-        # Check if we're in a subdirectory (for_comp, denoised, raw, etc.)
-        if source_basename in ['for_comp', 'denoised', 'raw']:
+        # Check if we're in a render subdirectory
+        from core.config import DENOISED_SUBDIRECTORY
+        if source_basename in ['for_comp', DENOISED_SUBDIRECTORY, 'raw']:
             base_render_path = os.path.dirname(source_dir)
             output_subdirectory = source_basename
         else:
@@ -288,11 +360,14 @@ class RePublishTab(RenderScanMixin, BaseTab):
         logger.info(f"Base render path: {base_render_path}")
         logger.info(f"Output subdirectory: {output_subdirectory}")
 
+        check_cancelled(cancel_event)
         progress_callback(50, "Preparing metadata for AYON publish...")
 
         # Get the base filename pattern for the sequence
         base_name = seq.basename()
-        frame_padding = len(seq.frameSet().frameRange().split("-")[0])
+        # Derive padding from the actual hash count in the basename (e.g. "render.####." → 4)
+        hash_count = base_name.count('#')
+        frame_padding = hash_count if hash_count > 0 else 4
         render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
 
         # Determine project name and folder path
@@ -301,7 +376,8 @@ class RePublishTab(RenderScanMixin, BaseTab):
             shot_path_for_conversion = self.app_state.shotpath
             logger.info(f"[Use Current Task] Using current AYON context instead of parsing path")
         else:
-            normalized_source = source_dir.replace("\\", "/")
+            from core.utils import normalize_path
+            normalized_source = normalize_path(source_dir)
             path_parts = normalized_source.split("/")
 
             project_name = self.app_state.jobname  # Default to current project
@@ -324,13 +400,14 @@ class RePublishTab(RenderScanMixin, BaseTab):
         logger.info(f"Detected project: {project_name}")
         logger.info(f"Detected folder path: {folder_path}")
 
-        # Determine working_dir from the shot path
+        # Determine working_dir from the shot path (ensure trailing slash for create_ayon_metadata)
         if "work" in shot_path_for_conversion:
-            working_dir = shot_path_for_conversion.split("work")[0] + "work"
+            working_dir = shot_path_for_conversion.split("work")[0] + "work/"
         else:
             working_dir = self.app_state.working_dir or shot_path_for_conversion
 
         # Create metadata
+        check_cancelled(cancel_event)
         progress_callback(75, "Creating AYON metadata...")
         metadata = create_ayon_metadata(
             project_name=project_name,
@@ -343,21 +420,21 @@ class RePublishTab(RenderScanMixin, BaseTab):
             user=self.app_state.user,
             output_subdirectory=output_subdirectory,
             working_dir=working_dir,
-            render_file=render_file
+            render_file=render_file,
+            farm=use_farm
         )
 
-        # Fix farm flag based on publish mode
-        if not use_farm and "instances" in metadata and len(metadata["instances"]) > 0:
-            metadata["instances"][0]["farm"] = False
-            logger.info(f"Set farm flag to False for local publish")
-
         # Write metadata file to source directory
-        metadata_filename = f"ayon_{product_name}.json"
+        from ayon.service import build_ayon_metadata_filename
+        metadata_filename = build_ayon_metadata_filename(product_name)
         metadata_path = os.path.join(source_dir, metadata_filename)
         metadata_path = write_metadata_file(metadata, metadata_path)
 
         if not metadata_path:
-            raise Exception("Failed to write metadata file")
+            raise RuntimeError("Failed to write metadata file")
+
+        # Check cancellation before publish step
+        check_cancelled(cancel_event)
 
         # Publish
         progress_callback(85, f"{'Submitting to farm' if use_farm else 'Publishing locally'}...")
@@ -375,7 +452,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             )
 
             if not job_id:
-                raise Exception("Failed to submit to Deadline")
+                raise RuntimeError("Failed to submit to Deadline")
 
             progress_callback(100, "Publish job submitted to farm")
             return {"success": True, "message": f"Published to farm! Job ID: {job_id}", "job_id": job_id}
@@ -389,21 +466,28 @@ class RePublishTab(RenderScanMixin, BaseTab):
             )
 
             if not success:
-                raise Exception("Local publish failed")
+                raise RuntimeError("Local publish failed")
 
             progress_callback(100, "Published successfully")
             return {"success": True, "message": f"Published: {product_name}"}
 
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
-        self.animator.update_status_animated(
-            f"AYON: {message}",
-            StatusColors.INFO
-        )
+        if self.animator:
+            self.animator.update_status_animated(
+                f"AYON: {message}",
+                StatusColors.INFO
+            )
+
+    def _reset_publish_button(self):
+        """Reset publish button to its default state."""
+        self._is_publishing = False
+        self.ui.RePublishPublish.setText("Publish to AYON")
+        self.ui.RePublishPublish.setEnabled(True)
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
-        self.ui.RePublishPublish.setEnabled(True)
+        self._reset_publish_button()
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
         self.update_status_with_spinner(
@@ -414,10 +498,20 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.show_status(result['message'], "success")
 
     def _on_publish_error(self, error_msg, traceback_str):
-        """Handle publish errors."""
-        full_error_msg = f"Publish failed: {error_msg}"
+        """Handle publish errors or cancellation."""
+        self._reset_publish_button()
 
-        self.ui.RePublishPublish.setEnabled(True)
+        if getattr(self, '_cancel_event', None) and self._cancel_event.is_set():
+            self.ui.RePublishStatusLabel.setText("Status: Publish cancelled")
+            self.update_status_with_spinner(
+                "AYON: Publish cancelled",
+                StatusColors.WARNING,
+                start=False
+            )
+            self.show_status("Publish cancelled", "warning")
+            return
+
+        full_error_msg = f"Publish failed: {error_msg}"
         self.ui.RePublishStatusLabel.setText(f"Status: {full_error_msg}")
 
         self.update_status_with_spinner(
@@ -426,6 +520,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
             start=False
         )
 
-        logging.error(f"Publish error: {error_msg}")
+        logger.error(f"Publish error: {error_msg}")
         if traceback_str:
-            logging.error(traceback_str)
+            logger.error(traceback_str)
