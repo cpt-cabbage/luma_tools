@@ -1,5 +1,9 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.6
+- Add cancel buttons to all tabs
+- Various bug fixes and ui improvements
+
 ## Version 0.6.5.5
 - Fix Publish path resolving to publishes instead of source renders
 

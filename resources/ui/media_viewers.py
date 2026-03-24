@@ -1225,11 +1225,13 @@ class EmbeddedImageViewer(QWidget):
         top_layout.addWidget(self.light_value_label)
 
         # Publish to AYON button
+        from icons import get_ayon_icon
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
+        self.publish_to_ayon_btn.setIcon(get_ayon_icon(16))
         self.publish_to_ayon_btn.setFixedHeight(28)
         self.publish_to_ayon_btn.setStyleSheet("""
-            QPushButton { background-color: #10b981; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background-color: #14ce94; }
+            QPushButton { background-color: #00cea5; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background-color: #00e6b8; }
             QPushButton:disabled { background-color: #3c414b; color: #6b6f78; }
         """)
         self.publish_to_ayon_btn.clicked.connect(self._publish_to_ayon)
@@ -2101,7 +2103,8 @@ class EmbeddedImageViewer(QWidget):
 
         # Publish to AYON
         menu.addSeparator()
-        publish_action = menu.addAction("Publish to AYON")
+        from icons import get_ayon_icon
+        publish_action = menu.addAction(get_ayon_icon(16), "Publish to AYON")
         publish_action.triggered.connect(self._publish_to_ayon)
 
         # Delete
@@ -2772,7 +2775,8 @@ class FullscreenImageViewer(QWidget):
 
         # Publish to AYON
         menu.addSeparator()
-        publish_action = menu.addAction("Publish to AYON")
+        from icons import get_ayon_icon
+        publish_action = menu.addAction(get_ayon_icon(16), "Publish to AYON")
         publish_action.triggered.connect(self._publish_to_ayon)
 
         # Delete

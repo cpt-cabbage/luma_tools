@@ -1201,11 +1201,12 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
         # Publish all to AYON
         menu.addSeparator()
+        from icons import get_ayon_icon
         if has_multi_selection:
-            publish_action = menu.addAction(f"Publish Selected to AYON ({selected_count} items)")
+            publish_action = menu.addAction(get_ayon_icon(16), f"Publish Selected to AYON ({selected_count} items)")
             publish_action.triggered.connect(self._publish_selected_items)
         else:
-            publish_action = menu.addAction(f"Publish All to AYON ({count} items)")
+            publish_action = menu.addAction(get_ayon_icon(16), f"Publish All to AYON ({count} items)")
             publish_action.triggered.connect(self._publish_all_items)
 
         # Delete - use multi-selection if active

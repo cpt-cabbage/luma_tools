@@ -61,6 +61,21 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         self.ui.RePublishPublish.setEnabled(False)
 
+        # AYON branding for publish button and checkbox
+        from icons import get_ayon_icon
+        from core.config import UIColors
+        self.ui.RePublishPublish.setIcon(get_ayon_icon(18))
+        self.ui.RePublishPublish.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {UIColors.AYON_GREEN}; color: white;
+                border: none; border-radius: 4px; font-weight: bold; font-size: 12px;
+            }}
+            QPushButton:hover {{ background-color: {UIColors.AYON_GREEN_HOVER}; }}
+            QPushButton:disabled {{ background-color: #3c414b; color: #6b6f78; }}
+        """)
+        self.ui.RePublishUseCurrentTask.setIcon(get_ayon_icon(14))
+        self.ui.RePublishUseCurrentTask.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+
         # In standalone mode, show browse button immediately
         if self.app_state.standalone_mode:
             self.ui.RePublishBrowseCustomPath.setVisible(True)
@@ -88,6 +103,111 @@ class RePublishTab(RenderScanMixin, BaseTab):
             on_changed=lambda v: None,  # No special action on task change
             label_prefix="Task: ",
             parent_window=self.main_window
+        )
+
+        # Run initial scan to find render directory (independent of Shot Cleaner tab)
+        if self.app_state.has_shot_context() and not self.app_state.republish_searchpath:
+            self._run_initial_scan()
+
+        # Populate "Publish To:" dropdown with AYON products
+        if self.app_state.has_shot_context():
+            self._populate_product_combo("")
+
+    def _run_initial_scan(self):
+        """Find render directory and set republish_searchpath on startup (async)."""
+        from services.file_operations import get_task_directory
+
+        task = self.app_state.task
+        task_dir = get_task_directory(self.app_state.shotpath, task)
+
+        if not os.path.isdir(task_dir):
+            logger.warning(f"Republish: Task directory not found: {task_dir}")
+            return
+
+        def _scan_worker(task_dir, task):
+            from services.file_operations import fast_scandir, find_renders, find_hip_files
+            from core.config import RENDERS_SUBPATH
+            from core.utils import truncate_at_suffix, get_trailing_number
+
+            try:
+                dirs = fast_scandir(task_dir)
+            except Exception as e:
+                logger.warning(f"Republish: Error scanning {task_dir}: {e}")
+                return None
+
+            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+            if not render_folders:
+                logger.warning(f"Republish: No render directory found in {task_dir}")
+                return None
+
+            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+
+            hip_files = find_hip_files(task_dir, task)
+            hip_file = ""
+            if hip_files:
+                hip_files = sorted(hip_files)
+                hip_file = hip_files[0].rsplit("_", 1)[0]
+
+            try:
+                render_dirs = sorted(next(os.walk(render_directory))[1])
+            except StopIteration:
+                return None
+
+            if hip_file:
+                matching = [d for d in render_dirs if hip_file in d]
+                if matching:
+                    render_dirs = matching
+
+            if not render_dirs:
+                return None
+
+            # Find latest version that has renders
+            latest_render = None
+            for render_version in reversed(render_dirs):
+                version_path = os.path.join(render_directory, render_version)
+                test_renders = find_renders(version_path)
+                if len(test_renders) > 0:
+                    latest_render = render_version
+                    break
+
+            if not latest_render:
+                latest_render = render_dirs[-1]
+
+            return {
+                'latest_render': latest_render,
+                'render_directory': render_directory,
+            }
+
+        def _on_scan_result(result):
+            if not result:
+                return
+            from core.utils import get_trailing_number
+
+            searchpath = os.path.join(result['render_directory'], result['latest_render'])
+            self.app_state.republish_searchpath = searchpath
+            self.ui.RePublishRenderPath.setText(searchpath)
+
+            # Block valueChanged while setting range/value to prevent premature scan
+            self.ui.RePublishCurrentVer.blockSignals(True)
+            ver_str = get_trailing_number(result['latest_render'])
+            if ver_str is not None:
+                latest_ver = int(ver_str)
+                self.ui.RePublishCurrentVer.setRange(0, latest_ver)
+                self.ui.RePublishCurrentVer.setValue(latest_ver)
+            self.ui.RePublishCurrentVer.blockSignals(False)
+
+            # Set default task to the current task from command line args
+            if self.app_state.task:
+                self._task_manager.set_value(self.app_state.task)
+
+            logger.info(f"Republish: Found render path: {searchpath}")
+
+            # Now trigger the scan with everything properly set up
+            self._on_scan_renders_clicked()
+
+        self.start_worker(
+            _scan_worker, task_dir, task,
+            on_result=_on_scan_result
         )
 
     @property
@@ -131,7 +251,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
             return
 
         from core.utils import update_path_version, scan_exr_sequences
-
         # In standalone mode, only custom path is allowed
         if self.app_state.standalone_mode and self._source != "custom":
             self.ui.RePublishStatusLabel.setText("Status: Use custom directory in standalone mode")
@@ -147,7 +266,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         # Clear previous list
         self.ui.RePublishRendersList.clear()
-        self.app_state.republish_renders = []
 
         # Determine which source to scan
         search_path = ""
@@ -162,6 +280,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             search_path = self.app_state.republish_custom_path
 
         if not search_path or not os.path.exists(search_path):
+            self.app_state.republish_renders = []
             if self.app_state.standalone_mode:
                 self.ui.RePublishStatusLabel.setText("Status: Please browse for a directory")
             else:
@@ -169,8 +288,11 @@ class RePublishTab(RenderScanMixin, BaseTab):
             return
 
         # Find EXR sequences
+        # NOTE: Build list locally then assign — ThreadSafeProperty returns
+        # copies on read, so .append() on a read would mutate the copy only.
         try:
             sequences = scan_exr_sequences(search_path)
+            renders = []
 
             for seq in sequences:
                 # Extract subdirectory name if applicable
@@ -178,8 +300,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 rel_path = os.path.relpath(os.path.dirname(seq_path), search_path)
                 subdir = rel_path if rel_path != "." else ""
 
-                # Store tuple of (subdir, sequence_object)
-                self.app_state.republish_renders.append((subdir, seq))
+                renders.append((subdir, seq))
 
                 # Display name
                 if subdir and subdir != ".":
@@ -189,9 +310,16 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
                 self.ui.RePublishRendersList.addItem(display_name)
 
+            # Assign the full list at once (ThreadSafeProperty stores it correctly)
+            self.app_state.republish_renders = renders
+
             # Update status
-            count = len(self.app_state.republish_renders)
+            count = len(renders)
             self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
+
+            # Auto-select first render so the publish button becomes available
+            if count > 0:
+                self.ui.RePublishRendersList.setCurrentRow(0)
 
         except Exception as e:
             logger.error(f"Error scanning renders for republish: {e}")
@@ -219,10 +347,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
             f"Frames: {self.app_state.republish_startframe}-{self.app_state.republish_endframe}"
         )
 
-        # Set product name from render and populate AYON products
+        # Populate AYON products and auto-select matching product name
         from core.utils import extract_render_name
         render_name = extract_render_name(seq.basename(), strip_frame_padding=True)
-        self.ui.RePublishProductName.setCurrentText(render_name)
         self._populate_product_combo(render_name)
 
         # Enable publish button
@@ -253,7 +380,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 self.app_state.shotpath, project_name
             )
             product_names = get_folder_product_names(project_name, folder_path)
-            matched = find_product_for_render(project_name, folder_path, default_name)
+            matched = find_product_for_render(project_name, folder_path, default_name) if default_name else ""
             return product_names, matched
 
         def _on_products(result):
@@ -261,12 +388,13 @@ class RePublishTab(RenderScanMixin, BaseTab):
             combo.clear()
             for name in product_names:
                 combo.addItem(name)
-            # Select the matched product from the dropdown
-            idx = combo.findText(matched_name)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            else:
-                combo.setCurrentText(matched_name)
+            if matched_name:
+                # Select the matched product from the dropdown
+                idx = combo.findText(matched_name)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                else:
+                    combo.setCurrentText(matched_name)
 
         self.start_worker(_query_products, on_result=_on_products)
 
@@ -345,13 +473,19 @@ class RePublishTab(RenderScanMixin, BaseTab):
         first_frame = seq.frame(self.app_state.republish_startframe)
         source_dir = os.path.dirname(first_frame)
 
-        source_basename = os.path.basename(source_dir)
-
-        # Check if we're in a render subdirectory
-        from core.config import DENOISED_SUBDIRECTORY
-        if source_basename in ['for_comp', DENOISED_SUBDIRECTORY, 'raw']:
-            base_render_path = os.path.dirname(source_dir)
-            output_subdirectory = source_basename
+        # Determine if source_dir is inside a render version directory (a subdirectory
+        # like "combined", "for_comp", etc.) or IS the version directory itself.
+        # Compare against the known render searchpath to avoid hardcoding subdir names.
+        searchpath = self.app_state.republish_searchpath
+        if searchpath and os.path.normcase(source_dir) != os.path.normcase(searchpath):
+            # source_dir is deeper than the version dir — treat the extra part as output subdir
+            rel = os.path.relpath(source_dir, searchpath)
+            if rel and not rel.startswith(".."):
+                base_render_path = searchpath
+                output_subdirectory = rel
+            else:
+                base_render_path = source_dir
+                output_subdirectory = ""
         else:
             base_render_path = source_dir
             output_subdirectory = ""
@@ -363,20 +497,24 @@ class RePublishTab(RenderScanMixin, BaseTab):
         check_cancelled(cancel_event)
         progress_callback(50, "Preparing metadata for AYON publish...")
 
-        # Get the base filename pattern for the sequence
-        base_name = seq.basename()
-        # Derive padding from the actual hash count in the basename (e.g. "render.####." → 4)
-        hash_count = base_name.count('#')
-        frame_padding = hash_count if hash_count > 0 else 4
-        render_file = f"{base_name.replace('#' * frame_padding, f'%0{frame_padding}d')}"
+        # Build render_file pattern from the actual sequence filename
+        # seq.basename() returns e.g. "Main." — we need "Main.%04d.exr"
+        import fileseq
+        base_name = seq.basename()  # e.g. "Main."
+        frame_padding = fileseq.FileSequence.getPaddingNum(seq.padding())
+        render_file = f"{base_name}%0{frame_padding}d.exr"
+
+        # render_name is the actual filename stem (for file listing in metadata)
+        # product_name is the AYON product name (for product/version tracking)
+        render_name = base_name.rstrip(".")  # "Main." → "Main"
 
         # Determine project name and folder path
+        from core.utils import normalize_path
         if use_current_task:
             project_name = self.app_state.jobname
             shot_path_for_conversion = self.app_state.shotpath
             logger.info(f"[Use Current Task] Using current AYON context instead of parsing path")
         else:
-            from core.utils import normalize_path
             normalized_source = normalize_path(source_dir)
             path_parts = normalized_source.split("/")
 
@@ -388,7 +526,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
                     project_name = path_parts[i - 1]
                     if "work" in path_parts:
                         work_idx = path_parts.index("work")
-                        shot_path_for_conversion = "/".join(path_parts[:work_idx])
+                        shot_path_for_conversion = "/".join(path_parts[:work_idx + 1])
                     break
 
             if not shot_path_for_conversion:
@@ -400,18 +538,18 @@ class RePublishTab(RenderScanMixin, BaseTab):
         logger.info(f"Detected project: {project_name}")
         logger.info(f"Detected folder path: {folder_path}")
 
-        # Determine working_dir from the shot path (ensure trailing slash for create_ayon_metadata)
-        if "work" in shot_path_for_conversion:
-            working_dir = shot_path_for_conversion.split("work")[0] + "work/"
+        # working_dir must end with "work/" for the source path template
+        if "/work" in normalize_path(shot_path_for_conversion):
+            working_dir = normalize_path(shot_path_for_conversion).split("/work")[0] + "/work/"
         else:
-            working_dir = self.app_state.working_dir or shot_path_for_conversion
+            working_dir = normalize_path(shot_path_for_conversion) + "/"
 
         # Create metadata
         check_cancelled(cancel_event)
         progress_callback(75, "Creating AYON metadata...")
         metadata = create_ayon_metadata(
             project_name=project_name,
-            render_name=product_name,
+            render_name=render_name,
             start_frame=self.app_state.republish_startframe,
             end_frame=self.app_state.republish_endframe,
             renders_path=base_render_path,
@@ -421,6 +559,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             output_subdirectory=output_subdirectory,
             working_dir=working_dir,
             render_file=render_file,
+            product_name=product_name,
             farm=use_farm
         )
 
@@ -483,6 +622,8 @@ class RePublishTab(RenderScanMixin, BaseTab):
         """Reset publish button to its default state."""
         self._is_publishing = False
         self.ui.RePublishPublish.setText("Publish to AYON")
+        from icons import get_ayon_icon
+        self.ui.RePublishPublish.setIcon(get_ayon_icon(18))
         self.ui.RePublishPublish.setEnabled(True)
 
     def _on_publish_complete(self, result):

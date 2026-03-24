@@ -1456,7 +1456,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
             # Publish to AYON
             menu.addSeparator()
-            publish_action = menu.addAction("Publish to AYON")
+            from icons import get_ayon_icon
+            publish_action = menu.addAction(get_ayon_icon(16), "Publish to AYON")
             publish_action.triggered.connect(self._publish_to_ayon)
 
             # Delete
@@ -1516,7 +1517,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         add_to_canvas_action.triggered.connect(self._batch_add_to_canvas)
 
         menu.addSeparator()
-        publish_action = menu.addAction("Publish to AYON")
+        from icons import get_ayon_icon
+        publish_action = menu.addAction(get_ayon_icon(16), "Publish to AYON")
         publish_action.triggered.connect(self._gallery_tab._on_publish_selected)
 
         menu.addSeparator()
@@ -1849,10 +1851,12 @@ class GallerySelectionToolbar(QWidget):
         layout.addWidget(self.view_btn)
 
         # Publish to AYON button
+        from icons import get_ayon_icon
         self.publish_btn = QPushButton("Publish to AYON")
+        self.publish_btn.setIcon(get_ayon_icon(16))
         self.publish_btn.setToolTip("Publish selected images to AYON")
         self.publish_btn.clicked.connect(self.publish_selected.emit)
-        self.publish_btn.setStyleSheet(self._get_button_style())
+        self.publish_btn.setStyleSheet(self._get_button_style("#00cea5"))
         layout.addWidget(self.publish_btn)
 
         # Delete button

@@ -391,6 +391,11 @@ class UIColors:
     ACCENT_BLUE_HOVER = "#5aa9ff"
     ACCENT_BLUE_ALT = "#6ab0ff"
 
+    # AYON brand colors
+    AYON_GREEN = "#00cea5"
+    AYON_GREEN_HOVER = "#00e6b8"
+    AYON_GREEN_DARK = "#00b892"
+
     # Status colors
     SUCCESS = "#10b981"
     SUCCESS_HOVER = "#14ce94"

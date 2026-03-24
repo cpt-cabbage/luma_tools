@@ -40,6 +40,9 @@ STATUS_COLORS = {
 # Default icon color
 DEFAULT_ICON_COLOR = "#9fa5b0"
 
+# AYON brand color
+AYON_GREEN = "#00cea5"
+
 
 class IconManager:
     """
@@ -309,3 +312,13 @@ def get_pixmap(name: str, color: str = None, size: int = 24) -> QPixmap:
 def get_tab_icon(tab_name: str, size: int = 20) -> QIcon:
     """Convenience function to get a tab icon."""
     return IconManager.get_tab_icon(tab_name, size)
+
+
+def get_ayon_icon(size: int = 16) -> QIcon:
+    """Get the AYON logo icon tinted with AYON brand green."""
+    return IconManager.get_icon("ayon", AYON_GREEN, size)
+
+
+def get_ayon_pixmap(size: int = 16) -> QPixmap:
+    """Get the AYON logo pixmap tinted with AYON brand green."""
+    return IconManager.get_pixmap("ayon", AYON_GREEN, size)

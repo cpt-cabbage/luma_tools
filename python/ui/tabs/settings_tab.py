@@ -301,10 +301,15 @@ class SettingsTab(BaseTab):
                 )
                 self._version_badge.show_badge()
 
-        # Show current AYON production bundle
+        # Show current AYON production bundle with AYON branding
         if hasattr(self.ui, 'BundleLabel'):
-            from core.config import get_ayon_bundle
+            from core.config import get_ayon_bundle, UIColors
             self.ui.BundleLabel.setText(get_ayon_bundle())
+            self.ui.BundleLabel.setStyleSheet(f"color: {UIColors.AYON_GREEN};")
+        if hasattr(self.ui, 'label_bundle'):
+            from icons import get_ayon_icon
+            from core.config import UIColors
+            self.ui.label_bundle.setStyleSheet(f"color: {UIColors.AYON_GREEN};")
 
         # Load feature request UI
         self._load_feature_request_ui()

@@ -347,6 +347,21 @@ def get_folder_render_products(project_name: str, folder_path: str) -> list:
             p for p in products
             if p.get("productType") in ("render", "image", "plate")
         ]
+
+        # Exclude products with no versions (deleted/empty products)
+        if render_products:
+            product_ids = [p["id"] for p in render_products]
+            versions = list(get_versions(
+                project_name,
+                product_ids=product_ids,
+                fields=["id", "productId"],
+            ))
+            products_with_versions = {v["productId"] for v in versions}
+            render_products = [
+                p for p in render_products
+                if p["id"] in products_with_versions
+            ]
+
         render_products.sort(key=lambda p: p["name"])
         logger.info(
             f"[get_folder_render_products] Found {len(render_products)} render products "

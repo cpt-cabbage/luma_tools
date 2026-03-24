@@ -150,6 +150,8 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "gallery_stacks_collapsed": SettingDef("gallery_stacks_collapsed", False, "user"),
     # UI display settings
     "show_statusbar_log": SettingDef("show_statusbar_log", False, "user"),
+    # Pass Builder settings
+    "pass_builder_publish_to_ayon": SettingDef("pass_builder_publish_to_ayon", True, "user"),
     # MP4 Maker settings
     "mp4_maker_add_to_gallery": SettingDef("mp4_maker_add_to_gallery", True, "user"),
     "mp4_maker_publish_to_ayon": SettingDef("mp4_maker_publish_to_ayon", False, "user"),

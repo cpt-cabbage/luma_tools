@@ -57,6 +57,28 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             parent_window=self.main_window
         )
 
+        # "Publish to AYON" checkbox — on by default, controls whether build publishes
+        from icons import get_ayon_icon
+        from core.config import UIColors
+        from core.settings_manager import safe_get_setting, safe_set_setting
+        self._publish_to_ayon_cb = QtWidgets.QCheckBox("Publish to AYON")
+        self._publish_to_ayon_cb.setIcon(get_ayon_icon(14))
+        self._publish_to_ayon_cb.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+        self._publish_to_ayon_cb.setToolTip("When enabled, built passes are published to AYON")
+        self._publish_to_ayon_cb.setChecked(safe_get_setting("pass_builder_publish_to_ayon", True))
+        self._publish_to_ayon_cb.stateChanged.connect(self._on_publish_to_ayon_changed)
+
+        # Insert checkbox before the "Publish To:" label in the build options layout
+        build_layout = self.ui.buildOptionsLayout
+        label_index = build_layout.indexOf(self.ui.publishToLabel)
+        if label_index >= 0:
+            build_layout.insertWidget(label_index, self._publish_to_ayon_cb)
+        else:
+            build_layout.insertWidget(2, self._publish_to_ayon_cb)
+
+        # Show/hide product widgets based on initial state
+        self._update_publish_widgets_visibility()
+
         # Source selection (File vs Publish) - only show if AYON is available
         ayon_service, _ = safe_import("ayon.service")
         ayon_available = getattr(ayon_service, 'AYON_AVAILABLE', False) if ayon_service else False
@@ -95,6 +117,23 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         # Run initial scan if we have shot context (only for file mode)
         if self.app_state.has_shot_context() and not hasattr(self, '_pb_source_manager'):
             self._run_initial_scan()
+
+        # Populate "Publish To:" dropdown with AYON products
+        if self.app_state.has_shot_context():
+            self._populate_product_combo()
+
+    def _on_publish_to_ayon_changed(self, state):
+        """Save Publish to AYON checkbox state and toggle product widgets."""
+        from core.settings_manager import safe_set_setting
+        from PySide6.QtCore import Qt
+        safe_set_setting("pass_builder_publish_to_ayon", state == Qt.Checked)
+        self._update_publish_widgets_visibility()
+
+    def _update_publish_widgets_visibility(self):
+        """Show/hide the Publish To label and product combo based on checkbox."""
+        visible = self._publish_to_ayon_cb.isChecked()
+        self.ui.publishToLabel.setVisible(visible)
+        self.ui.PublishProductCombo.setVisible(visible)
 
     def _run_initial_scan(self):
         """Find render directory and populate render path on startup (async)."""
@@ -448,14 +487,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         """
         combo = self.ui.PublishProductCombo
 
-        # In publish mode, use the selected AYON product name directly
+        # Determine default name based on source mode
         if hasattr(self, '_publish_product_combo') and hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
-            product_name = self._publish_product_combo.currentText()
-            if product_name:
-                combo.setCurrentText(product_name)
-                return
-
-        render_name = self.app_state.currentrender
+            render_name = self._publish_product_combo.currentText() or self.app_state.currentrender
+        else:
+            render_name = self.app_state.currentrender
 
         # Set the auto-derived name as current text immediately
         combo.setCurrentText(render_name)
@@ -477,9 +513,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 self.app_state.shotpath, project_name
             )
             product_names = get_folder_product_names(project_name, folder_path)
-            matched = find_product_for_render(
-                project_name, folder_path, render_name
-            )
+            matched = find_product_for_render(project_name, folder_path, render_name) if render_name else ""
             return product_names, matched
 
         def _on_products(result):
@@ -487,12 +521,13 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             combo.clear()
             for name in product_names:
                 combo.addItem(name)
-            # Select the matched product from the dropdown
-            idx = combo.findText(matched_name)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            else:
-                combo.setCurrentText(matched_name)
+            if matched_name:
+                # Select the matched product from the dropdown
+                idx = combo.findText(matched_name)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                else:
+                    combo.setCurrentText(matched_name)
 
         self.start_worker(_query_products, on_result=_on_products)
 
@@ -533,7 +568,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         use_farm = build_type == "farm"
 
         # Get selected product name (empty string means auto-derive from render name)
-        selected_product = self.ui.PublishProductCombo.currentText().strip() or None
+        do_publish = self._publish_to_ayon_cb.isChecked()
+        selected_product = self.ui.PublishProductCombo.currentText().strip() or None if do_publish else None
 
         # Get display name for status
         build_type_display = "Local" if build_type == "local" else "Farm"
@@ -566,7 +602,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 task=self.app_state.task,
                 user=self.app_state.user,
                 output_subdirectory=self.app_state.output_subdirectory,
-                do_publish=True,
+                do_publish=do_publish,
                 progress_callback=progress_callback,
                 product_name=selected_product,
                 cancel_event=cancel_event,
