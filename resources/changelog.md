@@ -1,5 +1,37 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.7
+rePublish:                                                                                                                                                                               - Add independent _run_initial_scan() so tab no longer depends on
+    Shot Cleaner tab for render path discovery at startup
+  - Fix ThreadSafeProperty mutation bug: build list locally then
+    assign (append on read copy was silently discarded)
+  - Fix output_subdirectory detection using searchpath comparison
+    instead of hardcoded subdirectory names
+  - Fix shot_path_for_conversion to include "work" segment in path
+  - Fix render_file pattern construction using fileseq padding API
+  - Pass render_name and product_name separately to create_ayon_metadata
+  - Auto-select first render after scan for immediate publish readiness
+  - Populate AYON product dropdown on tab initialization
+  - Guard find_product_for_render against empty render names
+
+  Pass Builder:
+  - Add "Publish to AYON" checkbox (on by default, persisted per user)
+  - Show/hide product name widgets based on checkbox state
+  - Populate product combo on tab initialization
+  - Respect do_publish flag in build_passes call
+
+  AYON Branding:
+  - Add AYON SVG icon and get_ayon_icon()/get_ayon_pixmap() helpers
+  - Add AYON_GREEN color constants to UIColors
+  - Apply AYON green branding to all "Publish to AYON" buttons,
+    checkboxes, and context menu actions across Gallery, Viewer,
+    MP4 Maker, rePublish, Pass Builder, and Settings tabs
+
+  Fixes:
+  - Filter out empty/deleted AYON products (no versions) from
+    get_folder_render_products results
+  - Settings tab: AYON bundle label styled with brand color
+
 ## Version 0.6.5.6
 - Add cancel buttons to all tabs
 - Various bug fixes and ui improvements

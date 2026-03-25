@@ -246,6 +246,91 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         if is_publish:
             self._on_publish_source_selected()
 
+    def _fetch_ayon_products(self):
+        """Override: fetch render products and scan available denoised render variants.
+
+        Returns both the AYON products and the set of available denoised render
+        variant names, so the product list can be filtered to only show products
+        that have matching denoised renders on disk.
+        """
+        from ayon.service import AYON_AVAILABLE, convert_to_ayon_folder_path, get_folder_render_products
+
+        products = []
+        if AYON_AVAILABLE:
+            project_name = self.app_state.jobname
+            folder_path = convert_to_ayon_folder_path(
+                self.app_state.shotpath, project_name
+            )
+            products = get_folder_render_products(project_name, folder_path)
+
+        available_variants = self._scan_available_render_variants()
+        return products, available_variants
+
+    def _scan_available_render_variants(self):
+        """Scan work directory for available denoised render variant names.
+
+        Returns:
+            set[str]: Lowercase variant names found in denoised renders
+                      (e.g., {'main', 'girrafe'}).
+        """
+        from services.file_operations import get_task_directory, fast_scandir, find_renders
+        from core.config import RENDERS_SUBPATH
+        from core.utils import truncate_at_suffix, extract_render_name
+
+        available = set()
+        task = self.app_state.task
+        task_dir = get_task_directory(self.app_state.shotpath, task)
+
+        if not os.path.isdir(task_dir):
+            return available
+
+        try:
+            dirs = fast_scandir(task_dir)
+            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+            if not render_folders:
+                return available
+
+            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+            render_dirs = sorted(next(os.walk(render_directory))[1])
+
+            # Find latest version with denoised renders
+            for d in reversed(render_dirs):
+                version_path = os.path.join(render_directory, d)
+                renders = find_renders(version_path)
+                if renders:
+                    for seq in renders:
+                        name = extract_render_name(os.path.basename(str(seq)))
+                        available.add(name.lower())
+                    break
+        except (StopIteration, Exception) as e:
+            logger.warning(f"Pass Builder: Error scanning render variants: {e}")
+
+        logger.info(f"Pass Builder: Available denoised render variants: {available}")
+        return available
+
+    def _on_ayon_products_fetched(self, result):
+        """Override: filter products to only those with available denoised renders."""
+        products, available_variants = result
+
+        if available_variants:
+            filtered = []
+            for p in products:
+                variant = self._extract_variant_from_product(p["name"])
+                if variant and variant.lower() in available_variants:
+                    filtered.append(p)
+
+            if filtered:
+                logger.info(
+                    f"Pass Builder: Showing {len(filtered)} products with denoised renders "
+                    f"(of {len(products)} total)"
+                )
+                products = filtered
+            else:
+                logger.info("Pass Builder: No products matched available renders, showing all")
+
+        # Delegate to mixin for combo population
+        super()._on_ayon_products_fetched(products)
+
     def _resolve_and_scan_publish(self, version_id):
         """Override: resolve AYON publish back to the WORK directory with denoised renders.
 
@@ -335,6 +420,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         self.ui.RenderPath.setText(staging_dir)
         self.app_state.searchpath = staging_dir
 
+        # In publish mode, filter renders to match selected product variant
+        if hasattr(self, '_publish_product_combo') and len(sequences) > 1:
+            sequences = self._filter_renders_by_product(sequences)
+
         # Store as plain FileSequence list (Pass Builder convention)
         self.app_state.renders = sequences
         self.ui.BuildPasses.setEnabled(False)
@@ -345,10 +434,51 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 self.ui.RendersList.addItem(os.path.basename(str(render_seq)))
             self.ui.RendersList.setEnabled(True)
             self.show_status(f"Found {len(sequences)} render(s)", "info")
+            # Auto-select first render after filtering
+            self.ui.RendersList.setCurrentRow(0)
         else:
             self.ui.RendersList.addItem("No Renders Found")
             self.ui.RendersList.setEnabled(False)
             self.show_status("No renders at resolved path", "warning")
+
+    def _extract_variant_from_product(self, product_name):
+        """Extract render variant from AYON product name.
+
+        Uses the render{Task}{Variant} convention.
+        e.g., renderLightingMain with task=lighting → Main
+        """
+        if not product_name:
+            return ""
+        task = self.app_state.task or ""
+        prefix = f"render{task.capitalize()}"
+        if product_name.lower().startswith(prefix.lower()) and len(product_name) > len(prefix):
+            return product_name[len(prefix):]
+        if product_name.lower().startswith("render") and len(product_name) > 6:
+            return product_name[6:]
+        return ""
+
+    def _filter_renders_by_product(self, sequences):
+        """Filter render sequences to match the selected publish product variant.
+
+        Falls back to all sequences if no match is found.
+        """
+        product_name = self._publish_product_combo.currentText()
+        variant = self._extract_variant_from_product(product_name)
+        if not variant:
+            return sequences
+
+        from core.utils import extract_render_name
+        filtered = [
+            seq for seq in sequences
+            if extract_render_name(os.path.basename(str(seq))).lower() == variant.lower()
+        ]
+
+        if filtered:
+            logger.info(f"Pass Builder: Filtered renders to {len(filtered)} matching variant '{variant}'")
+            return filtered
+
+        logger.info(f"Pass Builder: No renders matched variant '{variant}', showing all")
+        return sequences
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
@@ -479,22 +609,32 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             if item.text() in selectedpasses:
                 item.setSelected(True)
 
+    def _build_product_name(self, render_name):
+        """Construct AYON product name from render variant using render{Task}{Variant} convention."""
+        if not render_name:
+            return ""
+        task = self.app_state.task or ""
+        return f"render{task.capitalize()}{render_name.capitalize()}"
+
     def _populate_product_combo(self):
         """Populate the publish product combo box with existing AYON products.
 
-        Queries AYON for all products in the current shot folder, then
-        auto-selects the product that matches the selected render.
+        Queries AYON for render products in the current shot folder, then
+        auto-selects the product that matches the selected render using
+        the render{Task}{Variant} naming convention.
         """
         combo = self.ui.PublishProductCombo
 
-        # Determine default name based on source mode
-        if hasattr(self, '_publish_product_combo') and hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
-            render_name = self._publish_product_combo.currentText() or self.app_state.currentrender
-        else:
-            render_name = self.app_state.currentrender
+        # Use selected render name for product matching
+        render_name = self.app_state.currentrender
 
-        # Set the auto-derived name as current text immediately
-        combo.setCurrentText(render_name)
+        # Fallback: in publish mode use source product name if no render selected yet
+        if not render_name and hasattr(self, '_publish_product_combo') and hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
+            render_name = self._publish_product_combo.currentText()
+
+        # Build expected product name using AYON convention: render{Task}{Variant}
+        expected_product = self._build_product_name(render_name) if render_name else ""
+        combo.setCurrentText(expected_product or render_name)
 
         # Query AYON for existing products in background
         if not self.app_state.has_shot_context():
@@ -503,17 +643,20 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         def _query_products():
             from ayon.service import (
                 AYON_AVAILABLE, convert_to_ayon_folder_path,
-                get_folder_product_names, find_product_for_render,
+                get_folder_render_products, find_product_for_render,
             )
             if not AYON_AVAILABLE:
-                return [], render_name
+                return [], expected_product
 
             project_name = self.app_state.jobname
             folder_path = convert_to_ayon_folder_path(
                 self.app_state.shotpath, project_name
             )
-            product_names = get_folder_product_names(project_name, folder_path)
-            matched = find_product_for_render(project_name, folder_path, render_name) if render_name else ""
+            render_products = get_folder_render_products(project_name, folder_path)
+            product_names = [p["name"] for p in render_products]
+            matched = find_product_for_render(
+                project_name, folder_path, render_name, products=render_products
+            ) if render_name else ""
             return product_names, matched
 
         def _on_products(result):
@@ -528,6 +671,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                     combo.setCurrentIndex(idx)
                 else:
                     combo.setCurrentText(matched_name)
+            elif expected_product:
+                # No AYON match — use constructed name (will be created on publish)
+                combo.setCurrentText(expected_product)
 
         self.start_worker(_query_products, on_result=_on_products)
 
