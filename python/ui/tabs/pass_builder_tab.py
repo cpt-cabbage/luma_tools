@@ -382,26 +382,44 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             raise ValueError("Could not resolve filesystem path from AYON version")
 
         pub_dir = result["path"]
-        pub_files = result.get("files", [])
+        renders_path = result.get("renders_path")  # Work render dir (from data.rendersPath)
+        source_info = result.get("source_dir")      # dict with 'dir' and 'stem' from version.attrib.source
 
-        # Step 2: Try to use staging directory to find the correct render version.
-        # The staging dir is renders_path/output_subdirectory (e.g., .../v024/combined).
-        # Its parent is the render version folder where denoised/ lives.
+        # Step 2: Use renders_path from AYON metadata (set by luma_tools during publish).
+        # This is the most reliable source — it's the exact work directory that was
+        # used for the original pass build.
         work_render_path = None
-        if pub_dir and os.path.isdir(pub_dir):
-            parent = os.path.dirname(pub_dir)
-            if find_renders(parent):
-                work_render_path = parent
-                logger.info(f"Pass Builder: Found render version from staging dir: {work_render_path}")
+        if renders_path and os.path.isdir(renders_path) and find_renders(renders_path):
+            work_render_path = renders_path
+            logger.info(f"Pass Builder: Found render version from AYON data.rendersPath: {work_render_path}")
 
-        # Step 3: Fallback — search work directory by render name or latest version
+        # Step 3: Use version.attrib.source to find the matching render directory.
+        # The source field contains the DCC scene file path (e.g., Cha_sh0080_lighting_v024.hip).
+        # The scene filename stem matches the render version directory name under img/renders/.
+        if not work_render_path and source_info:
+            scene_stem = source_info["stem"]  # e.g. "Cha_sh0080_lighting_v024"
+            task_dir = get_task_directory(self.app_state.shotpath, task)
+            if os.path.isdir(task_dir):
+                dirs = fast_scandir(task_dir)
+                render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+                if render_folders:
+                    render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+                    candidate = os.path.join(render_directory, scene_stem)
+                    if os.path.isdir(candidate) and find_renders(candidate):
+                        work_render_path = candidate
+                        logger.info(
+                            f"Pass Builder: Matched render dir from version.attrib.source "
+                            f"scene stem '{scene_stem}': {work_render_path}"
+                        )
+                    else:
+                        logger.info(
+                            f"Pass Builder: Scene stem '{scene_stem}' did not match a render "
+                            f"directory with denoised renders at {candidate}"
+                        )
+
+        # Step 4: Last resort — search work directory for latest version with denoised renders.
         if not work_render_path:
-            render_name = None
-            if pub_files:
-                first_file = os.path.basename(pub_files[0])
-                render_name = extract_render_name(first_file)
-                logger.info(f"Pass Builder: Extracted render name from publish: {render_name}")
-
+            logger.info("Pass Builder: No rendersPath or source match, falling back to directory scan")
             task_dir = get_task_directory(self.app_state.shotpath, task)
             if not os.path.isdir(task_dir):
                 raise FileNotFoundError(f"Task directory not found: {task_dir}")
@@ -418,26 +436,21 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             except StopIteration:
                 raise FileNotFoundError(f"No render versions in {render_directory}")
 
+            # Latest folder with denoised renders
             matched_dir = None
-            if render_name:
-                for d in render_dirs:
-                    if render_name in d:
-                        matched_dir = d
-                        break
-
-            if not matched_dir:
-                for d in reversed(render_dirs):
-                    version_path = os.path.join(render_directory, d)
-                    if find_renders(version_path):
-                        matched_dir = d
-                        break
+            for d in reversed(render_dirs):
+                version_path = os.path.join(render_directory, d)
+                if find_renders(version_path):
+                    matched_dir = d
+                    break
 
             if not matched_dir:
                 raise FileNotFoundError(
-                    f"Could not find render folder matching '{render_name}' in {render_directory}"
+                    f"No render folder with denoised renders found in {render_directory}"
                 )
 
             work_render_path = os.path.join(render_directory, matched_dir)
+            logger.info(f"Pass Builder: Fallback to latest render folder: {matched_dir}")
 
         logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
 

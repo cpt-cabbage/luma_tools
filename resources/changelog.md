@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.9
+- Improve task and product finding
+
 ## Version 0.6.5.8
 ● Pass Builder: Fix product-render correspondence in publish mode
 

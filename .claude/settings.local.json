@@ -122,7 +122,8 @@
       "Read(//tmp/**)",
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/pass_builder.ui -o resources/ui/tabs/_compiled/ui_pass_builder.py -g python)",
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/republish.ui -o resources/ui/tabs/_compiled/ui_republish.py -g python)",
-      "Bash(pythonvenvScriptspython.exe -c \"from ayon_core.pipeline import Anatomy; print\\(Anatomy.__doc__[:500]\\)\")"
+      "Bash(pythonvenvScriptspython.exe -c \"from ayon_core.pipeline import Anatomy; print\\(Anatomy.__doc__[:500]\\)\")",
+      "Bash(python/venv/Scripts/python.exe -c \":*)"
     ],
     "deny": [
       "Read(./python/venv/**)",

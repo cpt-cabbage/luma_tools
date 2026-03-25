@@ -33,6 +33,7 @@ try:
         get_product_by_name,
         get_products,
         get_last_version_by_product_id,
+        get_version_by_id,
         get_versions,
         get_representations,
     )
@@ -406,6 +407,56 @@ def get_product_version_list(project_name: str, product_id: str) -> list:
         return []
 
 
+def _resolve_version_source(project_name: str, version_id: str):
+    """Resolve the work source path from version.attrib.source.
+
+    AYON stores the source file path on every published version in attrib.source.
+    For DCC publishes this is the scene file, e.g.
+    ``{root[work]}/Changan/shots/sh0080/work/lighting/Cha_sh0080_lighting_v024.hip``.
+    The scene filename stem (``Cha_sh0080_lighting_v024``) typically matches the
+    render version directory name under ``img/renders/``.
+
+    Returns:
+        dict or None: ``{'dir': str, 'stem': str}`` where *dir* is the resolved
+        parent directory and *stem* is the filename without extension, or None.
+    """
+    try:
+        version = get_version_by_id(project_name, version_id, fields=["attrib.source"])
+        source_raw = (version or {}).get("attrib", {}).get("source", "")
+        if not source_raw:
+            return None
+
+        logger.info(f"[_resolve_version_source] Raw version.attrib.source: {source_raw}")
+
+        # Resolve {root[*]} tokens using project anatomy
+        resolved = source_raw
+        if "{root" in resolved:
+            try:
+                anatomy = Anatomy(project_name)
+                for root_name, root_path in anatomy.roots.items():
+                    token = "{root[" + root_name + "]}"
+                    root_str = str(root_path).rstrip("/\\")
+                    resolved = resolved.replace(token, root_str)
+            except Exception as e:
+                logger.warning(f"[_resolve_version_source] Could not resolve roots via Anatomy: {e}")
+                return None
+
+        # Still has unresolved tokens — give up
+        if "{root" in resolved:
+            logger.warning(f"[_resolve_version_source] Unresolved root tokens in: {resolved}")
+            return None
+
+        resolved = resolved.replace("/", os.sep).replace("\\", os.sep)
+        source_dir = os.path.dirname(resolved) if os.path.splitext(resolved)[1] else resolved
+        stem = os.path.splitext(os.path.basename(resolved))[0]
+        logger.info(f"[_resolve_version_source] Resolved source dir: {source_dir}, stem: {stem}")
+        return {"dir": source_dir, "stem": stem}
+
+    except Exception as e:
+        logger.warning(f"[_resolve_version_source] Error: {e}")
+        return None
+
+
 def resolve_version_render_path(project_name: str, version_id: str):
     """
     Resolve the filesystem path from an AYON version's EXR representation.
@@ -413,13 +464,20 @@ def resolve_version_render_path(project_name: str, version_id: str):
     Looks for a representation named 'exr' in the given version and extracts
     the path to the directory containing the published files.
 
+    Also queries ``version.attrib.source`` (set by AYON integration on all
+    publishes) to provide a fallback work-directory path when the custom
+    ``data.rendersPath`` is not available.
+
     Args:
         project_name: Name of the AYON project
         version_id: UUID of the version
 
     Returns:
-        dict or None: {'path': str, 'files': list[str]} or None if not found.
-        'path' is the directory, 'files' is the list of filenames.
+        dict or None: {'path': str, 'files': list[str], 'renders_path': str|None,
+        'source_dir': str|None} or None if not found.
+        'path' is the published directory, 'files' is the list of filenames,
+        'renders_path' is the original work render directory (luma_tools metadata),
+        'source_dir' is the directory derived from version.attrib.source.
     """
     if not AYON_AVAILABLE:
         return None
@@ -463,21 +521,21 @@ def resolve_version_render_path(project_name: str, version_id: str):
         )
 
         resolved_path = None
+        renders_path = None
         source = None
 
-        # Priority 1: stagingDir in data (set by our publish code)
-        if data.get("stagingDir"):
-            resolved_path = data["stagingDir"]
-            source = "data.stagingDir"
-        # Priority 2: stagingDir at top level
-        elif target_rep.get("stagingDir"):
-            resolved_path = target_rep["stagingDir"]
-            source = "top-level stagingDir"
-        # Priority 3: attrib.path (AYON server stores published file path here)
-        elif attrib.get("path"):
+        # Priority 1: data.rendersPath (set by luma_tools publish — persisted by AYON)
+        if data.get("rendersPath"):
+            renders_path = data["rendersPath"]
+            logger.info(f"[resolve_version_render_path] Found rendersPath in data: {renders_path}")
+        # Note: stagingDir is NOT persisted by AYON after file integration,
+        # so we skip checking data.stagingDir and top-level stagingDir.
+
+        # Priority 2: attrib.path (AYON server stores published file path here)
+        if attrib.get("path"):
             resolved_path = attrib["path"]
             source = "attrib.path"
-        # Priority 4: files list - reconstruct directory from first file path
+        # Priority 3: files list - reconstruct directory from first file path
         elif target_rep.get("files"):
             files = target_rep["files"]
             if files:
@@ -489,7 +547,7 @@ def resolve_version_render_path(project_name: str, version_id: str):
                     resolved_path = str(first_file)
                 source = "files[0]"
 
-        if not resolved_path:
+        if not resolved_path and not renders_path:
             logger.warning(
                 f"[resolve_version_render_path] No path found in representation "
                 f"'{target_rep.get('name')}' for version {version_id}"
@@ -497,12 +555,19 @@ def resolve_version_render_path(project_name: str, version_id: str):
             return None
 
         # Normalize path separators
-        resolved_path = resolved_path.replace("/", os.sep).replace("\\", os.sep)
+        if resolved_path:
+            resolved_path = resolved_path.replace("/", os.sep).replace("\\", os.sep)
 
-        # If the resolved path points to a file (not a directory), use its parent
-        if os.path.splitext(resolved_path)[1]:
-            resolved_path = os.path.dirname(resolved_path)
-            source += " (extracted directory)"
+            # If the resolved path points to a file (not a directory), use its parent
+            if os.path.splitext(resolved_path)[1]:
+                resolved_path = os.path.dirname(resolved_path)
+                source += " (extracted directory)"
+
+        if renders_path:
+            renders_path = renders_path.replace("/", os.sep).replace("\\", os.sep)
+
+        # Query version.attrib.source for work-directory fallback
+        source_dir = _resolve_version_source(project_name, version_id)
 
         # Extract file names from representation
         rep_files = []
@@ -513,8 +578,16 @@ def resolve_version_render_path(project_name: str, version_id: str):
             else:
                 rep_files.append(str(f))
 
-        logger.info(f"[resolve_version_render_path] Resolved from {source}: {resolved_path} ({len(rep_files)} files)")
-        return {"path": resolved_path, "files": rep_files}
+        logger.info(
+            f"[resolve_version_render_path] Resolved from {source}: {resolved_path} "
+            f"(rendersPath: {renders_path}, source_dir: {source_dir}, {len(rep_files)} files)"
+        )
+        return {
+            "path": resolved_path,
+            "files": rep_files,
+            "renders_path": renders_path,
+            "source_dir": source_dir,
+        }
 
     except Exception as e:
         logger.error(f"[resolve_version_render_path] Error resolving path: {e}")
@@ -784,6 +857,10 @@ def create_ayon_metadata(
     staging_dir_path = normalize_path(staging_dir_path)
 
     # Create representations
+    # Note: stagingDir is transient — AYON strips it after file integration.
+    # We persist renders_path in data.rendersPath so we can map published
+    # versions back to their source render directory later.
+    renders_path_normalized = normalize_path(renders_path)
     representations = [{
         "name": "exr",
         "ext": "exr",
@@ -792,6 +869,9 @@ def create_ayon_metadata(
         "frameStart": start_frame,
         "frameEnd": end_frame,
         "stagingDir": staging_dir_path,
+        "data": {
+            "rendersPath": renders_path_normalized,
+        },
         "tags": ["review"],
         "colorspaceData": {
             "colorspace": AYON_COLORSPACE,
