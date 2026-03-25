@@ -5,6 +5,7 @@ Handles render scanning, pass detection, and pass building functionality.
 """
 
 import os
+import re
 import logging
 import threading
 from PySide6 import QtWidgets
@@ -269,41 +270,59 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
     def _scan_available_render_variants(self):
         """Scan work directory for available denoised render variant names.
 
+        If a task is set, scans only that task directory. Otherwise scans all
+        task directories under work/ to support task-less browsing.
+
         Returns:
-            set[str]: Lowercase variant names found in denoised renders
-                      (e.g., {'main', 'girrafe'}).
+            dict[str, set[str]]: Mapping of task_lowercase → set of variant
+            names (lowercase). e.g., {'lighting': {'main', 'girrafe'}}.
         """
         from services.file_operations import get_task_directory, fast_scandir, find_renders
         from core.config import RENDERS_SUBPATH
         from core.utils import truncate_at_suffix, extract_render_name
 
-        available = set()
+        available = {}
+        shot_path = self.app_state.shotpath
+
+        # Determine which task directories to scan
         task = self.app_state.task
-        task_dir = get_task_directory(self.app_state.shotpath, task)
-
-        if not os.path.isdir(task_dir):
-            return available
-
-        try:
-            dirs = fast_scandir(task_dir)
-            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-            if not render_folders:
+        if task:
+            tasks_to_scan = [task]
+        else:
+            work_dir = truncate_at_suffix(shot_path, "work")
+            if os.path.isdir(work_dir):
+                tasks_to_scan = [
+                    d for d in os.listdir(work_dir)
+                    if os.path.isdir(os.path.join(work_dir, d))
+                ]
+            else:
                 return available
 
-            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-            render_dirs = sorted(next(os.walk(render_directory))[1])
+        for t in tasks_to_scan:
+            task_dir = get_task_directory(shot_path, t)
+            if not os.path.isdir(task_dir):
+                continue
+            try:
+                dirs = fast_scandir(task_dir)
+                render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+                if not render_folders:
+                    continue
 
-            # Find latest version with denoised renders
-            for d in reversed(render_dirs):
-                version_path = os.path.join(render_directory, d)
-                renders = find_renders(version_path)
-                if renders:
-                    for seq in renders:
-                        name = extract_render_name(os.path.basename(str(seq)))
-                        available.add(name.lower())
-                    break
-        except (StopIteration, Exception) as e:
-            logger.warning(f"Pass Builder: Error scanning render variants: {e}")
+                render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+                render_dirs = sorted(next(os.walk(render_directory))[1])
+
+                for d in reversed(render_dirs):
+                    version_path = os.path.join(render_directory, d)
+                    renders = find_renders(version_path)
+                    if renders:
+                        variants = set()
+                        for seq in renders:
+                            name = extract_render_name(os.path.basename(str(seq)))
+                            variants.add(name.lower())
+                        available[t.lower()] = variants
+                        break
+            except (StopIteration, Exception) as e:
+                logger.warning(f"Pass Builder: Error scanning render variants for task '{t}': {e}")
 
         logger.info(f"Pass Builder: Available denoised render variants: {available}")
         return available
@@ -315,8 +334,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         if available_variants:
             filtered = []
             for p in products:
-                variant = self._extract_variant_from_product(p["name"])
-                if variant and variant.lower() in available_variants:
+                task, variant = self._parse_render_product(p["name"])
+                if task and variant and task in available_variants and variant.lower() in available_variants[task]:
                     filtered.append(p)
 
             if filtered:
@@ -334,79 +353,99 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
     def _resolve_and_scan_publish(self, version_id):
         """Override: resolve AYON publish back to the WORK directory with denoised renders.
 
-        Instead of using the publish path directly (which contains the already-combined EXR),
-        we extract the render name from the published files and search the work directory
-        for the matching render folder with denoised renders.
+        The staging directory stored during publish is renders_path/output_subdirectory
+        (e.g., .../Cha_sh0080_lighting_v024/combined). Going up one level gives the
+        render version folder where denoised/ lives. This correctly maps each AYON
+        version to its source render version.
+
+        The task is derived from the selected product name (render{Task}{Variant})
+        so this works even when no task is selected in the AYON context.
         """
         from ayon.service import resolve_version_render_path
         from services.file_operations import get_task_directory, fast_scandir, find_renders
         from core.config import RENDERS_SUBPATH
         from core.utils import truncate_at_suffix, extract_render_name
 
+        # Derive task from the selected product name (e.g., renderLightingMain → lighting)
+        product_name = self._publish_product_combo.currentText()
+        derived_task, _ = self._parse_render_product(product_name)
+        task = self.app_state.task or derived_task
+        if not task:
+            raise ValueError(
+                f"Cannot determine task from product '{product_name}'. "
+                "Select a task or choose a render product."
+            )
+
         # Step 1: Get published file info from AYON
         result = resolve_version_render_path(self.app_state.jobname, version_id)
         if not result:
             raise ValueError("Could not resolve filesystem path from AYON version")
 
-        pub_files = result.get("files", [])
         pub_dir = result["path"]
+        pub_files = result.get("files", [])
 
-        # Step 2: Extract render name from published filename
-        # e.g., "Cha_sh0080_Main_v001.1001.exr" → "Cha_sh0080_Main_v001"
-        render_name = None
-        if pub_files:
-            first_file = os.path.basename(pub_files[0])
-            render_name = extract_render_name(first_file)
-            logger.info(f"Pass Builder: Extracted render name from publish: {render_name}")
+        # Step 2: Try to use staging directory to find the correct render version.
+        # The staging dir is renders_path/output_subdirectory (e.g., .../v024/combined).
+        # Its parent is the render version folder where denoised/ lives.
+        work_render_path = None
+        if pub_dir and os.path.isdir(pub_dir):
+            parent = os.path.dirname(pub_dir)
+            if find_renders(parent):
+                work_render_path = parent
+                logger.info(f"Pass Builder: Found render version from staging dir: {work_render_path}")
 
-        # Step 3: Find the work directory render path
-        task = self.app_state.task
-        task_dir = get_task_directory(self.app_state.shotpath, task)
+        # Step 3: Fallback — search work directory by render name or latest version
+        if not work_render_path:
+            render_name = None
+            if pub_files:
+                first_file = os.path.basename(pub_files[0])
+                render_name = extract_render_name(first_file)
+                logger.info(f"Pass Builder: Extracted render name from publish: {render_name}")
 
-        if not os.path.isdir(task_dir):
-            raise FileNotFoundError(f"Task directory not found: {task_dir}")
+            task_dir = get_task_directory(self.app_state.shotpath, task)
+            if not os.path.isdir(task_dir):
+                raise FileNotFoundError(f"Task directory not found: {task_dir}")
 
-        dirs = fast_scandir(task_dir)
-        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-        if not render_folders:
-            raise FileNotFoundError(f"No render directory found in {task_dir}")
+            dirs = fast_scandir(task_dir)
+            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+            if not render_folders:
+                raise FileNotFoundError(f"No render directory found in {task_dir}")
 
-        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
 
-        # Step 4: Find matching render version folder
-        try:
-            render_dirs = sorted(next(os.walk(render_directory))[1])
-        except StopIteration:
-            raise FileNotFoundError(f"No render versions in {render_directory}")
+            try:
+                render_dirs = sorted(next(os.walk(render_directory))[1])
+            except StopIteration:
+                raise FileNotFoundError(f"No render versions in {render_directory}")
 
-        # Match by render name if available, otherwise use latest
-        matched_dir = None
-        if render_name:
-            for d in render_dirs:
-                if render_name in d:
-                    matched_dir = d
-                    break
+            matched_dir = None
+            if render_name:
+                for d in render_dirs:
+                    if render_name in d:
+                        matched_dir = d
+                        break
 
-        if not matched_dir:
-            # Fallback: find latest with denoised renders
-            for d in reversed(render_dirs):
-                version_path = os.path.join(render_directory, d)
-                if find_renders(version_path):
-                    matched_dir = d
-                    break
+            if not matched_dir:
+                for d in reversed(render_dirs):
+                    version_path = os.path.join(render_directory, d)
+                    if find_renders(version_path):
+                        matched_dir = d
+                        break
 
-        if not matched_dir:
-            raise FileNotFoundError(
-                f"Could not find render folder matching '{render_name}' in {render_directory}"
-            )
+            if not matched_dir:
+                raise FileNotFoundError(
+                    f"Could not find render folder matching '{render_name}' in {render_directory}"
+                )
 
-        work_render_path = os.path.join(render_directory, matched_dir)
+            work_render_path = os.path.join(render_directory, matched_dir)
+
         logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
 
-        # Step 5: Set working_dir for pass file cache
+        # Step 4: Set working_dir for pass file cache
+        render_directory = os.path.dirname(work_render_path)
         self.app_state.working_dir = truncate_at_suffix(render_directory, task)
 
-        # Step 6: Scan for denoised renders
+        # Step 5: Scan for denoised renders
         renders = find_renders(work_render_path)
         if not renders:
             raise FileNotFoundError(f"No denoised renders found in {work_render_path}")
@@ -441,21 +480,27 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self.ui.RendersList.setEnabled(False)
             self.show_status("No renders at resolved path", "warning")
 
-    def _extract_variant_from_product(self, product_name):
-        """Extract render variant from AYON product name.
+    @staticmethod
+    def _parse_render_product(product_name):
+        """Parse AYON render product name into (task, variant).
 
-        Uses the render{Task}{Variant} convention.
-        e.g., renderLightingMain with task=lighting → Main
+        Product names follow render{Task}{Variant} CamelCase convention.
+        e.g., renderLightingMain → ('lighting', 'Main')
+              renderLookdevBeauty → ('lookdev', 'Beauty')
+
+        Returns:
+            tuple: (task_lowercase, variant) or ('', '') if not parseable.
         """
-        if not product_name:
-            return ""
-        task = self.app_state.task or ""
-        prefix = f"render{task.capitalize()}"
-        if product_name.lower().startswith(prefix.lower()) and len(product_name) > len(prefix):
-            return product_name[len(prefix):]
-        if product_name.lower().startswith("render") and len(product_name) > 6:
-            return product_name[6:]
-        return ""
+        if not product_name or not product_name.startswith("render"):
+            return "", ""
+        remainder = product_name[6:]  # strip 'render'
+        if not remainder:
+            return "", ""
+        # Split on uppercase boundaries: 'LightingMain' → ['Lighting', 'Main']
+        parts = re.findall(r"[A-Z][a-z0-9]*", remainder)
+        if len(parts) < 2:
+            return "", ""
+        return parts[0].lower(), "".join(parts[1:])
 
     def _filter_renders_by_product(self, sequences):
         """Filter render sequences to match the selected publish product variant.
@@ -463,7 +508,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         Falls back to all sequences if no match is found.
         """
         product_name = self._publish_product_combo.currentText()
-        variant = self._extract_variant_from_product(product_name)
+        _, variant = self._parse_render_product(product_name)
         if not variant:
             return sequences
 
@@ -609,11 +654,20 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             if item.text() in selectedpasses:
                 item.setSelected(True)
 
-    def _build_product_name(self, render_name):
-        """Construct AYON product name from render variant using render{Task}{Variant} convention."""
+    def _build_product_name(self, render_name, task=None):
+        """Construct AYON product name from render variant using render{Task}{Variant} convention.
+
+        If task is not provided, derives it from app_state.task or the selected
+        source product name.
+        """
         if not render_name:
             return ""
-        task = self.app_state.task or ""
+        if not task:
+            task = self.app_state.task
+        if not task and hasattr(self, '_publish_product_combo'):
+            task, _ = self._parse_render_product(self._publish_product_combo.currentText())
+        if not task:
+            return ""
         return f"render{task.capitalize()}{render_name.capitalize()}"
 
     def _populate_product_combo(self):

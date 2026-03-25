@@ -1,5 +1,17 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.8
+● Pass Builder: Fix product-render correspondence in publish mode
+
+  - Filter denoised renders to match selected product variant
+    (renderLightingMain → only shows Main, not girrafe)
+  - Fix Publish To autofill to construct proper product name from
+    selected render using render{Task}{Variant} convention
+  - Filter Publish To dropdown to only show render-type products
+  - Hide products from source dropdown when no matching denoised
+    renders exist on disk (scans work dir for available variants)
+  - Extract shared _extract_variant_from_product() helper
+
 ## Version 0.6.5.7
 rePublish:                                                                                                                                                                               - Add independent _run_initial_scan() so tab no longer depends on
     Shot Cleaner tab for render path discovery at startup
