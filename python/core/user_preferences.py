@@ -155,8 +155,10 @@ def get_workflow_estimated_time_per_frame(workflow_preset: str) -> Optional[floa
     if not times:
         return None
     sorted_times = sorted(times)
-    mid = len(sorted_times) // 2
-    return sorted_times[mid]
+    n = len(sorted_times)
+    if n % 2 == 0:
+        return (sorted_times[n // 2 - 1] + sorted_times[n // 2]) / 2.0
+    return sorted_times[n // 2]
 
 
 # ============================================================================

@@ -216,6 +216,8 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_source_changed(self, value=None):
         """Override: extra visibility logic for version spinbox and UseCurrentTask."""
+        if not hasattr(self, '_source_manager'):
+            return
         # Call base for browse/label visibility
         super()._on_source_changed(value)
 
@@ -402,7 +404,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
         """Handle publish to AYON button click, or cancel if already publishing."""
         # If already publishing, cancel the operation
         if getattr(self, '_is_publishing', False):
-            self._cancel_event.set()
+            cancel_event = getattr(self, '_cancel_event', None)
+            if cancel_event:
+                cancel_event.set()
             self.ui.RePublishPublish.setEnabled(False)
             self.show_status("Cancelling publish...", "warning")
             return
@@ -448,17 +452,21 @@ class RePublishTab(RenderScanMixin, BaseTab):
         )
 
         # Use BaseTab helper for worker management
-        self.start_worker(
-            self._publish_worker,
-            task,
-            use_farm,
-            product_name,
-            use_current_task,
-            cancel_event,
-            on_result=self._on_publish_complete,
-            on_error=self._on_publish_error,
-            on_progress=self._on_publish_progress
-        )
+        try:
+            self.start_worker(
+                self._publish_worker,
+                task,
+                use_farm,
+                product_name,
+                use_current_task,
+                cancel_event,
+                on_result=self._on_publish_complete,
+                on_error=self._on_publish_error,
+                on_progress=self._on_publish_progress
+            )
+        except Exception:
+            self._reset_publish_button()
+            raise
 
     def _publish_worker(self, task, use_farm, product_name, use_current_task, cancel_event, progress_callback):
         """Worker thread function for publishing to AYON."""

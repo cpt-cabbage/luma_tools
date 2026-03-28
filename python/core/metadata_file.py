@@ -195,9 +195,10 @@ class MetadataFile:
         Returns:
             True if saved successfully, False on error
         """
-        data = self.load()
-        data[key] = value
-        return self.save(data)
+        with self._lock:
+            data = self.load()
+            data[key] = value
+            return self.save(data)
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -272,7 +273,7 @@ def clear_metadata_file_cache(directory: str = None, filename: str = None) -> No
     """
     with _metadata_file_cache_lock:
         if directory and filename:
-            key = os.path.join(directory, filename)
+            key = os.path.normpath(os.path.join(directory, filename))
             _metadata_file_cache.pop(key, None)
         else:
             _metadata_file_cache.clear()

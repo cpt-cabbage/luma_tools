@@ -73,6 +73,8 @@ def normalize_path(path):
     Returns:
         str: Path with forward slashes
     """
+    if not path:
+        return path
     return path.replace("\\", "/")
 
 
@@ -210,7 +212,10 @@ def replace_frame_tokens(template, frame_num):
                   lambda m: f"{frame_num:0{m.group(1)}d}", template)
 
 
-def load_json(path, default=None):
+_MISSING = object()
+
+
+def load_json(path, default=_MISSING):
     """
     Load JSON file with error handling.
 
@@ -222,13 +227,13 @@ def load_json(path, default=None):
         Loaded JSON data or default value
     """
     if not os.path.exists(path):
-        return default if default is not None else {}
+        return {} if default is _MISSING else default
     try:
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         logger.warning(f"Error loading JSON from {path}: {e}")
-        return default if default is not None else {}
+        return {} if default is _MISSING else default
 
 
 def save_json(path, data, pretty=True):

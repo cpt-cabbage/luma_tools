@@ -206,6 +206,8 @@ def clear_settings_cache():
         _user_settings_cache = None
         _global_settings_cache = None
         _global_settings_path_cache = None
+    from .logging_utils import clear_path_cache
+    clear_path_cache()
 
 
 def reload_settings():
@@ -376,7 +378,16 @@ class SettingsAccessor:
     def set(self, key: str, value: Any, verbose: bool = True):
         """Set a settings value by key. Atomic load-modify-save under lock."""
         with _settings_cache_lock:
-            settings = self._load_fn()
+            # Read from live cache directly (not a copy) to avoid lost-update race
+            # when two threads set different keys concurrently
+            if self.settings_type == 'global':
+                cache = _global_settings_cache
+            else:
+                cache = _user_settings_cache
+            # If cache is empty, load it first
+            if cache is None:
+                cache = self._load_fn()
+            settings = dict(cache)  # shallow copy for save
             settings[key] = value
             self._save_fn(settings)
         if verbose:

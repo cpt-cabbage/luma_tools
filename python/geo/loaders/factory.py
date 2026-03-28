@@ -6,6 +6,7 @@ Implements priority-based loader selection based on format and library availabil
 """
 
 import os
+import threading
 from typing import Dict, List
 
 from geo.loader import ModelData
@@ -32,13 +33,18 @@ SUPPORTED_EXTENSIONS = {
 }
 
 # Singleton loader instances
+_loaders_lock = threading.RLock()
 _loaders = None
 
 
 def _get_loaders() -> List:
     """Get all loader instances (lazy initialization)."""
     global _loaders
-    if _loaders is None:
+    if _loaders is not None:
+        return _loaders
+    with _loaders_lock:
+        if _loaders is not None:
+            return _loaders
         _loaders = [
             USDModelLoader(),
             TrimeshModelLoader(),
@@ -46,7 +52,7 @@ def _get_loaders() -> List:
             Open3DModelLoader(),
             SMPLModelLoader(),
         ]
-    return _loaders
+        return _loaders
 
 
 def get_format_type(path: str) -> str:

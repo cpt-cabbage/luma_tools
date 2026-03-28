@@ -275,7 +275,7 @@ class DirectoryScanner:
 
             # Set render path
             if self.state.latestrender:
-                self.state.searchpath = render_directory + "\\" + self.state.latestrender
+                self.state.searchpath = os.path.join(render_directory, self.state.latestrender)
                 self.signals.set_label_text.emit('RenderPath', self.state.searchpath)
                 currentver = get_trailing_number(self.state.latestrender)
                 self.signals.set_spinbox_value.emit('CurrentVer', int(currentver))
@@ -361,7 +361,7 @@ class DirectoryScanner:
             render_directory: Path to render directory
         """
         if render_directory != "" and self.state.latestrender:
-            searchpath = render_directory + "\\" + self.state.latestrender
+            searchpath = os.path.join(render_directory, self.state.latestrender)
             self.signals.set_label_text.emit('MP4RenderPath', searchpath)
             currentver = get_trailing_number(self.state.latestrender)
             self.signals.set_spinbox_value.emit('MP4CurrentVer', int(currentver))
@@ -375,7 +375,7 @@ class DirectoryScanner:
             render_directory: Path to render directory
         """
         if render_directory != "" and self.state.latestrender:
-            searchpath = render_directory + "\\" + self.state.latestrender
+            searchpath = os.path.join(render_directory, self.state.latestrender)
             self.state.republish_searchpath = searchpath
             self.signals.set_label_text.emit('RePublishRenderPath', searchpath)
             currentver = get_trailing_number(self.state.latestrender)

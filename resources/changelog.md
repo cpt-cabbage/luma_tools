@@ -1,5 +1,14 @@
 # Luma Tools Changelog
 
+## Version 0.6.5.12
+- Fix some casses where OIIO would fail
+
+## Version 0.6.5.11
+- Improve version filtering
+
+## Version 0.6.5.10
+● Pass Builder: Fix publish mode resolving same render dir for all versions
+
 ## Version 0.6.5.9
 - Improve task and product finding
 

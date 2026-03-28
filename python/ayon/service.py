@@ -6,6 +6,7 @@ Includes publish strategy pattern for farm vs local publishing.
 """
 
 import os
+import re
 import subprocess
 import logging
 import time
@@ -175,7 +176,7 @@ def submit_oiio_to_deadline(
     deadline_command.append('-arguments')
     deadline_command.append(f'{oiio_args}')
     deadline_command.append('-frames')
-    deadline_command.append(f'{start_frame}-{end_frame}step1')
+    deadline_command.append(f'{start_frame}-{end_frame}')
     deadline_command.append('-chunksize')
     deadline_command.append(str(DEADLINE_CHUNK_SIZE))
     deadline_command.append('-pool')
@@ -226,13 +227,10 @@ def convert_to_ayon_folder_path(filesystem_path, project_name):
         path = path.split("/work")[0]
 
     # Convert filesystem path to AYON hierarchy path
-    if project_name in path:
-        # Remove root and project name, keep only hierarchy
-        parts = path.split(f"{project_name}/", 1)
+    if f"/{project_name}/" in path:
+        parts = path.split(f"/{project_name}/", 1)
         if len(parts) == 2:
             path = "/" + parts[1]
-        else:
-            logger.warning(f"Project name '{project_name}' found in path but not followed by '/': {path}")
 
     return path
 
@@ -420,6 +418,9 @@ def _resolve_version_source(project_name: str, version_id: str):
         dict or None: ``{'dir': str, 'stem': str}`` where *dir* is the resolved
         parent directory and *stem* is the filename without extension, or None.
     """
+    if not AYON_AVAILABLE:
+        return None
+
     try:
         version = get_version_by_id(project_name, version_id, fields=["attrib.source"])
         source_raw = (version or {}).get("attrib", {}).get("source", "")
@@ -714,8 +715,6 @@ def create_ayon_metadata_single_file(
     Returns:
         dict: Metadata dictionary ready for AYON publish
     """
-    logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
-
     # Normalize path
     file_path = normalize_path(file_path)
     staging_dir = os.path.dirname(file_path)
@@ -839,8 +838,6 @@ def create_ayon_metadata(
     Returns:
         dict: Metadata dictionary
     """
-    logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
-
     project_code = _resolve_project_code(project_name, project_code)
 
     if task_type is None:
@@ -934,7 +931,7 @@ def create_ayon_metadata(
             "project": {"name": project_name, "code": project_code},
             "folder": {"name": os.path.basename(folder_path)},
             "task": {"name": task, "type": task_type},
-            "root": {"work": renders_path.split("work")[0] + "work"}
+            "root": {"work": re.split(r'[/\\]work(?=[/\\]|$)', renders_path, maxsplit=1)[0] + "/work"}
         }
     }
 
@@ -967,8 +964,6 @@ def write_metadata_file(metadata_dict, output_path):
     Returns:
         str: Path to written metadata file
     """
-    logger = Logger.get_logger(__name__) if AYON_AVAILABLE else None
-
     # Validate output_path
     if not output_path or not output_path.strip():
         raise ValueError("Output path cannot be empty")
@@ -983,15 +978,12 @@ def write_metadata_file(metadata_dict, output_path):
         # If no directory in path, use current working directory
         output_path = os.path.join(os.getcwd(), output_path)
 
-    # Use module-level logger (local logger may be None when AYON unavailable)
-    _logger = logging.getLogger(__name__)
-
     # Write metadata
     if not save_json(output_path, metadata_dict):
-        _logger.error(f"Failed to write metadata file: {output_path}")
+        logger.error(f"Failed to write metadata file: {output_path}")
         return None
 
-    _logger.info(f"Successfully wrote metadata to: {output_path}")
+    logger.info(f"Successfully wrote metadata to: {output_path}")
 
     # Verify required fields
     root_keys = list(metadata_dict.keys())
@@ -999,9 +991,9 @@ def write_metadata_file(metadata_dict, output_path):
     missing_fields = [f for f in required_fields if f not in root_keys]
 
     if missing_fields:
-        _logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
+        logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
     else:
-        _logger.info(f"All required fields present: {required_fields}")
+        logger.info(f"All required fields present: {required_fields}")
 
     return output_path
 
@@ -1160,10 +1152,13 @@ def publish_to_ayon_local(
             return True
         else:
             # Check for SiteAlreadyPresentError - this error occurs AFTER successful integration
-            # The IntegrateAsset plugin completes before IntegrateSiteSync fails
+            # The IntegrateAsset plugin completes before IntegrateSiteSync fails.
+            # Only treat as success if IntegrateAsset ran AND the only failure is SiteSync.
             all_output = "\n".join(list(stdout_lines) + list(stderr_lines))
-            if "SiteAlreadyPresentError" in all_output and "IntegrateAsset" in all_output:
-                logger.info('AYON Publish completed successfully')
+            if ("SiteAlreadyPresentError" in all_output
+                    and "IntegrateAsset" in all_output
+                    and "IntegrateSiteSync" in all_output):
+                logger.info('AYON Publish completed successfully (SiteAlreadyPresentError in IntegrateSiteSync only)')
                 return True
 
             logger.error(f'AYON Publish Local Process Failed with code {process.returncode}')
@@ -1209,11 +1204,11 @@ def submit_ayon_publish_to_deadline(
     Returns:
         str: Publish job ID or None if failed
     """
+    ayon_logger = Logger.get_logger(__name__) if AYON_AVAILABLE else logger
+
     if not AYON_AVAILABLE or not DEADLINE_AVAILABLE:
         logger.warning("AYON or Deadline not available, skipping publish")
         return None
-
-    logger = Logger.get_logger(__name__)
 
     try:
         # Get project settings and create Deadline addon
@@ -1350,7 +1345,9 @@ class PublishStrategy(ABC):
 
     def _build_paths(self, renders_path, shot, project_name):
         """Build working directory and folder paths."""
-        working_dir = renders_path.split("work")[0] + "work"
+        # Split on /work or \work path boundary (not substring match)
+        parts = re.split(r'[/\\]work(?=[/\\]|$)', renders_path, maxsplit=1)
+        working_dir = parts[0] + "/work" if len(parts) > 1 else renders_path
         if not working_dir.endswith("/"):
             working_dir += "/"
 

@@ -74,7 +74,10 @@ def slerp(q1: np.ndarray, q2: np.ndarray, t: float) -> np.ndarray:
     theta = theta_0 * t
 
     q_perp = q2 - q1 * dot
-    q_perp = q_perp / np.linalg.norm(q_perp)
+    perp_norm = np.linalg.norm(q_perp)
+    if perp_norm < 1e-10:
+        return q1.copy()
+    q_perp = q_perp / perp_norm
 
     return q1 * np.cos(theta) + q_perp * np.sin(theta)
 
@@ -138,7 +141,10 @@ def _interpolate_vector_keys(keys: List[VectorKeyframe], time: float) -> np.ndar
 
     for i in range(len(keys) - 1):
         if keys[i].time <= time <= keys[i + 1].time:
-            t = (time - keys[i].time) / (keys[i + 1].time - keys[i].time)
+            dt = keys[i + 1].time - keys[i].time
+            if dt <= 0:
+                return keys[i].value.copy()
+            t = (time - keys[i].time) / dt
             return lerp(keys[i].value, keys[i + 1].value, t)
 
     if time < keys[0].time:
@@ -156,7 +162,10 @@ def _interpolate_quaternion_keys(keys: List[QuaternionKeyframe], time: float) ->
 
     for i in range(len(keys) - 1):
         if keys[i].time <= time <= keys[i + 1].time:
-            t = (time - keys[i].time) / (keys[i + 1].time - keys[i].time)
+            dt = keys[i + 1].time - keys[i].time
+            if dt <= 0:
+                return keys[i].value.copy()
+            t = (time - keys[i].time) / dt
             return slerp(keys[i].value, keys[i + 1].value, t)
 
     if time < keys[0].time:

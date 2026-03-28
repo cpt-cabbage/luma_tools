@@ -182,6 +182,7 @@ class PipelineEventBus(QObject):
         self._active_jobs: Dict[str, JobInfo] = {}
         self._jobs_lock = threading.RLock()  # Thread safety for job tracking
         self._gallery_context = GalleryContext()
+        self._gallery_context_lock = threading.RLock()
         logger.debug("PipelineEventBus initialized")
 
     # =========================================================================
@@ -391,13 +392,15 @@ class PipelineEventBus(QObject):
             current_user: User whose gallery is being viewed
             visible: Whether gallery tab is visible
         """
-        for key, value in kwargs.items():
-            if hasattr(self._gallery_context, key):
-                setattr(self._gallery_context, key, value)
+        with self._gallery_context_lock:
+            for key, value in kwargs.items():
+                if hasattr(self._gallery_context, key):
+                    setattr(self._gallery_context, key, value)
 
     def get_gallery_context(self) -> GalleryContext:
         """Get current gallery context."""
-        return self._gallery_context
+        with self._gallery_context_lock:
+            return self._gallery_context
 
     # =========================================================================
     # Storytelling / Message Helpers
@@ -451,8 +454,9 @@ class PipelineEventBus(QObject):
         elif status == "completed":
             with self._jobs_lock:
                 job = self._active_jobs.get(job_id)
+                completed_outputs = job.completed_outputs if job else 0
             if job:
-                return f"Done! {job.completed_outputs} new image(s) ready"
+                return f"Done! {completed_outputs} new image(s) ready"
             return "Complete!"
 
         elif status == "failed":

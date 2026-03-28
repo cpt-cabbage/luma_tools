@@ -553,10 +553,10 @@ def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any
                 found_input = False
                 for new_node in new_nodes:
                     if new_node['id'] == target_node_id:
-                        for inp in new_node.get('inputs', []):
-                            # Find input by slot index or by matching name
+                        for inp_idx, inp in enumerate(new_node.get('inputs', [])):
+                            # Find input by slot index or by position
                             slot_match = inp.get('slot_index') == target_slot
-                            index_match = 'slot_index' not in inp and new_node.get('inputs', []).index(inp) == target_slot
+                            index_match = 'slot_index' not in inp and inp_idx == target_slot
                             if slot_match or index_match:
                                 inp['link'] = current_link_id
                                 found_input = True
@@ -637,9 +637,9 @@ def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any
                             # Update the source internal node's output
                             for new_node in new_nodes:
                                 if new_node['id'] == source_node_id:
-                                    for out in new_node.get('outputs', []):
+                                    for out_idx, out in enumerate(new_node.get('outputs', [])):
                                         if out.get('slot_index') == source_slot or (
-                                            'slot_index' not in out and new_node.get('outputs', []).index(out) == source_slot
+                                            'slot_index' not in out and out_idx == source_slot
                                         ):
                                             if 'links' not in out or out['links'] is None:
                                                 out['links'] = []
@@ -878,9 +878,8 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
             if nid not in skipped_node_ids:
                 continue
             slot_map = {}
-            for inp_spec in node.get('inputs', []):
-                slot_idx = inp_spec.get('slot_index',
-                                        node.get('inputs', []).index(inp_spec))
+            for default_idx, inp_spec in enumerate(node.get('inputs', [])):
+                slot_idx = inp_spec.get('slot_index', default_idx)
                 lid = inp_spec.get('link')
                 if lid is not None:
                     slot_map[slot_idx] = lid

@@ -49,9 +49,17 @@ def safe_import_multiple(module_path: str, *attrs: str) -> Tuple[Tuple[Optional[
     """
     try:
         module = importlib.import_module(module_path)
+    except (ImportError, ModuleNotFoundError):
+        return tuple(None for _ in attrs), False
+
+    try:
         values = tuple(getattr(module, attr) for attr in attrs)
         return values, True
-    except (ImportError, AttributeError, ModuleNotFoundError):
+    except AttributeError as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Module '{module_path}' imported but attribute missing: {e}"
+        )
         return tuple(None for _ in attrs), False
 
 

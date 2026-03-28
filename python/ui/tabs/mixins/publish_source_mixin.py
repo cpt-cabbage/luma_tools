@@ -172,7 +172,9 @@ class PublishSourceMixin:
         if products:
             self.show_status(f"Found {len(products)} AYON product(s)", "info")
             # Trigger version fetch for the first product
+            self._publish_product_combo.blockSignals(True)
             self._publish_product_combo.setCurrentIndex(0)
+            self._publish_product_combo.blockSignals(False)
             self._on_publish_product_changed(0)
         else:
             if render_list:
@@ -220,7 +222,7 @@ class PublishSourceMixin:
         self._publish_version_combo.blockSignals(False)
 
         if versions:
-            self._on_publish_version_changed(0)
+            self._on_publish_version_changed(self._publish_version_combo.currentIndex())
 
     def _on_publish_version_changed(self, index):
         """When version changes, resolve path and scan for renders."""

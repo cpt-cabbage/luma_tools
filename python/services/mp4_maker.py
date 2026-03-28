@@ -283,7 +283,7 @@ def generate_mp4(
         # Execute FFmpeg
         process = start_process(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
 
@@ -294,8 +294,10 @@ def generate_mp4(
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("Cancellation requested, killing FFmpeg process")
                 process.kill()
-                process.wait(timeout=10)
-                from core.error_handling import CancellationError
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
                 raise CancellationError("MP4 generation cancelled by user")
 
             stderr_lines.append(line)

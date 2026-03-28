@@ -122,6 +122,7 @@ class MetadataCopyMixin:
 
 import hashlib
 import threading
+from collections import OrderedDict
 from core.utils import ensure_directory
 
 # Disk cache directory (shared with model thumbnails)
@@ -130,8 +131,8 @@ ensure_directory(_THUMBNAIL_CACHE_DIR)
 
 # In-memory cache for fast access within a session
 # Key: image path, Value: PNG bytes data
-_image_thumbnail_cache = {}
-_image_thumbnail_cache_lock = threading.Lock()
+_image_thumbnail_cache = OrderedDict()
+_image_thumbnail_cache_lock = threading.RLock()
 _IMAGE_THUMBNAIL_CACHE_MAX_SIZE = 500  # Limit cache size
 
 
@@ -152,6 +153,7 @@ def get_cached_image_thumbnail(path):
     with _image_thumbnail_cache_lock:
         data = _image_thumbnail_cache.get(path)
         if data:
+            _image_thumbnail_cache.move_to_end(path)
             return data
 
     # Check disk cache
@@ -187,13 +189,13 @@ def cache_image_thumbnail(path, data):
     if not data:
         return
 
-    # Memory cache with LRU-like eviction (thread-safe)
+    # Memory cache with LRU eviction (thread-safe)
     with _image_thumbnail_cache_lock:
-        if len(_image_thumbnail_cache) >= _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
-            keys = list(_image_thumbnail_cache.keys())
-            for key in keys[:len(keys) // 2]:
-                del _image_thumbnail_cache[key]
+        if path in _image_thumbnail_cache:
+            _image_thumbnail_cache.move_to_end(path)
         _image_thumbnail_cache[path] = data
+        while len(_image_thumbnail_cache) > _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
+            _image_thumbnail_cache.popitem(last=False)
 
     # Write to disk cache outside lock using atomic temp-file + rename
     # to prevent corruption from concurrent writes or partial writes on crash
@@ -251,7 +253,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     _cached_liked_color = None
     _cached_stack_colors = None
     _settings_cache_initialized = False
-    _settings_cache_lock = threading.Lock()
+    _settings_cache_lock = threading.RLock()
 
     @classmethod
     def _ensure_settings_cache(cls):
@@ -1089,8 +1091,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_video_placeholder(self):
         """Create a video placeholder with play icon."""
         cache_key = "video_placeholder"
-        if cache_key in BaseThumbnailWidget._placeholder_cache:
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key in BaseThumbnailWidget._placeholder_cache:
+                return BaseThumbnailWidget._placeholder_cache[cache_key]
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1120,8 +1123,10 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "VIDEO")
         painter.end()
 
-        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-        return pixmap
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key not in BaseThumbnailWidget._placeholder_cache:
+                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
 
     # --- Audio placeholder ---
     def _load_audio_placeholder(self):
@@ -1156,8 +1161,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_audio_placeholder(self):
         """Create an audio placeholder with music note icon."""
         cache_key = "audio_placeholder"
-        if cache_key in BaseThumbnailWidget._placeholder_cache:
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key in BaseThumbnailWidget._placeholder_cache:
+                return BaseThumbnailWidget._placeholder_cache[cache_key]
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1178,8 +1184,10 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "AUDIO")
         painter.end()
 
-        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-        return pixmap
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key not in BaseThumbnailWidget._placeholder_cache:
+                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
 
     def _on_thumbnail_error(self):
         if not isValid(self):
@@ -1197,8 +1205,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_3d_placeholder(self, text):
         """Create a 3D cube icon placeholder for model thumbnails."""
         cache_key = f"model_3d_cube_{text}"
-        if cache_key in BaseThumbnailWidget._placeholder_cache:
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key in BaseThumbnailWidget._placeholder_cache:
+                return BaseThumbnailWidget._placeholder_cache[cache_key]
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1225,8 +1234,10 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 30, Qt.AlignCenter, text)
         painter.end()
 
-        BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-        return pixmap
+        with BaseThumbnailWidget._placeholder_cache_lock:
+            if cache_key not in BaseThumbnailWidget._placeholder_cache:
+                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
+            return BaseThumbnailWidget._placeholder_cache[cache_key]
 
     # --- Mouse events ---
     def mousePressEvent(self, event):

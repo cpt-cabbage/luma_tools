@@ -190,6 +190,12 @@ class ModelThumbnailService:
         Returns:
             QPixmap of the thumbnail, or None if generation failed
         """
+        from PySide6.QtCore import QThread, QCoreApplication
+        app = QCoreApplication.instance()
+        if app and QThread.currentThread() is not app.thread():
+            logger.warning("generate_thumbnail_sync must be called from the main thread")
+            return None
+
         if not os.path.exists(model_path):
             logger.warning(f"[ThumbnailService] Model file not found: {model_path}")
             return None

@@ -316,7 +316,8 @@ class CanvasSyncManager(QObject):
                 # Check if file was modified by someone else
                 if current_mtime > self._last_state_mtime:
                     # Don't reload if we just saved (prevents self-triggering)
-                    if time.time() - self._last_local_save < 1.0:
+                    # Use 3s grace to account for slow network file I/O
+                    if time.time() - self._last_local_save < 3.0:
                         self._last_state_mtime = current_mtime
                         return
 

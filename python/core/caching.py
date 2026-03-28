@@ -95,7 +95,7 @@ def cached_with_ttl(seconds: int, maxsize: int = 128):
                 result = func(*args, **kwargs)
 
                 # Evict oldest entries if at capacity
-                if len(cache) >= maxsize:
+                if maxsize > 0 and len(cache) >= maxsize:
                     # Remove oldest entry
                     oldest_key = min(cache.keys(), key=lambda k: cache[k][1])
                     del cache[oldest_key]

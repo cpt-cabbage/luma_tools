@@ -73,6 +73,8 @@ try:
     _HAS_IMAGE_CONVERT = True
 except ImportError:
     _HAS_IMAGE_CONVERT = False
+    logger.warning("Image conversion module not available (comfyui.image_convert)")
+
 
 
 # =============================================================================
@@ -375,8 +377,8 @@ def main():
     logger.debug(f"Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
     logger.debug(f"args.comfyui_path = {args.comfyui_path}")
     logger.debug(f"args.input_directory = {args.input_directory}")
+    comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
     if images_to_upload:
-        comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
         if os.path.isdir(comfyui_input_dir):
             logger.info(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
             for image_name in images_to_upload:
@@ -391,6 +393,8 @@ def main():
                                 shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
                                 logger.info(f"  Copied (conversion failed): {image_name}")
                         else:
+                            if not _HAS_IMAGE_CONVERT:
+                                logger.warning(f"Image conversion not available - copying {src_path} as-is")
                             dst_path = os.path.join(comfyui_input_dir, image_name)
                             shutil.copy2(src_path, dst_path)
                             logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
@@ -417,6 +421,8 @@ def main():
                             if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
                                 copy_or_convert(src_path, comfyui_input_dir)
                             else:
+                                if not _HAS_IMAGE_CONVERT:
+                                    logger.warning(f"Image conversion not available - copying {src_path} as-is")
                                 dst_path = os.path.join(comfyui_input_dir, image_name)
                                 shutil.copy2(src_path, dst_path)
                             logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")

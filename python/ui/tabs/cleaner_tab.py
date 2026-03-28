@@ -179,51 +179,60 @@ class CleanerTab(BaseTab):
 
         self.animate_button_click(self.ui.CleanFiles)
 
-        # Cleanup renders
+        # Collect what to clean (on main thread, reading UI state)
+        render_dirs = []
+        usd_dirs = []
+        do_hip = False
+
         if self.ui.CleanRender.isChecked():
             render_dirs = [
                 item.text() for item in self.ui.RendersClean.selectedItems()
             ]
-            if render_dirs:
-                count = 0
-                for dir_name in render_dirs:
-                    count += 1
-                    status_msg = f"Removing Renders: {self.app_state.lookdev_dir}\\img\\renders\\{dir_name}"
-                    self.show_status(status_msg, "warning")
-                    logger.info(status_msg)
-                    self.ui.progressBar.setValue(int(count / len(render_dirs) * 100))
 
-                cleanup_renders(self.app_state.lookdev_dir, render_dirs)
-
-        # Cleanup USD
         if self.ui.CleanUSD.isChecked():
             usd_dirs = [item.text() for item in self.ui.USDSClean.selectedItems()]
+
+        do_hip = self.ui.HIPBackups.isChecked()
+
+        if not render_dirs and not usd_dirs and not do_hip:
+            return
+
+        lookdev_dir = self.app_state.lookdev_dir
+        self.show_status("Cleaning up files...", "warning")
+
+        def _do_cleanup(progress_callback=None):
+            """Run file deletions in worker thread."""
+            if render_dirs:
+                for i, dir_name in enumerate(render_dirs):
+                    logger.info(f"Removing Renders: {lookdev_dir}\\img\\renders\\{dir_name}")
+                    if progress_callback:
+                        progress_callback(int((i + 1) / max(len(render_dirs), 1) * 50), f"Removing render: {dir_name}")
+                cleanup_renders(lookdev_dir, render_dirs)
+
             if usd_dirs:
-                count = 0
-                for dir_name in usd_dirs:
-                    count += 1
-                    self.ui.progressBar.setValue(int(count / len(usd_dirs) * 100))
-                    status_msg = f"Removing USDs: {self.app_state.lookdev_dir}\\usd_files\\{dir_name}"
-                    self.show_status(status_msg, "warning")
-                    logger.info(status_msg)
+                for i, dir_name in enumerate(usd_dirs):
+                    logger.info(f"Removing USDs: {lookdev_dir}\\usd_files\\{dir_name}")
+                    if progress_callback:
+                        progress_callback(50 + int((i + 1) / max(len(usd_dirs), 1) * 30), f"Removing USD: {dir_name}")
+                cleanup_usd(lookdev_dir, usd_dirs)
 
-                cleanup_usd(self.app_state.lookdev_dir, usd_dirs)
+            if do_hip:
+                logger.info(f"Removing Hip Backups Folder: {lookdev_dir}\\backup\\")
+                if progress_callback:
+                    progress_callback(90, "Removing HIP backups")
+                cleanup_hip_backups(lookdev_dir)
 
-        # Cleanup HIP backups
-        if self.ui.HIPBackups.isChecked():
-            self.ui.progressBar.setValue(0)
-            status_msg = (
-                f"Removing Hip Backups Folder: {self.app_state.lookdev_dir}\\backup\\"
-            )
-            self.show_status(status_msg, "warning")
-            cleanup_hip_backups(self.app_state.lookdev_dir)
-            self.ui.progressBar.setValue(100)
+            return True
 
-        # Final status
-        self.show_status("Cleanup complete", "success")
+        def _on_complete(result):
+            self.show_status("Cleanup complete", "success")
+            self.run_scanner()
 
-        # Rescan after cleanup
-        self.run_scanner()
+        def _on_error(error_msg, traceback_str=""):
+            self.show_status(f"Cleanup error: {error_msg}", "error")
+            self.run_scanner()
+
+        self.start_worker(_do_cleanup, on_result=_on_complete, on_error=_on_error)
 
     # =========================================================================
     # Gallery Cleanup Methods (new functionality)

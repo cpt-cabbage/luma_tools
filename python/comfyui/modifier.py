@@ -324,9 +324,11 @@ def modify_workflow_api_format(
                 if widget_type == 'text':
                     if widget_name:
                         inputs[widget_name] = value
-                    else:
-                        # Legacy fallback: try both common names
+                    elif 'prompt' in inputs:
                         inputs['prompt'] = value
+                    elif 'text' in inputs:
+                        inputs['text'] = value
+                    else:
                         inputs['text'] = value
                     logger.info(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
                 elif widget_type == 'image':

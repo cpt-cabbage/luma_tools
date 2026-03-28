@@ -95,48 +95,49 @@ def render_thumbnail(model_path: str, output_path: str, size: int = 150) -> bool
         vis = o3d.visualization.Visualizer()
         vis.create_window(width=size, height=size, visible=False)
 
-        # Add mesh
-        vis.add_geometry(mesh)
+        try:
+            # Add mesh
+            vis.add_geometry(mesh)
 
-        # Get render options and set background color
-        render_opt = vis.get_render_option()
-        render_opt.background_color = np.array([0.165, 0.188, 0.25])  # Dark theme
-        render_opt.light_on = True
-        # Disable grid and axis lines for clean thumbnails
-        render_opt.show_coordinate_frame = False
+            # Get render options and set background color
+            render_opt = vis.get_render_option()
+            render_opt.background_color = np.array([0.165, 0.188, 0.25])  # Dark theme
+            render_opt.light_on = True
+            # Disable grid and axis lines for clean thumbnails
+            render_opt.show_coordinate_frame = False
 
-        # Calculate camera position for 3/4 view
-        distance = max_extent * 2.0
-        pitch = np.radians(25)
-        yaw = np.radians(45)
+            # Calculate camera position for 3/4 view
+            distance = max_extent * 2.0
+            pitch = np.radians(25)
+            yaw = np.radians(45)
 
-        cam_x = center[0] + distance * np.cos(pitch) * np.sin(yaw)
-        cam_y = center[1] - distance * np.sin(pitch)
-        cam_z = center[2] + distance * np.cos(pitch) * np.cos(yaw)
+            cam_x = center[0] + distance * np.cos(pitch) * np.sin(yaw)
+            cam_y = center[1] - distance * np.sin(pitch)
+            cam_z = center[2] + distance * np.cos(pitch) * np.cos(yaw)
 
-        eye = np.array([cam_x, cam_y, cam_z])
-        up = np.array([0, 1, 0])
-        front = center - eye
-        front = front / np.linalg.norm(front)
+            eye = np.array([cam_x, cam_y, cam_z])
+            up = np.array([0, 1, 0])
+            front = center - eye
+            front = front / np.linalg.norm(front)
 
-        # Set camera view
-        ctr = vis.get_view_control()
-        ctr.set_lookat(center)
-        ctr.set_front(front)
-        ctr.set_up(up)
-        ctr.set_zoom(0.7)
+            # Set camera view
+            ctr = vis.get_view_control()
+            ctr.set_lookat(center)
+            ctr.set_front(front)
+            ctr.set_up(up)
+            ctr.set_zoom(0.7)
 
-        # Render and capture
-        vis.poll_events()
-        vis.update_renderer()
+            # Render and capture
+            vis.poll_events()
+            vis.update_renderer()
 
-        # Ensure output directory exists
-        _ensure_output_dir(output_path)
+            # Ensure output directory exists
+            _ensure_output_dir(output_path)
 
-        # Capture to file
-        vis.capture_screen_image(output_path, do_render=True)
-
-        vis.destroy_window()
+            # Capture to file
+            vis.capture_screen_image(output_path, do_render=True)
+        finally:
+            vis.destroy_window()
 
         return True
 
@@ -241,48 +242,49 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
         vis = o3d.visualization.Visualizer()
         vis.create_window(width=size, height=size, visible=False)
 
-        # Add geometries
-        for geom in geometries:
-            vis.add_geometry(geom)
+        try:
+            # Add geometries
+            for geom in geometries:
+                vis.add_geometry(geom)
 
-        if line_set:
-            vis.add_geometry(line_set)
+            if line_set:
+                vis.add_geometry(line_set)
 
-        # Get render options and set background color
-        render_opt = vis.get_render_option()
-        render_opt.background_color = np.array([0.165, 0.188, 0.25])
-        render_opt.light_on = True
-        render_opt.line_width = 3.0
-        # Disable grid and axis lines for clean thumbnails
-        render_opt.show_coordinate_frame = False
+            # Get render options and set background color
+            render_opt = vis.get_render_option()
+            render_opt.background_color = np.array([0.165, 0.188, 0.25])
+            render_opt.light_on = True
+            render_opt.line_width = 3.0
+            # Disable grid and axis lines for clean thumbnails
+            render_opt.show_coordinate_frame = False
 
-        # Camera setup
-        distance = max_extent * 3.0
-        pitch = np.radians(25)
-        yaw = np.radians(45)
+            # Camera setup
+            distance = max_extent * 3.0
+            pitch = np.radians(25)
+            yaw = np.radians(45)
 
-        cam_x = center[0] + distance * np.cos(pitch) * np.sin(yaw)
-        cam_y = center[1] - distance * np.sin(pitch)
-        cam_z = center[2] + distance * np.cos(pitch) * np.cos(yaw)
+            cam_x = center[0] + distance * np.cos(pitch) * np.sin(yaw)
+            cam_y = center[1] - distance * np.sin(pitch)
+            cam_z = center[2] + distance * np.cos(pitch) * np.cos(yaw)
 
-        eye = np.array([cam_x, cam_y, cam_z])
-        front = center - eye
-        front = front / np.linalg.norm(front)
+            eye = np.array([cam_x, cam_y, cam_z])
+            front = center - eye
+            front = front / np.linalg.norm(front)
 
-        ctr = vis.get_view_control()
-        ctr.set_lookat(center)
-        ctr.set_front(front)
-        ctr.set_up([0, 1, 0])
-        ctr.set_zoom(0.5)
+            ctr = vis.get_view_control()
+            ctr.set_lookat(center)
+            ctr.set_front(front)
+            ctr.set_up([0, 1, 0])
+            ctr.set_zoom(0.5)
 
-        # Render
-        vis.poll_events()
-        vis.update_renderer()
+            # Render
+            vis.poll_events()
+            vis.update_renderer()
 
-        _ensure_output_dir(output_path)
-        vis.capture_screen_image(output_path, do_render=True)
-
-        vis.destroy_window()
+            _ensure_output_dir(output_path)
+            vis.capture_screen_image(output_path, do_render=True)
+        finally:
+            vis.destroy_window()
 
         return True
 

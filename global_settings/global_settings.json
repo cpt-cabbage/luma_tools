@@ -245,7 +245,7 @@
       }
     }
   },
-  "comfyui_path": "D:\\ComfyUI\\",
+  "comfyui_path": "D:\\ComfyUI",
   "comfyui_mode": "embedded",
   "comfyui_python_path": "C:\\ComfyUi\\Comfy_Ui_Data\\.venv\\Scripts\\python.exe",
   "admin_users": [

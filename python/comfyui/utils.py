@@ -21,30 +21,49 @@ from typing import Optional, List, Dict, Any, Union
 
 logger = logging.getLogger(__name__)
 
-# Try to import websocket for real-time progress
-WEBSOCKET_AVAILABLE = False
-try:
-    import websocket
-    WEBSOCKET_AVAILABLE = True
-except ImportError:
-    # Try to install websocket-client automatically
-    logger.info("websocket-client not found, attempting to install...")
+# Lazy websocket import — avoid pip install at module import time
+_websocket = None
+_websocket_import_attempted = False
+
+
+def _get_websocket():
+    global _websocket, _websocket_import_attempted
+    if _websocket is not None:
+        return _websocket
+    if _websocket_import_attempted:
+        return None
+    _websocket_import_attempted = True
     try:
-        import subprocess as _sp
-        _result = _sp.run(
-            [sys.executable, '-m', 'pip', 'install', 'websocket-client', '--quiet'],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        if _result.returncode == 0:
-            import websocket
-            WEBSOCKET_AVAILABLE = True
-            logger.info("Successfully installed websocket-client")
-        else:
-            logger.error(f"Failed to install websocket-client: {_result.stderr}")
-    except Exception as _e:
-        logger.error(f"Could not auto-install websocket-client: {_e}")
+        import websocket
+        _websocket = websocket
+        return websocket
+    except ImportError:
+        logger.info("websocket-client not found, attempting to install...")
+        try:
+            import subprocess as _sp
+            _result = _sp.run(
+                [sys.executable, '-m', 'pip', 'install', 'websocket-client', '--quiet'],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if _result.returncode == 0:
+                import websocket
+                _websocket = websocket
+                logger.info("Successfully installed websocket-client")
+                return websocket
+            else:
+                logger.error(f"Failed to install websocket-client: {_result.stderr}")
+        except Exception as _e:
+            logger.error(f"Could not auto-install websocket-client: {_e}")
+        return None
+
+
+def _is_websocket_available():
+    return _get_websocket() is not None
+
+
+WEBSOCKET_AVAILABLE = None  # Kept for backward compat; use _is_websocket_available()
 
 
 # =============================================================================
@@ -220,6 +239,7 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
 
 
 _queue_check_failures = 0
+_queue_check_lock = threading.Lock()
 
 
 def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
@@ -238,7 +258,8 @@ def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
         with urllib.request.urlopen(queue_url, timeout=5) as response:
             queue_data = json.loads(response.read().decode('utf-8'))
 
-        _queue_check_failures = 0  # Reset on success
+        with _queue_check_lock:
+            _queue_check_failures = 0  # Reset on success
 
         running = queue_data.get('queue_running', [])
         pending = queue_data.get('queue_pending', [])
@@ -252,13 +273,15 @@ def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
 
         return False
     except Exception as e:
-        _queue_check_failures += 1
-        if _queue_check_failures < 3:
+        with _queue_check_lock:
+            _queue_check_failures += 1
+            failures = _queue_check_failures
+        if failures < 3:
             # Conservative fallback — avoids false completion
             return True
         else:
             # Queue endpoint repeatedly failing — stop assuming it's running
-            logger.warning(f"Queue endpoint failed {_queue_check_failures} times, assuming not in queue: {e}")
+            logger.warning(f"Queue endpoint failed {failures} times, assuming not in queue: {e}")
             return False
 
 
@@ -277,9 +300,6 @@ def wait_for_completion_websocket(
     client_id: str = None,
     workflow_dict: dict = None
 ) -> bool:
-    # Reset queue check failure counter for each new prompt
-    global _queue_check_failures
-    _queue_check_failures = 0
     """Wait for workflow execution using WebSocket for progress + HTTP polling for completion.
 
     Args:
@@ -297,6 +317,11 @@ def wait_for_completion_websocket(
     Returns:
         bool if track_node_timing=False, otherwise dict with success and node_timing
     """
+    # Reset queue check failure counter for each new prompt
+    global _queue_check_failures
+    with _queue_check_lock:
+        _queue_check_failures = 0
+
     base_url = _normalize_server_url(server_url, port)
     ws_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://')
     if not client_id:
@@ -321,6 +346,8 @@ def wait_for_completion_websocket(
 
     def on_message(ws, message):
         nonlocal result, last_progress
+        if isinstance(message, bytes):
+            return  # Binary frame (image preview), not a JSON status message
         try:
             data = json.loads(message)
             msg_type = data.get('type')
@@ -450,7 +477,14 @@ def wait_for_completion_websocket(
     def on_open(ws):
         logger.info(f"Connected to ComfyUI WebSocket")
 
-    ws = websocket.WebSocketApp(
+    _ws_mod = _get_websocket()
+    if _ws_mod is None:
+        logger.error("WebSocket module not available")
+        if track_node_timing:
+            return {'success': False, 'error': 'websocket_unavailable', 'node_timing': [], 'total_duration_ms': None}
+        return False
+
+    ws = _ws_mod.WebSocketApp(
         ws_url,
         on_open=on_open,
         on_message=on_message,
@@ -477,6 +511,13 @@ def wait_for_completion_websocket(
             elapsed = time.time() - start_time
             if elapsed > timeout:
                 logger.warning(f"Timeout after {int(elapsed)}s")
+                if track_node_timing:
+                    return {
+                        'success': False,
+                        'error': 'timeout',
+                        'node_timing': list(node_timing.values()),
+                        'total_duration_ms': None
+                    }
                 return False
 
             if time.time() - last_poll >= poll_interval:
@@ -698,7 +739,7 @@ def wait_for_completion(
         dict: {'success': bool, 'node_timing': list, 'total_duration_ms': int|None}
               if track_node_timing=True
     """
-    if WEBSOCKET_AVAILABLE:
+    if _is_websocket_available():
         try:
             return wait_for_completion_websocket(
                 prompt_id, server_url=server_url, port=port,
@@ -1040,11 +1081,12 @@ def move_output_files(
 
         try:
             initial_size = os.path.getsize(src_path)
-            time.sleep(0.5)
-            final_size = os.path.getsize(src_path)
-
-            if initial_size != final_size:
-                time.sleep(2)  # Wait for file to finish writing
+            for _ in range(5):
+                time.sleep(0.5)
+                current_size = os.path.getsize(src_path)
+                if current_size == initial_size:
+                    break
+                initial_size = current_size
 
             shutil.move(src_path, dest_path)
             moved_files.append(dest_path)

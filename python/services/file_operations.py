@@ -184,7 +184,7 @@ def read_comp_file(compfile, hip_file_name):
                             foundcomps = foundcomps[5:]  # Remove "file " prefix
                         foundcomps = foundcomps.strip()
                         foundcomps = os.path.dirname(foundcomps)
-                        foundcomps = foundcomps.removesuffix(r'/for_comp')
+                        foundcomps = foundcomps.removesuffix('/for_comp').removesuffix('\\for_comp')
                         foundcomps = foundcomps.split(r"/")[-1]
                         renders_in_comp.append(foundcomps)
     except Exception as e:

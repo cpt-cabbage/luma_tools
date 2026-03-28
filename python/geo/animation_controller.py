@@ -9,6 +9,7 @@ Provides animation playback control with:
 - Frame stepping
 """
 
+import time as _time
 from typing import Optional, Dict, List
 
 import numpy as np
@@ -47,6 +48,7 @@ class AnimationController(QObject):
         self._is_playing: bool = False
         self._loop: bool = True
         self._speed: float = 1.0
+        self._last_tick_time: float = 0.0
 
         # Playback timer
         self._timer = QTimer(self)
@@ -117,6 +119,7 @@ class AnimationController(QObject):
         if not self._current_animation:
             return
         self._is_playing = True
+        self._last_tick_time = _time.monotonic()
         self._timer.start()
         self.playback_state_changed.emit(True)
 
@@ -179,17 +182,21 @@ class AnimationController(QObject):
         if not self._current_animation or not self._is_playing:
             return
 
-        # Advance time
-        dt = 0.016 * self._speed  # ~60 FPS * speed
+        # Advance time using actual elapsed wall-clock time
+        now = _time.monotonic()
+        dt = (now - self._last_tick_time) * self._speed
+        self._last_tick_time = now
         new_time = self._current_time + dt
         duration = self._current_animation.duration
 
-        if new_time >= duration:
+        if duration > 0 and new_time >= duration:
             if self._loop:
                 new_time = new_time % duration
             else:
                 new_time = duration
                 self.pause()
+        elif duration <= 0:
+            new_time = 0.0
 
         self._current_time = new_time
         normalized = self._current_time / duration if duration > 0 else 0.0

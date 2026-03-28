@@ -172,12 +172,18 @@ class SplashScreen(QWidget):
 
         def on_result(window):
             """Called when initialization completes successfully."""
+            from shiboken6 import isValid
+            if not isValid(self):
+                return
             self.update_progress(100, "Initializing Luma Shot Tools", "Ready!")
             # Small delay before closing splash
             QTimer.singleShot(300, lambda: self._finish_initialization(window))
 
         def on_error(error_msg, traceback_str):
             """Called when initialization fails."""
+            from shiboken6 import isValid
+            if not isValid(self):
+                return
             logger.error(f"Error during initialization: {error_msg}")
             logger.error(traceback_str)
             self.close()

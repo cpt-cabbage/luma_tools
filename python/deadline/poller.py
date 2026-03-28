@@ -82,7 +82,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
 
         # Get queue position info for queued/pending jobs
         queue_info = {}
-        if status in ("Queued", "Pending"):
+        if status == "Pending":
             queue_info = get_queue_info(job_id)
 
         # Try to get detailed progress for rendering tasks
@@ -146,7 +146,7 @@ def get_task_log(job_id: str, task_id: int) -> Optional[str]:
 
         result = run_command(
             [DEADLINE_PATH, "GetTaskLog", job_id, str(task_id)],
-            timeout=5
+            timeout=15
         )
 
         if result.returncode == 0:

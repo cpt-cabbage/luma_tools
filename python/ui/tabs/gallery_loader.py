@@ -272,7 +272,7 @@ class GalleryLoader:
                     # 'full' = per-file metadata, 'partial' = job-level only, 'none' = no metadata
                     try:
                         from comfyui.metadata import get_metadata_level
-                        metadata_level = get_metadata_level(output_dir, filename)
+                        metadata_level = get_metadata_level(dir_path, filename)
                     except Exception:
                         # Fallback if function not available or errors
                         metadata_level = 'partial' if has_metadata else 'none'

@@ -217,8 +217,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             ver_str = get_trailing_number(result['latest_render'])
             if ver_str is not None:
                 latest_ver = int(ver_str)
+                self.ui.CurrentVer.blockSignals(True)
                 self.ui.CurrentVer.setRange(0, latest_ver)
                 self.ui.CurrentVer.setValue(latest_ver)
+                self.ui.CurrentVer.blockSignals(False)
 
             logger.info(f"Pass Builder: Found render path: {self.app_state.searchpath}")
             self._initial_scan_done = True
@@ -350,23 +352,97 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         # Delegate to mixin for combo population
         super()._on_ayon_products_fetched(products)
 
-    def _resolve_and_scan_publish(self, version_id):
-        """Override: resolve AYON publish back to the WORK directory with denoised renders.
+    def _on_publish_product_changed(self, index):
+        """Override: capture product name before worker starts (thread safety)."""
+        if index >= 0:
+            self._current_publish_product_name = self._publish_product_combo.currentText()
+        super()._on_publish_product_changed(index)
 
-        The staging directory stored during publish is renders_path/output_subdirectory
-        (e.g., .../Cha_sh0080_lighting_v024/combined). Going up one level gives the
-        render version folder where denoised/ lives. This correctly maps each AYON
-        version to its source render version.
+    def _fetch_product_versions(self, product_id):
+        """Override: filter out versions without resolvable denoised work renders."""
+        from ayon.service import get_product_version_list
 
-        The task is derived from the selected product name (render{Task}{Variant})
-        so this works even when no task is selected in the AYON context.
+        versions = get_product_version_list(self.app_state.jobname, product_id)
+        if not versions:
+            return versions
+
+        product_name = getattr(self, '_current_publish_product_name', '')
+        derived_task, _ = self._parse_render_product(product_name)
+        task = self.app_state.task or derived_task
+        if not task:
+            return versions
+
+        filtered = []
+        for v in versions:
+            work_path = self._resolve_work_render_path(v["id"], task)
+            if work_path:
+                filtered.append(v)
+            else:
+                logger.info(
+                    f"Pass Builder: Hiding version v{v['version']:03d} "
+                    "(no denoised work renders found)"
+                )
+
+        if not filtered:
+            logger.warning(
+                "Pass Builder: No versions have denoised work renders, showing all"
+            )
+            return versions
+
+        logger.info(
+            f"Pass Builder: Showing {len(filtered)} of {len(versions)} "
+            "versions with denoised renders"
+        )
+        return filtered
+
+    def _resolve_work_render_path(self, version_id, task):
+        """Resolve an AYON version to its work render directory with denoised renders.
+
+        Returns the work render path if denoised renders exist, None otherwise.
         """
         from ayon.service import resolve_version_render_path
         from services.file_operations import get_task_directory, fast_scandir, find_renders
         from core.config import RENDERS_SUBPATH
-        from core.utils import truncate_at_suffix, extract_render_name
+        from core.utils import truncate_at_suffix
 
-        # Derive task from the selected product name (e.g., renderLightingMain → lighting)
+        result = resolve_version_render_path(self.app_state.jobname, version_id)
+        if not result:
+            return None
+
+        renders_path = result.get("renders_path")
+        source_info = result.get("source_dir")
+
+        # Priority 1: renders_path from AYON metadata (set by luma_tools during publish)
+        if renders_path and os.path.isdir(renders_path) and find_renders(renders_path):
+            return renders_path
+
+        # Priority 2: scene stem from version.attrib.source
+        if source_info:
+            scene_stem = source_info["stem"]
+            task_dir = get_task_directory(self.app_state.shotpath, task)
+            if os.path.isdir(task_dir):
+                dirs = fast_scandir(task_dir)
+                render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+                if render_folders:
+                    render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+                    candidate = os.path.join(render_directory, scene_stem)
+                    if os.path.isdir(candidate) and find_renders(candidate):
+                        return candidate
+
+        return None
+
+    def _resolve_and_scan_publish(self, version_id):
+        """Override: resolve AYON publish back to the WORK directory with denoised renders.
+
+        Versions are pre-filtered by _fetch_product_versions to only include those
+        with resolvable denoised work renders, so this should always succeed.
+
+        The task is derived from the selected product name (render{Task}{Variant})
+        so this works even when no task is selected in the AYON context.
+        """
+        from services.file_operations import find_renders
+        from core.utils import truncate_at_suffix
+
         product_name = self._publish_product_combo.currentText()
         derived_task, _ = self._parse_render_product(product_name)
         task = self.app_state.task or derived_task
@@ -376,89 +452,20 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 "Select a task or choose a render product."
             )
 
-        # Step 1: Get published file info from AYON
-        result = resolve_version_render_path(self.app_state.jobname, version_id)
-        if not result:
-            raise ValueError("Could not resolve filesystem path from AYON version")
-
-        pub_dir = result["path"]
-        renders_path = result.get("renders_path")  # Work render dir (from data.rendersPath)
-        source_info = result.get("source_dir")      # dict with 'dir' and 'stem' from version.attrib.source
-
-        # Step 2: Use renders_path from AYON metadata (set by luma_tools during publish).
-        # This is the most reliable source — it's the exact work directory that was
-        # used for the original pass build.
-        work_render_path = None
-        if renders_path and os.path.isdir(renders_path) and find_renders(renders_path):
-            work_render_path = renders_path
-            logger.info(f"Pass Builder: Found render version from AYON data.rendersPath: {work_render_path}")
-
-        # Step 3: Use version.attrib.source to find the matching render directory.
-        # The source field contains the DCC scene file path (e.g., Cha_sh0080_lighting_v024.hip).
-        # The scene filename stem matches the render version directory name under img/renders/.
-        if not work_render_path and source_info:
-            scene_stem = source_info["stem"]  # e.g. "Cha_sh0080_lighting_v024"
-            task_dir = get_task_directory(self.app_state.shotpath, task)
-            if os.path.isdir(task_dir):
-                dirs = fast_scandir(task_dir)
-                render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-                if render_folders:
-                    render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-                    candidate = os.path.join(render_directory, scene_stem)
-                    if os.path.isdir(candidate) and find_renders(candidate):
-                        work_render_path = candidate
-                        logger.info(
-                            f"Pass Builder: Matched render dir from version.attrib.source "
-                            f"scene stem '{scene_stem}': {work_render_path}"
-                        )
-                    else:
-                        logger.info(
-                            f"Pass Builder: Scene stem '{scene_stem}' did not match a render "
-                            f"directory with denoised renders at {candidate}"
-                        )
-
-        # Step 4: Last resort — search work directory for latest version with denoised renders.
+        work_render_path = self._resolve_work_render_path(version_id, task)
         if not work_render_path:
-            logger.info("Pass Builder: No rendersPath or source match, falling back to directory scan")
-            task_dir = get_task_directory(self.app_state.shotpath, task)
-            if not os.path.isdir(task_dir):
-                raise FileNotFoundError(f"Task directory not found: {task_dir}")
-
-            dirs = fast_scandir(task_dir)
-            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-            if not render_folders:
-                raise FileNotFoundError(f"No render directory found in {task_dir}")
-
-            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-
-            try:
-                render_dirs = sorted(next(os.walk(render_directory))[1])
-            except StopIteration:
-                raise FileNotFoundError(f"No render versions in {render_directory}")
-
-            # Latest folder with denoised renders
-            matched_dir = None
-            for d in reversed(render_dirs):
-                version_path = os.path.join(render_directory, d)
-                if find_renders(version_path):
-                    matched_dir = d
-                    break
-
-            if not matched_dir:
-                raise FileNotFoundError(
-                    f"No render folder with denoised renders found in {render_directory}"
-                )
-
-            work_render_path = os.path.join(render_directory, matched_dir)
-            logger.info(f"Pass Builder: Fallback to latest render folder: {matched_dir}")
+            raise FileNotFoundError(
+                "Could not resolve work render directory with denoised renders "
+                "for this version."
+            )
 
         logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
 
-        # Step 4: Set working_dir for pass file cache
+        # Set working_dir for pass file cache
         render_directory = os.path.dirname(work_render_path)
         self.app_state.working_dir = truncate_at_suffix(render_directory, task)
 
-        # Step 5: Scan for denoised renders
+        # Scan for denoised renders
         renders = find_renders(work_render_path)
         if not renders:
             raise FileNotFoundError(f"No denoised renders found in {work_render_path}")
@@ -540,6 +547,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
     def _on_scan_renders_clicked(self):
         """Scan for renders when button clicked or version changed."""
+        if not self._initialized:
+            return
+
         # If in publish mode, don't do filesystem scan
         if hasattr(self, '_pb_source_manager') and self._pb_source_manager.value == "publish":
             return
@@ -750,7 +760,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         # If already building, cancel the operation
         if getattr(self, '_is_building', False):
-            self._cancel_event.set()
+            cancel_event = getattr(self, '_cancel_event', None)
+            if cancel_event:
+                cancel_event.set()
             self.ui.BuildPasses.setEnabled(False)
             self.show_status("Cancelling build...", "warning")
             return
@@ -782,7 +794,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         # Get selected product name (empty string means auto-derive from render name)
         do_publish = self._publish_to_ayon_cb.isChecked()
-        selected_product = self.ui.PublishProductCombo.currentText().strip() or None if do_publish else None
+        selected_product = (self.ui.PublishProductCombo.currentText().strip() or None) if do_publish else None
 
         # Get display name for status
         build_type_display = "Local" if build_type == "local" else "Farm"
@@ -867,4 +879,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self.show_status(f"Build failed: {error_msg}", "error")
 
         # Use BaseTab helper for worker management
-        self.start_worker(do_build, on_result=on_result, on_error=on_error, on_progress=on_progress)
+        try:
+            self.start_worker(do_build, on_result=on_result, on_error=on_error, on_progress=on_progress)
+        except Exception:
+            _reset_button()
+            raise

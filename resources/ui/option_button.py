@@ -63,7 +63,7 @@ class OptionButtonManager:
         self.value = initial_value
         self.on_changed = on_changed
         self.label_prefix = label_prefix
-        self.parent_window = parent_window or button.window()
+        self.parent_window = parent_window
         self.label_func = label_func
 
         # Connect button click
@@ -90,6 +90,8 @@ class OptionButtonManager:
         """Show popup menu with options."""
         from small_widgets import show_popup_menu
 
+        parent = self.parent_window or self.button.window()
+
         # Build display options (may use label_func for customization)
         display_options = []
         for label, value in self.options:
@@ -100,7 +102,7 @@ class OptionButtonManager:
             display_options.append((display_label, value))
 
         result = show_popup_menu(
-            self.parent_window,
+            parent,
             self.button,
             display_options,
             current=self.value
@@ -173,7 +175,7 @@ class IndexedOptionButtonManager:
         self.options = options
         self.index = initial_index
         self.on_changed = on_changed
-        self.parent_window = parent_window or button.window()
+        self.parent_window = parent_window
 
         # Connect button click
         button.clicked.connect(self._show_menu)
@@ -192,11 +194,13 @@ class IndexedOptionButtonManager:
         """Show popup menu with options."""
         from small_widgets import show_popup_menu
 
+        parent = self.parent_window or self.button.window()
+
         # Convert to (label, value) format
         menu_options = [(menu_label, idx) for idx, menu_label, button_label in self.options]
 
         result = show_popup_menu(
-            self.parent_window,
+            parent,
             self.button,
             menu_options,
             current=self.index

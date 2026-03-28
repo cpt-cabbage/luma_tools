@@ -11,6 +11,9 @@ from PySide6.QtWidgets import QMessageBox, QWidget, QApplication
 
 def get_active_window() -> Optional[QWidget]:
     """Get the currently active top-level window for dialogs."""
+    window = QApplication.activeWindow()
+    if window:
+        return window
     for widget in QApplication.topLevelWidgets():
         if widget.isVisible() and hasattr(widget, 'windowTitle'):
             return widget

@@ -111,6 +111,8 @@ class ImageNode(QGraphicsItem):
 
         # LOD cache: {scale_factor: QPixmap}
         self._lod_cache: Dict[float, QPixmap] = {}
+        # Grayscale pixmap cache: {lod_pixmap_id: grayscale_pixmap}
+        self._grayscale_cache: Dict[int, QPixmap] = {}
 
         # Non-destructive transformation state
         self._crop_rect: Optional[QRectF] = None  # Crop rectangle in original image coords
@@ -151,8 +153,9 @@ class ImageNode(QGraphicsItem):
         if qimage is not None and not qimage.isNull():
             self._pixmap = QPixmap.fromImage(qimage)
             self._missing = False
-            # Clear LOD cache when loading new image
+            # Clear LOD and grayscale caches when loading new image
             self._lod_cache.clear()
+            self._grayscale_cache.clear()
             # Store original aspect ratio for constrained resize
             self._original_aspect = self._pixmap.width() / max(1, self._pixmap.height())
             # Use original image dimensions if no size was specified
@@ -167,8 +170,9 @@ class ImageNode(QGraphicsItem):
                 self._pixmap = None
             else:
                 self._missing = False
-                # Clear LOD cache when loading new image
+                # Clear LOD and grayscale caches when loading new image
                 self._lod_cache.clear()
+                self._grayscale_cache.clear()
                 # Store original aspect ratio for constrained resize
                 self._original_aspect = self._pixmap.width() / max(1, self._pixmap.height())
                 # Use original image dimensions if no size was specified
@@ -266,14 +270,13 @@ class ImageNode(QGraphicsItem):
     def clear_lod_cache(self):
         """Clear the LOD cache (call when image changes or on memory pressure)."""
         self._lod_cache.clear()
+        self._grayscale_cache.clear()
 
     def boundingRect(self) -> QRectF:
         """Return the bounding rectangle."""
-        # Use a large fixed margin to account for screen-space elements
-        # (handles, badge, border) at various zoom levels.
-        # At 10% zoom, a 25px badge becomes 250 scene units, so we need
-        # a generous margin. This is fine since Qt clips drawing anyway.
-        margin = 300  # Large enough for zoom range 0.1x - 2x
+        # Margin accommodates selection handles, like badge, and border.
+        # Kept small to avoid inflating spatial index; Qt clips drawing anyway.
+        margin = 40
         return QRectF(-margin, -margin,
                       self._width + 2 * margin,
                       self._height + 2 * margin)
@@ -318,9 +321,15 @@ class ImageNode(QGraphicsItem):
                 # Get source pixmap (with LOD optimization for large images)
                 pixmap = self._get_lod_pixmap(lod)
 
-                # Apply grayscale if enabled
+                # Apply grayscale if enabled (cached per LOD pixmap)
                 if self._grayscale:
-                    pixmap = self._to_grayscale(pixmap)
+                    pixmap_key = id(pixmap)
+                    cached = self._grayscale_cache.get(pixmap_key)
+                    if cached is not None:
+                        pixmap = cached
+                    else:
+                        pixmap = self._to_grayscale(pixmap)
+                        self._grayscale_cache[pixmap_key] = pixmap
 
                 # Calculate source rectangle (for crop)
                 if self._crop_rect:
@@ -759,11 +768,13 @@ class ImageNode(QGraphicsItem):
     def set_grayscale(self, grayscale: bool):
         """Set grayscale mode."""
         self._grayscale = grayscale
+        self._grayscale_cache.clear()
         self.update()
 
     def toggle_grayscale(self):
         """Toggle grayscale mode."""
         self._grayscale = not self._grayscale
+        self._grayscale_cache.clear()
         self.update()
 
     def is_grayscale(self) -> bool:
@@ -799,6 +810,7 @@ class ImageNode(QGraphicsItem):
         self._rotation = 0.0
         self._opacity = 1.0
         self._grayscale = False
+        self._grayscale_cache.clear()
         self.update()
 
     def _reset_all_transforms(self):
@@ -829,6 +841,7 @@ class ImageNode(QGraphicsItem):
         self._rotation = state.get('rotation', 0.0)
         self._opacity = state.get('opacity', 1.0)
         self._grayscale = state.get('grayscale', False)
+        self._grayscale_cache.clear()
         self.update()
 
     # -------------------------------------------------------------------------
@@ -1153,10 +1166,17 @@ class ImageNode(QGraphicsItem):
             view._show_properties(self.image_path)
 
     def _remove_from_canvas(self):
-        """Remove this node from the canvas."""
+        """Remove this node from the canvas via the canvas's remove_image() for proper cleanup."""
         scene = self.scene()
+        if scene and scene.views():
+            canvas = scene.views()[0]
+            if hasattr(canvas, 'remove_image') and hasattr(canvas, '_image_nodes'):
+                for node_id, node in list(canvas._image_nodes.items()):
+                    if node is self:
+                        canvas.remove_image(node_id)
+                        return
+        # Fallback: direct removal if canvas API not available
         if scene:
-            # Remove connected lines first
             for item in list(scene.items()):
                 if isinstance(item, ConnectionLine):
                     if item.source_node == self or item.target_node == self:
@@ -1616,9 +1636,15 @@ class StickyNote(QGraphicsItem):
         self.update()
 
     def _remove(self):
-        """Remove from scene."""
+        """Remove from canvas via proper cleanup method."""
         scene = self.scene()
         if scene:
+            for view in scene.views():
+                if hasattr(view, '_sticky_notes'):
+                    for note_id, note in list(view._sticky_notes.items()):
+                        if note is self:
+                            view.remove_sticky_note(note_id)
+                            return
             scene.removeItem(self)
 
 
@@ -1765,8 +1791,15 @@ class GroupRegion(QGraphicsRectItem):
             self.update()
 
     def _remove(self):
+        """Remove from canvas via proper cleanup method."""
         scene = self.scene()
         if scene:
+            for view in scene.views():
+                if hasattr(view, '_groups'):
+                    for group_id, group in list(view._groups.items()):
+                        if group is self:
+                            view.remove_group(group_id)
+                            return
             scene.removeItem(self)
 
 
@@ -1929,6 +1962,12 @@ class VideoNode(QGraphicsItem):
         """Handle thumbnail extraction result (main thread)."""
         self._thumbnail_loading = False
         if result is None:
+            return
+
+        # Guard against deleted C++ object (canvas clear() before callback)
+        try:
+            self.scene()
+        except RuntimeError:
             return
 
         qimage, duration = result

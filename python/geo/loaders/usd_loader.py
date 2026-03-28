@@ -77,9 +77,18 @@ class USDModelLoader(BaseModelLoader):
 
                 # Get normals
                 normals_attr = mesh_prim.GetNormalsAttr().Get()
-                if normals_attr:
-                    normals = np.array(normals_attr, dtype=np.float32)
+                if normals_attr is not None:
+                    interp = mesh_prim.GetNormalsInterpolation()
+                    if interp == 'vertex' or interp == 'varying':
+                        normals = np.array(normals_attr, dtype=np.float32)
+                    elif interp == 'faceVarying' and face_counts is not None:
+                        normals = None
+                    else:
+                        normals = np.array(normals_attr, dtype=np.float32)
                 else:
+                    normals = None
+
+                if normals is None:
                     normals = np.zeros_like(vertices)
 
                 mesh_data = MeshData(

@@ -176,7 +176,7 @@ class CollaborativeCanvas(QGraphicsView):
 
         # Drag-drop state
         self._drop_highlight_active = False
-        self._browser_download_worker = None  # Prevent GC of download workers
+        self._browser_download_workers = []  # Prevent GC of download workers
         self.setAcceptDrops(True)
 
     def set_tab(self, tab):
@@ -756,7 +756,7 @@ class CollaborativeCanvas(QGraphicsView):
         self._scene.addItem(note)
 
         # Track by ID
-        note_id = note_id or f"note_{len(self._sticky_notes)}"
+        note_id = note_id or f"note_{uuid.uuid4().hex[:8]}"
         self._sticky_notes[note_id] = note
 
         # Emit signal
@@ -791,7 +791,7 @@ class CollaborativeCanvas(QGraphicsView):
         self._scene.addItem(group)
 
         # Track by ID
-        group_id = group_id or f"group_{len(self._groups)}"
+        group_id = group_id or f"group_{uuid.uuid4().hex[:8]}"
         self._groups[group_id] = group
 
         # Emit signal
@@ -1246,6 +1246,8 @@ class CollaborativeCanvas(QGraphicsView):
         pos_x, pos_y = position.x(), position.y()
 
         def _on_result(saved_path):
+            if worker in self._browser_download_workers:
+                self._browser_download_workers.remove(worker)
             if saved_path:
                 self.add_image(saved_path, pos_x, pos_y)
                 self.files_dropped_on_canvas.emit([saved_path])
@@ -1254,11 +1256,13 @@ class CollaborativeCanvas(QGraphicsView):
                 logger.warning(f"Failed to download image from: {url}")
 
         def _on_error(error_tuple):
+            if worker in self._browser_download_workers:
+                self._browser_download_workers.remove(worker)
             logger.error(f"Error downloading image from {url}: {error_tuple}")
 
         worker.signals.result.connect(_on_result)
         worker.signals.error.connect(_on_error)
-        self._browser_download_worker = worker  # Prevent GC
+        self._browser_download_workers.append(worker)  # Prevent GC
         QThreadPool.globalInstance().start(worker)
 
     def _start_connection(self, event: QMouseEvent):
@@ -1419,11 +1423,11 @@ class CollaborativeCanvas(QGraphicsView):
         drawing_id = f"drawing_{uuid.uuid4().hex[:8]}"
         self._drawings[drawing_id] = self._current_drawing_item
 
-        # Push to undo stack for undo/redo support
+        # Record to undo stack (drawing already added to scene, don't re-execute)
         if self._undo_stack:
             from .canvas_undo import AddDrawingCommand
             cmd = AddDrawingCommand(self, self._current_drawing_item, drawing_id)
-            self._undo_stack.push(cmd)
+            self._undo_stack.record(cmd)
 
         # Emit modified signal
         self._emit_modified()
@@ -1852,13 +1856,14 @@ class CollaborativeCanvas(QGraphicsView):
             item_rect.height()
         )
 
-        # Find snap targets
+        # Find snap targets using spatial query instead of iterating all scene items
         snap_x = None
         snap_y = None
         min_dx = threshold
         min_dy = threshold
 
-        for other in self._scene.items():
+        search_rect = proposed_rect.adjusted(-threshold, -threshold, threshold, threshold)
+        for other in self._scene.items(search_rect):
             if other == item or not isinstance(other, (ImageNode, StickyNote, GroupRegion)):
                 continue
 
@@ -2818,6 +2823,7 @@ class CollaborativeCanvas(QGraphicsView):
                 'liked': node.is_liked(),
                 'path': node.image_path,
                 'content_hash': node.content_hash,
+                'transform': node.get_transform_state(),
             }
 
         # Video nodes — snapshot dict
@@ -2985,6 +2991,9 @@ class CollaborativeCanvas(QGraphicsView):
                 )
                 if 'z' in node_data:
                     node.setZValue(node_data['z'])
+                transform_data = node_data.get('transform', {})
+                if transform_data:
+                    node.set_transform_state(transform_data)
 
             # Load video nodes
             videos_data = state.get('videos', {})
@@ -3129,6 +3138,9 @@ class CollaborativeCanvas(QGraphicsView):
                 )
                 if 'z' in node_data:
                     node.setZValue(node_data['z'])
+                transform_data = node_data.get('transform', {})
+                if transform_data:
+                    node.set_transform_state(transform_data)
 
             # Load video nodes (thumbnails loaded async, no preloading needed)
             videos_data = state.get('videos', {})
@@ -3313,13 +3325,18 @@ class CollaborativeCanvas(QGraphicsView):
             return None
 
         try:
+            MAX_HASH_FILES = 50
+            files_checked = 0
             for entry in os.scandir(directory):
+                if files_checked >= MAX_HASH_FILES:
+                    break
                 if not entry.is_file():
                     continue
                 ext = os.path.splitext(entry.name)[1].lower()
                 if ext not in GALLERY_SUPPORTED_EXTENSIONS:
                     continue
                 file_hash = compute_file_hash(entry.path)
+                files_checked += 1
                 if file_hash == expected_hash:
                     return os.path.normpath(entry.path)
         except Exception as e:

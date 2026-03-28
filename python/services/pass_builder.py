@@ -223,9 +223,6 @@ def create_pass_builder():
     """Create a new PassBuilder instance for each build operation."""
     return PassBuilder()
 
-# Keep backward-compatible reference (use create_pass_builder() for thread safety)
-pass_builder = PassBuilder()
-
 
 if __name__ == "__main__":
     logger.info("Pass Builder module loaded successfully")

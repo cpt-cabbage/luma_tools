@@ -332,7 +332,7 @@ DENOISED_SUBDIRECTORY = "denoised"
 EXCLUDED_CHANNELS = ["variance", "var", "Ci", "beauty", "a.Z"]
 
 # Special channel mappings
-NORMAL_CHANNELS = [" normal.x", " normal.y", " normal.z"]
+NORMAL_CHANNELS = ["normal.x", "normal.y", "normal.z"]
 
 # ============================================================================
 # DEFAULT PASSES

@@ -75,13 +75,14 @@ class Worker(QRunnable):
             self.signals.started.emit()
             result = self.fn(*self.args, **self.kwargs)
             self.signals.result.emit(result)
-            self.signals.finished.emit()
         except Exception as e:
             error_msg = str(e)
             tb = traceback.format_exc()
             self.signals.error.emit(error_msg, tb)
             logger.error(f"Worker error: {error_msg}")
             logger.error(tb)
+        finally:
+            self.signals.finished.emit()
 
 
 def start_worker_thread(func, *args, on_result=None, on_error=None, on_progress=None, worker_kwargs=None):

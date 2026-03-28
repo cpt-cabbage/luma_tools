@@ -48,6 +48,10 @@ class BaseSpinner(QWidget):
         self.angle = (self.angle + self.rotation_step) % 360
         self.update()
 
+    def hideEvent(self, event):
+        self.stop()
+        super().hideEvent(event)
+
     def paintEvent(self, event):
         """Paint the spinner with trailing opacity effect."""
         painter = QPainter(self)

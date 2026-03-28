@@ -176,8 +176,10 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
     oiio_args += f'"{denoised_path}"'
     oiio_args += " --ch "
     # Defaults - Beauty and Alpha
-    oiio_args += "Beauty.R,Beauty.G,Beauty.B,a.Z,"
-    oiio_args += denoised_passes
+    base_channels = "Beauty.R,Beauty.G,Beauty.B,a.Z"
+    if denoised_passes:
+        base_channels += "," + denoised_passes
+    oiio_args += base_channels
 
     # Add Passes from Raw Render
     if render_passes:
@@ -188,12 +190,13 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
     # Append final Pass names
     # Copy beauty and alpha to RGBA
     oiio_args += ' --chappend'
-    oiio_args += ' --chnames R,G,B,A,'
-    # Add Built Passes
-    oiio_args += denoised_passes
-    if render_passes != "":
-        oiio_args += ","
-    oiio_args += render_passes
+    # Build --chnames: R,G,B,A + denoised + render passes (no trailing/double commas)
+    chnames_parts = ["R,G,B,A"]
+    if denoised_passes:
+        chnames_parts.append(denoised_passes)
+    if render_passes:
+        chnames_parts.append(render_passes)
+    oiio_args += ' --chnames ' + ",".join(chnames_parts)
     oiio_args += ' -o '
     oiio_args += f'"{output_path}"'
 
@@ -218,7 +221,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
     from core.error_handling import check_cancelled
     # If no frame range specified, execute once
     if start_frame is None or end_frame is None:
-        local_command = [oiio_path] + shlex.split(oiio_args, posix=False)
+        local_command = [oiio_path] + [arg.strip('"') for arg in shlex.split(oiio_args, posix=False)]
         logger.info(f"Local Command: {local_command}")
 
         try:
@@ -263,7 +266,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         # Example: <STARTFRAME%4> becomes 1001 (4-digit padding)
         frame_args = replace_frame_tokens(oiio_args, frame_num)
 
-        local_command = [oiio_path, '-v'] + shlex.split(frame_args, posix=False)
+        local_command = [oiio_path, '-v'] + [arg.strip('"') for arg in shlex.split(frame_args, posix=False)]
 
         # Print first command for debugging
         if frame_num == start_frame:

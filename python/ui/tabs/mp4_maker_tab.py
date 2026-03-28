@@ -53,7 +53,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
     def initialize(self):
         """Initialize MP4 maker tab."""
         from option_button import IndexedOptionButtonManager
-        from core.settings_manager import get_setting
+        from core.settings_manager import get_setting, safe_get_setting
 
         self.ui.MP4Generate.setEnabled(False)
 
@@ -77,7 +77,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         )
 
         # Load "Add to Gallery" checkbox state from user settings
-        add_to_gallery = get_setting("mp4_maker_add_to_gallery")
+        add_to_gallery = safe_get_setting("mp4_maker_add_to_gallery", False)
         self.ui.MP4AddToGallery.setChecked(add_to_gallery)
 
         # Load Publish to AYON checkbox states
@@ -176,7 +176,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         # If already generating, cancel the operation
         if getattr(self, '_is_generating', False):
-            self._cancel_event.set()
+            cancel_event = getattr(self, '_cancel_event', None)
+            if cancel_event:
+                cancel_event.set()
             self.ui.MP4Generate.setEnabled(False)
             self.show_status("Cancelling MP4 generation...", "warning")
             return
@@ -316,21 +318,25 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             logger.debug(traceback_str)
 
         # Use BaseTab helper for worker management
-        self.start_worker(
-            generate_mp4,
-            input_pattern,
-            self.app_state.mp4_output_path,
-            self.app_state.mp4_startframe,
-            self.app_state.mp4_endframe,
-            worker_kwargs={
-                "quality_index": quality_index,
-                "burn_in_timecode": burn_in_timecode,
-                "cancel_event": cancel_event,
-            },
-            on_result=on_result,
-            on_error=on_error,
-            on_progress=on_progress,
-        )
+        try:
+            self.start_worker(
+                generate_mp4,
+                input_pattern,
+                self.app_state.mp4_output_path,
+                self.app_state.mp4_startframe,
+                self.app_state.mp4_endframe,
+                worker_kwargs={
+                    "quality_index": quality_index,
+                    "burn_in_timecode": burn_in_timecode,
+                    "cancel_event": cancel_event,
+                },
+                on_result=on_result,
+                on_error=on_error,
+                on_progress=on_progress,
+            )
+        except Exception:
+            _reset_button()
+            raise
 
     def _on_add_to_gallery_changed(self, state):
         """Save Add to Gallery checkbox state to user settings."""

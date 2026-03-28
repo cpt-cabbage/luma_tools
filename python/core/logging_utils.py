@@ -191,40 +191,45 @@ class TeeWriter:
 
     Used by runner.py for farm execution logging.
     Manages the log file handle and closes it properly on cleanup.
+    Thread-safe: uses lock to prevent write/close races during shutdown.
     """
 
     def __init__(self, original_stream, log_file):
         self.original_stream = original_stream
         self.log_file = log_file
         self._closed = False
+        self._lock = threading.RLock()
 
     def write(self, message):
-        if self._closed:
-            return
-        self.original_stream.write(message)
-        if message.strip():
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.log_file.write(f"{timestamp} | {message}")
-            if not message.endswith('\n'):
+        with self._lock:
+            if self._closed:
+                return
+            self.original_stream.write(message)
+            if message.strip():
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.log_file.write(f"{timestamp} | {message}")
+                if not message.endswith('\n'):
+                    self.log_file.write('\n')
+            elif message == '\n':
                 self.log_file.write('\n')
-        elif message == '\n':
-            self.log_file.write('\n')
-        self.log_file.flush()
+            self.log_file.flush()
 
     def flush(self):
-        if self._closed:
-            return
-        self.original_stream.flush()
-        self.log_file.flush()
+        with self._lock:
+            if self._closed:
+                return
+            self.original_stream.flush()
+            self.log_file.flush()
 
     def close(self):
         """Close the log file handle and restore original stream behavior."""
-        if not self._closed:
-            self._closed = True
-            try:
-                self.log_file.close()
-            except Exception:
-                pass
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                try:
+                    self.log_file.close()
+                except Exception:
+                    pass
 
 
 # =============================================================================
