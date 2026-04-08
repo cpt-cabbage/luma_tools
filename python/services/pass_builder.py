@@ -103,7 +103,8 @@ class PassBuilder:
         if not passes:
             raise ValueError(f"No passes found in {passes_file}")
 
-        # Initialize variables
+        # Initialize variables — render_name is already a bare filename (no path),
+        # so the path constructions below use it directly without redundant basename().
         self.render_name = os.path.basename(passes_file).rsplit(".", 1)[0]
         render_file = os.path.basename(renders_path)
 
@@ -111,16 +112,16 @@ class PassBuilder:
         denoised = os.path.join(
             renders_path,
             DENOISED_SUBDIRECTORY,
-            f"{os.path.basename(self.render_name)}.<STARTFRAME%{FRAME_PADDING}>.exr"
+            f"{self.render_name}.<STARTFRAME%{FRAME_PADDING}>.exr"
         )
         renders = os.path.join(
             renders_path,
-            f"{os.path.basename(self.render_name)}.<STARTFRAME%{FRAME_PADDING}>.exr"
+            f"{self.render_name}.<STARTFRAME%{FRAME_PADDING}>.exr"
         )
         output = os.path.join(
             renders_path,
             output_subdirectory,
-            f"{os.path.basename(self.render_name)}.<STARTFRAME%{FRAME_PADDING}>.exr"
+            f"{self.render_name}.<STARTFRAME%{FRAME_PADDING}>.exr"
         )
 
         # Check cancellation before building command

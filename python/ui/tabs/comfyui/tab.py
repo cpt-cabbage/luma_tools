@@ -545,29 +545,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             finally:
                 self._workflow_selector_combo.blockSignals(False)
 
-    def _update_auto_add_canvas_visibility(self):
-        """Show/hide auto-add to canvas based on preset output type.
-
-        Only image/video outputs can be added to canvas.
-        """
-        from comfyui.presets_manager import get_workflow_preset_output_type
-
-        if not hasattr(self.ui, 'ComfyUIAutoAddToCanvas'):
-            return
-
-        # Get output type for current preset
-        output_type = "image"  # Default
-        if self.state_manager.current_preset_name:
-            output_type = get_workflow_preset_output_type(self.state_manager.current_preset_name)
-
-        # Show checkbox only for image/video outputs
-        show_checkbox = output_type in ("image", "video")
-        self.ui.ComfyUIAutoAddToCanvas.setVisible(show_checkbox)
-
-        # Also uncheck if hidden to avoid unexpected behavior
-        if not show_checkbox:
-            self.ui.ComfyUIAutoAddToCanvas.setChecked(False)
-
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
         from comfyui.presets_manager import get_comfyui_workflow_preset_path, get_workflow_preset_config
@@ -726,7 +703,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
-            self._update_auto_add_canvas_visibility()
             self._save_state()
         else:
             display_name = self._get_preset_display_name(preset_name)
@@ -736,7 +712,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._refresh_editable_nodes()
             self._validate_inputs()
             self._update_note_display()
-            self._update_auto_add_canvas_visibility()
             # Guard for animator not being initialized yet during tab initialization
             self.show_status(f"Workflow file not found: {workflow_path}", "error")
 
@@ -790,9 +765,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         if dialog.exec_() == QDialog.Accepted:
             self.show_status(f"Model '{current_name}' updated", "success")
-
-            # Update auto-add to canvas visibility based on output type
-            self._update_auto_add_canvas_visibility()
 
             # Refresh the UI with the (possibly new) preset name
             # Re-fetch presets in case name changed

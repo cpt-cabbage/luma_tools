@@ -111,7 +111,9 @@ class MetadataFile:
                 # Check cache
                 if use_cache:
                     if self._cache is not None and self._cache_mtime == current_mtime:
-                        return self._cache
+                        # Return a shallow copy so callers can mutate the result
+                        # without corrupting the in-memory cache.
+                        return dict(self._cache)
 
                 # Load from file (under lock to prevent TOCTOU race between
                 # mtime check and file read — another thread could modify the
@@ -127,8 +129,9 @@ class MetadataFile:
                     )
                     return default
 
-                # Update cache
-                self._cache = data
+                # Update cache (store a copy so subsequent caller mutations
+                # don't reach back through the cache reference)
+                self._cache = dict(data)
                 self._cache_mtime = current_mtime
 
                 return data

@@ -133,20 +133,23 @@ class ThreeJSBridge(QObject):
             file_url = file_path.replace('\\', '/')
             if not file_url.startswith('file://'):
                 file_url = f'file:///{file_url}'
-            js_code = f"loadModel('{file_url}');"
+            # json.dumps escapes quotes/backslashes — paths with apostrophes
+            # (e.g. "O'Brien") would otherwise produce broken JS that
+            # runJavaScript silently rejects.
+            js_code = f"loadModel({json.dumps(file_url)});"
             self._web_view.page().runJavaScript(js_code)
 
     def set_view_mode(self, mode: str):
         """Send view mode command to JavaScript."""
         if self._web_view:
-            js_code = f"setViewMode('{mode}');"
+            js_code = f"setViewMode({json.dumps(mode)});"
             self._web_view.page().runJavaScript(js_code)
 
     def play_animation(self, name: str = None):
         """Send play animation command to JavaScript."""
         if self._web_view:
             if name:
-                js_code = f"playAnimation('{name}');"
+                js_code = f"playAnimation({json.dumps(name)});"
             else:
                 js_code = "playAnimation();"
             self._web_view.page().runJavaScript(js_code)
@@ -171,13 +174,13 @@ class ThreeJSBridge(QObject):
     def set_lighting_mode(self, mode: str):
         """Send lighting mode command to JavaScript."""
         if self._web_view:
-            js_code = f"setLightingMode('{mode}');"
+            js_code = f"setLightingMode({json.dumps(mode)});"
             self._web_view.page().runJavaScript(js_code)
 
     def set_shading_mode(self, mode: str):
         """Send shading mode command to JavaScript."""
         if self._web_view:
-            js_code = f"setShadingMode('{mode}');"
+            js_code = f"setShadingMode({json.dumps(mode)});"
             self._web_view.page().runJavaScript(js_code)
 
     def load_hdri(self, path: str):
@@ -186,7 +189,7 @@ class ThreeJSBridge(QObject):
             file_url = path.replace('\\', '/')
             if not file_url.startswith('file://'):
                 file_url = f'file:///{file_url}'
-            js_code = f"loadHdri('{file_url}');"
+            js_code = f"loadHdri({json.dumps(file_url)});"
             self._web_view.page().runJavaScript(js_code)
 
     def set_light_strength(self, strength: float):

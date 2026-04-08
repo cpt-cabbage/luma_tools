@@ -60,13 +60,6 @@ def _validate_server_behavior(v):
 def _validate_stacking_mode(v):
     return _validate_enum(v, ("job", "groups", "both", "grid"), "job")
 
-def _validate_canvas_sync_interval(v):
-    """Validate canvas sync interval (500-5000ms)."""
-    try:
-        return max(500, min(5000, int(v)))
-    except (ValueError, TypeError):
-        return 1000  # Default 1 second
-
 def _validate_deadline_poll_interval(v):
     """Validate Deadline poll interval (1-60 seconds)."""
     try:
@@ -106,10 +99,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
             "Landscape", "Abstract", "Experimental"
         ],
         "global"
-    ),
-    # Canvas Settings
-    "canvas_sync_interval": SettingDef(
-        "canvas_sync_interval", 1000, "global", _validate_canvas_sync_interval
     ),
     # Deadline Settings
     "deadline_poll_interval": SettingDef(
@@ -161,9 +150,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # ComfyUI Model Picker settings
     "comfyui_model_sort": SettingDef("comfyui_model_sort", "recently_used", "user"),
     "comfyui_model_filter": SettingDef("comfyui_model_filter", "all", "user"),
-    # Canvas settings
-    # Dict mapping "{jobname}" or "{jobname}_{shot}" to last opened canvas_id
-    "canvas_last_opened": SettingDef("canvas_last_opened", {}, "user"),
     # Cached tool paths (fallback for standalone mode)
     "cached_oiio_path": SettingDef("cached_oiio_path", "", "user"),
     "cached_oiio_info_path": SettingDef("cached_oiio_info_path", "", "user"),

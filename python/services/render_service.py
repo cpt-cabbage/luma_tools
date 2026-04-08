@@ -56,7 +56,8 @@ def detect_passes(render_file):
                 try:
                     key = truncate_at_suffix(ch, ".")
                     key = key.replace(".", "")
-                except (ValueError, AttributeError, Exception):
+                except (ValueError, AttributeError) as e:
+                    logger.debug(f"Channel parse fallback for {ch!r}: {e}")
                     key = ch
             else:
                 key = ch

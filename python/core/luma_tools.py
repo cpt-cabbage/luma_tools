@@ -12,7 +12,7 @@ import sys
 import os
 import logging
 
-from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_ROOT, FFMPEG_PATH, IS_DEV_MODE
+from core.config import APP_ID, APP_TITLE, APP_VERSION, ICON_PATH, DEADLINE_PATH, OIIO_PATH, OIIO_INFO_PATH, FFMPEG_PATH, IS_DEV_MODE
 from core.logging_utils import setup_file_logging, cleanup_old_logs, setup_exception_hook, setup_polling_logger, get_network_log_dir, get_local_log_dir
 
 
@@ -187,7 +187,7 @@ apply_stylesheet(app)
 
 logging.info(f"DEADLINE {DEADLINE_PATH}")
 logging.info(f"OIIO {OIIO_PATH}")
-logging.info(f"OIIO INFO {OIIO_INFO_ROOT}")
+logging.info(f"OIIO INFO {OIIO_INFO_PATH}")
 logging.info(f"FFMPEG {FFMPEG_PATH}")
 
 
@@ -1079,7 +1079,6 @@ class LumaShotTools(QtWidgets.QWidget):
             'cleaner': 'trash',
             'comfyui': 'sparkles',
             'gallery': 'image',
-            'canvas': 'grid',
         }
 
         for i in range(self.tab_widget.count()):

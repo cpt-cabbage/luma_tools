@@ -113,22 +113,6 @@ class PipelineEventBus(QObject):
     # Args: force (bool) - if True, forces full refresh ignoring cache
     gallery_refresh_requested = Signal(bool)
 
-    # =========================================================================
-    # Canvas Events
-    # =========================================================================
-
-    # Emitted to request adding an image to the canvas
-    # Args: image_path (str)
-    add_to_canvas = Signal(str)
-
-    # Emitted when an image was successfully added to canvas
-    # Args: image_path (str)
-    canvas_image_added = Signal(str)
-
-    # Emitted to navigate to and select an image in the gallery
-    # Args: image_path (str)
-    gallery_navigate_to = Signal(str)
-
     # Emitted when favorites data changes (likes, groups)
     # Args: None - listeners should re-query their items
     favorites_changed = Signal()
@@ -487,7 +471,12 @@ class PipelineEventBus(QObject):
             logger.info(f"All jobs completed: {total_outputs} outputs in {elapsed:.1f}s")
 
 
-# Global event bus instance
+# Global event bus instance.
+# IMPORTANT: PipelineEventBus inherits from QObject, so a QApplication must
+# exist before this module is imported. In production this is fine because
+# event_bus is imported from inside tabs/widgets that are already inside Qt.
+# Test files that import event_bus must create a QApplication first (see
+# tests/test_event_bus.py for the pattern).
 pipeline_events = PipelineEventBus()
 
 

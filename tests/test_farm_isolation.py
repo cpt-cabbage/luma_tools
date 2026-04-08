@@ -31,6 +31,7 @@ FARM_COPIES = {
     "utils.py": "comfyui_utils.py",
     "analytics.py": "comfyui_analytics.py",
     "node_configs.py": "comfyui_node_configs.py",
+    "metadata.py": "comfyui_metadata.py",
 }
 
 
@@ -99,6 +100,11 @@ class TestFarmImportIsolation:
     def test_runner_imports(self, farm_env):
         """runner.py is the actual entry-point Deadline executes."""
         importlib.import_module("comfyui_runner")
+
+    def test_metadata_imports(self, farm_env):
+        """metadata.py provides add_per_file_metadata used by the runner."""
+        mod = importlib.import_module("comfyui_metadata")
+        assert hasattr(mod, "add_per_file_metadata")
 
 
 class TestSubmitterCopyListComplete:

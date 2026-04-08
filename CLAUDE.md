@@ -32,7 +32,7 @@ After each layer, pause and tell the user what existing flows could be affected 
 - This is the #1 source of runtime `AttributeError` bugs in this codebase
 
 **When modifying event handlers, signals, or mouse/keyboard interactions:**
-- Trace what other features share that event path (e.g., mouse events used by both pen tool and pan, keyboard events shared between gallery and canvas)
+- Trace what other features share that event path
 - Test the adjacent features, not just the one being changed
 
 **Run the test suite at natural checkpoints** — after completing a logical layer of changes, not after every single edit.
@@ -56,7 +56,6 @@ Detailed architecture and API reference for each module lives in CLAUDE.md files
 |------------------|----------|
 | `python/core/CLAUDE.md` | utils, error_handling, validators, caching, metadata_file, config, logging_utils, subprocess_utils, event_bus |
 | `python/comfyui/CLAUDE.md` | Workflow pipeline, editable nodes, export nodes, subgraphs, metadata, Deadline integration |
-| `python/ui/canvas/CLAUDE.md` | Canvas architecture, multi-canvas system, network sync, items, drawing, undo, export |
 | `python/ui/tabs/CLAUDE.md` | BaseTab pattern, helpers, PollingMixin, RenderScanMixin, tab registration |
 | `python/ui/tabs/gallery/CLAUDE.md` | Gallery managers, incremental updates, favorites, groups, keyboard shortcuts, thumbnail styling |
 | `resources/ui/CLAUDE.md` | dialog_helpers, file_dialogs, option_button, thumbnails, spinners, viewers, effects |
@@ -100,7 +99,6 @@ python/
 ├── ayon/         # AYON publishing service (Strategy pattern), validators
 ├── services/     # pass_builder, render_service, mp4_maker, file_operations
 ├── ui/
-│   ├── canvas/   # Collaborative infinite canvas with network sync
 │   └── tabs/     # BaseTab subclasses, one per tool tab
 │       ├── gallery/  # Decomposed manager architecture (see gallery/CLAUDE.md)
 │       └── mixins/   # Shared tab functionality (RenderScanMixin)
@@ -270,7 +268,7 @@ if app_state.has_shot_context():   # True when launched with AYON context
 State groups: command line args (jobname, shot, task, shotpath, user), Pass Builder (renders, channels, searchpath, frames), MP4 (mp4_renders, mp4_searchpath), rePublish (republish_renders), ComfyUI (comfyui_workflow_path, comfyui_iterate_mode), standalone_mode.
 
 ### Event Bus (Cross-Tab Communication)
-`core/event_bus.py`: Central signal hub (`pipeline_events` singleton) for decoupled cross-tab communication. Used by ComfyUI, Gallery, Canvas, and Settings tabs.
+`core/event_bus.py`: Central signal hub (`pipeline_events` singleton) for decoupled cross-tab communication. Used by ComfyUI, Gallery, and Settings tabs.
 
 ```python
 from core.event_bus import pipeline_events
@@ -286,7 +284,6 @@ pipeline_events.job_completed.connect(self._on_job_completed)
 **Key signal groups:**
 - **ComfyUI → Gallery:** `job_submitted`, `job_progress`, `job_output_ready`, `job_completed`, `job_failed`, `all_jobs_completed`
 - **Gallery → ComfyUI:** `use_as_input`, `copy_settings`, `selection_changed`
-- **Canvas:** `add_to_canvas`, `canvas_image_added`, `gallery_navigate_to`
 - **Viewer:** `toggle_item_like`, `add_item_to_group`, `show_item_properties`
 
 Includes thread-safe job tracking via `JobInfo` dataclass and `GalleryContext` for state sharing.
@@ -319,7 +316,6 @@ if main:
 
 ### Domain-Specific Architecture
 - **ComfyUI:** Workflow load/modify/submit pipeline. See `python/comfyui/CLAUDE.md`
-- **Canvas:** Collaborative infinite canvas with network sync. See `python/ui/canvas/CLAUDE.md`
 - **Gallery:** Decomposed manager architecture. See `python/ui/tabs/gallery/CLAUDE.md`
 - **3D Loaders:** Strategy pattern in `geo/loaders/factory.py` — `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL)
 - **Pass Building:** `find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
@@ -340,6 +336,12 @@ if main:
 
 **Setup:** Python 3.10+, PySide6, pre-configured venv in `python/venv/`. Build step: precompile `.ui` files (see below).
 **Key deps:** PySide6 ≥6.6, open3d ≥0.18, trimesh ≥4.10, usd-core ≥25.11, PyOpenGL ≥3.1, pyenchant ≥3.3
+
+**codebase-memory-mcp project name:** This repo lives on a Windows mapped drive (`L:`), which trips a known indexer bug — the project is indexed under its UNC path instead. Use this exact name for `search_graph`, `trace_path`, `get_architecture`, etc.:
+```
+192.168.35.14-libraries-tools-_studio_tools-AYON-_dev-christophe-la_shot_tools-luma_tools
+```
+(Root path: `//192.168.35.14/libraries/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools`)
 
 **Testing:**
 Tests must be run with PYTHONPATH set. From Claude Code, use a `.ps1` script:
@@ -366,7 +368,7 @@ The Deadline runner copies scripts from `python/comfyui/` to a flat `_job_data/`
 
 **Helper scripts** (root directory):
 - `_run_tests.ps1` — Run full pytest suite with proper PYTHONPATH
-- `_check_logs.ps1` — Stability test: 10 back-to-back app launches (10s each)
+- `_check_logs.ps1` — Stability test: 10 back-to-back app launches (`--auto-close 10` each). Misleading name; it does not read logs, it generates them.
 - `_find_logs.ps1` — Find latest log file path
 - `_find_workflow.ps1` — Search for workflow files
 - `_check_analytics.ps1` — Check analytics data
@@ -410,13 +412,13 @@ Read tool on log path with offset=-100
 --tab <name>       Select a tab on startup (passbuilder, mp4maker, republish, shotcleaner/cleaner, logs, comfyui, gallery, settings)
 --auto-close <sec> Auto-close the app after N seconds (for automated testing)
 ```
-Tab names come from `_TAB_ALIASES` dict in `core/luma_tools.py` (not all `restrict_key` values work — e.g., `canvas` has no alias).
+Tab names come from `_TAB_ALIASES` dict in `core/luma_tools.py`.
 
 **Running the app from Claude Code for debugging:**
 Because PYTHONPATH must be set (uses `$env:` which bash mangles), write a `.ps1` script:
 ```powershell
 # _run_test.ps1 - write this file, then execute with: powershell -ExecutionPolicy Bypass -File _run_test.ps1
-Set-Location 'l:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'
+Set-Location 'L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools'
 $env:PYTHONPATH = "$(Get-Location)\python;$(Get-Location)\resources\ui"
 python\venv\Scripts\python.exe python\core\luma_tools.py --tab gallery --auto-close 30
 

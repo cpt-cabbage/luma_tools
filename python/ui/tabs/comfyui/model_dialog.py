@@ -147,9 +147,7 @@ class ModelDialog(QDialog):
         current_output_type = self.preset_data.get("output_type", "image")
         self._output_type_combo.setCurrentText(self._output_type_reverse.get(current_output_type, "Image"))
         self._output_type_combo.setToolTip(
-            "Specify what type of content this model generates.\n\n"
-            "• Image/Video: Auto-add to Canvas option will be available\n"
-            "• 3D/Audio/Other: Canvas integration is disabled"
+            "Specify what type of content this model generates."
         )
         form.addRow("Output Type:", self._output_type_combo)
 

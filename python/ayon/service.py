@@ -902,7 +902,10 @@ def create_ayon_metadata(
         "handleStart": 0,
         "handleEnd": 0,
         "fps": AYON_DEFAULT_FPS,
-        "source": "{root[work]}/" + working_dir.split("work/")[-1] + render_file,
+        # Normalize working_dir before splitting on "work/" — Windows callers
+        # may pass backslashes which would otherwise leave the split untouched
+        # and produce a broken AYON source path containing the drive letter.
+        "source": "{root[work]}/" + normalize_path(working_dir).split("work/")[-1] + render_file,
         "representations": representations,
         # farm=True tells AYON to defer file integration to a farm job
         # farm=False tells AYON to integrate files immediately (local publish)
@@ -1204,8 +1207,6 @@ def submit_ayon_publish_to_deadline(
     Returns:
         str: Publish job ID or None if failed
     """
-    ayon_logger = Logger.get_logger(__name__) if AYON_AVAILABLE else logger
-
     if not AYON_AVAILABLE or not DEADLINE_AVAILABLE:
         logger.warning("AYON or Deadline not available, skipping publish")
         return None

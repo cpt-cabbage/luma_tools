@@ -265,7 +265,7 @@ def save_image_data_to_file(image, directory: str, filename: str = None) -> Opti
         return None
 
     if not filename:
-        filename = generate_image_filename(prefix="canvas_paste")
+        filename = generate_image_filename(prefix="image_paste")
 
     filepath = os.path.join(directory, filename)
 
@@ -284,7 +284,7 @@ def save_image_data_to_file(image, directory: str, filename: str = None) -> Opti
         return None
 
 
-def generate_image_filename(url: str = None, prefix: str = "canvas_paste") -> str:
+def generate_image_filename(url: str = None, prefix: str = "image_paste") -> str:
     """Generate a timestamp-based filename for saved images.
 
     Args:
@@ -292,7 +292,7 @@ def generate_image_filename(url: str = None, prefix: str = "canvas_paste") -> st
         prefix: Filename prefix
 
     Returns:
-        Filename like 'canvas_paste_20260223_143052_123.png'
+        Filename like 'image_paste_20260223_143052_123.png'
     """
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond // 1000:03d}"
@@ -327,7 +327,7 @@ def download_image_from_url(url: str, save_directory: str) -> Optional[str]:
         logger.warning(f"Invalid URL scheme: {url}")
         return None
 
-    filename = generate_image_filename(url=url, prefix="canvas_drop")
+    filename = generate_image_filename(url=url, prefix="image_drop")
     filepath = os.path.join(save_directory, filename)
 
     try:

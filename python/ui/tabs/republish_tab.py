@@ -10,7 +10,6 @@ import threading
 
 from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
-from ui_components import StatusColors
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +211,12 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     @property
     def _task(self):
+        # Defensive guard: _task_manager is created in initialize(), which
+        # runs only on first tab activation. Mirror the _source/_source_manager
+        # pattern so any signal handler that fires before initialize() gets a
+        # safe default instead of AttributeError.
+        if not hasattr(self, '_task_manager'):
+            return "lighting"
         return self._task_manager.value
 
     def _on_source_changed(self, value=None):
@@ -439,6 +444,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.ui.RePublishPublish.setText("Cancel")
 
         # Show status bar progress
+        from ui_components import StatusColors
         self.update_status_with_spinner(
             "AYON: Preparing files for publish...",
             StatusColors.INFO
@@ -621,6 +627,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
         if self.animator:
+            from ui_components import StatusColors
             self.animator.update_status_animated(
                 f"AYON: {message}",
                 StatusColors.INFO
@@ -636,6 +643,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
+        from ui_components import StatusColors
         self._reset_publish_button()
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
@@ -648,6 +656,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_publish_error(self, error_msg, traceback_str):
         """Handle publish errors or cancellation."""
+        from ui_components import StatusColors
         self._reset_publish_button()
 
         if getattr(self, '_cancel_event', None) and self._cancel_event.is_set():

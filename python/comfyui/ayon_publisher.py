@@ -17,6 +17,11 @@ from dialog_helpers import show_warning, show_error, show_info
 
 logger = logging.getLogger(__name__)
 
+# Module-level anchor for in-flight publish workers — keeps them alive even
+# if the calling progress dialog is dropped early. Workers self-remove from
+# this list when their result/error callback fires.
+_active_publish_workers: List["object"] = []
+
 
 def _run_publish_validators(
     file_path: str,
@@ -290,13 +295,25 @@ def publish_comfyui_asset_to_ayon(
                 logger.error(f"[AYON Publish] Error: {error_msg}")
                 show_error("Publish Error", f"Failed to publish to AYON:\n\n{error_msg}", parent_widget)
 
-            # Create and start worker
-            # Store worker on progress_dialog to prevent garbage collection
+            # Create and start worker.
+            # Anchor the worker on a module-level list (not just the dialog)
+            # so it survives even if the caller drops its dialog reference.
             from ui_components import Worker
-            progress_dialog._worker = Worker(publish_worker)
-            progress_dialog._worker.signals.result.connect(on_publish_complete)
-            progress_dialog._worker.signals.error.connect(on_publish_error)
-            QThreadPool.globalInstance().start(progress_dialog._worker)
+            worker = Worker(publish_worker)
+            _active_publish_workers.append(worker)
+
+            def _release_worker(*_args, **_kwargs):
+                try:
+                    _active_publish_workers.remove(worker)
+                except ValueError:
+                    pass
+
+            worker.signals.result.connect(on_publish_complete)
+            worker.signals.error.connect(on_publish_error)
+            worker.signals.result.connect(_release_worker)
+            worker.signals.error.connect(_release_worker)
+            progress_dialog._worker = worker  # also anchor on the dialog for legacy callers
+            QThreadPool.globalInstance().start(worker)
 
             # Return True to indicate publish was initiated
             # (actual result will be shown in callbacks)

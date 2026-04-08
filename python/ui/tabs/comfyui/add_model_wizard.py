@@ -120,9 +120,7 @@ class DetailsPage(QWizardPage):
         self._output_type_combo = QComboBox()
         self._output_type_combo.addItems(["Image", "Video", "3D", "Audio", "Other"])
         self._output_type_combo.setToolTip(
-            "Specify what type of content this model generates.\n\n"
-            "• Image/Video: Auto-add to Canvas option will be available\n"
-            "• 3D/Audio/Other: Canvas integration is disabled"
+            "Specify what type of content this model generates."
         )
         output_layout.addWidget(output_label)
         output_layout.addWidget(self._output_type_combo)

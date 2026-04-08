@@ -51,8 +51,6 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
     ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
-    # Canvas sync settings
-    ("canvas_sync_interval", "CanvasSyncIntervalSpinBox", _SPINBOX),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]
@@ -150,7 +148,6 @@ class SettingsTab(BaseTab):
         is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
 
         # Create programmatic global settings UI widgets
-        self._setup_canvas_sync_interval_ui()
         self._setup_deadline_poll_interval_ui()
 
         # Initialize completion sound combobox with data values
@@ -185,57 +182,6 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'globalSettingsGroupBox'):
             self.ui.globalSettingsGroupBox.hide()
 
-    def _setup_canvas_sync_interval_ui(self):
-        """Create and add canvas sync interval spinbox to global settings."""
-        from PySide6.QtWidgets import QHBoxLayout, QLabel, QSpinBox, QSpacerItem, QSizePolicy
-
-        # Only add if global settings layout exists
-        if not hasattr(self.ui, 'globalSettingsLayout'):
-            return
-
-        layout = self.ui.globalSettingsLayout
-
-        # Create horizontal layout for the setting
-        row_layout = QHBoxLayout()
-
-        # Label
-        label = QLabel("Canvas Sync Interval (ms):")
-        label.setToolTip("How often the canvas syncs with other users (lower = faster, more network load)")
-        row_layout.addWidget(label)
-
-        # Spinbox
-        spinbox = QSpinBox()
-        spinbox.setMinimum(500)
-        spinbox.setMaximum(5000)
-        spinbox.setSingleStep(100)
-        spinbox.setValue(1000)
-        spinbox.setSuffix(" ms")
-        spinbox.setToolTip("Sync interval in milliseconds (500-5000ms)")
-        row_layout.addWidget(spinbox)
-
-        # Spacer
-        spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        row_layout.addItem(spacer)
-
-        # Insert after the server timeout row (find adminUsersHeader as reference)
-        insert_index = -1
-        for i in range(layout.count()):
-            item = layout.itemAt(i)
-            if item and item.widget():
-                widget = item.widget()
-                if widget.objectName() == 'adminUsersHeader':
-                    insert_index = i
-                    break
-
-        if insert_index >= 0:
-            layout.insertLayout(insert_index, row_layout)
-        else:
-            # Fallback: add before the last stretch
-            layout.addLayout(row_layout)
-
-        # Store reference so declarative system can find it
-        self.ui.CanvasSyncIntervalSpinBox = spinbox
-
     def _setup_deadline_poll_interval_ui(self):
         """Create and add Deadline poll interval spinbox to global settings."""
         from PySide6.QtWidgets import QHBoxLayout, QLabel, QSpinBox, QSpacerItem, QSizePolicy
@@ -263,7 +209,7 @@ class SettingsTab(BaseTab):
         spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         row_layout.addItem(spacer)
 
-        # Insert after canvas sync interval (find adminUsersHeader as reference)
+        # Insert before adminUsersHeader (so it sits with other global settings)
         insert_index = -1
         for i in range(layout.count()):
             item = layout.itemAt(i)

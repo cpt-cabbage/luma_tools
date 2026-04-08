@@ -65,9 +65,22 @@ def convert_exr_to_png_with_oiio(
         True if successful, False otherwise
     """
     from core.error_handling import check_cancelled
+    import re
     if not OIIO_PATH or not os.path.exists(OIIO_PATH):
         logger.error("OIIO not available for EXR conversion")
         return False
+
+    # Detect frame padding from the input pattern (e.g. %04d, %05d, %06d).
+    # Default to 4 if no token found — caller is expected to pass a printf
+    # padding token like %04d, but be defensive about other widths.
+    padding_match = re.search(r"%0(\d+)d", input_pattern)
+    if not padding_match:
+        logger.error(
+            f"Input pattern has no %0Nd frame token; cannot substitute frame number: {input_pattern}"
+        )
+        return False
+    padding_width = int(padding_match.group(1))
+    padding_token = f"%0{padding_width}d"
 
     try:
         frame_count = end_frame - start_frame + 1
@@ -80,9 +93,11 @@ def convert_exr_to_png_with_oiio(
             # Check for cancellation before each frame
             check_cancelled(cancel_event)
 
-            # Build input/output paths
-            input_file = input_pattern.replace("%04d", f"{frame:04d}")
-            output_file = os.path.join(output_dir, f"frame_{frame:04d}.png")
+            # Build input/output paths (preserve original padding width on both sides)
+            input_file = input_pattern.replace(padding_token, format(frame, f"0{padding_width}d"))
+            output_file = os.path.join(
+                output_dir, f"frame_{format(frame, f'0{padding_width}d')}.png"
+            )
 
             # Build OIIO command with OCIO color conversion
             # Use colorconvert to transform from ACES/linear to sRGB for display
@@ -175,6 +190,11 @@ def generate_mp4(
         True if successful, False otherwise
     """
     from core.error_handling import check_cancelled
+
+    if not FFMPEG_PATH:
+        logger.error("FFmpeg not available for MP4 generation")
+        return False
+
     temp_dir = None
 
     try:
@@ -222,8 +242,13 @@ def generate_mp4(
             if not success:
                 raise RuntimeError("OIIO conversion failed")
 
-            # Use PNG files as input for FFmpeg
-            ffmpeg_input_pattern = os.path.join(temp_dir, f"frame_%04d.png")
+            # Use PNG files as input for FFmpeg — match the padding width detected
+            # from the input EXR sequence (convert_exr_to_png_with_oiio writes
+            # frame_%0Nd.png where N is the input pattern's padding width).
+            import re as _re
+            _pad_match = _re.search(r"%0(\d+)d", input_sequence_path)
+            _pad_width = int(_pad_match.group(1)) if _pad_match else 4
+            ffmpeg_input_pattern = os.path.join(temp_dir, f"frame_%0{_pad_width}d.png")
         else:
             # Non-EXR files can be used directly by FFmpeg
             logger.info(f"Detected {file_ext} format - will use directly with FFmpeg")
@@ -259,8 +284,6 @@ def generate_mp4(
                 f"boxborderw=5:x=10:y=10"
             )
             filters.append(timecode_filter)
-
-        filters.append("format=yuv420p")
 
         if filters:
             cmd.extend(["-vf", ",".join(filters)])

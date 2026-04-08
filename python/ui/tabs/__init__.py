@@ -20,7 +20,6 @@ __all__ = [
 TAB_REGISTRY = [
     ('.comfyui', 'ComfyUITab', 'comfyui'),
     ('.gallery_tab', 'GalleryTab', 'gallery'),
-    ('.canvas_tab', 'CanvasTab', 'canvas'),
     ('.pass_builder_tab', 'PassBuilderTab', 'passbuilder'),
     ('.republish_tab', 'RePublishTab', 'republish'),
     ('.mp4_maker_tab', 'MP4MakerTab', 'mp4maker'),

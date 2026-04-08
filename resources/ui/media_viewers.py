@@ -2062,10 +2062,6 @@ class EmbeddedImageViewer(QWidget):
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
 
-        # Add to Canvas
-        add_to_canvas_action = menu.addAction("Add to Canvas")
-        add_to_canvas_action.triggered.connect(lambda: self._add_to_canvas(image_path))
-
         # View Input option (for outputs that have source images)
         metadata = self._get_metadata()
         input_image = metadata.get('input_image')
@@ -2154,13 +2150,6 @@ class EmbeddedImageViewer(QWidget):
                     self._favorites_manager.add_to_group(path, group.group_id)
         except Exception as e:
             logger.error(f"Error creating group: {e}")
-
-    def _add_to_canvas(self, image_path):
-        """Add image to canvas via event bus."""
-        if EVENT_BUS_AVAILABLE and pipeline_events:
-            pipeline_events.add_to_canvas.emit(image_path)
-            self.filename_label.setText(f"{os.path.basename(image_path)} - Added to canvas!")
-            QTimer.singleShot(1500, self._update_info)
 
     def _view_input(self, input_path):
         """View the input/source image."""
@@ -2734,10 +2723,6 @@ class FullscreenImageViewer(QWidget):
         open_folder_action = menu.addAction("Open Containing Folder")
         open_folder_action.triggered.connect(lambda: self._open_folder(image_path))
 
-        # Add to Canvas
-        add_to_canvas_action = menu.addAction("Add to Canvas")
-        add_to_canvas_action.triggered.connect(lambda: self._add_to_canvas(image_path))
-
         # View Input option (for outputs that have source images)
         metadata = self._get_metadata()
         input_image = metadata.get('input_image')
@@ -2826,13 +2811,6 @@ class FullscreenImageViewer(QWidget):
                     self._favorites_manager.add_to_group(path, group.group_id)
         except Exception as e:
             logger.error(f"Error creating group: {e}")
-
-    def _add_to_canvas(self, image_path):
-        """Add image to canvas via event bus."""
-        if EVENT_BUS_AVAILABLE and pipeline_events:
-            pipeline_events.add_to_canvas.emit(image_path)
-            self.filename_label.setText(f"{os.path.basename(image_path)} - Added to canvas!")
-            QTimer.singleShot(1500, self._update_info)
 
     def _view_input(self, input_path):
         """View the input/source image."""

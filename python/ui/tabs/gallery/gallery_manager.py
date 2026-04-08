@@ -21,6 +21,8 @@ from services.gallery_sorting import (
     group_items_by_user_groups,
 )
 
+logger = logging.getLogger(__name__)
+
 # Animation threshold - skip animations when gallery has more items than this
 ANIMATION_THRESHOLD = 100
 
@@ -156,12 +158,12 @@ class GalleryManager(BaseGalleryManager):
                 # Remove stale widgets (items no longer in scan results)
                 if stale_paths:
                     self._remove_stale_widgets(stale_paths)
-                    logging.info(f"[Gallery] Incremental sync: removed {len(stale_paths)} stale items")
+                    logger.info(f"[Gallery] Incremental sync: removed {len(stale_paths)} stale items")
 
                 # Add new items
                 if new_items:
                     self._insert_new_items_incrementally(items, new_items)
-                    logging.info(f"[Gallery] Incremental sync: added {len(new_items)} new items")
+                    logger.info(f"[Gallery] Incremental sync: added {len(new_items)} new items")
 
                 if stale_paths or new_items:
                     self.update_status_count(items)
@@ -282,7 +284,7 @@ class GalleryManager(BaseGalleryManager):
         self.tab._visible_items_ordered = [item['path'] for item in items]
 
         # Note: We don't reload thumbnails - recycled widgets already have them loaded
-        logging.info(f"[Gallery] Widget recycling: {len(target_paths)} shown, {len(hidden_paths)} hidden")
+        logger.info(f"[Gallery] Widget recycling: {len(target_paths)} shown, {len(hidden_paths)} hidden")
         return True
 
     def _clear_stack_widgets(self):
@@ -429,7 +431,7 @@ class GalleryManager(BaseGalleryManager):
         if expanded_stack_id_to_restore and expanded_stack_id_to_restore in self._stack_widgets:
             stack = self._stack_widgets[expanded_stack_id_to_restore]
             if isValid(stack) and not stack.is_expanded():
-                logging.info(f"[Gallery] Restoring expanded state for stack: {expanded_stack_id_to_restore}")
+                logger.info(f"[Gallery] Restoring expanded state for stack: {expanded_stack_id_to_restore}")
                 # Restore the tracking variable and expand the stack
                 self.tab._expanded_stack_id = expanded_stack_id_to_restore
                 # Use a short delay to let the layout settle before expanding
@@ -679,7 +681,7 @@ class GalleryManager(BaseGalleryManager):
             if stacks_to_update:
                 changes.append(f"{len(stacks_to_update)} updated")
             if changes:
-                logging.info(f"[Gallery] Incremental stacked sync: {', '.join(changes)}")
+                logger.info(f"[Gallery] Incremental stacked sync: {', '.join(changes)}")
 
             # Reorder all widgets to match the sorted item order
             if added_prefixes or removed_prefixes or had_transitions:
@@ -849,11 +851,11 @@ class GalleryManager(BaseGalleryManager):
             is_expanded: True if expanded, False if collapsed
         """
         if is_expanded:
-            logging.info(f"[Gallery] Stack expanded: {stack_id}")
+            logger.info(f"[Gallery] Stack expanded: {stack_id}")
             # Track expanded stack
             self.tab._expanded_stack_id = stack_id
         else:
-            logging.info(f"[Gallery] Stack collapsed: {stack_id}")
+            logger.info(f"[Gallery] Stack collapsed: {stack_id}")
             # Clear expanded state if this was the expanded stack
             if getattr(self.tab, '_expanded_stack_id', None) == stack_id:
                 self.tab._expanded_stack_id = None
@@ -939,7 +941,7 @@ class GalleryManager(BaseGalleryManager):
 
             return thumbnail
         except Exception as e:
-            logging.error(f"[Gallery] Error creating thumbnail for {path}: {e}")
+            logger.error(f"[Gallery] Error creating thumbnail for {path}: {e}")
             return None
 
     def _on_thumbnail_like_toggled(self, path, is_liked):
@@ -1072,7 +1074,7 @@ class GalleryManager(BaseGalleryManager):
             if len(ordered_widgets) != len(items):
                 # Mismatch - fall back to full rebuild
                 container.setUpdatesEnabled(True)
-                logging.info(f"[Gallery] Reorder mismatch: {len(ordered_widgets)} widgets vs {len(items)} items, doing full rebuild")
+                logger.info(f"[Gallery] Reorder mismatch: {len(ordered_widgets)} widgets vs {len(items)} items, doing full rebuild")
                 self.display_items(items, self.tab._view_mode)
                 return
 
@@ -1085,7 +1087,7 @@ class GalleryManager(BaseGalleryManager):
                 if not isValid(widget):
                     # Widget deleted during reorder - fall back to full rebuild
                     container.setUpdatesEnabled(True)
-                    logging.warning("[Gallery] Widget invalidated during reorder, falling back to full rebuild")
+                    logger.warning("[Gallery] Widget invalidated during reorder, falling back to full rebuild")
                     self.display_items(items, self.tab._view_mode)
                     return
                 self.tab._flow_layout.addWidget(widget)
@@ -1106,7 +1108,7 @@ class GalleryManager(BaseGalleryManager):
         self.tab._visible_items_ordered = [item['path'] for item in items]
 
         # Note: We don't reload thumbnails here - they're already loaded in the widgets
-        logging.info(f"[Gallery] Fast reorder: {len(items)} items repositioned")
+        logger.info(f"[Gallery] Fast reorder: {len(items)} items repositioned")
 
     def create_all_widgets(self):
         """Create thumbnail widgets in batches to avoid blocking the UI."""

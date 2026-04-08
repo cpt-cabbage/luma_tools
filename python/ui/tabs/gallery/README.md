@@ -71,8 +71,6 @@ pipeline_events.job_output_ready.connect(self._on_job_output_ready)
 
 ### External Events Emitted
 - `gallery_refresh_requested` - Request gallery refresh from other tabs
-- `gallery_navigate_to` - Navigate to specific item
-- `add_to_canvas` - Send items to canvas tab
 - `favorites_changed` - Notify when likes/groups change
 
 ## BaseGalleryManager

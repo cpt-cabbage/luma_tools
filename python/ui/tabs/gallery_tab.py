@@ -141,7 +141,7 @@ class GalleryTab(BaseTab):
         # Initialize favorites manager for likes and groups
         self._favorites_manager = FavoritesManager(self)
 
-        # Forward favorites changes to event bus for cross-tab sync (e.g., canvas)
+        # Forward favorites changes to event bus for cross-tab sync
         # Single-item signals (for toggle_like, add_to_group, remove_from_group single operations)
         self._favorites_manager.like_changed.connect(self._on_favorites_changed)
         self._favorites_manager.item_groups_changed.connect(self._on_favorites_changed)
@@ -344,7 +344,7 @@ class GalleryTab(BaseTab):
 
     def on_tab_deactivated(self):
         """Called when user switches away from this tab. Stop watchers and timers."""
-        logging.debug("[Gallery] on_tab_deactivated START")
+        logger.debug("[Gallery] on_tab_deactivated START")
         self._refresh_controller.stop_watcher()
         self._refresh_controller.stop_network_polling()
 
@@ -356,7 +356,7 @@ class GalleryTab(BaseTab):
             from core.state_manager import app_state
             app_state.gallery_visible = False
             pipeline_events.update_gallery_context(visible=False)
-        logging.debug("[Gallery] on_tab_deactivated COMPLETE")
+        logger.debug("[Gallery] on_tab_deactivated COMPLETE")
 
     def _set_gallery_drop_enabled(self, enabled):
         """Enable or disable drop targets on gallery widgets."""
@@ -380,9 +380,9 @@ class GalleryTab(BaseTab):
                                 if id(child) in saved:
                                     child.setAcceptDrops(True)
                             self._drop_enabled_widgets = None
-            logging.debug(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
+            logger.debug(f"[Gallery] Drop targets {'enabled' if enabled else 'disabled'}")
         except Exception as e:
-            logging.debug(f"[Gallery] Error setting drop enabled: {e}")
+            logger.debug(f"[Gallery] Error setting drop enabled: {e}")
 
     def _handle_scan_complete(self, items):
         """Handle scan complete event with item processing."""
@@ -963,9 +963,6 @@ class GalleryTab(BaseTab):
         # Subscribe to refresh requests from other tabs (e.g., settings)
         pipeline_events.gallery_refresh_requested.connect(self._on_refresh_requested)
 
-        # Subscribe to navigation requests from other tabs (e.g., canvas)
-        pipeline_events.gallery_navigate_to.connect(self._on_navigate_to_requested)
-
         # Subscribe to viewer action requests (from image viewers)
         pipeline_events.toggle_item_like.connect(self._on_toggle_item_like)
         pipeline_events.add_item_to_group.connect(self._on_add_item_to_group)
@@ -1013,24 +1010,6 @@ class GalleryTab(BaseTab):
             if hasattr(self, '_widget_cache'):
                 self.clear_widget_cache()
         self._on_refresh(force=force)
-
-    def _on_navigate_to_requested(self, image_path: str):
-        """Handle navigation request from event bus.
-
-        Called when another tab (e.g., canvas) wants to show an image in the gallery.
-
-        Args:
-            image_path: Path of the image to navigate to
-        """
-        # Switch to this tab
-        if hasattr(self.main_window, 'select_tab_by_name'):
-            self.main_window.select_tab_by_name('gallery')
-        elif hasattr(self.main_window, 'tab_widget'):
-            tab_widget = self.main_window.tab_widget
-            for i in range(tab_widget.count()):
-                if tab_widget.widget(i) == self:
-                    tab_widget.setCurrentIndex(i)
-                    break
 
         # Navigate to the image
         if hasattr(self, 'select_and_scroll_to_item'):
@@ -1097,7 +1076,7 @@ class GalleryTab(BaseTab):
         """Forward favorites changes to event bus for cross-tab sync.
 
         Called when likes or group assignments change. Emits favorites_changed
-        signal on the event bus so other tabs (e.g., canvas) can sync.
+        signal on the event bus so other tabs can sync.
         """
         if EVENT_BUS_AVAILABLE:
             pipeline_events.favorites_changed.emit()
@@ -1215,8 +1194,6 @@ class GalleryTab(BaseTab):
         """
         Select an item and scroll it into view.
 
-        Called from external sources like Canvas tab's "Show in Gallery" action.
-
         Args:
             image_path: Path to the image to select and show
         """
@@ -1308,7 +1285,6 @@ class GalleryTab(BaseTab):
                 pipeline_events.job_output_ready.disconnect(self._on_job_output_ready)
                 pipeline_events.use_as_input.disconnect(self._on_use_as_input_requested)
                 pipeline_events.gallery_refresh_requested.disconnect(self._on_refresh_requested)
-                pipeline_events.gallery_navigate_to.disconnect(self._on_navigate_to_requested)
             except (RuntimeError, TypeError):
                 # Already disconnected or invalid connection
                 pass

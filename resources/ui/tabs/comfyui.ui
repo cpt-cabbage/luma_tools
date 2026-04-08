@@ -334,19 +334,6 @@
              <number>6</number>
             </property>
             <item>
-             <widget class="QCheckBox" name="ComfyUIAutoAddToCanvas">
-              <property name="text">
-               <string>Auto-add to Canvas</string>
-              </property>
-              <property name="toolTip">
-               <string>Automatically add generated images to the Canvas tab</string>
-              </property>
-              <property name="checked">
-               <bool>false</bool>
-              </property>
-             </widget>
-            </item>
-            <item>
              <layout class="QHBoxLayout" name="nameLayout">
               <property name="spacing">
                <number>6</number>

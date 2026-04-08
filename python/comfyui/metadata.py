@@ -14,8 +14,28 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from core.config import COMFYUI_OUTPUT_EXTENSIONS
-from core.utils import ensure_directory
+# Farm isolation: this module must import on workers where the `core` package
+# is not available (it's copied to a flat _job_data dir as `comfyui_metadata.py`).
+# Provide fallbacks for the two core symbols we use.
+try:
+    from core.config import COMFYUI_OUTPUT_EXTENSIONS
+except ImportError:
+    # Mirror of core.config.COMFYUI_OUTPUT_EXTENSIONS for farm-isolated execution
+    COMFYUI_OUTPUT_EXTENSIONS = [
+        ".png", ".jpg", ".jpeg", ".webp", ".exr", ".tiff", ".tif", ".bmp", ".gif",
+        ".fbx", ".obj", ".gltf", ".glb", ".usd", ".usda", ".usdc", ".usdz",
+        ".mp4", ".mov", ".avi", ".webm",
+        ".wav", ".mp3", ".flac", ".ogg",
+        ".npy", ".npz", ".safetensors", ".pt", ".pth", ".ckpt", ".bin",
+    ]
+
+try:
+    from core.utils import ensure_directory
+except ImportError:
+    def ensure_directory(path):
+        if path and not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        return path
 
 logger = logging.getLogger(__name__)
 

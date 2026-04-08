@@ -82,19 +82,6 @@ class AssimpModelLoader(BaseModelLoader):
 
             return model
 
-    def _is_ascii_fbx(self, path: str) -> bool:
-        """Check if an FBX file is ASCII format (vs binary)."""
-        try:
-            with open(path, 'rb') as f:
-                header = f.read(23)
-                if header.startswith(b'Kaydara FBX Binary'):
-                    return False
-                if header.startswith(b'; FBX') or b'FBXHeaderExtension' in f.read(1000):
-                    return True
-        except Exception:
-            pass
-        return False
-
     def _load_with_flags(self, path: str):
         """Load model with appropriate post-processing flags.
 

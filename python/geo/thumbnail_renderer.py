@@ -172,14 +172,37 @@ def render_skeleton_thumbnail(model_path: str, output_path: str, size: int = 150
 
         skeleton = model_data.skeleton
 
-        # Extract bone positions
-        bone_positions = []
-        for bone in skeleton.bones:
-            transform = bone.local_transform
-            pos = np.array([transform[0, 3], transform[1, 3], transform[2, 3]])
-            bone_positions.append(pos)
+        # Extract bone world-space positions.
+        #
+        # Two strategies, with fallback:
+        # 1. Accumulate local_transform up the parent hierarchy (works for
+        #    loaders that populate local_transform — e.g. Assimp/FBX).
+        # 2. If the accumulated positions are all near the origin (which
+        #    happens for SMPL/USD loaders that leave local_transform = I), use
+        #    the inverse of offset_matrix instead. offset_matrix maps model
+        #    space → bone space, so its inverse's translation column is the
+        #    bone's bind-pose position in model space.
+        def _accumulate_world_positions(bones):
+            world_transforms = []
+            for bone in bones:
+                if bone.parent_index >= 0 and bone.parent_index < len(world_transforms):
+                    world = world_transforms[bone.parent_index] @ bone.local_transform
+                else:
+                    world = bone.local_transform
+                world_transforms.append(world)
+            return np.array([wt[:3, 3] for wt in world_transforms])
 
-        bone_positions = np.array(bone_positions)
+        bone_positions = _accumulate_world_positions(skeleton.bones)
+
+        # Detect degenerate result (all bones near origin) and fall back to
+        # inverse-offset-matrix bind pose.
+        if len(bone_positions) > 0 and np.max(np.abs(bone_positions)) < 1e-6:
+            try:
+                bone_positions = np.array([
+                    np.linalg.inv(bone.offset_matrix)[:3, 3] for bone in skeleton.bones
+                ])
+            except (np.linalg.LinAlgError, ValueError) as e:
+                logger.debug(f"Bind-pose fallback failed: {e}")
 
         if len(bone_positions) == 0:
             return False

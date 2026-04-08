@@ -26,8 +26,10 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
-# Module-level lock for CachedProperty per-instance lock creation
-_lock_creation_lock = threading.Lock()
+# Module-level lock for CachedProperty per-instance lock creation.
+# RLock to comply with the project-wide convention (CLAUDE.md), even though
+# this lock is currently only acquired briefly and never reentrantly.
+_lock_creation_lock = threading.RLock()
 
 
 def cached_with_ttl(seconds: int, maxsize: int = 128):

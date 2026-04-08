@@ -15,10 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QProgressBar,
-    QPushButton, QScrollArea, QSizePolicy, QSlider,
-    QSpacerItem, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QProgressBar, QPushButton,
+    QScrollArea, QSizePolicy, QSlider, QSpacerItem,
+    QSpinBox, QVBoxLayout, QWidget)
 
 class Ui_ComfyUITab(object):
     def setupUi(self, ComfyUITab):
@@ -190,12 +190,6 @@ class Ui_ComfyUITab(object):
         self.comfyuiSubmitLayout = QVBoxLayout(self.comfyuiSubmitGroupBox)
         self.comfyuiSubmitLayout.setSpacing(6)
         self.comfyuiSubmitLayout.setObjectName(u"comfyuiSubmitLayout")
-        self.ComfyUIAutoAddToCanvas = QCheckBox(self.comfyuiSubmitGroupBox)
-        self.ComfyUIAutoAddToCanvas.setObjectName(u"ComfyUIAutoAddToCanvas")
-        self.ComfyUIAutoAddToCanvas.setChecked(False)
-
-        self.comfyuiSubmitLayout.addWidget(self.ComfyUIAutoAddToCanvas)
-
         self.nameLayout = QHBoxLayout()
         self.nameLayout.setSpacing(6)
         self.nameLayout.setObjectName(u"nameLayout")
@@ -320,10 +314,6 @@ class Ui_ComfyUITab(object):
         self.ComfyUIRandomizeSeed.setToolTip(QCoreApplication.translate("ComfyUITab", u"Generate a new random seed", None))
 #endif // QT_CONFIG(tooltip)
         self.comfyuiSubmitGroupBox.setTitle(QCoreApplication.translate("ComfyUITab", u"Submit", None))
-        self.ComfyUIAutoAddToCanvas.setText(QCoreApplication.translate("ComfyUITab", u"Auto-add to Canvas", None))
-#if QT_CONFIG(tooltip)
-        self.ComfyUIAutoAddToCanvas.setToolTip(QCoreApplication.translate("ComfyUITab", u"Automatically add generated images to the Canvas tab", None))
-#endif // QT_CONFIG(tooltip)
         self.label_name.setText(QCoreApplication.translate("ComfyUITab", u"Name:", None))
         self.ComfyUIName.setPlaceholderText(QCoreApplication.translate("ComfyUITab", u"Optional - prefixes output filenames", None))
 #if QT_CONFIG(tooltip)

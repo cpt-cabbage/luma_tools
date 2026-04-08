@@ -20,7 +20,7 @@ from core.config import (
     DEADLINE_DEPARTMENT,
     DEADLINE_JOB_NAME_PREFIX,
 )
-from core.settings_manager import get_setting, safe_get_setting
+from core.settings_manager import safe_get_setting
 from core.utils import ensure_directory, save_json
 from comfyui.utils import resolve_comfyui_paths
 from comfyui.image_convert import needs_conversion, copy_or_convert
@@ -34,9 +34,9 @@ def _get_comfyui_config() -> Tuple[str, str, str, str]:
     Returns:
         Tuple of (comfyui_path, comfyui_mode, comfyui_python, python_exe)
     """
-    comfyui_path = get_setting("comfyui_path")
-    comfyui_mode = get_setting("comfyui_mode")
-    comfyui_python = get_setting("comfyui_python_path")
+    comfyui_path = safe_get_setting("comfyui_path", "")
+    comfyui_mode = safe_get_setting("comfyui_mode", "embedded")
+    comfyui_python = safe_get_setting("comfyui_python_path", "")
     python_exe, _ = resolve_comfyui_paths(comfyui_path, comfyui_mode, comfyui_python or "python")
     return comfyui_path, comfyui_mode, comfyui_python, python_exe
 
@@ -48,11 +48,11 @@ def _build_server_mode_flags() -> str:
         String of flags for server connection behavior
     """
     flags = ""
-    server_behavior = get_setting("comfyui_server_not_found_behavior")
+    server_behavior = safe_get_setting("comfyui_server_not_found_behavior", "fail")
     flags += f" --server-not-found {server_behavior}"
 
     if server_behavior == "wait":
-        server_wait_timeout = get_setting("comfyui_server_wait_timeout")
+        server_wait_timeout = safe_get_setting("comfyui_server_wait_timeout", 300)
         flags += f" --server-wait-timeout {server_wait_timeout}"
 
     return flags
@@ -98,6 +98,10 @@ def submit_comfyui_to_deadline(
     Returns:
         Deadline job ID or None if failed
     """
+    if not DEADLINE_PATH:
+        logger.error("Deadline not available — DEADLINE_PATH is not set")
+        return None
+
     if priority is None:
         priority = DEADLINE_PRIORITY_COMFYUI
     if pool is None:
@@ -118,10 +122,12 @@ def submit_comfyui_to_deadline(
     utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
     analytics_script_source = os.path.join(comfyui_package_dir, "analytics.py")
     node_configs_script_source = os.path.join(comfyui_package_dir, "node_configs.py")
+    metadata_script_source = os.path.join(comfyui_package_dir, "metadata.py")
     runner_script = os.path.join(job_data_dir, "comfyui_runner.py")
     utils_script = os.path.join(job_data_dir, "comfyui_utils.py")
     analytics_script = os.path.join(job_data_dir, "comfyui_analytics.py")
     node_configs_script = os.path.join(job_data_dir, "comfyui_node_configs.py")
+    metadata_script = os.path.join(job_data_dir, "comfyui_metadata.py")
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
@@ -130,6 +136,7 @@ def submit_comfyui_to_deadline(
         (utils_script_source, utils_script),
         (analytics_script_source, analytics_script),
         (node_configs_script_source, node_configs_script),
+        (metadata_script_source, metadata_script),
     ]:
         shutil.copy2(src, dst)
         logger.info(f"Copied {os.path.basename(src)} to: {dst}")
@@ -138,7 +145,7 @@ def submit_comfyui_to_deadline(
     port = 8188
 
     comfyui_path_clean = comfyui_path.rstrip('/\\')
-    timeout = get_setting("comfyui_timeout")
+    timeout = safe_get_setting("comfyui_timeout", 3600)
     runner_args = (
         f'"{runner_script}" '
         f'--comfyui-path "{comfyui_path_clean}" '

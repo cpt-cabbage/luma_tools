@@ -77,7 +77,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         )
 
         # Load "Add to Gallery" checkbox state from user settings
-        add_to_gallery = safe_get_setting("mp4_maker_add_to_gallery", False)
+        # (registry default is True, fall through to it for first-run users)
+        add_to_gallery = safe_get_setting("mp4_maker_add_to_gallery", True)
         self.ui.MP4AddToGallery.setChecked(add_to_gallery)
 
         # Load Publish to AYON checkbox states

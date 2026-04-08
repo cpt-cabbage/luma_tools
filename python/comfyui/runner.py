@@ -188,6 +188,19 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
     log_path = os.path.join(log_dir, log_filename)
     log_file = open(log_path, 'w', encoding='utf-8')
 
+    # Ensure the log file is flushed and closed at process exit so we don't
+    # lose the last buffer of output on long farm runs.
+    import atexit as _atexit
+
+    def _close_runner_log():
+        try:
+            log_file.flush()
+            log_file.close()
+        except Exception:
+            pass
+
+    _atexit.register(_close_runner_log)
+
     log_file.write(f"{'='*60}\n")
     log_file.write(f"ComfyUI Runner Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     log_file.write(f"{'='*60}\n\n")
@@ -443,15 +456,16 @@ def main():
 
     logger.info(f"Connected to server on port {args.port}")
 
-    # Also upload via HTTP API as backup method
-    logger.info("\nUploading input images to server via HTTP...")
-    for image_name in images_to_upload:
-        image_path = os.path.join(args.input_directory, image_name)
-        if os.path.exists(image_path):
-            if not upload_image_to_server(image_path, port=args.port):
-                logger.warning(f"HTTP upload failed for {image_name} (but direct copy may have succeeded)")
-        else:
-            logger.warning(f"Image not found locally: {image_path}")
+    # Also upload via HTTP API as backup method (skip when there's nothing to upload)
+    if images_to_upload:
+        logger.info(f"\nUploading {len(images_to_upload)} input image(s) to server via HTTP...")
+        for image_name in images_to_upload:
+            image_path = os.path.join(args.input_directory, image_name)
+            if os.path.exists(image_path):
+                if not upload_image_to_server(image_path, port=args.port):
+                    logger.warning(f"HTTP upload failed for {image_name} (but direct copy may have succeeded)")
+            else:
+                logger.warning(f"Image not found locally: {image_path}")
 
     # Cleanup handler
     def cleanup(signum=None, frame=None, exit_code=None):
@@ -554,12 +568,19 @@ def main():
                     if moved:
                         logger.info(f"Moved {len(moved)} output file(s)")
 
-                # Store per-file metadata for each output file
+                # Store per-file metadata for each output file.
+                # Try the package import first, then the farm-isolated copy.
+                add_per_file_metadata = None
                 try:
                     from comfyui.metadata import add_per_file_metadata
                 except ImportError:
-                    # Farm execution - try local import
-                    add_per_file_metadata = None
+                    try:
+                        from comfyui_metadata import add_per_file_metadata
+                    except ImportError:
+                        logger.warning(
+                            "[Runner] add_per_file_metadata unavailable — "
+                            "per-file metadata will not be stored for this job"
+                        )
 
                 # Try to import file hashing (available with full package)
                 _compute_hash = None
