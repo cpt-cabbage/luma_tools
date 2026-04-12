@@ -11,7 +11,6 @@ Storage layout on network path:
 """
 
 import os
-import sys
 import json
 import time
 import socket
@@ -30,10 +29,11 @@ SCHEMA_VERSION = 1
 # =============================================================================
 
 def _get_network_output_path() -> Optional[str]:
-    """Get the network output path from global settings.
+    """Get the network output path from farm config or global settings.
 
-    Replicates the pattern from runner.py's fallback logging for standalone
-    farm execution where core modules may not be available.
+    Checks for _farm_config.json (written by submitter alongside this script)
+    first, then falls back to the relative global_settings.json path from
+    a full installation.
 
     Returns:
         Network output path string, or None if unavailable.
@@ -41,8 +41,8 @@ def _get_network_output_path() -> Optional[str]:
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         settings_paths = [
+            os.path.join(script_dir, '_farm_config.json'),
             os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
         ]
         for settings_path in settings_paths:
             norm_path = os.path.normpath(settings_path)
@@ -52,7 +52,6 @@ def _get_network_output_path() -> Optional[str]:
                 network_path = settings.get('network_output_path', '')
                 if network_path and os.path.isdir(network_path):
                     return network_path
-                break
     except Exception:
         pass
     return None

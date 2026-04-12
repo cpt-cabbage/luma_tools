@@ -124,9 +124,160 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Deferred node_info cache check (give server time to start)
         QTimer.singleShot(5000, self._check_node_info_cache)
 
+        # Server status indicator (near Submit button)
+        self._setup_server_status_indicator()
+
+        # Auto-refresh server status every 30 seconds
+        self._server_check_timer = QTimer(self.main_window)
+        self._server_check_timer.timeout.connect(self._check_server_status)
+        self._server_check_timer.start(30000)
+
+        # Initial server status check (slight delay for startup)
+        QTimer.singleShot(2000, self._check_server_status)
+
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         self._validate_inputs()
+        # Refresh server status when tab becomes visible
+        if hasattr(self, '_server_status_label'):
+            self._check_server_status()
+
+    # =========================================================================
+    # SERVER STATUS (reads heartbeat file from network, written by server.py)
+    # =========================================================================
+
+    _HEARTBEAT_STALE_SECONDS = 60  # Heartbeat older than this = offline
+
+    def _setup_server_status_indicator(self):
+        """Create server status indicator near the Submit button."""
+        self._server_status_label = QLabel("  Checking...")
+        self._server_status_label.setStyleSheet(
+            "color: #888888; font-size: 11px; padding: 0 4px;"
+        )
+        self._server_status_label.setToolTip("ComfyUI server connection status")
+        self._server_is_online = None  # Unknown initially
+
+        # Insert at the end of the submitButtonsLayout (after Cancel button)
+        self.ui.submitButtonsLayout.addWidget(self._server_status_label)
+
+    def _check_server_status(self):
+        """Read heartbeat file(s) from the network path to determine server status.
+
+        Runs the file I/O on a worker thread to avoid blocking the Qt event loop
+        when the network path is slow or unreachable.
+        """
+        self.start_worker(
+            self._read_heartbeat_status,
+            on_result=self._on_heartbeat_result,
+            on_error=self._on_heartbeat_error,
+        )
+
+    @staticmethod
+    def _read_heartbeat_status():
+        """Read heartbeat files from network path (runs on worker thread)."""
+        from core.settings_manager import safe_get_setting
+        from core.utils import load_json
+        from datetime import datetime
+        import glob
+
+        stale_seconds = ComfyUITab._HEARTBEAT_STALE_SECONDS
+
+        network_path = safe_get_setting("network_output_path", "")
+        if not network_path:
+            return ("unknown", "Network output path not configured")
+
+        heartbeat_dir = os.path.join(network_path, '_server_status')
+        if not os.path.isdir(heartbeat_dir):
+            return ("offline", "No server heartbeat found")
+
+        heartbeat_files = glob.glob(os.path.join(heartbeat_dir, 'heartbeat_*.json'))
+        if not heartbeat_files:
+            return ("offline", "No server heartbeat found")
+
+        best_status = "offline"
+        best_info = ""
+        now = datetime.now()
+
+        for hb_file in heartbeat_files:
+            data = load_json(hb_file, {})
+            if not data or 'timestamp' not in data:
+                continue
+
+            try:
+                ts = datetime.fromisoformat(data['timestamp'])
+                # Normalize to naive datetime for safe subtraction
+                ts = ts.replace(tzinfo=None)
+                age_seconds = (now - ts).total_seconds()
+            except (ValueError, TypeError):
+                continue
+
+            status = data.get('status', 'offline')
+            hostname = data.get('hostname', 'unknown')
+
+            if age_seconds > stale_seconds:
+                continue
+
+            if status == "online":
+                uptime = data.get('uptime_seconds', 0)
+                jobs = data.get('jobs_completed', 0)
+                best_status = "online"
+                hours = uptime // 3600
+                minutes = (uptime % 3600) // 60
+                uptime_str = f"{hours}h {minutes}m" if hours else f"{uptime // 60}m" if uptime >= 60 else f"{uptime}s"
+                best_info = (
+                    f"Server: {hostname} | "
+                    f"Uptime: {uptime_str} | "
+                    f"Jobs completed: {jobs}"
+                )
+                break
+            elif status == "starting":
+                best_status = "starting"
+                best_info = f"Server on {hostname} is loading models..."
+
+        return (best_status, best_info)
+
+    def _on_heartbeat_result(self, result):
+        """Handle heartbeat check result on the main thread."""
+        status, info = result
+        self._update_server_indicator(status, info)
+
+    def _on_heartbeat_error(self, error_msg, traceback_str=""):
+        """Handle heartbeat check error."""
+        self._update_server_indicator("unknown", f"Error checking server: {error_msg}")
+
+    def _update_server_indicator(self, status: str, info: str):
+        """Update the server status label based on resolved status."""
+        from core.settings_manager import safe_get_setting
+
+        self._server_is_online = (status == "online")
+
+        if status == "online":
+            self._server_status_label.setText("  \u25cf Online")
+            self._server_status_label.setStyleSheet(
+                "color: #4CAF50; font-size: 11px; font-weight: bold; padding: 0 4px;"
+            )
+            self._server_status_label.setToolTip(info)
+        elif status == "starting":
+            self._server_status_label.setText("  \u25cf Starting...")
+            self._server_status_label.setStyleSheet(
+                "color: #FF9800; font-size: 11px; font-weight: bold; padding: 0 4px;"
+            )
+            self._server_status_label.setToolTip(info)
+        else:
+            self._server_status_label.setText("  \u25cf Offline")
+            self._server_status_label.setStyleSheet(
+                "color: #F44336; font-size: 11px; font-weight: bold; padding: 0 4px;"
+            )
+            # Show what will happen on submit
+            behavior = safe_get_setting("comfyui_server_not_found_behavior", "fail")
+            behavior_labels = {
+                "wait": "Jobs will wait for server to come online",
+                "fail": "Jobs will fail immediately if server is offline",
+                "fail_delete": "Jobs will fail and be deleted if server is offline",
+            }
+            tip = info or "ComfyUI server is not responding"
+            tip += f". {behavior_labels.get(behavior, '')}"
+            self._server_status_label.setToolTip(tip)
 
     # =========================================================================
     # NODE INFO CACHE
@@ -455,9 +606,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _update_network_path_display(self):
         """Update the network path display label."""
-        from core.settings_manager import get_setting
+        from core.settings_manager import safe_get_setting
 
-        network_path = get_setting("network_output_path")
+        network_path = safe_get_setting("network_output_path", "")
         if network_path:
             self.ui.ComfyUINetworkPathDisplay.setText(network_path)
             self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #aaaaaa;")
@@ -1048,10 +1199,10 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _validate_inputs(self):
         """Validate inputs and enable/disable submit button."""
-        from core.settings_manager import get_setting
+        from core.settings_manager import safe_get_setting
 
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
-        network_path_ok = bool(get_setting("network_output_path"))
+        network_path_ok = bool(safe_get_setting("network_output_path", ""))
         self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
 
     # =========================================================================
@@ -1062,7 +1213,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Submit the workflow to ComfyUI/Deadline."""
         from ui_components import StatusColors
         from deadline.submitter import submit_comfyui_job
-        from core.settings_manager import get_setting
+        from core.settings_manager import safe_get_setting
         from comfyui.presets_manager import get_workflow_preset_config
         from .polling import format_elapsed_time
 
@@ -1075,7 +1226,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Get network output path - always use user subfolder
-        network_output_dir = get_setting("network_output_path")
+        network_output_dir = safe_get_setting("network_output_path", "")
         if not network_output_dir:
             self.show_status("Network output path not configured in Settings", "error")
             return
@@ -1133,11 +1284,23 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
-        self.animator.update_status_animated(
-            f"ComfyUI: Preparing {generation_count} generation(s)...",
-            StatusColors.INFO
-        )
-        self.animator.animate_button_click(self.ui.ComfyUISubmit)
+
+        # Inform user about server status when submitting
+        if hasattr(self, '_server_is_online') and self._server_is_online is False:
+            from core.settings_manager import safe_get_setting
+            behavior = safe_get_setting("comfyui_server_not_found_behavior", "fail")
+            behavior_msgs = {
+                "wait": "ComfyUI: Server offline \u2014 job will wait for server to come online",
+                "fail_delete": "ComfyUI: Server offline \u2014 job will fail and be deleted",
+            }
+            msg = behavior_msgs.get(behavior, "ComfyUI: Server offline \u2014 job will fail immediately")
+            self.update_status_with_spinner(msg, StatusColors.WARNING, start=False)
+        else:
+            self.update_status_with_spinner(
+                f"ComfyUI: Preparing {generation_count} generation(s)...",
+                StatusColors.INFO, start=False
+            )
+        self.animate_button_click(self.ui.ComfyUISubmit)
 
         # Server mode is always enabled (persistent ComfyUI)
         use_server_mode = True
@@ -1199,9 +1362,9 @@ class ComfyUITab(PollingMixin, BaseTab):
                 job_count = len(job_ids)
                 total_gens = job_count * ctx["generation_count"]
                 self.show_status(f"Submitted {job_count} job(s), {total_gens} generations", "success")
-                self.animator.update_status_animated(
+                self.update_status_with_spinner(
                     f"ComfyUI: {job_count} job(s) submitted",
-                    StatusColors.SUCCESS
+                    StatusColors.SUCCESS, start=False
                 )
                 logger.info(f"ComfyUI submission complete: {job_ids}")
 
@@ -1222,9 +1385,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             else:
                 self.main_window.stop_status_spinner()
                 self.show_status(f"Submission failed: {error_msg}", "error")
-                self.animator.update_status_animated(
+                self.update_status_with_spinner(
                     f"ComfyUI failed: {error_msg}",
-                    StatusColors.ERROR
+                    StatusColors.ERROR, start=False
                 )
         except Exception as e:
             import traceback
@@ -1237,9 +1400,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         self.main_window.stop_status_spinner()
         self.show_status(f"Submission error: {error_msg}", "error")
-        self.animator.update_status_animated(
+        self.update_status_with_spinner(
             f"ComfyUI error: {error_msg}",
-            StatusColors.ERROR
+            StatusColors.ERROR, start=False
         )
         logger.error(f"ComfyUI submission error: {error_msg}")
         if traceback_str:
@@ -1249,9 +1412,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Handle ComfyUI job submission progress."""
         from ui_components import StatusColors
 
-        self.animator.update_status_animated(
+        self.update_status_with_spinner(
             f"ComfyUI: {message}",
-            StatusColors.INFO
+            StatusColors.INFO, start=False
         )
 
     # =========================================================================
@@ -1503,7 +1666,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Subscribe to gallery events
-        pipeline_events.selection_changed.connect(self._on_gallery_selection_changed)
         pipeline_events.use_as_input.connect(self._on_use_images_from_gallery)
         pipeline_events.copy_settings.connect(self.apply_settings_from_metadata)
 
@@ -1512,19 +1674,6 @@ class ComfyUITab(PollingMixin, BaseTab):
         pipeline_events.all_jobs_completed.connect(self._on_all_own_jobs_completed)
 
         logger.debug("ComfyUI tab subscribed to event bus")
-
-    def _on_gallery_selection_changed(self, paths: list, count: int):
-        """Handle gallery selection change event.
-
-        This allows the ComfyUI tab to be aware of what's selected in the gallery.
-
-        Args:
-            paths: List of selected file paths
-            count: Number of selected items
-        """
-        # Currently just for awareness - could enable features like
-        # "Use Selected as Input" button when items are selected
-        pass
 
     def _on_use_images_from_gallery(self, paths: list):
         """Handle request to use gallery images as inputs."""

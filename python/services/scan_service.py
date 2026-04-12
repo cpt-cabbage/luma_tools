@@ -150,7 +150,7 @@ class DirectoryScanner:
                 render_directory = render_folders[0]
                 render_directory = truncate_at_suffix(render_directory, RENDERS_SUBPATH)
                 self.signals.set_label_text.emit('Renderlabel', f'Render Directory Found: {render_directory}')
-            except (IndexError, Exception) as e:
+            except Exception as e:
                 self.signals.set_widget_enabled.emit('RendersList', False)
                 logger.warning(f"No Renders Found: {e}")
         else:
@@ -187,7 +187,7 @@ class DirectoryScanner:
                 usd_directory = usd_folders[0]
                 usd_directory = truncate_at_suffix(usd_directory, USD_SUBPATH)
                 self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
-            except (IndexError, Exception) as e:
+            except Exception as e:
                 usd_directory = ""
                 logger.warning(f"No USDs Found: {e}")
         else:

@@ -55,7 +55,7 @@ def _validate_server_wait_timeout(v):
         return 30
 
 def _validate_server_behavior(v):
-    return _validate_enum(v, ("fail", "wait"), "fail")
+    return _validate_enum(v, ("fail", "wait", "fail_delete"), "fail")
 
 def _validate_stacking_mode(v):
     return _validate_enum(v, ("job", "groups", "both", "grid"), "job")
@@ -331,9 +331,9 @@ def save_global_settings(settings: Dict[str, Any]):
     """Save global settings to file using atomic write. Thread-safe via _settings_cache_lock."""
     from .utils import save_json
     global _global_settings_cache
-    _ensure_global_settings_dir()
-    settings_file = _get_global_settings_file()
     with _settings_cache_lock:
+        _ensure_global_settings_dir()
+        settings_file = _get_global_settings_file()
         if save_json(settings_file, settings):
             _global_settings_cache = settings.copy()
         else:
@@ -465,7 +465,7 @@ def safe_set_setting(name: str, value: Any, verbose: bool = False) -> bool:
     try:
         set_setting(name, value, verbose=verbose)
         return True
-    except (KeyError, Exception) as e:
+    except Exception as e:
         logger.warning(f"Could not save setting {name}: {e}")
         return False
 

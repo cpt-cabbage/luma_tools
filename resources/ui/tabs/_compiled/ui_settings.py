@@ -501,6 +501,7 @@ class Ui_SettingsTab(object):
         self.ServerNotFoundCombo = QComboBox(self.globalSettingsGroupBox)
         self.ServerNotFoundCombo.addItem("")
         self.ServerNotFoundCombo.addItem("")
+        self.ServerNotFoundCombo.addItem("")
         self.ServerNotFoundCombo.setObjectName(u"ServerNotFoundCombo")
         self.ServerNotFoundCombo.setMinimumWidth(150)
 
@@ -953,9 +954,10 @@ class Ui_SettingsTab(object):
 #endif // QT_CONFIG(tooltip)
         self.ServerNotFoundCombo.setItemText(0, QCoreApplication.translate("SettingsTab", u"Fail Immediately", None))
         self.ServerNotFoundCombo.setItemText(1, QCoreApplication.translate("SettingsTab", u"Wait for Server", None))
+        self.ServerNotFoundCombo.setItemText(2, QCoreApplication.translate("SettingsTab", u"Fail and Delete Job", None))
 
 #if QT_CONFIG(tooltip)
-        self.ServerNotFoundCombo.setToolTip(QCoreApplication.translate("SettingsTab", u"Choose whether to fail immediately or wait for the server to start when not found", None))
+        self.ServerNotFoundCombo.setToolTip(QCoreApplication.translate("SettingsTab", u"Behavior when ComfyUI server is not running: fail immediately, wait for it, or fail and remove the Deadline job", None))
 #endif // QT_CONFIG(tooltip)
         self.serverWaitTimeoutLabel.setText(QCoreApplication.translate("SettingsTab", u"Wait Timeout:", None))
 #if QT_CONFIG(tooltip)

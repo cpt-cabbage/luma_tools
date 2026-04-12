@@ -628,8 +628,8 @@ def get_media_duration(file_path):
         >>> format_duration(duration)
         '2:05'
     """
-    from core.config import FFMPEG_PATH
-    import subprocess
+    from .config import FFMPEG_PATH
+    from .subprocess_utils import run_command
 
     if not FFMPEG_PATH or not os.path.exists(file_path):
         return None
@@ -645,27 +645,22 @@ def get_media_duration(file_path):
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 file_path
             ]
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=creationflags)
+            result = run_command(cmd, timeout=5)
             if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())
-        except (subprocess.TimeoutExpired, ValueError, Exception) as e:
+        except Exception as e:
             logger.debug(f"FFprobe duration extraction failed: {e}")
 
     # Fallback to FFmpeg
     try:
         cmd = [FFMPEG_PATH, '-i', file_path]
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=creationflags)
-        # FFmpeg outputs duration in stderr
+        result = run_command(cmd, timeout=5)
         output = result.stderr
-        # Parse "Duration: HH:MM:SS.ms" format
-        import re
         match = re.search(r'Duration:\s*(\d+):(\d+):(\d+)\.(\d+)', output)
         if match:
             hours, minutes, seconds, centiseconds = map(int, match.groups())
             return hours * 3600 + minutes * 60 + seconds + centiseconds / 100.0
-    except (subprocess.TimeoutExpired, Exception) as e:
+    except Exception as e:
         logger.debug(f"FFmpeg duration extraction failed: {e}")
 
     return None

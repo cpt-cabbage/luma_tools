@@ -145,12 +145,14 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
             self.log_file.flush()
 
     def get_network_log_dir_local(subdirectory: str = "runner") -> str:
-        """Get network log directory from global settings."""
+        """Get network log directory from farm config or global settings."""
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
+            # Try farm config first (written by submitter alongside this script),
+            # then fall back to relative global_settings.json from full installation
             settings_paths = [
+                os.path.join(script_dir, '_farm_config.json'),
                 os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-                r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
             ]
             for settings_path in settings_paths:
                 norm_path = os.path.normpath(settings_path)
@@ -162,7 +164,6 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
                         log_dir = os.path.join(network_path, '_logs', subdirectory)
                         os.makedirs(log_dir, exist_ok=True)
                         return log_dir
-                    break
         except Exception:
             pass
         return None
@@ -299,6 +300,81 @@ def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
 
 
 # =============================================================================
+# DEADLINE JOB MANAGEMENT
+# =============================================================================
+
+def _find_deadlinecommand():
+    """Find the deadlinecommand executable on the farm worker.
+
+    Checks shutil.which first, then DEADLINE_PATH env var.
+
+    Returns:
+        Path to deadlinecommand or None if not found.
+    """
+    cmd = shutil.which("deadlinecommand")
+    if cmd:
+        return cmd
+
+    deadline_path = os.environ.get("DEADLINE_PATH") or os.environ.get("DEADLINEPATH")
+    if deadline_path:
+        for candidate in [
+            os.path.join(deadline_path, "deadlinecommand.exe"),
+            os.path.join(deadline_path, "deadlinecommand"),
+            os.path.join(deadline_path, "bin", "deadlinecommand.exe"),
+            os.path.join(deadline_path, "bin", "deadlinecommand"),
+        ]:
+            if os.path.isfile(candidate):
+                return candidate
+
+    return None
+
+
+def _fail_and_delete_deadline_job():
+    """Fail the current Deadline job, then delete it.
+
+    Uses DEADLINE_JOBID env var and deadlinecommand to manage the job.
+    Logs warnings if unable to find required tools/env vars.
+    """
+    import subprocess
+
+    job_id = os.environ.get("DEADLINE_JOBID")
+    if not job_id:
+        logger.warning("DEADLINE_JOBID not set - cannot delete Deadline job")
+        return
+
+    deadline_cmd = _find_deadlinecommand()
+    if not deadline_cmd:
+        logger.warning("deadlinecommand not found - cannot delete Deadline job")
+        return
+
+    # Fail the job first (so Deadline logs the failure)
+    try:
+        result = subprocess.run(
+            [deadline_cmd, "-FailJob", job_id],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info(f"Deadline job {job_id} marked as failed")
+        else:
+            logger.warning(f"Failed to fail Deadline job: {result.stderr.strip()}")
+    except Exception as e:
+        logger.warning(f"Error failing Deadline job: {e}")
+
+    # Then delete it
+    try:
+        result = subprocess.run(
+            [deadline_cmd, "-DeleteJob", job_id],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info(f"Deadline job {job_id} deleted")
+        else:
+            logger.warning(f"Failed to delete Deadline job: {result.stderr.strip()}")
+    except Exception as e:
+        logger.warning(f"Error deleting Deadline job: {e}")
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -317,8 +393,8 @@ def main():
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files)')
     parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs')
     parser.add_argument('--restart-lowvram', action='store_true', help='Restart server with --lowvram (only used with --full-restart)')
-    parser.add_argument('--server-not-found', choices=['fail', 'wait'], default='fail',
-                        help='Behavior when server not found')
+    parser.add_argument('--server-not-found', choices=['fail', 'wait', 'fail_delete'], default='fail',
+                        help='Behavior when server not found: fail, wait, or fail_delete (fail then delete Deadline job)')
     parser.add_argument('--server-wait-timeout', type=int, default=300,
                         help='Timeout when waiting for server to start')
 
@@ -391,32 +467,36 @@ def main():
     logger.debug(f"args.comfyui_path = {args.comfyui_path}")
     logger.debug(f"args.input_directory = {args.input_directory}")
     comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
-    if images_to_upload:
-        if os.path.isdir(comfyui_input_dir):
-            logger.info(f"\nCopying {len(images_to_upload)} input image(s) to ComfyUI input directory...")
-            for image_name in images_to_upload:
-                src_path = os.path.join(args.input_directory, image_name)
-                if os.path.exists(src_path):
-                    try:
-                        if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
-                            result = copy_or_convert(src_path, comfyui_input_dir)
-                            if result:
-                                logger.info(f"  Converted: {image_name} -> {os.path.basename(result)}")
-                            else:
-                                shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
-                                logger.info(f"  Copied (conversion failed): {image_name}")
-                        else:
-                            if not _HAS_IMAGE_CONVERT:
-                                logger.warning(f"Image conversion not available - copying {src_path} as-is")
-                            dst_path = os.path.join(comfyui_input_dir, image_name)
-                            shutil.copy2(src_path, dst_path)
-                            logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
-                    except Exception as e:
-                        logger.warning(f"Failed to copy {image_name}: {e}")
+
+    def _copy_input_images(label="Copying"):
+        """Copy input images from source dir to ComfyUI input dir."""
+        if not images_to_upload or not os.path.isdir(comfyui_input_dir):
+            if images_to_upload:
+                logger.warning(f"ComfyUI input directory not found: {comfyui_input_dir}")
+            return
+        logger.info(f"\n{label} {len(images_to_upload)} input image(s) to ComfyUI input directory...")
+        for image_name in images_to_upload:
+            src_path = os.path.join(args.input_directory, image_name)
+            if not os.path.exists(src_path):
+                logger.warning(f"Image not found: {src_path}")
+                continue
+            try:
+                if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
+                    result = copy_or_convert(src_path, comfyui_input_dir)
+                    if result:
+                        logger.info(f"  Converted: {image_name} -> {os.path.basename(result)}")
+                    else:
+                        shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
+                        logger.info(f"  Copied (conversion failed): {image_name}")
                 else:
-                    logger.warning(f"Image not found: {src_path}")
-        else:
-            logger.warning(f"ComfyUI input directory not found: {comfyui_input_dir}")
+                    if not _HAS_IMAGE_CONVERT:
+                        logger.warning(f"Image conversion not available - copying {src_path} as-is")
+                    shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
+                    logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to copy {image_name}: {e}")
+
+    _copy_input_images("Copying")
 
     if args.full_restart:
         logger.info("\nFull restart requested")
@@ -425,22 +505,7 @@ def main():
                 logger.error("Server restart failed")
                 sys.exit(1)
             # Re-copy images after restart in case they were cleared
-            if images_to_upload and os.path.isdir(comfyui_input_dir):
-                logger.info(f"\nRe-copying {len(images_to_upload)} input image(s) after restart...")
-                for image_name in images_to_upload:
-                    src_path = os.path.join(args.input_directory, image_name)
-                    if os.path.exists(src_path):
-                        try:
-                            if _HAS_IMAGE_CONVERT and needs_conversion(src_path):
-                                copy_or_convert(src_path, comfyui_input_dir)
-                            else:
-                                if not _HAS_IMAGE_CONVERT:
-                                    logger.warning(f"Image conversion not available - copying {src_path} as-is")
-                                dst_path = os.path.join(comfyui_input_dir, image_name)
-                                shutil.copy2(src_path, dst_path)
-                            logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
-                        except Exception as e:
-                            logger.warning(f"Failed to copy {image_name}: {e}")
+            _copy_input_images("Re-copying")
         else:
             logger.warning("Could not signal server restart, continuing...")
 
@@ -450,6 +515,10 @@ def main():
             if not wait_for_server(port=args.port, timeout=args.server_wait_timeout):
                 logger.error(f"Server did not start within timeout")
                 sys.exit(1)
+        elif args.server_not_found == 'fail_delete':
+            logger.error(f"No ComfyUI server found on port {args.port} - failing and deleting Deadline job")
+            _fail_and_delete_deadline_job()
+            sys.exit(1)
         else:
             logger.error(f"No ComfyUI server found on port {args.port}")
             sys.exit(1)

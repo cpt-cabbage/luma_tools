@@ -47,30 +47,6 @@ except ImportError as e:
     logger.warning(f"AYON imports failed: {e}")
     AYON_AVAILABLE = False
 
-def _resolve_production_bundle():
-    """Query AYON server API for the current production bundle name.
-
-    Called when get_ayon_bundle() returns the "production" fallback,
-    meaning env vars weren't set. Uses the already-imported ayon_api
-    which has server connection available at publish time.
-
-    Returns:
-        str or None: Production bundle name, or None if unavailable.
-    """
-    if not AYON_AVAILABLE:
-        return None
-    try:
-        from ayon_api import get_bundles, is_connection_created, create_connection
-        if not is_connection_created():
-            create_connection()
-        bundles_info = get_bundles()
-        production_bundle = bundles_info.get("productionBundle")
-        if production_bundle:
-            logger.info(f"Resolved production bundle from API: {production_bundle}")
-            return production_bundle
-    except Exception as e:
-        logger.warning(f"Could not resolve production bundle from API: {e}")
-    return None
 
 
 # Deadline imports
@@ -110,16 +86,6 @@ def _resolve_project_code(project_name, project_code=None):
         except Exception as e:
             logger.warning(f"Could not resolve project code for '{project_name}': {e}")
     return project_name
-
-
-def _get_resolved_bundle():
-    """Get the AYON bundle name, resolving 'production' to actual bundle name."""
-    bundle = get_ayon_bundle()
-    if bundle == "production":
-        resolved = _resolve_production_bundle()
-        if resolved:
-            return resolved
-    return bundle
 
 
 def _resolve_task_type(task, task_type=None):
@@ -1029,7 +995,7 @@ def publish_to_ayon_local(
         logger.warning("AYON not available, skipping publish")
         return False
 
-    bundle = _get_resolved_bundle()
+    bundle = get_ayon_bundle()
     logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console command
@@ -1219,7 +1185,7 @@ def submit_ayon_publish_to_deadline(
         logger.error(f"Failed to initialize AYON/Deadline: {e}")
         return None
 
-    bundle = _get_resolved_bundle()
+    bundle = get_ayon_bundle()
     logger.info(f"Using AYON bundle: {bundle}")
 
     # Build AYON console arguments
@@ -1265,7 +1231,7 @@ def submit_ayon_publish_to_deadline(
     try:
         deadline_settings = project_settings.get("deadline", {})
         server_name = deadline_settings.get("deadline_server", "default")
-    except (KeyError, AttributeError, Exception) as e:
+    except Exception as e:
         logger.warning(f"Could not get Deadline server from settings: {e}")
         server_name = "default"
 

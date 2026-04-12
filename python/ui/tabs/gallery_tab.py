@@ -329,10 +329,11 @@ class GalleryTab(BaseTab):
             self._start_watcher(self._current_path)
 
         # If no initial scan done yet, show loading overlay and scan
+        # Note: _initial_scan_done is set in _handle_scan_complete(), not here,
+        # so that new-item detection doesn't fire on the very first scan.
         if not self._initial_scan_done:
             self.show_loading_overlay("Loading gallery...")
             self._on_refresh()
-            self._initial_scan_done = True
 
         # Reset new items counter (user is now viewing gallery)
         if EVENT_BUS_AVAILABLE:
@@ -361,8 +362,8 @@ class GalleryTab(BaseTab):
     def _set_gallery_drop_enabled(self, enabled):
         """Enable or disable drop targets on gallery widgets."""
         try:
-            if hasattr(self, '_gallery_manager') and self._gallery_manager:
-                content = self._gallery_manager._scroll_content
+            if hasattr(self, '_manager') and self._manager:
+                content = self.ui.galleryThumbnailContainer
                 if content:
                     from PySide6.QtWidgets import QWidget
                     if not enabled:
@@ -388,6 +389,10 @@ class GalleryTab(BaseTab):
         """Handle scan complete event with item processing."""
         # Store in cache
         self._cached_items = items
+
+        # Warn if gallery is empty and path may be unreachable
+        if not items and self._current_path and not os.path.isdir(self._current_path):
+            self.show_status("Gallery path unreachable — check network connection", "warning")
 
         # Detect new items (paths are already normalized at scan source)
         current_paths = set(item['path'] for item in items)
@@ -498,7 +503,6 @@ class GalleryTab(BaseTab):
 
     def _on_open_explorer(self):
         """Open the current gallery folder in file explorer."""
-        import subprocess
         import platform
 
         if not self._current_path or not os.path.exists(self._current_path):
@@ -510,11 +514,11 @@ class GalleryTab(BaseTab):
             if system == "Windows":
                 os.startfile(self._current_path)
             elif system == "Darwin":
-                creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                subprocess.run(["open", self._current_path], creationflags=creationflags)
+                from core.subprocess_utils import run_command
+                run_command(["open", self._current_path])
             else:
-                creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                subprocess.run(["xdg-open", self._current_path], creationflags=creationflags)
+                from core.subprocess_utils import run_command
+                run_command(["xdg-open", self._current_path])
             # Show success status
             self.show_status("Opened gallery folder", "info")
         except Exception as e:
@@ -1203,7 +1207,7 @@ class GalleryTab(BaseTab):
         image_path = os.path.normpath(image_path)
 
         # Find the widget for this path
-        widget = self._gallery_manager.find_widget_by_path(image_path)
+        widget = self._manager.find_widget_by_path(image_path)
 
         if not widget:
             # Item not visible in current view - may need to change filters or load
@@ -1211,7 +1215,7 @@ class GalleryTab(BaseTab):
 
             # Try to clear filters and reload
             self._clear_all_filters()
-            self._gallery_manager.refresh(force=True)
+            self._on_refresh(force=True)
 
             # Try again after refresh (use a timer to let refresh complete)
             from PySide6.QtCore import QTimer
@@ -1232,7 +1236,7 @@ class GalleryTab(BaseTab):
         import os
         image_path = os.path.normpath(image_path)
 
-        widget = self._gallery_manager.find_widget_by_path(image_path)
+        widget = self._manager.find_widget_by_path(image_path)
         if widget:
             self._selection_manager.clear_selection()
             self._selection_manager.select_single(widget)

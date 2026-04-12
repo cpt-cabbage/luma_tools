@@ -51,6 +51,8 @@ atexit.register(cleanup_tee_writers)
 
 # Cached values
 _network_output_path_cache: Optional[str] = None
+_network_negative_cache_time: float = 0.0  # time.monotonic() of last negative cache
+_NEGATIVE_CACHE_TTL = 120.0  # Re-check after 2 minutes if network was unavailable
 _network_cache_lock = threading.RLock()
 
 
@@ -59,7 +61,6 @@ def _get_global_settings_paths() -> list:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     return [
         os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-        r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
     ]
 
 
@@ -91,12 +92,17 @@ def get_network_output_path() -> Optional[str]:
     Returns:
         Network path string if available and exists, None otherwise
     """
-    global _network_output_path_cache
+    global _network_output_path_cache, _network_negative_cache_time
 
     with _network_cache_lock:
         if _network_output_path_cache is not None:
-            # Empty string means we already checked and found nothing
-            return _network_output_path_cache if _network_output_path_cache else None
+            if _network_output_path_cache:
+                return _network_output_path_cache
+            # Negative cache — re-check after TTL expires (network may have come online)
+            import time as _time
+            if (_time.monotonic() - _network_negative_cache_time) < _NEGATIVE_CACHE_TTL:
+                return None
+            # TTL expired, fall through to re-check
 
         settings = _load_global_settings_raw()
         path = settings.get('network_output_path', '')
@@ -105,7 +111,9 @@ def get_network_output_path() -> Optional[str]:
             _network_output_path_cache = path
             return path
 
-        _network_output_path_cache = ""  # Cache the negative result too
+        import time as _time
+        _network_output_path_cache = ""  # Cache the negative result with TTL
+        _network_negative_cache_time = _time.monotonic()
         return None
 
 

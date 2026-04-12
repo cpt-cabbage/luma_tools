@@ -47,6 +47,7 @@ from core.utils import load_json, ensure_directory
 logger = logging.getLogger(__name__)
 
 
+
 class ThreadSafeState:
     """Thread-safe wrapper around a state dict.
 
@@ -228,6 +229,13 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
     logger.info(f"Log file: {log_path}")
     return log_path
 
+
+# Lock to prevent concurrent restart_comfyui() calls from multiple threads
+_restart_lock = threading.Lock()
+
+# Cached heartbeat directory path — resolved once at startup, used every 20s
+_heartbeat_dir_cache: str = ""
+_heartbeat_dir_resolved: bool = False
 
 # Server state — wrapped in ThreadSafeState for multi-thread access
 server_state = ThreadSafeState({
@@ -420,6 +428,7 @@ def health_monitor_thread(port: int):
                 if time.time() - last_actual_check < 120:
                     consecutive_failures = 0
                     server_state['last_health_check'] = datetime.now().isoformat()
+                    write_heartbeat("online")
                     continue
 
             server_state['last_actual_health_check'] = time.time()
@@ -444,6 +453,11 @@ def health_monitor_thread(port: int):
                         logger.warning("ComfyUI unresponsive after multiple health checks, requesting restart...")
                         server_state['restart_requested'] = True
                         consecutive_failures = 0
+
+        # Write heartbeat regardless of ready state (so UI always has fresh data)
+        # Use live read (not snapshot) since is_ready may have changed during health check
+        heartbeat_status = "online" if server_state['is_ready'] else "starting"
+        write_heartbeat(heartbeat_status)
 
 
 def check_comfyui_dependencies(python_exe: str, comfyui_path: str) -> tuple:
@@ -605,6 +619,19 @@ def restart_comfyui(reason: str = "manual"):
     Args:
         reason: Why the restart is happening (manual, crash, health_check)
     """
+    # Prevent concurrent restarts from multiple threads
+    if not _restart_lock.acquire(blocking=False):
+        logger.warning(f"Restart already in progress, ignoring duplicate request (reason: {reason})")
+        return False
+
+    try:
+        return _restart_comfyui_locked(reason)
+    finally:
+        _restart_lock.release()
+
+
+def _restart_comfyui_locked(reason: str):
+    """Internal restart logic — must be called with _restart_lock held."""
     config = server_state.get('startup_config')
     if not config:
         logger.error("No startup config available for restart")
@@ -752,6 +779,9 @@ def shutdown(signum=None, frame=None):
     logger.info("\nShutdown requested...")
     server_state['shutdown_requested'] = True
 
+    # Write offline heartbeat so UI updates immediately
+    write_heartbeat("offline")
+
     config = server_state.get('startup_config', {})
     port = config.get('port', 8188)
 
@@ -787,7 +817,6 @@ def load_global_settings() -> dict:
         # Try relative path from script location (../../global_settings/global_settings.json)
         possible_paths = [
             os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-            r'L:\tools\_studio_tools\luma_tools\global_settings\global_settings.json',
             # Fallback to home directory settings
             os.path.join(os.path.expanduser("~"), ".luma_tools", "global_settings_path.txt"),
         ]
@@ -810,6 +839,72 @@ def load_global_settings() -> dict:
     except Exception as e:
         logger.warning(f"Error loading global settings: {e}")
         return {}
+
+
+def _resolve_heartbeat_dir(global_settings: dict = None):
+    """Resolve and cache the heartbeat directory path.
+
+    Call once at startup after loading global settings.
+    Subsequent calls to write_heartbeat use the cached path.
+    """
+    global _heartbeat_dir_cache, _heartbeat_dir_resolved
+    if global_settings is None:
+        global_settings = load_global_settings()
+    network_path = global_settings.get('network_output_path', '')
+    if network_path and os.path.isdir(network_path):
+        _heartbeat_dir_cache = os.path.join(network_path, '_server_status')
+        ensure_directory(_heartbeat_dir_cache)
+    else:
+        _heartbeat_dir_cache = ''
+    _heartbeat_dir_resolved = True
+
+
+def write_heartbeat(status: str = "online", global_settings: dict = None):
+    """Write a heartbeat file to the network path for UI status checks.
+
+    Called periodically by the health monitor thread and on server state changes.
+    The file is written to <network_output_path>/_server_status/heartbeat_<hostname>.json.
+    Uses atomic write (tmp + rename) to prevent partial reads by the UI.
+
+    Args:
+        status: Server status — "online", "offline", or "starting".
+        global_settings: Loaded global settings dict (used for first-time resolution only).
+    """
+    import socket
+    global _heartbeat_dir_cache, _heartbeat_dir_resolved
+
+    # Resolve on first call if not done at startup
+    if not _heartbeat_dir_resolved:
+        _resolve_heartbeat_dir(global_settings)
+
+    if not _heartbeat_dir_cache:
+        return
+
+    hostname = socket.gethostname()
+    heartbeat_file = os.path.join(_heartbeat_dir_cache, f"heartbeat_{hostname}.json")
+
+    state = server_state.snapshot()
+    uptime = int(time.time() - state['start_time']) if state['start_time'] else 0
+
+    heartbeat = {
+        "timestamp": datetime.now().isoformat(),
+        "hostname": hostname,
+        "port": state['comfyui_port'],
+        "status": status,
+        "is_ready": state['is_ready'],
+        "uptime_seconds": uptime,
+        "jobs_completed": state['jobs_completed'],
+        "jobs_failed": state['jobs_failed'],
+    }
+
+    try:
+        # Atomic write: write to temp file then rename to prevent partial reads
+        tmp_file = heartbeat_file + ".tmp"
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(heartbeat, f)
+        os.replace(tmp_file, heartbeat_file)
+    except Exception as e:
+        logger.debug(f"Failed to write heartbeat: {e}")
 
 
 def _save_node_info_to_network(port: int, global_settings: dict = None):
@@ -992,6 +1087,12 @@ def main():
     output_thread = threading.Thread(target=stream_comfyui_output, args=(process,), daemon=True)
     output_thread.start()
 
+    # Resolve and cache heartbeat directory once at startup
+    _resolve_heartbeat_dir(global_settings)
+
+    # Write "starting" heartbeat while waiting for ComfyUI to load
+    write_heartbeat("starting")
+
     COMFYUI_STARTUP_TIMEOUT = 3000  # 50 minutes for initial model loading
     if not wait_for_comfyui(args.port, timeout=COMFYUI_STARTUP_TIMEOUT):
         logger.error("ComfyUI failed to start")
@@ -1006,6 +1107,9 @@ def main():
 
     # Save node definitions to network path for client machines
     _save_node_info_to_network(args.port, global_settings)
+
+    # Write initial heartbeat so UI can see server is online immediately
+    write_heartbeat("online")
 
     health_thread = threading.Thread(target=health_monitor_thread, args=(args.port,), daemon=True)
     health_thread.start()

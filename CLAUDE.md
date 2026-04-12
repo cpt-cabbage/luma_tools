@@ -213,7 +213,7 @@ with self._cache_lock:
 
 - **User:** `~/.luma_tools/settings.json` (window state, tab order, last dirs)
 - **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs)
-- **Key global setting:** `network_output_path` — network path for outputs AND centralized logs (currently `W:/LumaRND/luma_tools`). Used by runner.py, server.py, luma_tools.py for log file destinations, and by gallery/submitter for output paths.
+- **Key global setting:** `network_output_path` — network path for outputs, centralized logs, and inter-process communication (currently `W:/LumaRND/luma_tools`). Used by runner.py, server.py, luma_tools.py for log file destinations, by gallery/submitter for output paths, and by the server heartbeat system for status reporting. This path is the **only shared filesystem** between the user's workstation and farm workers.
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
 
@@ -314,6 +314,31 @@ if main:
     main.get_tab(tab_id)
 ```
 
+### ComfyUI Farm Architecture (CRITICAL — read before touching ComfyUI code)
+
+The ComfyUI server runs on a **Deadline farm worker**, NOT on the user's workstation. The user's machine has **no direct network access** to the server (no HTTP, no WebSocket). Communication between the workstation and farm happens exclusively through:
+
+1. **Deadline** — job submission (`deadline/submitter.py`), polling (`deadline/poller.py`)
+2. **Shared network filesystem** — `network_output_path` (`W:/LumaRND/luma_tools/`)
+
+This means:
+- **Never call `check_server_health()` from UI code** — it would ping `localhost`, not the farm
+- **Server status** is read from heartbeat files at `<network_output_path>/_server_status/heartbeat_<hostname>.json`, written every ~20s by `server.py`'s `health_monitor_thread`
+- **Runner scripts** (`runner.py`) run on the farm worker alongside the server, so they CAN do HTTP calls to `localhost:8188`
+- **The `--server-not-found` flag** controls what the runner does when the server is down: `fail`, `wait` (with timeout), or `fail_delete` (fail + delete the Deadline job)
+
+```
+User Workstation                    Farm Worker
+┌──────────────┐                   ┌──────────────────────┐
+│ Luma Tools UI │ ──Deadline──→    │ runner.py             │
+│ (comfyui tab) │                  │   ↕ localhost:8188    │
+│               │                  │ server.py → ComfyUI   │
+└───────┬───────┘                  └──────────┬───────────┘
+        │                                     │
+        └──── W:/LumaRND/luma_tools/ ─────────┘
+              (logs, outputs, heartbeat, node_info cache)
+```
+
 ### Domain-Specific Architecture
 - **ComfyUI:** Workflow load/modify/submit pipeline. See `python/comfyui/CLAUDE.md`
 - **Gallery:** Decomposed manager architecture. See `python/ui/tabs/gallery/CLAUDE.md`
@@ -384,12 +409,15 @@ Use `logger.info()`, `logger.warning()`, `logger.error()`. Never use `print()` f
 
 **Log Files:** All logs are centralized on the network path from `network_output_path` global setting:
 ```
-<network_path>/_logs/
-├── users/    # Main app logs: luma_tools_<user>_<hostname>_<timestamp>.log
-├── server/   # Persistent server logs: comfyui_server_<hostname>_<timestamp>.log
-├── runner/   # Farm runner logs: comfyui_runner_<jobname>_<timestamp>.log
+<network_path>/
+├── _logs/
+│   ├── users/    # Main app logs: luma_tools_<user>_<hostname>_<timestamp>.log
+│   ├── server/   # Persistent server logs: comfyui_server_<hostname>_<timestamp>.log
+│   └── runner/   # Farm runner logs: comfyui_runner_<jobname>_<timestamp>.log
+├── _server_status/
+│   └── heartbeat_<hostname>.json  # Server heartbeat (written by server.py every ~20s)
 ```
-Currently: `W:/LumaRND/luma_tools/_logs/`. Falls back to `~/.luma_tools/logs/` if network unavailable.
+Currently: `W:/LumaRND/luma_tools/`. Falls back to `~/.luma_tools/logs/` if network unavailable.
 
 **Reading logs (NO SCRIPT NEEDED):**
 ```bash

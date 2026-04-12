@@ -7,7 +7,11 @@ Supports standalone mode when AYON environment is not available.
 
 import os
 import glob
+import logging
 import shutil
+import threading
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # BASE PATHS
@@ -71,32 +75,53 @@ def get_ocio_config():
     return matches[0] if matches else None
 
 
+_cached_bundle_name = None
+_bundle_lock = threading.Lock()
+
+
 def get_ayon_bundle():
     """Get AYON bundle name from environment or API.
 
     Priority:
-    1. AYON_DEFAULT_SETTINGS_VARIANT env var (set by AYON launcher)
-    2. AYON_BUNDLE_NAME env var (set by some AYON configurations)
-    3. Query AYON server API for the current production bundle
-    4. Fall back to "production"
+    1. AYON_BUNDLE_NAME env var (set by AYON launcher or our own publish env)
+    2. Query AYON server API for the current production bundle
+    3. Fall back to "production" (last resort)
+
+    The result is cached after the first successful API resolution so we
+    don't call /api/bundles on every publish or settings read.
+    Thread-safe: concurrent callers won't race on the cache write.
     """
-    env_bundle = (
-        os.environ.get("AYON_DEFAULT_SETTINGS_VARIANT")
-        or os.environ.get("AYON_BUNDLE_NAME")
-    )
+    global _cached_bundle_name
+
+    # Env var set by AYON launcher or our own publish subprocess
+    env_bundle = os.environ.get("AYON_BUNDLE_NAME")
     if env_bundle:
+        logger.debug("AYON bundle from AYON_BUNDLE_NAME env var: %s", env_bundle)
         return env_bundle
 
-    try:
-        import ayon_api
-        if not ayon_api.is_connection_created():
-            ayon_api.create_connection()
-        bundles_info = ayon_api.get_bundles()
-        production_bundle = bundles_info.get("productionBundle")
-        if production_bundle:
-            return production_bundle
-    except Exception:
-        pass
+    # Return cached result from a previous API call (fast path, no lock needed)
+    if _cached_bundle_name:
+        return _cached_bundle_name
+
+    # Resolve from AYON server API (serialize concurrent callers)
+    with _bundle_lock:
+        # Double-check after acquiring lock
+        if _cached_bundle_name:
+            return _cached_bundle_name
+
+        try:
+            import ayon_api
+            if not ayon_api.is_connection_created():
+                ayon_api.create_connection()
+            bundles_info = ayon_api.get_bundles()
+            production_bundle = bundles_info.get("productionBundle")
+            if production_bundle:
+                _cached_bundle_name = production_bundle
+                logger.info("Resolved AYON bundle from API: %s", production_bundle)
+                return production_bundle
+            logger.warning("API returned no productionBundle")
+        except Exception as e:
+            logger.warning("Could not resolve AYON bundle from API: %s", e)
 
     return "production"
 

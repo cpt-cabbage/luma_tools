@@ -538,13 +538,13 @@ class ThreeJSViewerDialog(QWidget):
         self._current_hdri_path = None
         self._current_light_strength = 1.0
 
-        # Load saved preferences
+        # Load saved preferences (individual calls so one failure doesn't skip the rest)
         try:
-            from core.settings_manager import get_setting, get_hdri_list
-            self._current_shading_mode = get_setting("viewer_3d_shading_mode") or "textured"
-            self._current_lighting_mode = get_setting("viewer_3d_lighting_mode") or "studio"
-            self._current_light_strength = get_setting("viewer_3d_light_strength") or 1.0
-            hdri_name = get_setting("viewer_3d_hdri_name")
+            from core.settings_manager import safe_get_setting, get_hdri_list
+            self._current_shading_mode = safe_get_setting("viewer_3d_shading_mode", "textured") or "textured"
+            self._current_lighting_mode = safe_get_setting("viewer_3d_lighting_mode", "studio") or "studio"
+            self._current_light_strength = safe_get_setting("viewer_3d_light_strength", 1.0) or 1.0
+            hdri_name = safe_get_setting("viewer_3d_hdri_name", "")
             if hdri_name:
                 hdri_list = get_hdri_list()
                 for hdri in hdri_list:

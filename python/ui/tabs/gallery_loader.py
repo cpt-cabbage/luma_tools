@@ -115,6 +115,75 @@ def extract_job_prefix(filename: str, file_type: str = 'image') -> tuple:
         return (None, is_output)
 
 
+def _enrich_file_from_metadata(item, filename, full_metadata, lookup_fn, hash_fn):
+    """Enrich a single item dict using metadata lookup, falling back to filename patterns.
+
+    Shared logic used by both scan_directory() and enrich_prewarm_items().
+    """
+    file_metadata = None
+
+    # Try filename-based lookup first (no hash needed)
+    if full_metadata and lookup_fn:
+        try:
+            file_metadata = lookup_fn(
+                full_metadata, filename,
+                allow_reverse_match=False, content_hash=None)
+        except Exception:
+            pass
+
+    # Hash-based fallback if filename lookup missed
+    if file_metadata is None and full_metadata and lookup_fn and hash_fn:
+        try:
+            content_hash = hash_fn(item['path'])
+            item['content_hash'] = content_hash
+            file_metadata = lookup_fn(
+                full_metadata, filename,
+                allow_reverse_match=False, content_hash=content_hash)
+        except Exception:
+            pass
+
+    if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
+        item['has_metadata'] = True
+        try:
+            is_output = file_metadata.get('is_output', True)
+            item['job_prefix'] = file_metadata.get('job_prefix')
+            source_images = file_metadata.get('source_images', [])
+            item['source_images'] = source_images if isinstance(source_images, list) else []
+            item['is_input'] = not is_output
+        except Exception:
+            _enrich_file_fallback(item)
+    else:
+        item['has_metadata'] = False
+        file_type = item.get('type', 'image')
+        try:
+            job_prefix, is_output = extract_job_prefix(filename, file_type)
+        except Exception:
+            job_prefix = None
+            is_output = file_type in ('model', 'video', 'audio')
+        item['job_prefix'] = job_prefix
+        item['is_input'] = not is_output
+        item['source_images'] = item.get('source_images', [])
+
+
+def _enrich_file_fallback(item):
+    """Set safe default metadata fields on an item dict."""
+    if 'workflow' not in item:
+        item['workflow'] = ''
+    if 'job_prefix' not in item:
+        try:
+            filename = os.path.basename(item.get('path', ''))
+            file_type = item.get('type', 'image')
+            job_prefix, is_output = extract_job_prefix(filename, file_type)
+            item['job_prefix'] = job_prefix
+            item['is_input'] = not is_output
+        except Exception:
+            item['job_prefix'] = None
+            file_type = item.get('type', 'image')
+            item['is_input'] = file_type not in ('model', 'video', 'audio')
+    if 'source_images' not in item:
+        item['source_images'] = []
+
+
 class GalleryLoader:
     """Handles async loading operations for the gallery.
 
@@ -135,8 +204,9 @@ class GalleryLoader:
         """
         items = []
 
-        # Check if directory exists (can be slow on network paths)
+        # Check if directory exists (can be slow on network paths — up to 30s on Windows)
         if not os.path.isdir(output_dir):
+            logger.warning(f"[Loader] Gallery directory not accessible: {output_dir}")
             return items
 
         # Use module-level constants for supported extensions
@@ -174,14 +244,20 @@ class GalleryLoader:
             # Second pass: load metadata and create items
             # Import metadata functions once at the top
             try:
-                from comfyui.metadata import load_gallery_metadata, _lookup_file_metadata
-                from comfyui.metadata import get_workflow_preset_for_files
+                from comfyui.metadata import (
+                    load_gallery_metadata, _lookup_file_metadata,
+                    get_workflow_preset_for_files, is_known_input_file,
+                    get_metadata_level,
+                )
                 from comfyui.utils import compute_file_hash
             except ImportError as e:
                 logger.error(f"[Loader] Failed to import metadata functions: {e}")
                 load_gallery_metadata = None
                 get_workflow_preset_for_files = None
                 _lookup_file_metadata = None
+                is_known_input_file = None
+                get_metadata_level = None
+                compute_file_hash = None
 
             for dir_path, file_list in files_by_dir.items():
                 # Load full metadata if enabled (for enhanced detection)
@@ -191,51 +267,55 @@ class GalleryLoader:
                 if load_metadata and load_gallery_metadata and get_workflow_preset_for_files:
                     filenames = [f[0] for f in file_list]
                     try:
-                        # Load full metadata for advanced detection
                         full_metadata = load_gallery_metadata(dir_path)
                         if not isinstance(full_metadata, dict):
                             full_metadata = {}
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"[GalleryLoader] Failed to load metadata for {dir_path}: {e}")
                         full_metadata = {}
 
                     try:
-                        # Also get workflow presets (for backward compat)
                         workflow_map = get_workflow_preset_for_files(dir_path, filenames)
                         if not isinstance(workflow_map, dict):
                             workflow_map = {}
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"[GalleryLoader] Failed to load workflow presets for {dir_path}: {e}")
                         workflow_map = {}
 
                 # Build items dict
                 items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
-                    # Compute content hash for file identification
-                    content_hash = None
-                    try:
-                        content_hash = compute_file_hash(full_path)
-                    except Exception:
-                        pass
-
-                    # Try to get metadata-based detection first (new method)
-                    # Use allow_reverse_match=False to avoid matching input files to output metadata
+                    # Try filename-based metadata lookup first (no hash needed)
                     file_metadata = None
                     if full_metadata and _lookup_file_metadata:
                         try:
                             file_metadata = _lookup_file_metadata(
                                 full_metadata, filename,
                                 allow_reverse_match=False,
+                                content_hash=None)
+                        except Exception as e:
+                            logger.debug(f"[GalleryLoader] Metadata lookup failed for {filename}: {e}")
+                            file_metadata = None
+
+                    # Only compute hash if filename lookup missed and hash lookup is available
+                    content_hash = None
+                    if file_metadata is None and full_metadata and _lookup_file_metadata and compute_file_hash:
+                        try:
+                            content_hash = compute_file_hash(full_path)
+                            file_metadata = _lookup_file_metadata(
+                                full_metadata, filename,
+                                allow_reverse_match=False,
                                 content_hash=content_hash)
                         except Exception:
-                            file_metadata = None
+                            pass
 
                     # Determine if file is output and get job prefix
                     is_output = None
                     job_prefix = None
                     source_images = []
-                    has_metadata = False  # Track if metadata was found for this file
+                    has_metadata = False
 
                     if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
-                        # Use metadata-based detection (reliable)
                         has_metadata = True
                         try:
                             is_output = file_metadata.get('is_output', True)
@@ -249,32 +329,27 @@ class GalleryLoader:
                             has_metadata = False
 
                     # Fall back to filename pattern detection if metadata missing or invalid
-                    # Note: is_output=False with job_prefix=None is valid for input files
                     if is_output is None or (is_output and job_prefix is None):
                         try:
                             job_prefix, is_output = extract_job_prefix(filename, file_type)
                         except Exception:
                             job_prefix = None
-                            # 3D models/video/audio default to output, images to input
                             is_output = file_type in ('model', 'video', 'audio')
 
-                        # Double-check: if pattern says output but file is a known source image,
-                        # override to mark as input (handles files with misleading names like _001)
-                        if is_output and file_type == 'image':
+                        if is_output and file_type == 'image' and is_known_input_file:
                             try:
-                                from comfyui.metadata import is_known_input_file
                                 if is_known_input_file(output_dir, filename):
                                     is_output = False
-                            except ImportError:
+                            except Exception:
                                 pass
 
                     # Determine metadata completeness level
-                    # 'full' = per-file metadata, 'partial' = job-level only, 'none' = no metadata
-                    try:
-                        from comfyui.metadata import get_metadata_level
-                        metadata_level = get_metadata_level(dir_path, filename)
-                    except Exception:
-                        # Fallback if function not available or errors
+                    if get_metadata_level:
+                        try:
+                            metadata_level = get_metadata_level(dir_path, filename)
+                        except Exception:
+                            metadata_level = 'partial' if has_metadata else 'none'
+                    else:
                         metadata_level = 'partial' if has_metadata else 'none'
 
                     items_dict[filename] = {
@@ -378,28 +453,16 @@ class GalleryLoader:
         """
         # Import metadata functions with error handling
         try:
-            from comfyui.metadata import load_gallery_metadata, get_workflow_preset_for_files, _lookup_file_metadata
+            from comfyui.metadata import (
+                load_gallery_metadata, get_workflow_preset_for_files,
+                _lookup_file_metadata,
+            )
             from comfyui.utils import compute_file_hash
         except ImportError as e:
             logger.error(f"[Prewarm] Failed to import metadata functions: {e}")
             # Fall back to filename pattern for all items
             for item in items:
-                if 'workflow' not in item:
-                    item['workflow'] = ''
-                if 'job_prefix' not in item:
-                    try:
-                        filename = os.path.basename(item.get('path', ''))
-                        file_type = item.get('type', 'image')
-                        job_prefix, is_output = extract_job_prefix(filename, file_type)
-                        item['job_prefix'] = job_prefix
-                        item['is_input'] = not is_output
-                        item['source_images'] = []
-                    except Exception:
-                        item['job_prefix'] = None
-                        # 3D models/video/audio default to output, images to input
-                        file_type = item.get('type', 'image')
-                        item['is_input'] = file_type not in ('model', 'video', 'audio')
-                        item['source_images'] = []
+                _enrich_file_fallback(item)
             return items
 
         # Group items by directory for batch metadata loading
@@ -413,45 +476,35 @@ class GalleryLoader:
                     items_by_dir[output_dir] = []
                 items_by_dir[output_dir].append(item)
             except Exception:
-                pass  # Skip invalid items
+                pass
 
         # Batch load metadata per directory
         for output_dir, dir_items in items_by_dir.items():
             full_metadata = {}
             workflow_map = {}
 
-            # Try to load metadata
             try:
                 full_metadata = load_gallery_metadata(output_dir)
                 if not isinstance(full_metadata, dict):
                     full_metadata = {}
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[GalleryLoader] Failed to load metadata for {output_dir}: {e}")
                 full_metadata = {}
 
-            # Try to load workflow presets
             try:
                 filenames = [os.path.basename(item['path']) for item in dir_items]
                 workflow_map = get_workflow_preset_for_files(output_dir, filenames)
                 if not isinstance(workflow_map, dict):
                     workflow_map = {}
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[GalleryLoader] Failed to load workflow presets for {output_dir}: {e}")
                 workflow_map = {}
 
-            # Enrich each item
             for item in dir_items:
                 try:
                     filename = os.path.basename(item.get('path', ''))
                     if not filename:
                         continue
-
-                    # Compute content hash if missing
-                    if 'content_hash' not in item:
-                        try:
-                            item['content_hash'] = compute_file_hash(item['path'])
-                        except Exception:
-                            item['content_hash'] = None
-
-                    content_hash = item.get('content_hash')
 
                     # Update workflow if missing
                     if 'workflow' not in item or not item['workflow']:
@@ -459,50 +512,12 @@ class GalleryLoader:
 
                     # Update job_prefix and is_input if missing
                     if 'job_prefix' not in item:
-                        file_metadata = None
-
-                        # Try metadata-based detection
-                        # Use allow_reverse_match=False to avoid matching input files to output metadata
-                        if full_metadata:
-                            try:
-                                file_metadata = _lookup_file_metadata(
-                                    full_metadata, filename,
-                                    allow_reverse_match=False,
-                                    content_hash=content_hash)
-                            except Exception:
-                                pass  # Fall back to filename pattern
-
-                        if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
-                            # Use metadata-based detection
-                            try:
-                                is_output = file_metadata.get('is_output', True)
-                                job_prefix = file_metadata.get('job_prefix')
-                                source_images = file_metadata.get('source_images', [])
-                                if not isinstance(source_images, list):
-                                    source_images = []
-                                item['source_images'] = source_images
-                            except Exception:
-                                # Fall back to filename pattern
-                                file_type = item.get('type', 'image')
-                                job_prefix, is_output = extract_job_prefix(filename, file_type)
-                                item['source_images'] = []
-                        else:
-                            # Fall back to filename pattern
-                            file_type = item.get('type', 'image')
-                            job_prefix, is_output = extract_job_prefix(filename, file_type)
-                            item['source_images'] = []
-
-                        item['job_prefix'] = job_prefix
-                        item['is_input'] = not is_output
-
+                        _enrich_file_from_metadata(
+                            item, filename, full_metadata,
+                            _lookup_file_metadata, compute_file_hash,
+                        )
                 except Exception:
-                    # Set safe defaults
-                    if 'workflow' not in item:
-                        item['workflow'] = ''
-                    if 'job_prefix' not in item:
-                        item['job_prefix'] = None
-                        item['is_input'] = True
-                        item['source_images'] = []
+                    _enrich_file_fallback(item)
 
         return items
 

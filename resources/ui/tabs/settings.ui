@@ -892,7 +892,7 @@
             <item>
              <widget class="QComboBox" name="ServerNotFoundCombo">
               <property name="toolTip">
-               <string>Choose whether to fail immediately or wait for the server to start when not found</string>
+               <string>Behavior when ComfyUI server is not running: fail immediately, wait for it, or fail and remove the Deadline job</string>
               </property>
               <property name="minimumWidth">
                <number>150</number>
@@ -905,6 +905,11 @@
               <item>
                <property name="text">
                 <string>Wait for Server</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Fail and Delete Job</string>
                </property>
               </item>
              </widget>

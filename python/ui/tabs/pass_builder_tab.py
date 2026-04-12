@@ -323,7 +323,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                             variants.add(name.lower())
                         available[t.lower()] = variants
                         break
-            except (StopIteration, Exception) as e:
+            except Exception as e:
                 logger.warning(f"Pass Builder: Error scanning render variants for task '{t}': {e}")
 
         logger.info(f"Pass Builder: Available denoised render variants: {available}")

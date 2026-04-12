@@ -141,6 +141,13 @@ def submit_comfyui_to_deadline(
         shutil.copy2(src, dst)
         logger.info(f"Copied {os.path.basename(src)} to: {dst}")
 
+    # Write farm config alongside scripts so farm modules can find network paths
+    # without hardcoded production paths. This is the single source of truth for
+    # farm-side settings discovery.
+    farm_config = {"network_output_path": safe_get_setting("network_output_path", "")}
+    farm_config_path = os.path.join(job_data_dir, "_farm_config.json")
+    save_json(farm_config_path, farm_config)
+
     input_dir = output_dir
     port = 8188
 

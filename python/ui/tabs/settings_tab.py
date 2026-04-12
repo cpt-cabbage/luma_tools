@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 _CHECKBOX = "checkbox"
 _TEXT = "text"
 _SPINBOX = "spinbox"
-
-# Widget type constants for settings mapping (extended)
 _COMBOBOX = "combobox"
 
 # Declarative settings mappings: (setting_key, widget_name, widget_type[, load_converter, save_converter])
@@ -53,6 +51,8 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
+    # Server behavior (combo populated with data values in initialize)
+    ("comfyui_server_not_found_behavior", "ServerNotFoundCombo", _COMBOBOX),
 ]
 
 
@@ -157,6 +157,15 @@ class SettingsTab(BaseTab):
             combo.addItem("None", "none")
             combo.addItem("Subtle", "subtle")
             combo.addItem("System", "system")
+
+        # Initialize server not found behavior combobox with data values
+        if hasattr(self.ui, 'ServerNotFoundCombo'):
+            combo = self.ui.ServerNotFoundCombo
+            combo.clear()
+            combo.addItem("Fail Immediately", "fail")
+            combo.addItem("Wait for Server", "wait")
+            combo.addItem("Fail & Delete Job", "fail_delete")
+            combo.currentIndexChanged.connect(self._update_server_wait_visibility)
 
         self._load_version_ui()
 
@@ -382,7 +391,7 @@ class SettingsTab(BaseTab):
             key = entry[0]
             try:
                 values[key] = get_setting(key)
-            except (KeyError, Exception):
+            except Exception:
                 values[key] = None
 
         for entry in settings_map:
@@ -499,12 +508,6 @@ class SettingsTab(BaseTab):
         # Load all mapped settings (paths, checkboxes, spinboxes with converters)
         self._load_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
-        # Server not found behavior combo (custom bidirectional mapping)
-        if hasattr(self.ui, 'ServerNotFoundCombo'):
-            behavior = get_setting("comfyui_server_not_found_behavior")
-            self.ui.ServerNotFoundCombo.setCurrentIndex(0 if behavior == "fail" else 1)
-            self.ui.ServerNotFoundCombo.currentIndexChanged.connect(self._update_server_wait_visibility)
-
         self._update_comfyui_python_visibility()
         self._update_server_wait_visibility()
 
@@ -575,7 +578,7 @@ class SettingsTab(BaseTab):
     def _update_server_wait_visibility(self):
         """Show/hide server wait timeout based on selected behavior."""
         if hasattr(self.ui, 'ServerNotFoundCombo') and hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
-            is_wait = self.ui.ServerNotFoundCombo.currentIndex() == 1
+            is_wait = self.ui.ServerNotFoundCombo.currentData() == "wait"
             self.ui.ServerWaitTimeoutSpinBox.setEnabled(is_wait)
             if hasattr(self.ui, 'serverWaitTimeoutLabel'):
                 self.ui.serverWaitTimeoutLabel.setEnabled(is_wait)
@@ -777,11 +780,6 @@ class SettingsTab(BaseTab):
 
         # Save all mapped global settings (paths, checkboxes, spinboxes with converters)
         self._save_settings_from_map(_GLOBAL_SETTINGS_MAP)
-
-        # Server not found behavior combo (custom bidirectional mapping)
-        if hasattr(self.ui, 'ServerNotFoundCombo'):
-            behavior = "fail" if self.ui.ServerNotFoundCombo.currentIndex() == 0 else "wait"
-            set_setting("comfyui_server_not_found_behavior", behavior)
 
         # Save restricted tabs configuration
         self._save_restricted_tabs_settings()

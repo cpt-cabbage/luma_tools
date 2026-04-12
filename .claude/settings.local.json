@@ -152,7 +152,11 @@
       "mcp__codebase-memory-mcp__query_graph",
       "mcp__codebase-memory-mcp__search_graph",
       "Bash(cargo --version)",
-      "Bash(where rtk:*)"
+      "Bash(where rtk:*)",
+      "mcp__codebase-memory-mcp__get_code_snippet",
+      "Bash(rtk git:*)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/settings.ui -o resources/ui/tabs/_compiled/ui_settings.py -g python)",
+      "mcp__codebase-memory-mcp__detect_changes"
     ],
     "deny": [
       "Read(./python/venv/**)",
