@@ -59,12 +59,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         )
 
         # "Publish to AYON" checkbox — on by default, controls whether build publishes
-        from icons import get_ayon_icon
-        from core.config import UIColors
         from core.settings_manager import safe_get_setting, safe_set_setting
         self._publish_to_ayon_cb = QtWidgets.QCheckBox("Publish to AYON")
-        self._publish_to_ayon_cb.setIcon(get_ayon_icon(14))
-        self._publish_to_ayon_cb.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+        self.apply_ayon_checkbox_style(self._publish_to_ayon_cb)
         self._publish_to_ayon_cb.setToolTip("When enabled, built passes are published to AYON")
         self._publish_to_ayon_cb.setChecked(safe_get_setting("pass_builder_publish_to_ayon", True))
         self._publish_to_ayon_cb.stateChanged.connect(self._on_publish_to_ayon_changed)
@@ -132,6 +129,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
     def _update_publish_widgets_visibility(self):
         """Show/hide the Publish To label and product combo based on checkbox."""
+        if not hasattr(self, '_publish_to_ayon_cb'):
+            return
         visible = self._publish_to_ayon_cb.isChecked()
         self.ui.publishToLabel.setVisible(visible)
         self.ui.PublishProductCombo.setVisible(visible)
@@ -250,11 +249,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self._on_publish_source_selected()
 
     def _fetch_ayon_products(self):
-        """Override: fetch render products and scan available denoised render variants.
+        """Override: fetch render products and scan available render variants.
 
-        Returns both the AYON products and the set of available denoised render
+        Returns both the AYON products and the set of available render
         variant names, so the product list can be filtered to only show products
-        that have matching denoised renders on disk.
+        that have matching renders on disk.
         """
         from ayon.service import AYON_AVAILABLE, convert_to_ayon_folder_path, get_folder_render_products
 
@@ -270,7 +269,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         return products, available_variants
 
     def _scan_available_render_variants(self):
-        """Scan work directory for available denoised render variant names.
+        """Scan work directory for available render variant names.
 
         If a task is set, scans only that task directory. Otherwise scans all
         task directories under work/ to support task-less browsing.
@@ -288,17 +287,16 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         # Determine which task directories to scan
         task = self.app_state.task
-        if task:
-            tasks_to_scan = [task]
+        # Always scan all task directories — renders may belong to a different
+        # task than the one the app was launched from (e.g., compositing→lighting)
+        work_dir = truncate_at_suffix(shot_path, "work")
+        if os.path.isdir(work_dir):
+            tasks_to_scan = [
+                d for d in os.listdir(work_dir)
+                if os.path.isdir(os.path.join(work_dir, d))
+            ]
         else:
-            work_dir = truncate_at_suffix(shot_path, "work")
-            if os.path.isdir(work_dir):
-                tasks_to_scan = [
-                    d for d in os.listdir(work_dir)
-                    if os.path.isdir(os.path.join(work_dir, d))
-                ]
-            else:
-                return available
+            return available
 
         for t in tasks_to_scan:
             task_dir = get_task_directory(shot_path, t)
@@ -326,11 +324,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             except Exception as e:
                 logger.warning(f"Pass Builder: Error scanning render variants for task '{t}': {e}")
 
-        logger.info(f"Pass Builder: Available denoised render variants: {available}")
+        logger.info(f"Pass Builder: Available render variants: {available}")
         return available
 
     def _on_ayon_products_fetched(self, result):
-        """Override: filter products to only those with available denoised renders."""
+        """Override: filter products to only those with available renders on disk."""
         products, available_variants = result
 
         if available_variants:
@@ -342,7 +340,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
             if filtered:
                 logger.info(
-                    f"Pass Builder: Showing {len(filtered)} products with denoised renders "
+                    f"Pass Builder: Showing {len(filtered)} products with renders "
                     f"(of {len(products)} total)"
                 )
                 products = filtered
@@ -359,7 +357,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         super()._on_publish_product_changed(index)
 
     def _fetch_product_versions(self, product_id):
-        """Override: filter out versions without resolvable denoised work renders."""
+        """Override: filter out versions without resolvable work renders."""
         from ayon.service import get_product_version_list
 
         versions = get_product_version_list(self.app_state.jobname, product_id)
@@ -368,7 +366,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         product_name = getattr(self, '_current_publish_product_name', '')
         derived_task, _ = self._parse_render_product(product_name)
-        task = self.app_state.task or derived_task
+        # Prefer derived task from product name — renders may belong to a
+        # different task than the one the app was launched from
+        task = derived_task or self.app_state.task
         if not task:
             return versions
 
@@ -380,25 +380,25 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             else:
                 logger.info(
                     f"Pass Builder: Hiding version v{v['version']:03d} "
-                    "(no denoised work renders found)"
+                    "(no work renders found)"
                 )
 
         if not filtered:
             logger.warning(
-                "Pass Builder: No versions have denoised work renders, showing all"
+                "Pass Builder: No versions have work renders, showing all"
             )
             return versions
 
         logger.info(
             f"Pass Builder: Showing {len(filtered)} of {len(versions)} "
-            "versions with denoised renders"
+            "versions with renders"
         )
         return filtered
 
     def _resolve_work_render_path(self, version_id, task):
-        """Resolve an AYON version to its work render directory with denoised renders.
+        """Resolve an AYON version to its work render directory.
 
-        Returns the work render path if denoised renders exist, None otherwise.
+        Returns the work render path if renders exist, None otherwise.
         """
         from ayon.service import resolve_version_render_path
         from services.file_operations import get_task_directory, fast_scandir, find_renders
@@ -432,10 +432,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         return None
 
     def _resolve_and_scan_publish(self, version_id):
-        """Override: resolve AYON publish back to the WORK directory with denoised renders.
+        """Override: resolve AYON publish back to the WORK directory with renders.
 
         Versions are pre-filtered by _fetch_product_versions to only include those
-        with resolvable denoised work renders, so this should always succeed.
+        with resolvable work renders, so this should always succeed.
 
         The task is derived from the selected product name (render{Task}{Variant})
         so this works even when no task is selected in the AYON context.
@@ -445,7 +445,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         product_name = self._publish_product_combo.currentText()
         derived_task, _ = self._parse_render_product(product_name)
-        task = self.app_state.task or derived_task
+        task = derived_task or self.app_state.task
         if not task:
             raise ValueError(
                 f"Cannot determine task from product '{product_name}'. "
@@ -455,8 +455,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         work_render_path = self._resolve_work_render_path(version_id, task)
         if not work_render_path:
             raise FileNotFoundError(
-                "Could not resolve work render directory with denoised renders "
-                "for this version."
+                "Could not resolve work render directory for this version."
             )
 
         logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
@@ -465,16 +464,31 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         render_directory = os.path.dirname(work_render_path)
         self.app_state.working_dir = truncate_at_suffix(render_directory, task)
 
-        # Scan for denoised renders
+        # Scan for renders
         renders = find_renders(work_render_path)
         if not renders:
-            raise FileNotFoundError(f"No denoised renders found in {work_render_path}")
+            raise FileNotFoundError(f"No renders found in {work_render_path}")
 
         return work_render_path, renders
 
     def _on_publish_scan_complete(self, result):
         """Override: Pass Builder stores plain FileSequence objects, not tuples."""
+        from core.config import DENOISED_SUBDIRECTORY
+        from core.utils import extract_render_name
+        from services.file_operations import get_denoised_status
+
         staging_dir, sequences = result
+
+        # Detect denoised-only fallback: if the staging dir has no raw EXRs
+        # but its denoised/ subdir contains the sequences, point downstream
+        # tooling at the denoised dir so paths exist.
+        used_fallback = False
+        if sequences:
+            denoised_dir = os.path.join(staging_dir, DENOISED_SUBDIRECTORY)
+            seq_dir = os.path.dirname(str(sequences[0]))
+            if os.path.normcase(seq_dir).startswith(os.path.normcase(denoised_dir)):
+                staging_dir = denoised_dir
+                used_fallback = True
 
         self.ui.RenderPath.setText(staging_dir)
         self.app_state.searchpath = staging_dir
@@ -489,10 +503,28 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         self.ui.RendersList.clear()
         if sequences:
+            # Check denoised status for each render
+            render_names = [
+                extract_render_name(os.path.basename(str(seq)))
+                for seq in sequences
+            ]
+            self._denoised_status = get_denoised_status(staging_dir, render_names)
+
             for render_seq in sequences:
-                self.ui.RendersList.addItem(os.path.basename(str(render_seq)))
+                name = extract_render_name(os.path.basename(str(render_seq)))
+                is_denoised = self._denoised_status.get(name, False)
+                label = f"{os.path.basename(str(render_seq))}  [Denoised]" if is_denoised else os.path.basename(str(render_seq))
+                self.ui.RendersList.addItem(label)
+
             self.ui.RendersList.setEnabled(True)
-            self.show_status(f"Found {len(sequences)} render(s)", "info")
+            if used_fallback:
+                self.show_status(
+                    f"Raw renders cleaned — using denoised only ({len(sequences)} sequence(s)). "
+                    "AOV passes (Crypto, normal) will not be available.",
+                    "warning",
+                )
+            else:
+                self.show_status(f"Found {len(sequences)} render(s)", "info")
             # Auto-select first render after filtering
             self.ui.RendersList.setCurrentRow(0)
         else:
@@ -546,7 +578,12 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         return sequences
 
     def _on_scan_renders_clicked(self):
-        """Scan for renders when button clicked or version changed."""
+        """Scan for renders when button clicked or version changed.
+
+        Runs filesystem scan on a background worker thread to avoid blocking
+        the GUI on network paths. Connected to both the Scan button and
+        CurrentVer.valueChanged.
+        """
         if not self._initialized:
             return
 
@@ -555,34 +592,80 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             return
 
         from core.utils import update_path_version
-        from services.file_operations import find_renders
 
         # Show scanning status
         self.show_status("Pass Builder: Scanning...", "info")
 
         self.ui.RendersList.clear()
         self.ui.Passes.clear()
+        self.ui.BuildPasses.setEnabled(False)
 
-        # Build search path
+        # Build search path (UI reads on main thread)
         self.app_state.searchpath = self.ui.RenderPath.text()
         newver = self.ui.CurrentVer.value()
         self.app_state.searchpath = update_path_version(self.app_state.searchpath, newver)
         self.ui.RenderPath.setText(self.app_state.searchpath)
 
-        # Find renders
-        self.app_state.renders = find_renders(self.app_state.searchpath)
-        self.ui.BuildPasses.setEnabled(False)
+        search_path = self.app_state.searchpath
 
-        if len(self.app_state.renders) > 0:
-            for render_seq in self.app_state.renders:
-                self.ui.RendersList.addItem(os.path.basename(str(render_seq)))
-            self.ui.RendersList.setEnabled(True)
-            # Show result
-            self.show_status(f"Found {len(self.app_state.renders)} render(s)", "info")
-        else:
-            self.ui.RendersList.addItem("No Renders Found")
+        def _scan_worker():
+            """Filesystem scan in background thread."""
+            from services.file_operations import find_renders_with_source, get_denoised_status
+            from core.utils import extract_render_name
+
+            renders, source_dir = find_renders_with_source(search_path)
+            used_fallback = bool(renders) and source_dir != search_path
+            denoised_status = {}
+            if renders:
+                render_names = [
+                    extract_render_name(os.path.basename(str(seq)))
+                    for seq in renders
+                ]
+                # When raw renders are gone and we fell back to denoised/, the
+                # sequences live in source_dir (the denoised folder) and there is
+                # no separate denoised file to advertise as a "denoised version".
+                lookup_dir = source_dir if used_fallback else search_path
+                denoised_status = get_denoised_status(lookup_dir, render_names)
+            return renders, source_dir, used_fallback, denoised_status
+
+        def _on_scan_result(result):
+            from core.utils import extract_render_name
+            renders, source_dir, used_fallback, denoised_status = result
+            self.app_state.renders = renders
+            self._denoised_status = denoised_status
+
+            if used_fallback:
+                # Point downstream pass-building at the denoised dir so paths exist
+                self.app_state.searchpath = source_dir
+                self.ui.RenderPath.setText(source_dir)
+
+            if renders:
+                for render_seq in renders:
+                    name = extract_render_name(os.path.basename(str(render_seq)))
+                    is_denoised = denoised_status.get(name, False)
+                    label = f"{os.path.basename(str(render_seq))}  [Denoised]" if is_denoised else os.path.basename(str(render_seq))
+                    self.ui.RendersList.addItem(label)
+                self.ui.RendersList.setEnabled(True)
+                if used_fallback:
+                    self.show_status(
+                        f"Raw renders cleaned — using denoised only ({len(renders)} sequence(s)). "
+                        "AOV passes (Crypto, normal) will not be available.",
+                        "warning",
+                    )
+                else:
+                    self.show_status(f"Found {len(renders)} render(s)", "info")
+            else:
+                self.ui.RendersList.addItem("No Renders Found")
+                self.ui.RendersList.setEnabled(False)
+                self.show_status("No renders found", "warning")
+
+        def _on_scan_error(error_msg, traceback_str=""):
+            self.app_state.renders = []
+            self.ui.RendersList.addItem("Scan error")
             self.ui.RendersList.setEnabled(False)
-            self.show_status("No renders found", "warning")
+            self.show_status(f"Scan error: {error_msg}", "error")
+
+        self.start_worker(_scan_worker, on_result=_on_scan_result, on_error=_on_scan_error)
 
     def _on_render_selection_changed(self):
         """Update passes when selected render changes."""
@@ -599,14 +682,20 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         filename = os.path.basename(framename)
         from core.utils import extract_render_name
         self.app_state.currentrender = extract_render_name(filename)
-        denoisedpath = framename
+
+        # Track denoised status for selected render
+        self._current_render_is_denoised = getattr(self, '_denoised_status', {}).get(
+            self.app_state.currentrender, False
+        )
+
+        # Detect passes from the raw render file (has all channels)
+        self._detect_passes(framename)
 
         # Find passes (shows inline spinner automatically)
         if self.app_state.working_dir:
             self.app_state.passesfile = get_pass_file_path(
                 self.app_state.working_dir, self.app_state.currentrender
             )
-        self._detect_passes(denoisedpath)
 
         # Populate AYON product selector
         self._populate_product_combo()
@@ -796,7 +885,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         do_publish = self._publish_to_ayon_cb.isChecked()
         selected_product = (self.ui.PublishProductCombo.currentText().strip() or None) if do_publish else None
 
+        # Get denoised status for selected render
+        is_denoised = getattr(self, '_current_render_is_denoised', False)
+
         # Get display name for status
+        denoise_label = "denoised" if is_denoised else "raw"
         build_type_display = "Local" if build_type == "local" else "Farm"
 
         # Set up cancellation
@@ -806,7 +899,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         # Show status bar progress (no overlay so user can still interact)
         self.update_status_with_spinner(
-            f"Pass Builder: Building passes ({build_type_display})...",
+            f"Pass Builder: Building passes ({build_type_display}, {denoise_label})...",
             StatusColors.INFO
         )
 
@@ -831,6 +924,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 progress_callback=progress_callback,
                 product_name=selected_product,
                 cancel_event=cancel_event,
+                is_denoised=is_denoised,
             )
 
         def on_progress(percent, message):

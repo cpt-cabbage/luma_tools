@@ -5,6 +5,7 @@ Handles cleanup of shot files (renders, USD, HIP backups)
 and gallery footprint management.
 """
 
+import os
 import logging
 from typing import Optional, List
 
@@ -56,32 +57,70 @@ class CleanerTab(BaseTab):
     # =========================================================================
 
     def _setup_scanner(self):
-        """Setup the directory scanner."""
+        """Setup the directory scanner and wire its signals to UI slots."""
         from services.scan_service import DirectoryScanner
 
-        try:
-            self.scanner = DirectoryScanner(self.app_state, self.ui, None)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Cleaner scanner setup failed (pre-existing API mismatch): {e}"
-            )
+        self.scanner = DirectoryScanner(self.app_state, self.ui, None)
+        s = self.scanner.signals
+        s.set_label_text.connect(self._scanner_set_label_text)
+        s.add_list_item.connect(self._scanner_add_list_item)
+        s.clear_list.connect(self._scanner_clear_list)
+        s.scroll_list_to_bottom.connect(self._scanner_scroll_list_to_bottom)
+        s.set_widget_enabled.connect(self._scanner_set_widget_enabled)
+        s.set_widget_checked.connect(self._scanner_set_widget_checked)
+        s.set_spinbox_range.connect(self._scanner_set_spinbox_range)
+        s.set_spinbox_value.connect(self._scanner_set_spinbox_value)
+        s.set_combobox_text.connect(self._scanner_set_combobox_text)
 
-    def _on_add_render_item(self, text):
-        """Add item to renders list."""
-        self.ui.RendersClean.addItem(text)
+    def _scanner_set_label_text(self, widget_name, text):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is not None:
+            widget.setText(text)
 
-    def _on_add_usd_item(self, text):
-        """Add item to USD list."""
-        self.ui.USDSClean.addItem(text)
+    def _scanner_add_list_item(self, list_name, item_text):
+        widget = getattr(self.ui, list_name, None)
+        if widget is not None:
+            widget.addItem(item_text)
 
-    def _on_set_hip_backup_label(self, text):
-        """Set HIP backup label text."""
-        self.ui.HIPBackupsLabel.setText(text)
+    def _scanner_clear_list(self, list_name):
+        widget = getattr(self.ui, list_name, None)
+        if widget is not None:
+            widget.clear()
 
-    def _on_set_latest_render_label(self, text):
-        """Set latest render label text."""
-        self.ui.LatestRender.setText(text)
+    def _scanner_scroll_list_to_bottom(self, list_name):
+        widget = getattr(self.ui, list_name, None)
+        if widget is not None and widget.count() > 0:
+            widget.scrollToBottom()
+
+    def _scanner_set_widget_enabled(self, widget_name, enabled):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is not None:
+            widget.setEnabled(enabled)
+
+    def _scanner_set_widget_checked(self, widget_name, checked):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is not None and hasattr(widget, "setChecked"):
+            widget.setChecked(checked)
+
+    def _scanner_set_spinbox_range(self, widget_name, lo, hi):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is not None:
+            widget.setRange(lo, hi)
+
+    def _scanner_set_spinbox_value(self, widget_name, value):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is not None:
+            widget.setValue(value)
+
+    def _scanner_set_combobox_text(self, widget_name, text):
+        widget = getattr(self.ui, widget_name, None)
+        if widget is None:
+            return
+        idx = widget.findText(text)
+        if idx >= 0:
+            widget.setCurrentIndex(idx)
+        else:
+            widget.setCurrentText(text)
 
     def _on_rescan_clicked(self):
         """Rescan for files to clean."""
@@ -136,9 +175,11 @@ class CleanerTab(BaseTab):
             "Shot Cleaner: Scan complete", StatusColors.SUCCESS, start=False
         )
 
-        # Call completion callback if provided
-        if hasattr(self, "_scan_on_complete") and self._scan_on_complete:
-            self._scan_on_complete()
+        # Call completion callback if provided (clear before calling to avoid re-entrancy)
+        cb = getattr(self, "_scan_on_complete", None)
+        self._scan_on_complete = None
+        if cb:
+            cb()
 
     def _on_scan_error(self, error_msg, traceback_str=""):
         """Handle scan error."""
@@ -170,6 +211,7 @@ class CleanerTab(BaseTab):
 
     def _on_clean_files_clicked(self):
         """Handle cleanup button click."""
+        from dialog_helpers import confirm_action
         from ui_components import StatusColors
         from services.cleanup_service import (
             cleanup_renders,
@@ -197,6 +239,23 @@ class CleanerTab(BaseTab):
         if not render_dirs and not usd_dirs and not do_hip:
             return
 
+        # Build confirmation summary
+        summary_parts = []
+        if render_dirs:
+            summary_parts.append(f"{len(render_dirs)} render director{'y' if len(render_dirs) == 1 else 'ies'}")
+        if usd_dirs:
+            summary_parts.append(f"{len(usd_dirs)} USD director{'y' if len(usd_dirs) == 1 else 'ies'}")
+        if do_hip:
+            summary_parts.append("HIP backups folder")
+
+        if not confirm_action(
+            "Confirm Shot Cleanup",
+            f"Are you sure you want to delete {', '.join(summary_parts)}?\n\n"
+            "This action cannot be undone.",
+            parent=self.main_window,
+        ):
+            return
+
         lookdev_dir = self.app_state.lookdev_dir
         self.show_status("Cleaning up files...", "warning")
 
@@ -204,20 +263,20 @@ class CleanerTab(BaseTab):
             """Run file deletions in worker thread."""
             if render_dirs:
                 for i, dir_name in enumerate(render_dirs):
-                    logger.info(f"Removing Renders: {lookdev_dir}\\img\\renders\\{dir_name}")
+                    logger.info(f"Removing Renders: {os.path.join(lookdev_dir, 'img', 'renders', dir_name)}")
                     if progress_callback:
                         progress_callback(int((i + 1) / max(len(render_dirs), 1) * 50), f"Removing render: {dir_name}")
                 cleanup_renders(lookdev_dir, render_dirs)
 
             if usd_dirs:
                 for i, dir_name in enumerate(usd_dirs):
-                    logger.info(f"Removing USDs: {lookdev_dir}\\usd_files\\{dir_name}")
+                    logger.info(f"Removing USDs: {os.path.join(lookdev_dir, 'usd_files', dir_name)}")
                     if progress_callback:
                         progress_callback(50 + int((i + 1) / max(len(usd_dirs), 1) * 30), f"Removing USD: {dir_name}")
                 cleanup_usd(lookdev_dir, usd_dirs)
 
             if do_hip:
-                logger.info(f"Removing Hip Backups Folder: {lookdev_dir}\\backup\\")
+                logger.info(f"Removing Hip Backups Folder: {os.path.join(lookdev_dir, 'backup')}")
                 if progress_callback:
                     progress_callback(90, "Removing HIP backups")
                 cleanup_hip_backups(lookdev_dir)
@@ -247,9 +306,9 @@ class CleanerTab(BaseTab):
 
     def _update_gallery_path_label(self):
         """Update the gallery path label."""
-        from services.gallery_cleanup_service import get_gallery_output_path
+        from services.gallery_cleanup_service import get_gallery_root_path
 
-        path = get_gallery_output_path()
+        path = get_gallery_root_path()
         if path:
             self.ui.GalleryPathLabel.setText(f"Gallery: {path}")
             self.ui.GalleryScanButton.setEnabled(True)
@@ -264,12 +323,12 @@ class CleanerTab(BaseTab):
         accidentally deleting other users' data.
         """
         from services.gallery_cleanup_service import (
-            get_gallery_output_path,
+            get_gallery_root_path,
             scan_gallery_footprint,
         )
         from ui_components import StatusColors
 
-        output_path = get_gallery_output_path()
+        output_path = get_gallery_root_path()
         if not output_path:
             self.show_status("Gallery path not configured", "warning")
             return

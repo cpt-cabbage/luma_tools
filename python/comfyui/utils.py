@@ -2,7 +2,7 @@
 ComfyUI Shared Utilities.
 
 Common functions for ComfyUI server communication, workflow handling, and file operations.
-Used by client.py, runner.py, and server.py.
+Used by runner.py and server.py.
 """
 
 import sys
@@ -38,24 +38,10 @@ def _get_websocket():
         _websocket = websocket
         return websocket
     except ImportError:
-        logger.info("websocket-client not found, attempting to install...")
-        try:
-            import subprocess as _sp
-            _result = _sp.run(
-                [sys.executable, '-m', 'pip', 'install', 'websocket-client', '--quiet'],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if _result.returncode == 0:
-                import websocket
-                _websocket = websocket
-                logger.info("Successfully installed websocket-client")
-                return websocket
-            else:
-                logger.error(f"Failed to install websocket-client: {_result.stderr}")
-        except Exception as _e:
-            logger.error(f"Could not auto-install websocket-client: {_e}")
+        logger.warning(
+            "websocket-client not installed. Install it with: "
+            "pip install websocket-client"
+        )
         return None
 
 
@@ -63,7 +49,7 @@ def _is_websocket_available():
     return _get_websocket() is not None
 
 
-WEBSOCKET_AVAILABLE = None  # Kept for backward compat; use _is_websocket_available()
+WEBSOCKET_AVAILABLE = None  # Deprecated: use _is_websocket_available() instead
 
 
 # =============================================================================
@@ -239,7 +225,7 @@ def check_history_for_completion(prompt_id: str, server_url: str = None, port: i
 
 
 _queue_check_failures = 0
-_queue_check_lock = threading.Lock()
+_queue_check_lock = threading.RLock()
 
 
 def _is_prompt_in_queue(prompt_id: str, server_url: str) -> bool:
@@ -625,6 +611,12 @@ def wait_for_completion_http(
     on_image_output: callable = None
 ) -> bool:
     """Wait for workflow execution using HTTP polling (fallback when WebSocket unavailable)."""
+    # Reset queue check failure counter for each new prompt to avoid leaking
+    # state between prompts in the same process.
+    global _queue_check_failures
+    with _queue_check_lock:
+        _queue_check_failures = 0
+
     base_url = _normalize_server_url(server_url, port)
     history_url = f"{base_url}/history/{prompt_id}"
     queue_url = f"{base_url}/queue"
@@ -984,15 +976,22 @@ def download_image_from_server(
 # Output File Operations
 # =============================================================================
 
-# Default extensions for output files that need moving
-OUTPUT_FILE_EXTENSIONS = (
-    # 3D model formats
-    '.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae',
-    # Video formats
-    '.mp4', '.mov', '.avi', '.webm',
-    # Audio formats
-    '.wav', '.mp3', '.flac', '.ogg',
-)
+# Default extensions for output files that need moving.
+# Sourced from core.config so adding a new format updates every consumer.
+try:
+    from core.config import MODEL_EXTENSIONS as _MODEL_EXT
+    from core.config import VIDEO_EXTENSIONS as _VIDEO_EXT
+    from core.config import AUDIO_EXTENSIONS as _AUDIO_EXT
+    OUTPUT_FILE_EXTENSIONS = tuple(sorted(_MODEL_EXT | _VIDEO_EXT | _AUDIO_EXT))
+except ImportError:
+    # Farm-isolation fallback (this module is copied to a flat _job_data dir
+    # without the core package on path).
+    OUTPUT_FILE_EXTENSIONS = (
+        '.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae',
+        '.stl', '.ply',
+        '.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv', '.m4v',
+        '.wav', '.mp3', '.flac', '.ogg',
+    )
 
 
 def move_output_files(
@@ -1231,7 +1230,7 @@ except ImportError:
     # Farm environment — use OrderedDict with lock for LRU-like eviction
     from collections import OrderedDict
     _hash_cache = OrderedDict()
-    _hash_cache_lock = threading.Lock()
+    _hash_cache_lock = threading.RLock()
     _HASH_CACHE_TYPE = "dict"
 
 

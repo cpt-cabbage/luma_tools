@@ -6,15 +6,17 @@
       "iteratable": false,
       "note": "",
       "full_restart": false,
+      "restart_lowvram": false,
       "node_overrides": {},
       "is_multi": true,
       "output_type": "3d",
       "workflows": {
         "SingleView": {
-          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/Trellis_2_v004.json",
+          "path": "L:/tools/_studio_tools/luma_tools/comfyui/workflows/LA_TRELLIS2_APRIL_SINGLE.json",
           "note": "Needs single Subject, clear difference between BG and FG and center of frame. Does not work on greyscale, needs to be rendered/real.",
           "iteratable": false,
           "full_restart": true,
+          "restart_lowvram": false,
           "node_overrides": {}
         },
         "MultiViews": {
@@ -22,6 +24,7 @@
           "note": "Needs single Subject, clear difference between BG and FG and center of frame. Does not work on greyscale, needs to be rendered/real. Make sure they all line up.",
           "iteratable": false,
           "full_restart": true,
+          "restart_lowvram": false,
           "node_overrides": {}
         }
       }

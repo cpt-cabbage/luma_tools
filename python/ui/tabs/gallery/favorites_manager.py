@@ -742,19 +742,41 @@ class FavoritesManager(BaseGalleryManager, QObject):
         items = []
         exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
 
+        # Batch stat calls by grouping paths by directory and using scandir
+        paths_by_dir = {}
         for path in self._liked_items:
-            # Skip items in the excluded directory
             if exclude_dir_norm and os.path.normpath(path).startswith(exclude_dir_norm):
                 continue
+            dir_path = os.path.dirname(path)
+            if dir_path not in paths_by_dir:
+                paths_by_dir[dir_path] = []
+            paths_by_dir[dir_path].append(path)
 
-            if os.path.exists(path):
+        for dir_path, paths in paths_by_dir.items():
+            # Build a lookup of existing files and their mtimes via scandir (one OS call per dir)
+            existing_files = {}
+            try:
+                with os.scandir(dir_path) as entries:
+                    for entry in entries:
+                        try:
+                            existing_files[entry.path] = entry.stat().st_mtime
+                        except (OSError, PermissionError):
+                            pass
+            except (OSError, PermissionError):
+                continue
+
+            for path in paths:
+                norm_path = os.path.normpath(path)
+                mtime = existing_files.get(norm_path)
+                if mtime is None:
+                    continue
                 filename = os.path.basename(path)
                 items.append({
                     'path': path,
                     'filename': filename,
                     'name': filename.lower(),
                     'type': self._get_file_type(path),
-                    'mtime': os.path.getmtime(path),
+                    'mtime': mtime,
                     'is_external': True,
                     'has_metadata': False,
                     'metadata_level': 'none',
@@ -781,19 +803,40 @@ class FavoritesManager(BaseGalleryManager, QObject):
         exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
         group_paths = self.get_items_in_group(group_id)
 
+        # Batch stat calls by grouping paths by directory and using scandir
+        paths_by_dir = {}
         for path in group_paths:
-            # Skip items in the excluded directory
             if exclude_dir_norm and os.path.normpath(path).startswith(exclude_dir_norm):
                 continue
+            dir_path = os.path.dirname(path)
+            if dir_path not in paths_by_dir:
+                paths_by_dir[dir_path] = []
+            paths_by_dir[dir_path].append(path)
 
-            if os.path.exists(path):
+        for dir_path, paths in paths_by_dir.items():
+            existing_files = {}
+            try:
+                with os.scandir(dir_path) as entries:
+                    for entry in entries:
+                        try:
+                            existing_files[entry.path] = entry.stat().st_mtime
+                        except (OSError, PermissionError):
+                            pass
+            except (OSError, PermissionError):
+                continue
+
+            for path in paths:
+                norm_path = os.path.normpath(path)
+                mtime = existing_files.get(norm_path)
+                if mtime is None:
+                    continue
                 filename = os.path.basename(path)
                 items.append({
                     'path': path,
                     'filename': filename,
                     'name': filename.lower(),
                     'type': self._get_file_type(path),
-                    'mtime': os.path.getmtime(path),
+                    'mtime': mtime,
                     'is_external': True,
                     'has_metadata': False,
                     'metadata_level': 'none',

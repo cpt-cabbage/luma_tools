@@ -190,49 +190,6 @@ class TestLogError:
         assert "specific error message" in logged_messages[0]
 
 
-class TestFormatError:
-    """Tests for format_error function."""
-
-    def test_basic_format(self):
-        """Test basic error formatting."""
-        from core.error_handling import format_error
-
-        msg = format_error("reading config", "File not found")
-        assert "Error reading config" in msg
-        assert "File not found" in msg
-
-    def test_format_with_variable(self):
-        """Test error formatting with variable."""
-        from core.error_handling import format_error
-
-        msg = format_error("opening file", "Permission denied", variable="/etc/shadow")
-        assert "/etc/shadow" in msg
-        assert "Permission denied" in msg
-
-    def test_format_without_traceback(self):
-        """Test formatting without traceback."""
-        from core.error_handling import format_error
-
-        try:
-            raise ValueError("test error")
-        except ValueError as e:
-            msg = format_error("test operation", e, include_traceback=False)
-
-        assert "Traceback" not in msg
-
-    def test_format_with_traceback(self):
-        """Test formatting with traceback included."""
-        from core.error_handling import format_error
-
-        try:
-            raise ValueError("test error")
-        except ValueError as e:
-            msg = format_error("test operation", e, include_traceback=True)
-
-        assert "Traceback" in msg
-        assert "ValueError" in msg
-
-
 class TestIntegration:
     """Integration tests for error handling utilities."""
 

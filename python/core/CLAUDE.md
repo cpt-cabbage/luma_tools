@@ -15,18 +15,10 @@ Core utilities and infrastructure for Luma Tools.
 - `@safe_operation(name, return_on_error)` - decorator for functions that may fail
 - `with handle_errors(name, reraise=False)` - context manager for error blocks
 - `log_error(operation, error, variable)` - consistent error logging format
-- `format_error(operation, error, variable, include_traceback)` - format error message string
-
-### validators.py — Path and Data Validation
-- `is_valid_file(path)`, `is_valid_directory(path)` - boolean checks
-- `validate_file(path)`, `validate_directory(path)` - raise ValidationError on failure
-- `validate_file_for_operation(path, operation)` - returns bool, logs errors
-- `safe_list_dir(path, pattern)` - list directory with error handling
 
 ### caching.py — Reusable Caching Patterns
 - `@cached_with_ttl(seconds)` - decorator for time-based cache invalidation
 - `ThreadSafeCache(max_size)` - thread-safe dictionary cache with optional size limit
-- `CachedProperty(ttl)` - property descriptor with optional expiration
 
 ### metadata_file.py — Thread-Safe JSON Metadata Files
 - `MetadataFile(directory, filename)` - class for JSON files with mtime-based caching

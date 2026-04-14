@@ -20,30 +20,12 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def validate_username(username: str) -> bool:
-    """
-    Validate username contains only safe characters.
-
-    Args:
-        username: Username to validate
-
-    Returns:
-        True if username is valid, False otherwise
-    """
-    if not username or not isinstance(username, str):
-        return False
-
-    # Strip whitespace and check if empty
-    username = username.strip()
-    if not username:
-        return False
-
-    # Only allow alphanumeric, underscore, hyphen, and period
-    # This prevents path traversal attacks like "../other_user"
-    if not re.match(r'^[a-zA-Z0-9._-]+$', username):
+    """Backwards-compat wrapper around core.utils.is_valid_username with logging."""
+    from core.utils import is_valid_username
+    ok = is_valid_username(username)
+    if not ok:
         logger.error(f"[PreWarm] Invalid username characters: {username}")
-        return False
-
-    return True
+    return ok
 
 
 def get_gallery_output_path() -> Optional[str]:

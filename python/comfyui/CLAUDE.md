@@ -18,7 +18,6 @@ ComfyUI AI workflow management — loading, modifying, submitting, and executing
 - `presets_manager.py` - Workflow preset management (load, save, import, validate)
 - `runner.py` - Farm execution of workflows (called by Deadline)
 - `server.py` - ComfyUI server management (start, stop, health checks)
-- `client.py` - HTTP client for ComfyUI API
 - `ayon_publisher.py` - AYON publishing integration for ComfyUI outputs
 - `ratings.py` - Rating/scoring system for generated outputs
 - `service.py` - Re-exports all public APIs

@@ -7,9 +7,11 @@ Implements priority-based loader selection based on format and library availabil
 
 import os
 import threading
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
-from geo.loader import ModelData
+if TYPE_CHECKING:
+    # Avoid circular import: geo.loader re-exports symbols from this module.
+    from geo.loader import ModelData
 
 # Import loaders
 from .open3d_loader import Open3DModelLoader
@@ -80,7 +82,7 @@ def is_supported_format(path: str) -> bool:
     return ext in SUPPORTED_EXTENSIONS
 
 
-def load_model(path: str) -> ModelData:
+def load_model(path: str) -> "ModelData":
     """
     Load a 3D model from file.
 

@@ -1,5 +1,13 @@
 # Luma Tools Changelog
 
+## Version 0.7.1
+- ComfyUI: live server status indicator next to the Submit button — shows whether the farm server is online, starting, or offline
+- ComfyUI: new "Fail & Delete Job" option in Settings — automatically removes the Deadline job when the server is unavailable instead of leaving it in a failed state
+- ComfyUI: submit button now warns you about server status before sending jobs
+- Gallery: faster loading — file hashes are only computed when actually needed instead of for every file
+- Fixed network path detection not retrying after a temporary network outage
+- Removed hardcoded studio paths from farm scripts — farm jobs now get their config from the submitter
+
 ## Version 0.7
 - Removed the Canvas tab (and all the "Add to Canvas" right-click options that came with it)
 - MP4 Maker: now works with render sequences using any frame number padding, not just 4 digits

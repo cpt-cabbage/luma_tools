@@ -35,8 +35,7 @@ SUPPORTED_EXTENSIONS = {
     '.obj',           # Wavefront OBJ
 }
 
-# Ensure cache directory exists
-ensure_directory(CACHE_DIR)
+# Cache directory is created lazily in ModelThumbnailService.__init__
 
 
 # ============================================================================
@@ -64,6 +63,7 @@ class ModelThumbnailService:
         self._lock = threading.RLock()
         self._cache: Dict[str, QPixmap] = {}  # In-memory cache
         self._pending: Dict[str, bool] = {}   # Tracks pending generations
+        ensure_directory(CACHE_DIR)
 
     def get_cache_path(self, model_path: str) -> str:
         """
@@ -276,9 +276,17 @@ class ModelThumbnailService:
 
                     viewer._bridge.viewerReady.connect(on_viewer_ready)
                     ready_timer.start(10000)  # 10s timeout for viewer ready
-                    ready_loop.exec()
-                    ready_timer.stop()
-                    viewer._bridge.viewerReady.disconnect(on_viewer_ready)
+                    try:
+                        ready_loop.exec()
+                    finally:
+                        ready_timer.stop()
+                        # Always disconnect, even on timeout — a late viewerReady
+                        # would otherwise fire into a stack-local slot whose
+                        # surrounding viewer is about to be cleaned up.
+                        try:
+                            viewer._bridge.viewerReady.disconnect(on_viewer_ready)
+                        except (RuntimeError, TypeError):
+                            pass
 
                 if not viewer._viewer_ready:
                     logger.warning("[ThumbnailService] Viewer failed to initialize")
@@ -354,7 +362,7 @@ class ModelThumbnailService:
 # ============================================================================
 
 _model_thumbnail_service_instance: Optional[ModelThumbnailService] = None
-_service_creation_lock = threading.Lock()
+_service_creation_lock = threading.RLock()
 
 
 def get_model_thumbnail_service() -> ModelThumbnailService:

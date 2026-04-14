@@ -65,7 +65,6 @@ class _UserProperty(ThreadSafeProperty):
             setattr(obj, self._attr, value)
             # Invalidate cached role status so it's re-evaluated for the new user
             obj._is_admin = None
-            obj._is_sup = None
 
 
 class ApplicationState:
@@ -118,11 +117,6 @@ class ApplicationState:
     comfyui_current_job_id = ThreadSafeProperty('comfyui_current_job_id', '')
     comfyui_last_generated_image = ThreadSafeProperty('comfyui_last_generated_image', '')
 
-    # Cross-tab awareness: Active job tracking
-    # List of job_ids currently being tracked (for persistence/recovery)
-    comfyui_active_job_ids = ThreadSafeProperty('comfyui_active_job_ids', [])
-    # Total outputs expected across all active jobs
-    comfyui_pending_output_count = ThreadSafeProperty('comfyui_pending_output_count', 0)
     # Recent output paths (last N for quick access in ComfyUI tab)
     comfyui_recent_outputs = ThreadSafeProperty('comfyui_recent_outputs', [])
     # Generation stats for the current session
@@ -140,12 +134,6 @@ class ApplicationState:
     # Whether gallery tab is currently visible
     gallery_visible = ThreadSafeProperty('gallery_visible', False)
 
-    # Cross-tab awareness: Workflow context
-    # Most recent input images used (for suggestions)
-    workflow_last_used_inputs = ThreadSafeProperty('workflow_last_used_inputs', [])
-    # Recent generation history for smart defaults
-    workflow_generation_history = ThreadSafeProperty('workflow_generation_history', [])
-
     # Standalone mode (running outside AYON context)
     standalone_mode = ThreadSafeProperty('standalone_mode', False)
 
@@ -156,7 +144,6 @@ class ApplicationState:
 
         # Role status (cached) - handled specially, not via descriptor
         self._is_admin = None
-        self._is_sup = None
 
     @property
     def is_admin(self):
@@ -182,44 +169,20 @@ class ApplicationState:
             return self._is_admin
 
     @property
-    def is_sup(self):
-        """
-        Check if the current user is a supervisor.
-        Supervisors can see ComfyUI and Gallery tabs (but not Settings).
-        Thread-safe with caching to avoid repeated file reads.
-
-        Returns:
-            bool: True if current user is a supervisor
-        """
-        with self._lock:
-            # Return False if user not initialized yet
-            user = getattr(self, '_user', '') or ''
-            if not user:
-                return False
-            if self._is_sup is None:
-                try:
-                    from core.settings_manager import is_user_in_role
-                    self._is_sup = is_user_in_role(user, "sup")
-                except Exception:
-                    self._is_sup = False
-            return self._is_sup
-
-    @property
     def has_elevated_access(self):
         """
-        Check if the current user has any elevated access (admin or sup).
+        Check if the current user has elevated access (admin).
         Thread-safe with caching.
 
         Returns:
-            bool: True if current user is an admin or supervisor
+            bool: True if current user is an admin
         """
-        return self.is_admin or self.is_sup
+        return self.is_admin
 
     def refresh_admin_status(self):
-        """Force refresh of admin and supervisor status (call after role list changes)."""
+        """Force refresh of admin status (call after role list changes)."""
         with self._lock:
             self._is_admin = None
-            self._is_sup = None
 
     def has_shot_context(self):
         """Check if shot context is available (job, shot, shotpath)."""
@@ -307,53 +270,6 @@ class ApplicationState:
         """Reset the new items count (called when gallery becomes visible)."""
         # Use property accessor (not _attr) to go through descriptor
         self.gallery_new_since_view = 0
-
-    def add_to_generation_history(self, entry: dict, max_count: int = 50) -> None:
-        """
-        Add an entry to generation history for smart defaults.
-
-        Args:
-            entry: Dict with workflow_name, generation_count, seed, prompt, etc.
-            max_count: Maximum history entries to keep
-        """
-        # Hold lock for entire read-modify-write to prevent lost updates
-        with self._lock:
-            history = list(getattr(self, '_workflow_generation_history', None) or [])
-            history.insert(0, entry)
-            self._workflow_generation_history = history[:max_count]
-
-    def get_workflow_defaults(self, workflow_name: str) -> dict:
-        """
-        Get smart defaults for a workflow based on history.
-
-        Args:
-            workflow_name: Name of the workflow preset
-
-        Returns:
-            Dict with suggested defaults (generation_count, etc.)
-        """
-        # Use property accessor (not _attr) to go through descriptor
-        history = self.workflow_generation_history or []
-        # Find recent entries for this workflow
-        workflow_entries = [
-            e for e in history
-            if e.get('workflow_name') == workflow_name
-        ][:10]  # Last 10 uses
-
-        if not workflow_entries:
-            return {}
-
-        # Calculate mode for generation count
-        gen_counts = [e.get('generation_count', 5) for e in workflow_entries]
-        if gen_counts:
-            suggested_count = max(set(gen_counts), key=gen_counts.count)
-        else:
-            suggested_count = 5
-
-        return {
-            'generation_count': suggested_count,
-            'uses': len(workflow_entries)
-        }
 
     def initialize_from_args(self, args):
         """

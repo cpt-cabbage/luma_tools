@@ -108,8 +108,13 @@ class GalleryFootprint:
             return "Older than 90 days"
 
 
-def get_gallery_output_path() -> Optional[str]:
-    """Get the gallery output directory from settings."""
+def get_gallery_root_path() -> Optional[str]:
+    """Get the gallery network root from settings (not user-scoped).
+
+    Distinct from the user-scoped helper in `ui/gallery_prewarm.py`, which
+    returns `<network>/<user>`. Use this when scanning the entire gallery
+    tree for cleanup/footprint stats.
+    """
     path = safe_get_setting("network_output_path", "")
     if path and os.path.isdir(path):
         return path
@@ -326,13 +331,21 @@ def cleanup_gallery_files(
 
     total = len(files)
     for idx, gf in enumerate(files):
+        # Avoid TOCTOU + treat already-gone files as success — the goal is for
+        # the file to not exist, and FileNotFoundError means we got there.
         try:
-            if os.path.exists(gf.path):
-                os.remove(gf.path)
-                deleted_count += 1
-                freed_bytes += gf.size
-                logger.debug(f"Deleted: {gf.filename}")
-        except Exception as e:
+            os.remove(gf.path)
+            deleted_count += 1
+            freed_bytes += gf.size
+            logger.debug(f"Deleted: {gf.filename}")
+        except FileNotFoundError:
+            deleted_count += 1
+            freed_bytes += gf.size
+        except PermissionError as e:
+            error_msg = f"Locked, skipping: {gf.filename}: {e}"
+            errors.append(error_msg)
+            logger.warning(error_msg)
+        except OSError as e:
             error_msg = f"Failed to delete {gf.filename}: {e}"
             errors.append(error_msg)
             logger.warning(error_msg)

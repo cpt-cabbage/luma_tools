@@ -39,18 +39,7 @@ def play_completion_sound():
         logger.debug(f"Could not play completion sound: {e}")
 
 
-def format_elapsed_time(seconds):
-    """Format elapsed time in a human-readable way."""
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    elif seconds < 3600:
-        mins = int(seconds // 60)
-        secs = int(seconds % 60)
-        return f"{mins}m {secs}s"
-    else:
-        hours = int(seconds // 3600)
-        mins = int((seconds % 3600) // 60)
-        return f"{hours}h {mins}m"
+from core.utils import format_elapsed_time  # noqa: E402 — canonical source in core.utils
 
 
 def pluralize_output_type(output_type: str, count: int = 2) -> str:
@@ -96,10 +85,26 @@ def estimate_remaining_time(completed, total, elapsed_seconds):
     return None
 
 
+_cached_poll_interval_ms = None
+
+
 def _get_poll_interval_ms():
-    """Get Deadline poll interval from global settings (in milliseconds)."""
-    from core.settings_manager import safe_get_setting
-    return safe_get_setting("deadline_poll_interval", 5) * 1000
+    """Get Deadline poll interval from global settings (in milliseconds).
+
+    Cached for performance — call `_invalidate_poll_interval_cache()` after
+    the user changes the setting to pick up the new value without a restart.
+    """
+    global _cached_poll_interval_ms
+    if _cached_poll_interval_ms is None:
+        from core.settings_manager import safe_get_setting
+        _cached_poll_interval_ms = safe_get_setting("deadline_poll_interval", 5) * 1000
+    return _cached_poll_interval_ms
+
+
+def _invalidate_poll_interval_cache():
+    """Drop the cached poll interval so the next read re-fetches from settings."""
+    global _cached_poll_interval_ms
+    _cached_poll_interval_ms = None
 
 
 class PollingMixin:
@@ -371,9 +376,9 @@ class PollingMixin:
                     status_text = f"Rendering job {completed_tasks + 1}/{display_total} - Loading model..."
                     main_status = f"ComfyUI: Loading model... (job {completed_tasks + 1}/{display_total}) - {elapsed_str}"
                 elif task_progress:
-                    tp_pct = task_progress['progress_pct']
-                    tp_cur = task_progress['current_node']
-                    tp_tot = task_progress['total_nodes']
+                    tp_pct = task_progress.get('progress_pct', 0)
+                    tp_cur = task_progress.get('current_node', 0)
+                    tp_tot = task_progress.get('total_nodes', 0)
                     tp_name = task_progress.get('current_node_name')
                     # Show node name if available, otherwise just show node count
                     if tp_name:
@@ -473,8 +478,8 @@ class PollingMixin:
         )
 
         # Show system tray notification (if enabled)
-        from core.settings_manager import get_setting
-        if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+        from core.settings_manager import safe_get_setting
+        if safe_get_setting("show_tray_notifications", True) and hasattr(self.main_window, 'show_system_notification'):
             output_type_str = pluralize_output_type(self._iterate_output_type, frames)
             self.main_window.show_system_notification(
                 "ComfyUI Complete",
@@ -565,7 +570,9 @@ class PollingMixin:
             self.show_status("No generated image available", "error")
             return
 
-        for node_id, container in self.widget_manager.dynamic_widgets.items():
+        # dynamic_widgets is keyed by (node_id, widget_name) tuples — destructure
+        # so the loop variable names reflect reality.
+        for (_node_id, _widget_name), container in self.widget_manager.dynamic_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if input_widget and hasattr(input_widget, 'add_images'):
                 input_widget.clear_images()
@@ -699,6 +706,7 @@ class PollingMixin:
 
     def _poll_batch_jobs(self):
         """Poll all pending batch jobs and collect results before updating status."""
+        import time
         from ui_components import Worker
         from deadline.poller import poll_deadline_job_status
 
@@ -706,16 +714,34 @@ class PollingMixin:
             self._stop_batch_polling()
             return
 
-        # Guard: skip if previous poll cycle's workers haven't all reported back
+        # Guard: skip if previous poll cycle's workers haven't all reported back.
+        # Watchdog: if a worker silently dropped its signal, the counter would
+        # stay > 0 forever and freeze polling. Force-reset after 4× the poll
+        # interval so the next cycle can run.
+        now = time.monotonic()
         with self._batch_poll_lock:
             if self._batch_poll_pending_results > 0:
-                logger.debug("[Batch] Skipping poll cycle — previous workers still pending")
-                return
+                started = getattr(self, "_batch_poll_cycle_started_at", 0.0)
+                interval_s = max(self._cached_poll_interval_ms or 5000, 1000) / 1000.0
+                if started and (now - started) > (interval_s * 4):
+                    logger.warning(
+                        "[Batch] Poll watchdog: previous cycle stuck "
+                        f"({self._batch_poll_pending_results} pending after "
+                        f"{now - started:.1f}s) — resetting counter."
+                    )
+                    self._batch_poll_pending_results = 0
+                    self._batch_poll_results = {}
+                else:
+                    logger.debug("[Batch] Skipping poll cycle — previous workers still pending")
+                    return
             self._batch_poll_pending_results = len(self._batch_pending_jobs)
             self._batch_poll_results = {}
+            self._batch_poll_cycle_started_at = now
 
-        # Store workers and callbacks to prevent garbage collection
-        self._batch_poll_workers = []
+        # Extend (not replace) worker list to prevent GC of still-running workers.
+        # Old workers are pruned at the end of _process_collected_poll_results.
+        if not hasattr(self, '_batch_poll_workers') or self._batch_poll_workers is None:
+            self._batch_poll_workers = []
 
         output_dir = self._batch_network_output_dir
         for job_id in list(self._batch_pending_jobs):
@@ -757,7 +783,6 @@ class PollingMixin:
 
     def _process_collected_poll_results(self):
         """Process all collected poll results and update status bar once."""
-        import sys
         try:
             # Snapshot results under lock to prevent concurrent modification
             with self._batch_poll_lock:
@@ -964,9 +989,11 @@ class PollingMixin:
             logger.debug(f"[Batch Poll] Updating status bar...")
             self.animator.update_status_animated(main_status, status_color)
             logger.debug(f"[Batch Poll] Status update complete")
+
+            # Prune completed worker references to free memory
+            self._batch_poll_workers = []
         except Exception as e:
             import traceback
-            import sys
             logger.error(f"ERROR in _process_collected_poll_results: {e}", exc_info=True)
             logger.error(f"[Batch] ERROR in _process_collected_poll_results: {e}")
             logger.error(traceback.format_exc())
@@ -1037,8 +1064,8 @@ class PollingMixin:
                 StatusColors.SUCCESS
             )
             # Show system tray notification (if enabled)
-            from core.settings_manager import get_setting
-            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+            from core.settings_manager import safe_get_setting
+            if safe_get_setting("show_tray_notifications", True) and hasattr(self.main_window, 'show_system_notification'):
                 self.main_window.show_system_notification(
                     "ComfyUI Complete",
                     f"{total_count} job(s) completed while app was closed",
@@ -1051,8 +1078,8 @@ class PollingMixin:
                 StatusColors.ERROR
             )
             # Show system tray notification for failures (if enabled)
-            from core.settings_manager import get_setting
-            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+            from core.settings_manager import safe_get_setting
+            if safe_get_setting("show_tray_notifications", True) and hasattr(self.main_window, 'show_system_notification'):
                 self.main_window.show_system_notification(
                     "ComfyUI Failed",
                     f"{failed_count}/{total_count} job(s) failed. {success_count} succeeded.",
@@ -1065,8 +1092,8 @@ class PollingMixin:
                 StatusColors.SUCCESS
             )
             # Show system tray notification for success (if enabled)
-            from core.settings_manager import get_setting
-            if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+            from core.settings_manager import safe_get_setting
+            if safe_get_setting("show_tray_notifications", True) and hasattr(self.main_window, 'show_system_notification'):
                 output_type_str = pluralize_output_type(self._batch_output_type, total_frames)
                 self.main_window.show_system_notification(
                     "ComfyUI Complete",
@@ -1205,8 +1232,8 @@ class PollingMixin:
             # Invalidate cache for current user so new items are detected when switching back
             # This handles the case where user is viewing another user's gallery when renders complete
             current_user = getattr(self.app_state, 'user', None)
-            if current_user and hasattr(gallery_tab, '_user_cache') and current_user in gallery_tab._user_cache:
-                del gallery_tab._user_cache[current_user]
+            if current_user and hasattr(gallery_tab, 'invalidate_user_cache'):
+                gallery_tab.invalidate_user_cache(current_user)
                 logger.debug(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
             gallery_tab._on_refresh(show_status=False)
             gallery_tab.signals.request_attention.emit()
@@ -1512,7 +1539,12 @@ class PollingMixin:
 
             self._iterate_network_output_dir = network_output_dir
             self._iterate_total_tasks = generation_count
-            self._iterate_start_time = time.time()
+            # Preserve the persisted start time so analytics record the real
+            # elapsed time, not the time since recovery.
+            persisted_start = (
+                persisted_state.get("start_time") if persisted_state else None
+            ) or job.get("start_time")
+            self._iterate_start_time = persisted_start or time.time()
             self._iterate_completed_tasks = 0
             self._iterate_poll_count = 0
             self._iterate_output_type = persisted_state.get("output_type", "image") if persisted_state else "image"
@@ -1622,14 +1654,15 @@ class PollingMixin:
             logger.info(f"[Recovery] Checking status of iterate job {job_id} (async)")
 
             def on_status_result(status_result):
+                self._recovery_status_worker = None
                 try:
                     self._handle_iterate_recovery_status(job_state, status_result)
                 except Exception as e:
-                    logger.error(f"[Recovery] Error handling iterate recovery: {e}")
                     logger.error(f"[Recovery] Error handling iterate recovery: {e}", exc_info=True)
                     self._clear_running_job_state()
 
             def on_status_error(msg, tb):
+                self._recovery_status_worker = None
                 logger.error(f"[Recovery] Error checking iterate job status: {msg}")
                 self._clear_running_job_state()
 
@@ -1754,8 +1787,8 @@ class PollingMixin:
             if status == "Completed":
                 self.show_status("Previous ComfyUI job completed while app was closed", "success")
                 # Show system tray notification (if enabled)
-                from core.settings_manager import get_setting
-                if get_setting("show_tray_notifications") and hasattr(self.main_window, 'show_system_notification'):
+                from core.settings_manager import safe_get_setting
+                if safe_get_setting("show_tray_notifications", True) and hasattr(self.main_window, 'show_system_notification'):
                     self.main_window.show_system_notification(
                         "ComfyUI Complete",
                         "Previous job completed while app was closed",

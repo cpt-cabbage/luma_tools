@@ -29,10 +29,12 @@ def get_window_state() -> Dict[str, Any]:
 
 
 def save_window_state(width: int, height: int, maximized: bool):
-    """Save the window state."""
-    set_setting("window_width", width, verbose=False)
-    set_setting("window_height", height, verbose=False)
-    set_setting("window_maximized", maximized, verbose=False)
+    """Save the window state (single disk write)."""
+    settings = load_user_settings()
+    settings["window_width"] = width
+    settings["window_height"] = height
+    settings["window_maximized"] = maximized
+    save_user_settings(settings)
 
 
 # ============================================================================
@@ -92,37 +94,49 @@ def set_last_opened_version(version: str):
     set_setting("last_opened_version", version, verbose=False)
 
 
+def _parse_version_parts(version: str):
+    """Extract leading integer parts from a version string.
+
+    Tolerates suffixes like '0.7-dev' or '0.7+build5' by grabbing only
+    leading digit-and-dot segments. Returns [] if no digits found.
+    """
+    import re as _re
+    if not isinstance(version, str):
+        return []
+    match = _re.match(r'^(\d+(?:\.\d+)*)', version.strip())
+    if not match:
+        return []
+    return [int(p) for p in match.group(1).split('.')]
+
+
 def is_new_version(current_version: str) -> bool:
-    """Check if the current version is newer than the last opened version."""
+    """Check if the current version is newer than the last opened version.
+
+    Tolerates non-numeric suffixes (e.g. '0.7-dev'); returns False on parse
+    failure rather than spuriously clearing caches every dev startup.
+    """
     last_version = get_last_opened_version()
 
     # If never opened before, it's a new version
     if last_version == "0.0.0":
         return True
 
-    # Compare versions (simple string comparison works for x.y.z.w format)
-    try:
-        # Split versions into parts and compare
-        current_parts = [int(p) for p in current_version.split('.')]
-        last_parts = [int(p) for p in last_version.split('.')]
+    current_parts = _parse_version_parts(current_version)
+    last_parts = _parse_version_parts(last_version)
 
-        # Pad to same length
-        max_len = max(len(current_parts), len(last_parts))
-        current_parts += [0] * (max_len - len(current_parts))
-        last_parts += [0] * (max_len - len(last_parts))
+    if not current_parts or not last_parts:
+        return False  # treat as same when we cannot reliably compare
 
-        # Compare part by part
-        for curr, last in zip(current_parts, last_parts):
-            if curr > last:
-                return True
-            elif curr < last:
-                return False
+    max_len = max(len(current_parts), len(last_parts))
+    current_parts += [0] * (max_len - len(current_parts))
+    last_parts += [0] * (max_len - len(last_parts))
 
-        # Versions are equal
-        return False
-    except (ValueError, AttributeError):
-        # If version parsing fails, assume it's new
-        return True
+    for curr, last in zip(current_parts, last_parts):
+        if curr > last:
+            return True
+        elif curr < last:
+            return False
+    return False
 
 
 # ============================================================================

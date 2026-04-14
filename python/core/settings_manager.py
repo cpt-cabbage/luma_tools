@@ -81,15 +81,15 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "network_output_path": SettingDef("network_output_path", "", "global"),
     "comfyui_workflows_directory": SettingDef(
         "comfyui_workflows_directory",
-        "L:/tools/_studio_tools/luma_tools/comfyui/workflows",
+        "",  # Empty default — resolved from network_output_path at runtime
         "global"
     ),
     "comfyui_timeout": SettingDef("comfyui_timeout", 3600, "global", _validate_timeout),
     "comfyui_server_not_found_behavior": SettingDef(
-        "comfyui_server_not_found_behavior", "fail", "global", _validate_server_behavior
+        "comfyui_server_not_found_behavior", "fail", "user", _validate_server_behavior
     ),
     "comfyui_server_wait_timeout": SettingDef(
-        "comfyui_server_wait_timeout", 300, "global", _validate_server_wait_timeout
+        "comfyui_server_wait_timeout", 300, "user", _validate_server_wait_timeout
     ),
     "comfyui_preset_categories": SettingDef(
         "comfyui_preset_categories",
@@ -162,17 +162,7 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     # Viewer settings
     "viewer_live_audio_scrub": SettingDef("viewer_live_audio_scrub", False, "user"),
     # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
-    "restricted_tabs": SettingDef("restricted_tabs", ["comfyui", "gallery"], "global"),
-}
-
-TAB_RESTRICTION_MAP = {
-    "comfyui": "RestrictComfyUI",
-    "gallery": "RestrictGallery",
-    # Settings tab is admin-only, not configurable
-    "passbuilder": "RestrictPassBuilder",
-    "mp4maker": "RestrictMP4Maker",
-    "republish": "RestrictRePublish",
-    "cleaner": "RestrictCleaner"
+    "restricted_tabs": SettingDef("restricted_tabs", [], "global"),
 }
 
 # ============================================================================
@@ -197,21 +187,21 @@ def clear_settings_cache():
 
 
 def reload_settings():
-    """Clear and reload all settings caches atomically within a single lock hold.
+    """Clear and reload all settings caches.
 
-    Prevents races within this function (another thread cannot populate the cache
-    with stale data between the clear and reload). External callers of
-    load_*_settings() can still see stale data if settings files haven't been
-    updated on disk yet. Call immediately after saving settings to disk.
+    Clears caches first, then reloads outside the lock to avoid holding it
+    during potentially slow network file I/O. The reload calls will re-acquire
+    the lock internally for cache population.
     """
     global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
     with _settings_cache_lock:
         _user_settings_cache = None
         _global_settings_cache = None
         _global_settings_path_cache = None
-        # Immediately reload under the same lock hold
-        load_user_settings()
-        load_global_settings()
+    # Reload outside lock — load functions acquire the lock internally
+    # and file I/O won't block other threads from reading cached values
+    load_user_settings()
+    load_global_settings()
 
 
 def ensure_settings_dir():
@@ -220,6 +210,15 @@ def ensure_settings_dir():
     if not os.path.exists(USER_SETTINGS_DIR):
         ensure_directory(USER_SETTINGS_DIR)
         logger.info(f"Created settings directory: {USER_SETTINGS_DIR}")
+
+
+# Keys that were migrated from global to user scope.  On first load we copy
+# their value from global_settings.json so existing studio configuration is
+# preserved for each user.
+_MIGRATED_TO_USER = (
+    "comfyui_server_not_found_behavior",
+    "comfyui_server_wait_timeout",
+)
 
 
 # ============================================================================
@@ -245,6 +244,30 @@ def load_user_settings() -> Dict[str, Any]:
             settings["default_passes"] = DEFAULT_PASSES.copy()
         _user_settings_cache = settings
         return settings.copy()
+
+
+def _migrate_global_to_user():
+    """One-time migration: copy formerly-global settings into user settings.
+
+    Called once during startup (after both caches are populated) so that users
+    who relied on the global value don't silently fall back to registry defaults.
+    """
+    from .utils import save_json
+    global _user_settings_cache
+    with _settings_cache_lock:
+        if _user_settings_cache is None or _global_settings_cache is None:
+            return
+        migrated = False
+        for key in _MIGRATED_TO_USER:
+            if key not in _user_settings_cache:
+                global_val = _global_settings_cache.get(key)
+                if global_val is not None:
+                    _user_settings_cache[key] = global_val
+                    migrated = True
+                    logger.info(f"Migrated setting '{key}' from global to user: {global_val}")
+        if migrated:
+            ensure_settings_dir()
+            save_json(USER_SETTINGS_FILE, _user_settings_cache)
 
 
 def save_user_settings(settings: Dict[str, Any]):
@@ -314,7 +337,6 @@ def load_global_settings() -> Dict[str, Any]:
         default_settings = {
             "comfyui_workflow_presets": {},
             "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
-            "sup_users": [],  # Supervisors: can see ComfyUI and Gallery tabs (not Settings)
         }
         settings_file = _get_global_settings_file()
 
@@ -341,6 +363,32 @@ def save_global_settings(settings: Dict[str, Any]):
 
 
 # ============================================================================
+# INTERNAL SAVE (lock already held)
+# ============================================================================
+
+def _save_settings_unlocked(settings_type: str, settings: Dict[str, Any]):
+    """Save settings while the caller already holds _settings_cache_lock.
+
+    Avoids nested RLock acquisition that causes lost-update races.
+    """
+    from .utils import save_json
+    global _user_settings_cache, _global_settings_cache
+    if settings_type == 'global':
+        _ensure_global_settings_dir()
+        settings_file = _get_global_settings_file()
+        if save_json(settings_file, settings):
+            _global_settings_cache = settings.copy()
+        else:
+            logger.error("Failed to save global settings")
+    else:
+        ensure_settings_dir()
+        if save_json(USER_SETTINGS_FILE, settings):
+            _user_settings_cache = settings.copy()
+        else:
+            logger.error("Failed to save user settings")
+
+
+# ============================================================================
 # UNIFIED SETTINGS ACCESSOR
 # Generic get/set for registry-defined settings
 # ============================================================================
@@ -362,22 +410,34 @@ class SettingsAccessor:
         return self._load_fn().get(key, default)
 
     def set(self, key: str, value: Any, verbose: bool = True):
-        """Set a settings value by key. Atomic load-modify-save under lock."""
+        """Set a settings value by key. Atomic load-modify-save under lock.
+
+        Uses _save_unlocked to avoid nested RLock acquisition which could cause
+        a lost-update when two threads set different keys concurrently.
+        """
         with _settings_cache_lock:
             # Read from live cache directly (not a copy) to avoid lost-update race
-            # when two threads set different keys concurrently
             if self.settings_type == 'global':
                 cache = _global_settings_cache
             else:
                 cache = _user_settings_cache
-            # If cache is empty, load it first
+            # If cache is empty, load it first (load_fn acquires lock, OK with RLock)
             if cache is None:
                 cache = self._load_fn()
             settings = dict(cache)  # shallow copy for save
             settings[key] = value
-            self._save_fn(settings)
+            # Save without re-acquiring the lock
+            _save_settings_unlocked(self.settings_type, settings)
         if verbose:
             logger.info(f"Set {key} to: {value}")
+        # network_output_path has a sibling cache in core.logging_utils for
+        # early-startup access; flush it whenever the value changes.
+        if key == "network_output_path":
+            try:
+                from core.logging_utils import clear_path_cache
+                clear_path_cache()
+            except Exception:
+                pass
 
 
 _global_settings = SettingsAccessor('global')
@@ -509,24 +569,13 @@ def remove_hdri_from_list(name: str):
 
 
 # ============================================================================
-# TAB RESTRICTIONS
-# ============================================================================
-
-def is_tab_restricted(tab_name: str) -> bool:
-    """Check if a specific tab is restricted to admin users."""
-    return tab_name in get_setting("restricted_tabs")
-
-
-# ============================================================================
 # USER ROLE MANAGEMENT (Global)
 # Admins: Full access (all tabs including Settings)
-# Supervisors (Sups): Can see ComfyUI and Gallery tabs (not Settings)
 # ============================================================================
 
 # Role-based settings keys mapping
 _ROLE_SETTINGS_KEYS = {
     "admin": "admin_users",
-    "sup": "sup_users",
 }
 
 
@@ -541,7 +590,7 @@ def get_users_with_role(role: str) -> List[str]:
     """Get the list of users with a specific role.
 
     Args:
-        role: Role name ("admin" or "sup")
+        role: Role name ("admin")
 
     Returns:
         List of usernames with the role
@@ -554,7 +603,7 @@ def is_user_in_role(username: str, role: str) -> bool:
 
     Args:
         username: Username to check
-        role: Role name ("admin" or "sup")
+        role: Role name ("admin")
 
     Returns:
         True if user has the role
@@ -564,34 +613,40 @@ def is_user_in_role(username: str, role: str) -> bool:
     return any(u.lower() == username.lower() for u in get_users_with_role(role))
 
 
+def _refresh_role_cache():
+    """Best-effort: clear the cached admin status on app_state so the next
+    is_admin / has_elevated_access read picks up the new role list."""
+    try:
+        from core.state_manager import app_state
+        app_state.refresh_admin_status()
+    except Exception:
+        pass
+
+
 def add_user_to_role(username: str, role: str):
     """Add a user to a role. Atomic load-modify-save.
 
-    Args:
-        username: Username to add
-        role: Role name ("admin" or "sup")
+    Stores the username in lowercase form so future reads/removes are
+    consistent regardless of the input casing.
     """
     if not username:
         return
+    username = username.lower()
     settings_key = _get_role_settings_key(role)
     with _settings_cache_lock:
         settings = load_global_settings()
         if settings_key not in settings:
             settings[settings_key] = []
         existing_lower = [u.lower() for u in settings[settings_key]]
-        if username.lower() not in existing_lower:
+        if username not in existing_lower:
             settings[settings_key].append(username)
             save_global_settings(settings)
     logger.info(f"Added {role} user: {username}")
+    _refresh_role_cache()
 
 
 def remove_user_from_role(username: str, role: str):
-    """Remove a user from a role. Atomic load-modify-save.
-
-    Args:
-        username: Username to remove
-        role: Role name ("admin" or "sup")
-    """
+    """Remove a user from a role. Atomic load-modify-save."""
     settings_key = _get_role_settings_key(role)
     with _settings_cache_lock:
         settings = load_global_settings()
@@ -602,8 +657,4 @@ def remove_user_from_role(username: str, role: str):
         if len(settings[settings_key]) < len(original_list):
             save_global_settings(settings)
     logger.info(f"Removed {role} user: {username}")
-
-
-def has_elevated_access(username: str) -> bool:
-    """Check if a username has any elevated access (admin or sup)."""
-    return is_user_in_role(username, "admin") or is_user_in_role(username, "sup")
+    _refresh_role_cache()

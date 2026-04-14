@@ -140,6 +140,8 @@ def cleanup_job_temp_files(output_dir: str) -> int:
             pass
 
     # Backward compat: clean up root-level files from old jobs
+    # (comfyui_client.py is from a long-removed module; leave the pattern so
+    # legacy jobs still get tidied)
     temp_patterns = [
         "comfyui_workflow*.json",
         "comfyui_seeds.json",

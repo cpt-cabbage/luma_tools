@@ -40,7 +40,8 @@ STATUS_COLORS = {
 # Default icon color
 DEFAULT_ICON_COLOR = "#9fa5b0"
 
-# AYON brand color
+# AYON brand color — canonical source is UIColors.AYON_GREEN in core.config
+# Kept here for icons.py internal use only (avoid circular import with core.config)
 AYON_GREEN = "#00cea5"
 
 

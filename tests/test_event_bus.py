@@ -128,14 +128,18 @@ class TestPipelineEventBus:
         assert job.completed_outputs == 1
 
     def test_complete_job_success(self):
+        # Register two jobs so completing one doesn't trigger all_jobs_completed cleanup
         self.bus.register_job("job1", 1)
+        self.bus.register_job("job2", 1)
         self.bus.complete_job("job1", success=True)
         job = self.bus.get_job_info("job1")
         assert job.status == "completed"
         assert job.progress == 100
 
     def test_complete_job_failure(self):
+        # Register two jobs so completing one doesn't trigger all_jobs_completed cleanup
         self.bus.register_job("job1", 1)
+        self.bus.register_job("job2", 1)
         self.bus.complete_job("job1", success=False, error_message="OOM")
         job = self.bus.get_job_info("job1")
         assert job.status == "failed"
@@ -216,4 +220,5 @@ class TestEventBusThreadSafety:
             t.join()
 
         assert errors == []
-        assert len(bus.get_active_jobs()) == 10
+        # All jobs completed → all_jobs_completed fires → jobs are cleaned up
+        assert len(bus.get_active_jobs()) == 0

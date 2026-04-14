@@ -4,7 +4,6 @@ Caching utilities for luma_tools.
 Provides reusable caching patterns:
 - cached_with_ttl: Decorator for time-based cache invalidation
 - ThreadSafeCache: Thread-safe dictionary cache with optional max size
-- cached_property_with_ttl: Property descriptor with time-based invalidation
 
 Usage:
     @cached_with_ttl(seconds=300)
@@ -25,11 +24,6 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
-
-# Module-level lock for CachedProperty per-instance lock creation.
-# RLock to comply with the project-wide convention (CLAUDE.md), even though
-# this lock is currently only acquired briefly and never reentrantly.
-_lock_creation_lock = threading.RLock()
 
 
 def cached_with_ttl(seconds: int, maxsize: int = 128):
@@ -279,116 +273,3 @@ class ThreadSafeCache:
             return valid_keys
 
 
-class CachedProperty:
-    """
-    Thread-safe property descriptor with optional TTL.
-
-    Like @property but caches the result. Optionally expires after TTL.
-    Uses double-checked locking for thread safety.
-
-    Example:
-        class MyClass:
-            @CachedProperty(ttl=60)
-            def expensive_calculation(self):
-                return compute_something()
-
-            # Access like normal property
-            result = obj.expensive_calculation
-
-            # Clear cache
-            del obj.expensive_calculation  # or obj.__class__.expensive_calculation.clear(obj)
-    """
-
-    def __init__(self, func: Callable = None, ttl: Optional[int] = None):
-        """
-        Initialize cached property.
-
-        Args:
-            func: The property getter function
-            ttl: Optional TTL in seconds (None = cache forever)
-        """
-        self.func = func
-        self.ttl = ttl
-        self.attr_name = None
-        self.lock_attr = None
-        self.__doc__ = func.__doc__ if func else None
-
-    def __set_name__(self, owner, name):
-        self.attr_name = f"_cached_{name}"
-        self.lock_attr = f"_cached_{name}_lock"
-
-    def _get_lock(self, obj) -> threading.RLock:
-        """Get or create the lock for this property on the instance.
-
-        Uses double-checked locking to prevent two threads from creating
-        separate locks for the same property (which would defeat mutual exclusion).
-        """
-        lock = getattr(obj, self.lock_attr, None)
-        if lock is None:
-            with _lock_creation_lock:
-                # Double-check after acquiring creation lock
-                lock = getattr(obj, self.lock_attr, None)
-                if lock is None:
-                    lock = threading.RLock()
-                    object.__setattr__(obj, self.lock_attr, lock)
-        return lock
-
-    def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-
-        cache_attr = self.attr_name
-
-        # Fast path: check cache without lock. Safe under CPython because
-        # getattr() is atomic (GIL) and returns an immutable tuple reference.
-        cached = getattr(obj, cache_attr, None)
-        if cached is not None:
-            value, timestamp = cached
-            if self.ttl is None or time.time() - timestamp < self.ttl:
-                return value
-
-        # Slow path: acquire lock for computation
-        lock = self._get_lock(obj)
-        with lock:
-            # Double-check after acquiring lock (another thread may have computed)
-            cached = getattr(obj, cache_attr, None)
-            if cached is not None:
-                value, timestamp = cached
-                if self.ttl is None or time.time() - timestamp < self.ttl:
-                    return value
-
-            # Compute and cache
-            value = self.func(obj)
-            setattr(obj, cache_attr, (value, time.time()))
-            return value
-
-    def __delete__(self, obj):
-        """Clear the cached value (thread-safe)."""
-        lock = self._get_lock(obj)
-        with lock:
-            try:
-                delattr(obj, self.attr_name)
-            except AttributeError:
-                pass
-
-    def clear(self, obj) -> None:
-        """Clear the cached value (alternative to del)."""
-        self.__delete__(obj)
-
-
-def cached_property(ttl: int = None):
-    """
-    Decorator factory for cached properties.
-
-    Args:
-        ttl: Optional TTL in seconds
-
-    Example:
-        class MyClass:
-            @cached_property(ttl=60)
-            def data(self):
-                return expensive_fetch()
-    """
-    def decorator(func):
-        return CachedProperty(func, ttl=ttl)
-    return decorator

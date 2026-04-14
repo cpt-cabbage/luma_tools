@@ -137,7 +137,7 @@ class TestContextChecks:
 
 
 # ============================================================================
-# Role checks (is_admin, is_sup, has_elevated_access)
+# Role checks (is_admin, has_elevated_access)
 # ============================================================================
 
 class TestRoleChecks:
@@ -146,18 +146,12 @@ class TestRoleChecks:
 
     def test_no_user_returns_false(self):
         assert self.state.is_admin is False
-        assert self.state.is_sup is False
         assert self.state.has_elevated_access is False
 
     @patch("core.settings_manager.is_user_in_role", return_value=True)
     def test_admin_check(self, mock_role):
         self.state.user = "admin_user"
         assert self.state.is_admin is True
-
-    @patch("core.settings_manager.is_user_in_role", side_effect=lambda u, r: r == "sup")
-    def test_sup_check(self, mock_role):
-        self.state.user = "sup_user"
-        assert self.state.is_sup is True
         assert self.state.has_elevated_access is True
 
     @patch("core.settings_manager.is_user_in_role", return_value=True)
@@ -254,15 +248,6 @@ class TestCrossTabHelpers:
         self.state.increment_gallery_new_count(5)
         self.state.reset_gallery_new_count()
         assert self.state.gallery_new_since_view == 0
-
-    def test_generation_history(self):
-        self.state.add_to_generation_history({"workflow_name": "upscale", "generation_count": 5})
-        self.state.add_to_generation_history({"workflow_name": "upscale", "generation_count": 10})
-        defaults = self.state.get_workflow_defaults("upscale")
-        assert defaults["uses"] == 2
-
-    def test_workflow_defaults_empty(self):
-        assert self.state.get_workflow_defaults("nonexistent") == {}
 
 
 # ============================================================================

@@ -6,14 +6,11 @@ import pytest
 
 from services.file_operations import (
     fast_scandir,
-    scan_directories,
-    scan_files_by_extension,
     find_hip_files,
     find_comp_files,
     get_task_directory,
     get_working_directory,
     get_comp_directory,
-    scan_render_versions,
 )
 
 
@@ -56,48 +53,6 @@ class TestFastScandir:
         (tmp_path / "subdir").mkdir()
         result = fast_scandir(str(tmp_path))
         assert len(result) == 1
-
-
-# ============================================================================
-# scan_directories
-# ============================================================================
-
-class TestScanDirectories:
-    def test_recursive(self, tmp_path):
-        (tmp_path / "a" / "b").mkdir(parents=True)
-        result = scan_directories(str(tmp_path), recursive=True)
-        assert len(result) == 2
-
-    def test_non_recursive(self, tmp_path):
-        (tmp_path / "a" / "b").mkdir(parents=True)
-        result = scan_directories(str(tmp_path), recursive=False)
-        assert len(result) == 1  # Only "a"
-
-    def test_invalid_dir(self):
-        assert scan_directories("/nonexistent") == []
-
-    def test_empty_string(self):
-        assert scan_directories("") == []
-
-
-# ============================================================================
-# scan_files_by_extension
-# ============================================================================
-
-class TestScanFilesByExtension:
-    def test_finds_matching(self, tmp_path):
-        (tmp_path / "a.exr").write_text("")
-        (tmp_path / "b.png").write_text("")
-        (tmp_path / "c.txt").write_text("")
-        result = scan_files_by_extension(str(tmp_path), {".exr", ".png"}, recursive=False)
-        assert len(result) == 2
-
-    def test_empty_dir(self, tmp_path):
-        result = scan_files_by_extension(str(tmp_path), {".exr"})
-        assert result == []
-
-    def test_invalid_dir(self):
-        assert scan_files_by_extension("/nonexistent", {".exr"}) == []
 
 
 # ============================================================================
@@ -177,23 +132,3 @@ class TestGetCompDirectory:
         result = get_comp_directory("W:/Project/shots/sh0010/work/lighting")
         assert result.endswith("Compositing")
         assert "work" in result
-
-
-# ============================================================================
-# scan_render_versions
-# ============================================================================
-
-class TestScanRenderVersions:
-    def test_finds_matching_versions(self, tmp_path):
-        (tmp_path / "shot_lighting_v01").mkdir()
-        (tmp_path / "shot_lighting_v02").mkdir()
-        (tmp_path / "shot_lookdev_v01").mkdir()
-        result = scan_render_versions(str(tmp_path), "lighting")
-        assert len(result) == 2
-        assert all("lighting" in d for d in result)
-
-    def test_empty_dir(self, tmp_path):
-        # No subdirs — os.walk returns empty
-        (tmp_path / "placeholder.txt").write_text("")
-        result = scan_render_versions(str(tmp_path), "lighting")
-        assert result == []

@@ -8,6 +8,23 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+_USERNAME_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
+
+
+def is_valid_username(username) -> bool:
+    """Validate a username contains only safe filesystem characters.
+
+    Used for path-construction safety: blocks traversal attempts like '../foo'.
+    Allowed: alphanumerics, dot, underscore, hyphen.
+    """
+    if not username or not isinstance(username, str):
+        return False
+    username = username.strip()
+    if not username:
+        return False
+    return bool(_USERNAME_RE.match(username))
+
+
 def get_trailing_number(s):
     """
     Extract the last number from a string.
@@ -76,69 +93,6 @@ def normalize_path(path):
     if not path:
         return path
     return path.replace("\\", "/")
-
-
-def validate_file_exists(path, raise_error=True):
-    """
-    Validate that a file exists.
-
-    Args:
-        path: Path to validate
-        raise_error: If True, raise FileNotFoundError; otherwise return False
-
-    Returns:
-        bool: True if file exists
-
-    Raises:
-        FileNotFoundError: If file doesn't exist and raise_error is True
-    """
-    if not os.path.exists(path):
-        if raise_error:
-            raise FileNotFoundError(f"File not found: {path}")
-        return False
-    return True
-
-
-def validate_is_file(path, raise_error=True):
-    """
-    Validate that path is a file (not a directory).
-
-    Args:
-        path: Path to validate
-        raise_error: If True, raise ValueError; otherwise return False
-
-    Returns:
-        bool: True if path is a file
-
-    Raises:
-        ValueError: If path is not a file and raise_error is True
-    """
-    if not os.path.isfile(path):
-        if raise_error:
-            raise ValueError(f"Path is not a file: {path}")
-        return False
-    return True
-
-
-def validate_is_directory(path, raise_error=True):
-    """
-    Validate that path is a directory.
-
-    Args:
-        path: Path to validate
-        raise_error: If True, raise ValueError; otherwise return False
-
-    Returns:
-        bool: True if path is a directory
-
-    Raises:
-        ValueError: If path is not a directory and raise_error is True
-    """
-    if not os.path.isdir(path):
-        if raise_error:
-            raise ValueError(f"Path is not a directory: {path}")
-        return False
-    return True
 
 
 def ensure_directory(path):
@@ -332,24 +286,6 @@ class ByteSize(int):
         return '{val:{fmt}} {suf}'.format(val=val, fmt=format_spec, suf=suffix)
 
 
-def pad_frame_number(frame_number, padding=4):
-    """
-    Pad frame number with leading zeros.
-
-    Args:
-        frame_number: Frame number to pad
-        padding: Number of digits (default: 4)
-
-    Returns:
-        str: Padded frame number
-
-    Example:
-        >>> pad_frame_number(42, 4)
-        '0042'
-    """
-    return str(frame_number).zfill(padding)
-
-
 def update_path_version(path, new_version):
     """
     Update version number in a path string.
@@ -427,73 +363,6 @@ def extract_render_name(filename, strip_frame_padding=False):
 
 
 # ============================================================================
-# PATH VALIDATION HELPERS
-# ============================================================================
-
-def validate_directory_for_operation(path, operation="access"):
-    """
-    Check if directory exists and log error if not.
-
-    Args:
-        path: Directory path to validate
-        operation: Description of operation for error message (e.g., "scan", "write")
-
-    Returns:
-        bool: True if directory exists, False otherwise
-    """
-    if not path:
-        logger.error(f"Cannot {operation}: path is empty or None")
-        return False
-    if not os.path.isdir(path):
-        logger.error(f"Cannot {operation}: directory does not exist: {path}")
-        return False
-    return True
-
-
-def validate_file_for_operation(path, operation="access"):
-    """
-    Check if file exists and log error if not.
-
-    Args:
-        path: File path to validate
-        operation: Description of operation for error message (e.g., "read", "process")
-
-    Returns:
-        bool: True if file exists, False otherwise
-    """
-    if not path:
-        logger.error(f"Cannot {operation}: path is empty or None")
-        return False
-    if not os.path.isfile(path):
-        logger.error(f"Cannot {operation}: file does not exist: {path}")
-        return False
-    return True
-
-
-def safe_list_dir(path, pattern=None):
-    """
-    Safely list directory contents with error handling.
-
-    Args:
-        path: Directory to list
-        pattern: Optional glob pattern to filter (e.g., "*.png")
-
-    Returns:
-        list: List of filenames, empty list on error
-    """
-    if not path or not os.path.isdir(path):
-        return []
-    try:
-        if pattern:
-            import fnmatch
-            return [f for f in os.listdir(path) if fnmatch.fnmatch(f, pattern)]
-        return os.listdir(path)
-    except OSError as e:
-        logger.warning(f"Error listing directory {path}: {e}")
-        return []
-
-
-# ============================================================================
 # USER MESSAGE FORMATTING
 # ============================================================================
 
@@ -520,91 +389,6 @@ def plural(count, singular, plural_form=None):
     if plural_form is None:
         plural_form = singular + "s"
     return f"{count} {singular if count == 1 else plural_form}"
-
-
-# ============================================================================
-# NESTED DICT UTILITIES
-# ============================================================================
-
-def nested_get(d, keys, default=None):
-    """
-    Safely get a nested dictionary value.
-
-    Args:
-        d: Dictionary to traverse
-        keys: List of keys to traverse (e.g., ['a', 'b', 'c'] for d['a']['b']['c'])
-        default: Value to return if any key is missing
-
-    Returns:
-        Value at nested path, or default if not found
-
-    Example:
-        >>> d = {'a': {'b': {'c': 42}}}
-        >>> nested_get(d, ['a', 'b', 'c'])
-        42
-        >>> nested_get(d, ['a', 'x'], 'default')
-        'default'
-    """
-    current = d
-    for key in keys:
-        if not isinstance(current, dict):
-            return default
-        if key not in current:
-            return default
-        current = current[key]
-    return current
-
-
-def nested_set(d, keys, value):
-    """
-    Set a nested dictionary value, creating intermediate dicts as needed.
-
-    Args:
-        d: Dictionary to modify
-        keys: List of keys for the path (e.g., ['a', 'b', 'c'])
-        value: Value to set at the path
-
-    Example:
-        >>> d = {}
-        >>> nested_set(d, ['a', 'b', 'c'], 42)
-        >>> d
-        {'a': {'b': {'c': 42}}}
-    """
-    current = d
-    for key in keys[:-1]:
-        if key not in current or not isinstance(current[key], dict):
-            current[key] = {}
-        current = current[key]
-    current[keys[-1]] = value
-
-
-def nested_delete(d, keys):
-    """
-    Delete a nested dictionary value if it exists.
-
-    Args:
-        d: Dictionary to modify
-        keys: List of keys for the path
-
-    Returns:
-        bool: True if value was deleted, False if path didn't exist
-
-    Example:
-        >>> d = {'a': {'b': {'c': 42}}}
-        >>> nested_delete(d, ['a', 'b', 'c'])
-        True
-        >>> d
-        {'a': {'b': {}}}
-    """
-    current = d
-    for key in keys[:-1]:
-        if not isinstance(current, dict) or key not in current:
-            return False
-        current = current[key]
-    if isinstance(current, dict) and keys[-1] in current:
-        del current[keys[-1]]
-        return True
-    return False
 
 
 # ============================================================================
@@ -696,3 +480,27 @@ def format_duration(seconds):
         return f"{hours}:{minutes:02d}:{secs:02d}"
     else:
         return f"{minutes}:{secs:02d}"
+
+
+def format_elapsed_time(seconds):
+    """Format elapsed time in a compact human-readable way.
+
+    Unlike format_duration() which uses colon notation (2:05),
+    this uses compact notation (2m 5s) suitable for progress messages.
+
+    Args:
+        seconds: Duration in seconds (float or int)
+
+    Returns:
+        str: Formatted time ("30s", "2m 30s", "1h 5m")
+    """
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins}m {secs}s"
+    else:
+        hours = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        return f"{hours}h {mins}m"

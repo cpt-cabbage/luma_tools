@@ -101,10 +101,6 @@ class PipelineEventBus(QObject):
     # Args: metadata (dict)
     copy_settings = Signal(dict)
 
-    # Emitted when gallery selection changes
-    # Args: selected_paths (list of str), selected_count (int)
-    selection_changed = Signal(list, int)
-
     # =========================================================================
     # Gallery Events
     # =========================================================================
@@ -121,45 +117,9 @@ class PipelineEventBus(QObject):
     # Viewer Events (for image viewers to request gallery actions)
     # =========================================================================
 
-    # Emitted to toggle like status for an item
-    # Args: path (str), output_dir (str)
-    toggle_item_like = Signal(str, str)
-
-    # Emitted to add an item to a group
-    # Args: path (str), group_id (str), output_dir (str)
-    add_item_to_group = Signal(str, str, str)
-
-    # Emitted to create a new group with an item
-    # Args: path (str), output_dir (str)
-    create_item_group = Signal(str, str)
-
-    # Emitted to show properties dialog for an item
-    # Args: path (str), output_dir (str)
-    show_item_properties = Signal(str, str)
-
-    # Emitted to publish an item to AYON
-    # Args: path (str)
-    publish_item = Signal(str)
-
     # Emitted to view the input/source image for an output
     # Args: input_path (str)
     view_input_image = Signal(str)
-
-    # Emitted to request groups list (response comes via groups_list_response)
-    # Args: output_dir (str), requester_id (str)
-    request_groups_list = Signal(str, str)
-
-    # Response signal with groups list
-    # Args: requester_id (str), groups (list of dict with 'id', 'name', 'color')
-    groups_list_response = Signal(str, list)
-
-    # Emitted to check if an item is liked (response via item_like_status)
-    # Args: path (str), output_dir (str), requester_id (str)
-    request_item_like_status = Signal(str, str, str)
-
-    # Response with like status
-    # Args: requester_id (str), path (str), is_liked (bool)
-    item_like_status = Signal(str, str, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -219,6 +179,7 @@ class PipelineEventBus(QObject):
             total_nodes: Total nodes in workflow
             eta_seconds: Estimated time remaining
         """
+        completed_outputs = 0
         with self._jobs_lock:
             job = self._active_jobs.get(job_id)
             if job:
@@ -227,10 +188,12 @@ class PipelineEventBus(QObject):
                 job.current_node = current_node
                 job.total_nodes = total_nodes
                 job.eta_seconds = eta_seconds
+                completed_outputs = job.completed_outputs
 
-        # Build storytelling message (outside lock - no mutation)
+        # Build storytelling message (outside lock - no mutation, uses captured values)
         message = self._build_progress_story(job_id, progress, status,
-                                             current_node, total_nodes, eta_seconds)
+                                             current_node, total_nodes, eta_seconds,
+                                             completed_outputs)
         self.job_progress.emit(job_id, progress, message)
 
     def record_job_output(self, job_id: str, output_path: str) -> None:
@@ -284,7 +247,7 @@ class PipelineEventBus(QObject):
                 self.job_failed.emit(job_id, error_message)
                 logger.warning(f"Job {job_id} failed: {error_message}")
 
-            # Check if all jobs are done
+            # Check if all jobs are done; clean up completed jobs afterward
             self._check_all_jobs_completed()
 
     def remove_job(self, job_id: str) -> None:
@@ -392,7 +355,8 @@ class PipelineEventBus(QObject):
 
     def _build_progress_story(self, job_id: str, progress: int, status: str,
                               current_node: int, total_nodes: int,
-                              eta_seconds: Optional[int]) -> str:
+                              eta_seconds: Optional[int],
+                              completed_outputs: int = 0) -> str:
         """
         Build an engaging progress message instead of bare percentages.
 
@@ -436,10 +400,7 @@ class PipelineEventBus(QObject):
                 return f"Almost there! {progress}%{node_info}{eta_info}"
 
         elif status == "completed":
-            with self._jobs_lock:
-                job = self._active_jobs.get(job_id)
-                completed_outputs = job.completed_outputs if job else 0
-            if job:
+            if completed_outputs > 0:
                 return f"Done! {completed_outputs} new image(s) ready"
             return "Complete!"
 
@@ -449,42 +410,68 @@ class PipelineEventBus(QObject):
         return f"{status}: {progress}%"
 
     def _check_all_jobs_completed(self) -> None:
-        """Check if all tracked jobs are done and emit signal if so. Thread-safe."""
+        """Check if all tracked jobs are done and emit signal if so. Thread-safe.
+
+        Cleans up completed/failed jobs after emitting all_jobs_completed
+        to prevent unbounded memory growth and duplicate signal emissions.
+
+        The entire check-and-cleanup runs under a single lock hold to prevent
+        a race where register_job() sneaks in between the check and cleanup.
+        """
+        import time
         with self._jobs_lock:
             jobs = list(self._active_jobs.values())
-        if not jobs:
-            return
+            if not jobs:
+                return
 
-        all_done = all(j.status in ("completed", "failed") for j in jobs)
-        if all_done:
-            import time
+            if not all(j.status in ("completed", "failed") for j in jobs):
+                return
+
             total_outputs = sum(j.completed_outputs for j in jobs)
 
             # Calculate elapsed time from earliest job
             start_times = [j.start_time for j in jobs if j.start_time]
-            if start_times:
-                elapsed = time.time() - min(start_times)
-            else:
-                elapsed = 0.0
+            elapsed = time.time() - min(start_times) if start_times else 0.0
 
-            self.all_jobs_completed.emit(total_outputs, elapsed)
-            logger.info(f"All jobs completed: {total_outputs} outputs in {elapsed:.1f}s")
+            # Clean up finished jobs under the same lock hold
+            for j in jobs:
+                self._active_jobs.pop(j.job_id, None)
+
+        # Emit outside lock to avoid deadlock with signal handlers
+        self.all_jobs_completed.emit(total_outputs, elapsed)
+        logger.info(f"All jobs completed: {total_outputs} outputs in {elapsed:.1f}s")
 
 
-# Global event bus instance.
-# IMPORTANT: PipelineEventBus inherits from QObject, so a QApplication must
-# exist before this module is imported. In production this is fine because
-# event_bus is imported from inside tabs/widgets that are already inside Qt.
-# Test files that import event_bus must create a QApplication first (see
-# tests/test_event_bus.py for the pattern).
-pipeline_events = PipelineEventBus()
+# Lazy singleton — instantiated on first access so a QApplication doesn't need
+# to exist at import time (fixes test environments and top-level imports).
+_pipeline_events: Optional[PipelineEventBus] = None
+_pipeline_events_lock = threading.RLock()
 
 
 def get_pipeline_events() -> PipelineEventBus:
     """
-    Get the global pipeline event bus instance.
+    Get the global pipeline event bus instance (created lazily on first call).
+
+    Thread-safe via double-checked locking pattern.
 
     Returns:
         PipelineEventBus: The global event bus
     """
-    return pipeline_events
+    global _pipeline_events
+    if _pipeline_events is None:
+        with _pipeline_events_lock:
+            if _pipeline_events is None:
+                _pipeline_events = PipelineEventBus()
+    return _pipeline_events
+
+
+# Backward-compatible module-level alias.
+# NOTE: Code that accesses ``pipeline_events`` at *import time* (e.g. at module
+# scope) should use ``get_pipeline_events()`` instead so instantiation is deferred
+# until a QApplication exists.
+class _LazyProxy:
+    """Transparent proxy that defers PipelineEventBus creation until first attribute access."""
+    def __getattr__(self, name):
+        return getattr(get_pipeline_events(), name)
+
+pipeline_events: PipelineEventBus = _LazyProxy()  # type: ignore[assignment]

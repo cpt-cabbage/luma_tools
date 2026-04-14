@@ -144,8 +144,9 @@ class BaseGalleryManager:
         """
         Start a worker thread with standard signal connections.
 
-        Worker is stored on self._worker to prevent garbage collection.
-        Each manager stores its own worker to allow concurrent operations.
+        Workers are stored in self._active_workers list to prevent garbage
+        collection, even when multiple operations run concurrently. Completed
+        workers are pruned on each new start.
 
         Args:
             func: Function to run in worker thread
@@ -156,13 +157,18 @@ class BaseGalleryManager:
             worker_kwargs: Optional dict of keyword arguments for the function
         """
         from workers import start_worker_thread
-        self._worker = start_worker_thread(
+        if not hasattr(self, '_active_workers'):
+            self._active_workers = []
+        # Prune completed workers (those whose QRunnable has finished)
+        self._active_workers = [w for w in self._active_workers if w is not None]
+        worker = start_worker_thread(
             func, *args,
             on_result=on_result,
             on_error=on_error,
             on_progress=on_progress,
             worker_kwargs=worker_kwargs
         )
+        self._active_workers.append(worker)
 
     # =========================================================================
     # Settings Helpers

@@ -5,12 +5,14 @@ Defines the interface that all model loaders must implement.
 """
 
 from abc import ABC, abstractmethod
-from typing import Set
+from typing import TYPE_CHECKING, Set
 
 import numpy as np
 
-# Import data types from parent module
-from geo.loader import ModelData
+if TYPE_CHECKING:
+    # Avoid circular import: geo.loader imports loaders.factory which
+    # imports loaders.<impl> which subclass this base.
+    from geo.loader import ModelData
 
 
 class BaseModelLoader(ABC):
@@ -35,7 +37,7 @@ class BaseModelLoader(ABC):
         pass
 
     @abstractmethod
-    def load(self, path: str) -> ModelData:
+    def load(self, path: str) -> "ModelData":
         """
         Load a 3D model from the given path.
 
@@ -87,7 +89,7 @@ class BaseModelLoader(ABC):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model file not found: {path}")
 
-    def _calculate_bounds(self, model: ModelData) -> None:
+    def _calculate_bounds(self, model: "ModelData") -> None:
         """Calculate bounding box for the model."""
         if not model.meshes:
             return

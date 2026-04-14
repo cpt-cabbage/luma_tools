@@ -48,11 +48,8 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_normalvram", "ComfyUINormalVRAM", _CHECKBOX),
     ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
     ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
-    ("comfyui_server_wait_timeout", "ServerWaitTimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
-    # Server behavior (combo populated with data values in initialize)
-    ("comfyui_server_not_found_behavior", "ServerNotFoundCombo", _COMBOBOX),
 ]
 
 
@@ -101,12 +98,6 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'RemoveAdminUserButton'):
             self.ui.RemoveAdminUserButton.clicked.connect(self._on_remove_admin_user)
 
-        # Supervisor user management
-        if hasattr(self.ui, 'AddSupUserButton'):
-            self.ui.AddSupUserButton.clicked.connect(self._on_add_sup_user)
-        if hasattr(self.ui, 'RemoveSupUserButton'):
-            self.ui.RemoveSupUserButton.clicked.connect(self._on_remove_sup_user)
-
         # HDRI management
         if hasattr(self.ui, 'AddHdriButton'):
             self.ui.AddHdriButton.clicked.connect(self._on_add_hdri)
@@ -144,9 +135,6 @@ class SettingsTab(BaseTab):
             parent_window=self.main_window
         )
 
-        # Check if user is supervisor (can see user settings but not global settings)
-        is_supervisor = self.app_state.is_sup and not self.app_state.is_admin
-
         # Create programmatic global settings UI widgets
         self._setup_deadline_poll_interval_ui()
 
@@ -158,38 +146,14 @@ class SettingsTab(BaseTab):
             combo.addItem("Subtle", "subtle")
             combo.addItem("System", "system")
 
-        # Initialize server not found behavior combobox with data values
-        if hasattr(self.ui, 'ServerNotFoundCombo'):
-            combo = self.ui.ServerNotFoundCombo
-            combo.clear()
-            combo.addItem("Fail Immediately", "fail")
-            combo.addItem("Wait for Server", "wait")
-            combo.addItem("Fail & Delete Job", "fail_delete")
-            combo.currentIndexChanged.connect(self._update_server_wait_visibility)
-
         self._load_version_ui()
-
-        # Supervisors can see user settings, admins can see everything
         self._load_default_passes_ui()
         self._load_user_settings_ui()
-
-        # Only load global settings and admin sections for admins
-        if not is_supervisor:
-            self._load_global_settings_ui()
-            self._load_admin_users_ui()
-            self._load_sup_users_ui()
-            self._load_restricted_tabs_ui()
-            self._load_hdri_list_ui()
-            self._load_categories_ui()
-        else:
-            # Hide global settings for supervisors
-            self._hide_global_settings_for_supervisor()
-
-    def _hide_global_settings_for_supervisor(self):
-        """Hide global settings section for supervisor users (they can still see user settings)."""
-        # Hide global settings group box
-        if hasattr(self.ui, 'globalSettingsGroupBox'):
-            self.ui.globalSettingsGroupBox.hide()
+        self._load_global_settings_ui()
+        self._load_admin_users_ui()
+        self._load_restricted_tabs_ui()
+        self._load_hdri_list_ui()
+        self._load_categories_ui()
 
     def _setup_deadline_poll_interval_ui(self):
         """Create and add Deadline poll interval spinbox to global settings."""
@@ -509,7 +473,6 @@ class SettingsTab(BaseTab):
         self._load_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
         self._update_comfyui_python_visibility()
-        self._update_server_wait_visibility()
 
     def _load_admin_users_ui(self):
         """Load admin users list (settings access only)."""
@@ -521,17 +484,6 @@ class SettingsTab(BaseTab):
         self.ui.AdminUsersList.clear()
         for user in get_users_with_role("admin"):
             self.ui.AdminUsersList.addItem(user)
-
-    def _load_sup_users_ui(self):
-        """Load supervisor users list (full access)."""
-        from core.settings_manager import get_users_with_role
-
-        if not hasattr(self.ui, 'SupUsersList'):
-            return
-
-        self.ui.SupUsersList.clear()
-        for user in get_users_with_role("sup"):
-            self.ui.SupUsersList.addItem(user)
 
     # Property for backward compatibility
     @property
@@ -575,14 +527,6 @@ class SettingsTab(BaseTab):
                 except ValueError as e:
                     self.ui.comfyuiCurrentPath.setText(f"Current: (error: {e})")
 
-    def _update_server_wait_visibility(self):
-        """Show/hide server wait timeout based on selected behavior."""
-        if hasattr(self.ui, 'ServerNotFoundCombo') and hasattr(self.ui, 'ServerWaitTimeoutSpinBox'):
-            is_wait = self.ui.ServerNotFoundCombo.currentData() == "wait"
-            self.ui.ServerWaitTimeoutSpinBox.setEnabled(is_wait)
-            if hasattr(self.ui, 'serverWaitTimeoutLabel'):
-                self.ui.serverWaitTimeoutLabel.setEnabled(is_wait)
-
     def _on_add_pass_clicked(self):
         """Add a custom pass to the default passes list."""
         pass_name, ok = QtWidgets.QInputDialog.getText(
@@ -594,14 +538,14 @@ class SettingsTab(BaseTab):
             pass_name = pass_name.strip()
             existing_items = self.ui.DefaultPassesList.findItems(pass_name, Qt.MatchExactly)
             if existing_items:
-                logging.warning(f"Pass '{pass_name}' already exists in the list")
+                self.show_status(f"Pass '{pass_name}' already exists", "warning")
                 return
 
             item = QtWidgets.QListWidgetItem(pass_name)
             item.setToolTip("Select to include this pass by default")
             item.setSelected(True)
             self.ui.DefaultPassesList.addItem(item)
-            logging.info(f"Added custom pass: {pass_name}")
+            logger.info(f"Added custom pass: {pass_name}")
 
     def _on_remove_pass_clicked(self):
         """Remove selected pass from the default passes list."""
@@ -609,18 +553,18 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.DefaultPassesList.selectedItems()
         if not selected_items:
-            logging.warning("No passes selected for removal")
+            self.show_status("No passes selected", "warning")
             return
 
         for item in selected_items:
             pass_name = item.text()
             if pass_name in REQUIRED_PASSES:
-                logging.warning(f"Cannot remove required pass: {pass_name}")
+                logger.warning(f"Cannot remove required pass: {pass_name}")
                 continue
 
             row = self.ui.DefaultPassesList.row(item)
             self.ui.DefaultPassesList.takeItem(row)
-            logging.info(f"Removed pass: {pass_name}")
+            logger.info(f"Removed pass: {pass_name}")
 
     def _on_reset_passes_clicked(self):
         """Reset default passes to system defaults."""
@@ -628,7 +572,7 @@ class SettingsTab(BaseTab):
             from core.config import DEFAULT_PASSES
             from core.user_preferences import set_default_passes
             set_default_passes(DEFAULT_PASSES.copy())
-            logging.info("Reset to default passes")
+            logger.info("Reset to default passes")
             self._load_default_passes_ui()
 
     def _on_save_settings_clicked(self):
@@ -647,7 +591,7 @@ class SettingsTab(BaseTab):
                 selected_passes.append(pass_name)
 
         set_default_passes(selected_passes)
-        logging.info(f"Saved default passes: {selected_passes}")
+        logger.info(f"Saved default passes: {selected_passes}")
 
         # Save all mapped user settings
         self._save_settings_from_map(_USER_SETTINGS_MAP)
@@ -672,7 +616,7 @@ class SettingsTab(BaseTab):
                 from geo.thumbnail_service import get_model_thumbnail_service
                 service = get_model_thumbnail_service()
                 service.clear_cache()
-                logging.info("Cleared model thumbnail cache")
+                logger.info("Cleared model thumbnail cache")
 
                 # Clear image thumbnail cache (if it exists)
                 thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
@@ -686,7 +630,7 @@ class SettingsTab(BaseTab):
                             count += 1
                         except Exception:
                             pass
-                    logging.info(f"Cleared {count} cached thumbnail files")
+                    logger.info(f"Cleared {count} cached thumbnail files")
 
                 # Notify gallery tab to refresh via event bus
                 from core.event_bus import pipeline_events
@@ -695,7 +639,7 @@ class SettingsTab(BaseTab):
                 self.show_status("Thumbnail cache cleared", "success")
 
             except Exception as e:
-                logging.error(f"Error clearing thumbnails: {e}")
+                logger.error(f"Error clearing thumbnails: {e}")
                 self.show_status(f"Error: {e}", "error")
 
     def _on_browse_global_settings_path(self):
@@ -791,7 +735,15 @@ class SettingsTab(BaseTab):
         except ImportError:
             pass
 
-        self.show_status("Global settings saved", "success")
+        # Drop cached deadline poll interval so the new value takes effect
+        # without a restart.
+        try:
+            from ui.tabs.comfyui.polling import _invalidate_poll_interval_cache
+            _invalidate_poll_interval_cache()
+        except ImportError:
+            pass
+
+        self.show_status("Global settings saved (tab visibility changes require restart)", "success")
 
     def _on_add_admin_user(self):
         """Add an admin user."""
@@ -805,7 +757,7 @@ class SettingsTab(BaseTab):
             username = username.strip().lower()
             add_user_to_role(username, "admin")
             self._load_admin_users_ui()
-            logging.info(f"Added admin user: {username}")
+            logger.info(f"Added admin user: {username}")
 
     def _on_remove_admin_user(self):
         """Remove selected admin user."""
@@ -813,7 +765,7 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
-            logging.warning("No admin user selected for removal")
+            logger.warning("No admin user selected for removal")
             return
 
         username = selected_items[0].text()
@@ -832,48 +784,6 @@ class SettingsTab(BaseTab):
         self._load_admin_users_ui()
         self.show_status(f"Removed admin user: {username}", "success")
 
-    def _on_add_sup_user(self):
-        """Add a supervisor user."""
-        from core.settings_manager import add_user_to_role
-
-        username, ok = QtWidgets.QInputDialog.getText(
-            self.main_window, "Add Supervisor", "Enter username:",
-            QtWidgets.QLineEdit.Normal
-        )
-        if ok and username:
-            username = username.strip().lower()
-            add_user_to_role(username, "sup")
-            self._load_sup_users_ui()
-            logging.info(f"Added supervisor user: {username}")
-
-    def _on_remove_sup_user(self):
-        """Remove selected supervisor user."""
-        from core.settings_manager import remove_user_from_role
-
-        if not hasattr(self.ui, 'SupUsersList'):
-            return
-
-        selected_items = self.ui.SupUsersList.selectedItems()
-        if not selected_items:
-            logging.warning("No supervisor user selected for removal")
-            return
-
-        username = selected_items[0].text()
-
-        # Warn if removing self
-        if username.lower() == self.app_state.user.lower():
-            if not confirm_action(
-                "Remove Yourself?",
-                "You are about to remove yourself from the supervisor list.\n"
-                "You will lose access to supervisor features after restarting.\n\nContinue?",
-                self.main_window
-            ):
-                return
-
-        remove_user_from_role(username, "sup")
-        self._load_sup_users_ui()
-        self.show_status(f"Removed supervisor: {username}", "success")
-
     # =========================================================================
     # RESTRICTED TABS
     # =========================================================================
@@ -890,7 +800,7 @@ class SettingsTab(BaseTab):
             "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
             "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
             "republish": getattr(self.ui, 'RestrictRePublish', None),
-            "shotcleaner": getattr(self.ui, 'RestrictShotCleaner', None),
+            "cleaner": getattr(self.ui, 'RestrictShotCleaner', None),
         }
 
     def _load_restricted_tabs_ui(self):
@@ -1106,7 +1016,7 @@ class SettingsTab(BaseTab):
         try:
             add_hdri_to_list(name, file_path)
             self._load_hdri_list_ui()
-            logging.info(f"Added HDRI: {name}")
+            logger.info(f"Added HDRI: {name}")
         except Exception as e:
             show_warning("Error", f"Failed to add HDRI: {e}", self.main_window)
 
@@ -1119,7 +1029,7 @@ class SettingsTab(BaseTab):
 
         selected_items = self.ui.HdriListWidget.selectedItems()
         if not selected_items:
-            logging.warning("No HDRI selected for removal")
+            logger.warning("No HDRI selected for removal")
             return
 
         # Confirm deletion
@@ -1138,7 +1048,7 @@ class SettingsTab(BaseTab):
                 name = hdri.get("name", "")
                 if name:
                     remove_hdri_from_list(name)
-                    logging.info(f"Removed HDRI: {name}")
+                    logger.info(f"Removed HDRI: {name}")
 
             self._load_hdri_list_ui()
         except Exception as e:

@@ -491,42 +491,6 @@ class Ui_SettingsTab(object):
 
         self.globalSettingsLayout.addLayout(self.comfyuiTimeoutLayout)
 
-        self.serverNotFoundLayout = QHBoxLayout()
-        self.serverNotFoundLayout.setObjectName(u"serverNotFoundLayout")
-        self.serverNotFoundLabel = QLabel(self.globalSettingsGroupBox)
-        self.serverNotFoundLabel.setObjectName(u"serverNotFoundLabel")
-
-        self.serverNotFoundLayout.addWidget(self.serverNotFoundLabel)
-
-        self.ServerNotFoundCombo = QComboBox(self.globalSettingsGroupBox)
-        self.ServerNotFoundCombo.addItem("")
-        self.ServerNotFoundCombo.addItem("")
-        self.ServerNotFoundCombo.addItem("")
-        self.ServerNotFoundCombo.setObjectName(u"ServerNotFoundCombo")
-        self.ServerNotFoundCombo.setMinimumWidth(150)
-
-        self.serverNotFoundLayout.addWidget(self.ServerNotFoundCombo)
-
-        self.serverWaitTimeoutLabel = QLabel(self.globalSettingsGroupBox)
-        self.serverWaitTimeoutLabel.setObjectName(u"serverWaitTimeoutLabel")
-
-        self.serverNotFoundLayout.addWidget(self.serverWaitTimeoutLabel)
-
-        self.ServerWaitTimeoutSpinBox = QSpinBox(self.globalSettingsGroupBox)
-        self.ServerWaitTimeoutSpinBox.setObjectName(u"ServerWaitTimeoutSpinBox")
-        self.ServerWaitTimeoutSpinBox.setMinimum(1)
-        self.ServerWaitTimeoutSpinBox.setMaximum(60)
-        self.ServerWaitTimeoutSpinBox.setValue(5)
-
-        self.serverNotFoundLayout.addWidget(self.ServerWaitTimeoutSpinBox)
-
-        self.serverNotFoundSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-
-        self.serverNotFoundLayout.addItem(self.serverNotFoundSpacer)
-
-
-        self.globalSettingsLayout.addLayout(self.serverNotFoundLayout)
-
         self.adminUsersHeader = QLabel(self.globalSettingsGroupBox)
         self.adminUsersHeader.setObjectName(u"adminUsersHeader")
 
@@ -565,45 +529,6 @@ class Ui_SettingsTab(object):
 
 
         self.globalSettingsLayout.addLayout(self.adminUsersContentLayout)
-
-        self.supUsersHeader = QLabel(self.globalSettingsGroupBox)
-        self.supUsersHeader.setObjectName(u"supUsersHeader")
-
-        self.globalSettingsLayout.addWidget(self.supUsersHeader)
-
-        self.supUsersContentLayout = QHBoxLayout()
-        self.supUsersContentLayout.setObjectName(u"supUsersContentLayout")
-        self.SupUsersList = QListWidget(self.globalSettingsGroupBox)
-        self.SupUsersList.setObjectName(u"SupUsersList")
-        self.SupUsersList.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.SupUsersList.setMinimumHeight(80)
-        self.SupUsersList.setMaximumHeight(120)
-
-        self.supUsersContentLayout.addWidget(self.SupUsersList)
-
-        self.supUsersButtonsLayout = QVBoxLayout()
-        self.supUsersButtonsLayout.setObjectName(u"supUsersButtonsLayout")
-        self.AddSupUserButton = QPushButton(self.globalSettingsGroupBox)
-        self.AddSupUserButton.setObjectName(u"AddSupUserButton")
-        self.AddSupUserButton.setMinimumSize(QSize(100, 28))
-
-        self.supUsersButtonsLayout.addWidget(self.AddSupUserButton)
-
-        self.RemoveSupUserButton = QPushButton(self.globalSettingsGroupBox)
-        self.RemoveSupUserButton.setObjectName(u"RemoveSupUserButton")
-        self.RemoveSupUserButton.setMinimumSize(QSize(100, 28))
-
-        self.supUsersButtonsLayout.addWidget(self.RemoveSupUserButton)
-
-        self.supUsersButtonsSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-
-        self.supUsersButtonsLayout.addItem(self.supUsersButtonsSpacer)
-
-
-        self.supUsersContentLayout.addLayout(self.supUsersButtonsLayout)
-
-
-        self.globalSettingsLayout.addLayout(self.supUsersContentLayout)
 
         self.restrictedTabsHeader = QLabel(self.globalSettingsGroupBox)
         self.restrictedTabsHeader.setObjectName(u"restrictedTabsHeader")
@@ -948,22 +873,6 @@ class Ui_SettingsTab(object):
         self.ComfyUITimeoutSpinBox.setToolTip(QCoreApplication.translate("SettingsTab", u"Maximum time in minutes for ComfyUI workflow execution before timeout", None))
 #endif // QT_CONFIG(tooltip)
         self.ComfyUITimeoutSpinBox.setSuffix(QCoreApplication.translate("SettingsTab", u" min", None))
-        self.serverNotFoundLabel.setText(QCoreApplication.translate("SettingsTab", u"If Server Not Found:", None))
-#if QT_CONFIG(tooltip)
-        self.serverNotFoundLabel.setToolTip(QCoreApplication.translate("SettingsTab", u"Behavior when ComfyUI server is not running in persistent mode", None))
-#endif // QT_CONFIG(tooltip)
-        self.ServerNotFoundCombo.setItemText(0, QCoreApplication.translate("SettingsTab", u"Fail Immediately", None))
-        self.ServerNotFoundCombo.setItemText(1, QCoreApplication.translate("SettingsTab", u"Wait for Server", None))
-        self.ServerNotFoundCombo.setItemText(2, QCoreApplication.translate("SettingsTab", u"Fail and Delete Job", None))
-
-#if QT_CONFIG(tooltip)
-        self.ServerNotFoundCombo.setToolTip(QCoreApplication.translate("SettingsTab", u"Behavior when ComfyUI server is not running: fail immediately, wait for it, or fail and remove the Deadline job", None))
-#endif // QT_CONFIG(tooltip)
-        self.serverWaitTimeoutLabel.setText(QCoreApplication.translate("SettingsTab", u"Wait Timeout:", None))
-#if QT_CONFIG(tooltip)
-        self.ServerWaitTimeoutSpinBox.setToolTip(QCoreApplication.translate("SettingsTab", u"Maximum time in minutes to wait for the server to start", None))
-#endif // QT_CONFIG(tooltip)
-        self.ServerWaitTimeoutSpinBox.setSuffix(QCoreApplication.translate("SettingsTab", u" min", None))
         self.adminUsersHeader.setText(QCoreApplication.translate("SettingsTab", u"Admin Users (Full access):", None))
 #if QT_CONFIG(tooltip)
         self.adminUsersHeader.setToolTip(QCoreApplication.translate("SettingsTab", u"Admins have full access to all tabs including Settings", None))
@@ -973,18 +882,9 @@ class Ui_SettingsTab(object):
 #endif // QT_CONFIG(tooltip)
         self.AddAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Add User", None))
         self.RemoveAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Remove User", None))
-        self.supUsersHeader.setText(QCoreApplication.translate("SettingsTab", u"Supervisor Users (ComfyUI and Gallery access):", None))
-#if QT_CONFIG(tooltip)
-        self.supUsersHeader.setToolTip(QCoreApplication.translate("SettingsTab", u"Supervisors can see ComfyUI and Gallery tabs (not Settings)", None))
-#endif // QT_CONFIG(tooltip)
-#if QT_CONFIG(tooltip)
-        self.SupUsersList.setToolTip(QCoreApplication.translate("SettingsTab", u"Users with access to ComfyUI and Gallery tabs (not Settings)", None))
-#endif // QT_CONFIG(tooltip)
-        self.AddSupUserButton.setText(QCoreApplication.translate("SettingsTab", u"Add User", None))
-        self.RemoveSupUserButton.setText(QCoreApplication.translate("SettingsTab", u"Remove User", None))
         self.restrictedTabsHeader.setText(QCoreApplication.translate("SettingsTab", u"Restricted Tabs (hidden from regular users):", None))
 #if QT_CONFIG(tooltip)
-        self.restrictedTabsHeader.setToolTip(QCoreApplication.translate("SettingsTab", u"These tabs are hidden from regular users. Admins and Supervisors can see checked tabs.", None))
+        self.restrictedTabsHeader.setToolTip(QCoreApplication.translate("SettingsTab", u"These tabs are hidden from regular users. Admins can always see all tabs.", None))
 #endif // QT_CONFIG(tooltip)
         self.RestrictComfyUI.setText(QCoreApplication.translate("SettingsTab", u"ComfyUI", None))
         self.RestrictGallery.setText(QCoreApplication.translate("SettingsTab", u"Gallery", None))

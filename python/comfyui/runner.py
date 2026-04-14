@@ -727,14 +727,19 @@ def main():
         except Exception as e:
             logger.warning(f"Analytics recording failed (non-fatal): {e}")
 
-        # Auto-establish lineage relationships based on source images
+        # Auto-establish lineage relationships based on source images.
+        # On the farm, comfyui modules are flat-copied as comfyui_<name>.py,
+        # so try the package import first then fall back to the flat alias.
         try:
-            from comfyui.metadata import auto_establish_lineage_from_job_metadata
+            try:
+                from comfyui.metadata import auto_establish_lineage_from_job_metadata
+            except ImportError:
+                from comfyui_metadata import auto_establish_lineage_from_job_metadata
             lineage_count = auto_establish_lineage_from_job_metadata(args.output_directory)
             if lineage_count > 0:
                 logger.info(f"Established {lineage_count} lineage relationship(s)")
         except ImportError:
-            logger.debug("Could not import lineage function (running on farm)")
+            logger.debug("Lineage helper not available")
         except Exception as e:
             logger.warning(f"Could not establish lineage: {e}")
 

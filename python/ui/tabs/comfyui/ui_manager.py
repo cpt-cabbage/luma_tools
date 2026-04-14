@@ -149,7 +149,19 @@ class ComfyUIWidgetManager:
         if not workflow_path:
             return
 
-        editable_nodes = extract_editable_nodes(workflow_path)
+        # Memoize extract_editable_nodes by (path, mtime) — large workflows
+        # are expensive to re-parse on every variant switch / state restore.
+        try:
+            mtime = os.path.getmtime(workflow_path)
+        except OSError:
+            mtime = None
+        cache_key = (workflow_path, mtime)
+        cached = getattr(self, "_editable_nodes_cache", None)
+        if cached and cached[0] == cache_key:
+            editable_nodes = cached[1]
+        else:
+            editable_nodes = extract_editable_nodes(workflow_path)
+            self._editable_nodes_cache = (cache_key, editable_nodes)
 
         # Count total image/video nodes for pairing calculation
         total_image_nodes = sum(1 for node in editable_nodes
@@ -301,27 +313,14 @@ class ComfyUIWidgetManager:
                     return widget
         return None
 
-    def _parse_node_title(self, title: str) -> Tuple[bool, str, Optional[str]]:
-        """Parse node title for editable marker and condition (mirrors comfyui_service logic)."""
-        editable_markers = ['_editable', '_editble']
-        is_editable = False
-        condition_node = None
-        base_title = title
+    @staticmethod
+    def _parse_node_title(title: str) -> Tuple[bool, str, Optional[str]]:
+        """Parse node title for editable marker and condition.
 
-        for marker in editable_markers:
-            if marker in title:
-                is_editable = True
-                parts = title.split(marker)
-                base_title = parts[0]
-                if len(parts) > 1:
-                    after_marker = parts[1]
-                    for sep in ['@if_', '&if_']:
-                        if after_marker.startswith(sep):
-                            condition_node = after_marker[len(sep):]
-                            break
-                break
-
-        return is_editable, base_title, condition_node
+        Delegates to the canonical implementation in comfyui.editable.
+        """
+        from comfyui.editable import _parse_editable_title
+        return _parse_editable_title(title)
 
     def on_toggle_changed(self, checked: bool, toggle_node_name: str):
         """Handle toggle widget state change - update visibility of dependent widgets."""
@@ -454,9 +453,10 @@ class ComfyUIWidgetManager:
             container.input_widget = input_widget
 
         elif node.widget_type == 'video':
+            from core.config import VIDEO_EXTENSIONS as _VIDEO_EXT
             # Create BatchImageSelector configured for video files
             input_widget = BatchImageSelector(
-                supported_extensions=['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv'],
+                supported_extensions=sorted(_VIDEO_EXT),
                 total_image_nodes=total_video_nodes,
                 file_type_label="videos",
             )
@@ -583,11 +583,13 @@ class ComfyUIWidgetManager:
         """Open file browser for 3D model selection."""
         from file_dialogs import browse_file_with_memory
 
+        from core.config import MODEL_EXTENSIONS as _MODEL_EXT
+        _model_filter = " ".join(f"*{ext}" for ext in sorted(_MODEL_EXT))
         file_path = browse_file_with_memory(
             self.main_window,
             context="comfyui_3d_models",
             title="Select 3D Model",
-            file_filter="3D Models (*.glb *.gltf *.obj *.fbx *.usd *.usda *.usdc *.usdz);;All Files (*)",
+            file_filter=f"3D Models ({_model_filter});;All Files (*)",
             fallback_path=""
         )
         if file_path:

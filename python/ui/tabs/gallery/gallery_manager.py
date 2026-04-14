@@ -192,10 +192,9 @@ class GalleryManager(BaseGalleryManager):
             if item.widget():
                 item.widget().deleteLater()
 
-        # Reset widget cache
-        self.tab._widget_cache = {}
-        self.tab._hash_to_path = {}
-        self.tab._section_items = {}  # section_id -> [paths]
+        # Reset widget cache (thread-safe)
+        self.tab.clear_widget_cache()
+        self.tab.clear_section_items()
 
         # Store items for widget creation (grid mode)
         # Include has_metadata, job_prefix and content_hash for proper styling and identification
@@ -345,10 +344,9 @@ class GalleryManager(BaseGalleryManager):
         from PySide6.QtCore import QEvent
         QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
-        # Reset caches
-        self.tab._widget_cache = {}
-        self.tab._hash_to_path = {}
-        self.tab._section_items = {}
+        # Reset caches (thread-safe)
+        self.tab.clear_widget_cache()
+        self.tab.clear_section_items()
         self._stack_widgets = {}
         self._group_colors = {}
 
@@ -499,10 +497,10 @@ class GalleryManager(BaseGalleryManager):
                 stacks_to_update.append(prefix)
 
         if not added_prefixes and not removed_prefixes and not stacks_to_update:
-            # No changes - just update internal tracking
-            self.tab._section_items = {}
+            # No changes - just update internal tracking (thread-safe)
+            self.tab.clear_section_items()
             for prefix, group_items in new_groups.items():
-                self.tab._section_items[prefix] = [item['path'] for item in group_items]
+                self.tab.set_section_items(prefix, [item['path'] for item in group_items])
             return
 
         # Disable updates during modifications
@@ -1117,9 +1115,8 @@ class GalleryManager(BaseGalleryManager):
             self.tab.ui.galleryThumbnailContainer.setUpdatesEnabled(True)
             return
 
-        # Ensure widget cache exists
-        if not hasattr(self.tab, '_widget_cache'):
-            self.tab._widget_cache = {}
+        # Ensure widget cache exists (initialized by GalleryTab.__init__/initialize)
+        # No reassign here — the lock-protected dict is created up front.
 
         # Updates already disabled by display_items, don't toggle
         # Start batched creation
@@ -1350,11 +1347,9 @@ class GalleryManager(BaseGalleryManager):
                 widget.setParent(None)
                 widget.deleteLater()
 
-        # Clear widget cache
-        if hasattr(self.tab, '_widget_cache'):
-            self.tab._widget_cache = {}
-        if hasattr(self.tab, '_hash_to_path'):
-            self.tab._hash_to_path = {}
+        # Clear widget cache (thread-safe)
+        if hasattr(self.tab, 'clear_widget_cache'):
+            self.tab.clear_widget_cache()
 
         # Clear stacked widgets
         if hasattr(self, '_stack_widgets'):
@@ -1364,9 +1359,9 @@ class GalleryManager(BaseGalleryManager):
                     stack.deleteLater()
             self._stack_widgets = {}
 
-        # Clear section tracking
-        if hasattr(self.tab, '_section_items'):
-            self.tab._section_items = {}
+        # Clear section tracking (thread-safe)
+        if hasattr(self.tab, 'clear_section_items'):
+            self.tab.clear_section_items()
 
         # Clear group colors
         if hasattr(self, '_group_colors'):

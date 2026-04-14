@@ -34,7 +34,8 @@ class OperationsManager(BaseGalleryManager):
         super().__init__(tab)
 
     def delete_selected(self):
-        """Delete all selected items with confirmation."""
+        """Delete all selected items with confirmation. Filesystem deletes run
+        on a worker thread so the GUI doesn't freeze on network paths."""
         from dialog_helpers import confirm_action, show_warning
 
         if not self.tab._selected_items:
@@ -42,68 +43,61 @@ class OperationsManager(BaseGalleryManager):
 
         count = len(self.tab._selected_items)
 
-        if confirm_action(
+        if not confirm_action(
             "Delete Selected Items",
-            f"Are you sure you want to delete {count} selected item(s)?\n\nThis will permanently delete the files from disk.",
-            parent=self.tab.main_window
+            f"Are you sure you want to delete {count} selected item(s)?\n\n"
+            "This will permanently delete the files from disk.",
+            parent=self.tab.main_window,
         ):
-            success_count = 0
-            failed_items = []
+            return
 
-            # Show status with spinner
-            from ui_components import StatusColors
-            self.tab.update_status_with_spinner(
-                f"Gallery: Deleting {count} item(s)...",
-                StatusColors.INFO
-            )
+        from ui_components import StatusColors
+        self.tab.update_status_with_spinner(
+            f"Gallery: Deleting {count} item(s)...", StatusColors.INFO
+        )
 
-            # Make a copy of the set since we'll be modifying it
-            items_to_delete = list(self.tab._selected_items)
+        items_to_delete = list(self.tab._selected_items)
 
-            # Track which stacks need updating after deletion
-            stacks_to_update = set()
-
-            for item_path in items_to_delete:
+        def _delete_worker(paths=items_to_delete):
+            ok, failed = [], []
+            for p in paths:
                 try:
-                    os.remove(item_path)
-                    success_count += 1
-
-                    # Remove widget from layout (for non-stacked items)
-                    # Use thread-safe cache accessor to avoid race conditions
-                    widget = self.remove_cached_widget(item_path)
-                    if widget:
-                        from shiboken6 import isValid
-                        if isValid(widget):
-                            self.tab._flow_layout.removeWidget(widget)
-                            widget.deleteLater()
-                    else:
-                        # Item might be in a stacked view - find which stack contains it
-                        stack_id = self._find_stack_containing_item(item_path)
-                        if stack_id:
-                            stacks_to_update.add(stack_id)
-
-                    # Clean up caches via tab's method
-                    self._on_item_deleted(item_path)
+                    os.remove(p)
+                    ok.append(p)
                 except FileNotFoundError:
-                    self.tab.log(f"[Gallery] File not found: {item_path}")
-                    failed_items.append(os.path.basename(item_path))
+                    # Goal achieved — file already gone.
+                    ok.append(p)
                 except Exception as e:
-                    self.tab.log(f"[Gallery] Error deleting {item_path}: {e}")
-                    failed_items.append(f"{os.path.basename(item_path)}: {e}")
+                    failed.append((p, str(e)))
+            return ok, failed
 
-            # Update or remove stacks that had items deleted
+        def _on_delete_done(result):
+            ok, failed = result
+            stacks_to_update = set()
+            from shiboken6 import isValid
+
+            for item_path in ok:
+                widget = self.remove_cached_widget(item_path)
+                if widget and isValid(widget):
+                    self.tab._flow_layout.removeWidget(widget)
+                    widget.deleteLater()
+                else:
+                    stack_id = self._find_stack_containing_item(item_path)
+                    if stack_id:
+                        stacks_to_update.add(stack_id)
+                self._on_item_deleted(item_path)
+
             self._update_stacks_after_deletion(stacks_to_update)
-
-            # Clear selection (items already removed from widget cache)
             self.tab._selected_items.clear()
             self.tab._selection_manager._update_toolbar()
 
-            # Show result with status feedback
-            if success_count == count:
+            success_count = len(ok)
+            failed_items = [f"{os.path.basename(p)}: {e}" for p, e in failed]
+            if not failed_items:
                 self.tab.update_status_with_spinner(
                     f"Gallery: Deleted {success_count} item(s)",
                     StatusColors.SUCCESS,
-                    start=False
+                    start=False,
                 )
                 self.show_status(f"Deleted {success_count} item(s)", "success")
                 self.tab.log(f"[Gallery] Deleted {success_count} item(s)")
@@ -111,13 +105,24 @@ class OperationsManager(BaseGalleryManager):
                 self.tab.update_status_with_spinner(
                     f"Gallery: Deleted {success_count}/{count} (partial)",
                     StatusColors.WARNING,
-                    start=False
+                    start=False,
                 )
                 show_warning(
                     "Partial Delete",
-                    f"Deleted {success_count} of {count} items.\n\nFailed:\n" + "\n".join(failed_items[:5]),
-                    parent=self.tab.main_window
+                    f"Deleted {success_count} of {count} items.\n\nFailed:\n"
+                    + "\n".join(failed_items[:5]),
+                    parent=self.tab.main_window,
                 )
+
+        def _on_delete_error(msg, tb=""):
+            self.tab.update_status_with_spinner(
+                f"Gallery: Delete failed - {msg}", StatusColors.ERROR, start=False
+            )
+            show_warning("Delete Failed", msg, parent=self.tab.main_window)
+
+        self.tab.start_worker(
+            _delete_worker, on_result=_on_delete_done, on_error=_on_delete_error
+        )
 
     def _find_stack_containing_item(self, item_path):
         """Find the stack_id that contains the given item path.

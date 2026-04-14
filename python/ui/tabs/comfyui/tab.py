@@ -20,7 +20,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QMenu, QInputDialog, QDialog, QVBoxLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
-    QSizePolicy
+    QSizePolicy, QFrame
 )
 from PySide6.QtGui import QPixmap
 
@@ -29,8 +29,8 @@ from dialog_helpers import confirm_action
 from .polling import PollingMixin
 from .ui_manager import ComfyUIWidgetManager
 from .state_manager import ComfyUIStateManager
-from .model_picker_overlay import ModelPickerOverlay
-from .star_rating import CompactStarRating
+from .inline_model_grid import InlineModelGrid
+from .variant_selector import VariantSelector
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +45,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def connect_signals(self):
         """Connect ComfyUI tab signals."""
-        from icons import IconManager, DEFAULT_ICON_COLOR
-
-        # Model picker toggle
-        self.ui.ComfyUIChoosePreset.clicked.connect(self._on_choose_preset_clicked)
-
-        # Generation settings
+        # Submit / generation
         self.ui.ComfyUISubmit.clicked.connect(self._on_submit_clicked)
         self.ui.ComfyUIGenerationCount.valueChanged.connect(self._on_generation_count_changed)
         self.ui.ComfyUISeed.valueChanged.connect(self._on_seed_changed)
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_randomize_seed)
-        self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 16))
 
-        # Name field (debounced save)
+        # Name field toggle and input
+        self.ui.ComfyUINameToggle.toggled.connect(self._on_name_toggle_changed)
         self.ui.ComfyUIName.textChanged.connect(self._on_text_changed)
 
         # Iterate mode signals
@@ -65,6 +60,18 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Cancel jobs button
         self.ui.ComfyUICancelJobs.clicked.connect(self._on_cancel_jobs_clicked)
+
+        # Change model button (header bar)
+        self.ui.changeModelBtn.clicked.connect(self._on_change_model_clicked)
+
+        # Advanced settings gear
+        self.ui.advancedGearBtn.clicked.connect(self._on_advanced_gear_clicked)
+
+        # Workflow settings gear (in header)
+        self.ui.workflowSettingsBtn.clicked.connect(self._on_workflow_settings_clicked)
+
+        # Edit model button (in header, admin only)
+        self.ui.editModelBtn.clicked.connect(self._on_edit_preset_clicked)
 
     def initialize(self):
         """Initialize ComfyUI tab."""
@@ -76,18 +83,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
         self.state_manager = ComfyUIStateManager()
 
-        # Setup model picker (inline expandable panel)
-        self._setup_model_picker()
+        # Setup inline model grid (replaces overlay picker)
+        self._setup_inline_grid()
 
-        # Setup workflow settings button (next to model button)
-        self._setup_workflow_settings_button()
-
-        # Setup rating widget below model button
-        self._setup_rating_widget()
-
-        # Create workflow selector dropdown (will be added to UI dynamically)
-        self._setup_workflow_selector()
-        self._setup_note_display()
+        # Setup variant selector (replaces radio buttons)
+        self._setup_variant_selector()
 
         # Set up filename-safe validator on the Name field
         from PySide6.QtCore import QRegularExpression
@@ -99,6 +99,11 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Initialize polling state from mixin
         self._init_polling_state()
+
+        # Debounce timer for state saves (created once, not lazily)
+        self._save_timer = QTimer(self.main_window)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._save_state)
 
         # Display network path from global settings
         self._update_network_path_display()
@@ -124,16 +129,24 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Deferred node_info cache check (give server time to start)
         QTimer.singleShot(5000, self._check_node_info_cache)
 
-        # Server status indicator (near Submit button)
-        self._setup_server_status_indicator()
+        # Server behavior controls (per-job, persisted to user settings)
+        self._setup_server_behavior_controls()
+
+        # Server status banner (prominent, in submit section)
+        self._setup_server_status_banner()
 
         # Auto-refresh server status every 30 seconds
         self._server_check_timer = QTimer(self.main_window)
         self._server_check_timer.timeout.connect(self._check_server_status)
         self._server_check_timer.start(30000)
+        self._heartbeat_pending = False
 
         # Initial server status check (slight delay for startup)
         QTimer.singleShot(2000, self._check_server_status)
+
+        # Start in grid state if no model selected
+        if not self.state_manager.current_preset_name:
+            self._show_model_grid()
 
     def on_tab_activated(self):
         """Called when tab becomes visible."""
@@ -148,24 +161,86 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     _HEARTBEAT_STALE_SECONDS = 60  # Heartbeat older than this = offline
 
-    def _setup_server_status_indicator(self):
-        """Create server status indicator near the Submit button."""
-        self._server_status_label = QLabel("  Checking...")
-        self._server_status_label.setStyleSheet(
-            "color: #888888; font-size: 11px; padding: 0 4px;"
-        )
-        self._server_status_label.setToolTip("ComfyUI server connection status")
+    def _setup_server_behavior_controls(self):
+        """Initialize server-offline behavior combo and wait timeout spinbox."""
+        from core.settings_manager import safe_get_setting, safe_set_setting
+
+        combo = self.ui.ServerBehaviorCombo
+        combo.clear()
+        combo.addItem("Fail Immediately", "fail")
+        combo.addItem("Wait for Server", "wait")
+        combo.addItem("Fail & Delete Job", "fail_delete")
+
+        # Load persisted value
+        saved = safe_get_setting("comfyui_server_not_found_behavior", "fail")
+        idx = combo.findData(saved)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+        # Load wait timeout (stored in seconds, displayed in minutes)
+        timeout_sec = safe_get_setting("comfyui_server_wait_timeout", 300)
+        self.ui.ServerWaitTimeoutSpinBox.setValue(timeout_sec // 60)
+
+        # Initial visibility
+        self._update_server_wait_visibility()
+
+        # Connect signals to persist on change
+        combo.currentIndexChanged.connect(self._on_server_behavior_changed)
+        self.ui.ServerWaitTimeoutSpinBox.valueChanged.connect(self._on_server_wait_timeout_changed)
+
+    def _on_server_behavior_changed(self):
+        """Save server behavior selection and update timeout visibility."""
+        from core.settings_manager import safe_set_setting
+        value = self.ui.ServerBehaviorCombo.currentData()
+        safe_set_setting("comfyui_server_not_found_behavior", value)
+        self._update_server_wait_visibility()
+
+    def _on_server_wait_timeout_changed(self, minutes):
+        """Save wait timeout (convert minutes to seconds for storage)."""
+        from core.settings_manager import safe_set_setting
+        safe_set_setting("comfyui_server_wait_timeout", minutes * 60)
+
+    def _update_server_wait_visibility(self):
+        """Show/hide wait timeout based on selected behavior."""
+        is_wait = self.ui.ServerBehaviorCombo.currentData() == "wait"
+        self.ui.ServerWaitTimeoutSpinBox.setVisible(is_wait)
+        self.ui.serverWaitTimeoutLabel.setVisible(is_wait)
+
+    def _setup_server_status_banner(self):
+        """Create prominent server status banner in the submit section."""
         self._server_is_online = None  # Unknown initially
 
-        # Insert at the end of the submitButtonsLayout (after Cancel button)
-        self.ui.submitButtonsLayout.addWidget(self._server_status_label)
+        # Use the serverStatusBanner frame from the .ui file
+        banner = self.ui.serverStatusBanner
+
+        # Status icon + text label
+        self._server_status_label = QLabel("Checking server...")
+        self._server_status_label.setStyleSheet(
+            "color: #797e89; font-size: 12px; border: none;"
+        )
+        self.ui.serverStatusLayout.addWidget(self._server_status_label)
+        self.ui.serverStatusLayout.addStretch()
+
+        # Always show the banner
+        banner.setVisible(True)
+        banner.setStyleSheet(
+            "QFrame#serverStatusBanner {"
+            "  background-color: #2c313a;"
+            "  border: 1px solid #3c414b;"
+            "  border-radius: 6px;"
+            "}"
+        )
 
     def _check_server_status(self):
         """Read heartbeat file(s) from the network path to determine server status.
 
         Runs the file I/O on a worker thread to avoid blocking the Qt event loop
-        when the network path is slow or unreachable.
+        when the network path is slow or unreachable. Skips if a previous check
+        is still in flight.
         """
+        if getattr(self, '_heartbeat_pending', False):
+            return
+        self._heartbeat_pending = True
         self.start_worker(
             self._read_heartbeat_status,
             on_result=self._on_heartbeat_result,
@@ -177,7 +252,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Read heartbeat files from network path (runs on worker thread)."""
         from core.settings_manager import safe_get_setting
         from core.utils import load_json
-        from datetime import datetime
+        from datetime import datetime, timezone
         import glob
 
         stale_seconds = ComfyUITab._HEARTBEAT_STALE_SECONDS
@@ -196,7 +271,8 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         best_status = "offline"
         best_info = ""
-        now = datetime.now()
+        # UTC for safe cross-timezone comparison with the farm server.
+        now = datetime.now(timezone.utc)
 
         for hb_file in heartbeat_files:
             data = load_json(hb_file, {})
@@ -205,8 +281,10 @@ class ComfyUITab(PollingMixin, BaseTab):
 
             try:
                 ts = datetime.fromisoformat(data['timestamp'])
-                # Normalize to naive datetime for safe subtraction
-                ts = ts.replace(tzinfo=None)
+                # Older heartbeats wrote naive local time; assume UTC if naive
+                # so we don't crash mixing aware/naive on subtraction.
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 age_seconds = (now - ts).total_seconds()
             except (ValueError, TypeError):
                 continue
@@ -238,45 +316,72 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_heartbeat_result(self, result):
         """Handle heartbeat check result on the main thread."""
+        self._heartbeat_pending = False
+        if not hasattr(self, '_server_status_label') or not self._server_status_label:
+            return
         status, info = result
         self._update_server_indicator(status, info)
 
     def _on_heartbeat_error(self, error_msg, traceback_str=""):
         """Handle heartbeat check error."""
+        self._heartbeat_pending = False
+        if not hasattr(self, '_server_status_label') or not self._server_status_label:
+            return
         self._update_server_indicator("unknown", f"Error checking server: {error_msg}")
 
     def _update_server_indicator(self, status: str, info: str):
-        """Update the server status label based on resolved status."""
-        from core.settings_manager import safe_get_setting
-
+        """Update the server status banner based on resolved status."""
         self._server_is_online = (status == "online")
+        banner = self.ui.serverStatusBanner
 
         if status == "online":
-            self._server_status_label.setText("  \u25cf Online")
+            self._server_status_label.setText("\u25cf  Server Online")
             self._server_status_label.setStyleSheet(
-                "color: #4CAF50; font-size: 11px; font-weight: bold; padding: 0 4px;"
+                "color: #10b981; font-size: 12px; font-weight: bold; border: none;"
+            )
+            banner.setStyleSheet(
+                "QFrame#serverStatusBanner {"
+                "  background-color: rgba(16, 185, 129, 0.08);"
+                "  border: 1px solid rgba(16, 185, 129, 0.25);"
+                "  border-radius: 6px;"
+                "}"
             )
             self._server_status_label.setToolTip(info)
         elif status == "starting":
-            self._server_status_label.setText("  \u25cf Starting...")
+            self._server_status_label.setText("\u25cf  Server Starting...")
             self._server_status_label.setStyleSheet(
-                "color: #FF9800; font-size: 11px; font-weight: bold; padding: 0 4px;"
+                "color: #f59e0b; font-size: 12px; font-weight: bold; border: none;"
+            )
+            banner.setStyleSheet(
+                "QFrame#serverStatusBanner {"
+                "  background-color: rgba(245, 158, 11, 0.08);"
+                "  border: 1px solid rgba(245, 158, 11, 0.25);"
+                "  border-radius: 6px;"
+                "}"
             )
             self._server_status_label.setToolTip(info)
         else:
-            self._server_status_label.setText("  \u25cf Offline")
-            self._server_status_label.setStyleSheet(
-                "color: #F44336; font-size: 11px; font-weight: bold; padding: 0 4px;"
-            )
-            # Show what will happen on submit
-            behavior = safe_get_setting("comfyui_server_not_found_behavior", "fail")
+            # Build helpful offline message
+            behavior = self.ui.ServerBehaviorCombo.currentData()
             behavior_labels = {
-                "wait": "Jobs will wait for server to come online",
-                "fail": "Jobs will fail immediately if server is offline",
-                "fail_delete": "Jobs will fail and be deleted if server is offline",
+                "wait": "Jobs will wait for server",
+                "fail": "Jobs will fail immediately",
+                "fail_delete": "Jobs will fail and be deleted",
             }
+            behavior_text = behavior_labels.get(behavior, "")
+            offline_text = f"\u25cf  Server Offline \u2014 {behavior_text}" if behavior_text else "\u25cf  Server Offline"
+            self._server_status_label.setText(offline_text)
+            self._server_status_label.setStyleSheet(
+                "color: #ef4444; font-size: 12px; font-weight: bold; border: none;"
+            )
+            banner.setStyleSheet(
+                "QFrame#serverStatusBanner {"
+                "  background-color: rgba(239, 68, 68, 0.08);"
+                "  border: 1px solid rgba(239, 68, 68, 0.25);"
+                "  border-radius: 6px;"
+                "}"
+            )
             tip = info or "ComfyUI server is not responding"
-            tip += f". {behavior_labels.get(behavior, '')}"
             self._server_status_label.setToolTip(tip)
 
     # =========================================================================
@@ -315,203 +420,166 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _setup_tooltips(self):
         """Set up contextual tooltips for better user guidance."""
-        # Preset selection
-        self.ui.ComfyUIChoosePreset.setToolTip(
-            "Select a workflow preset.\n\n"
-            "Each preset defines what kind of AI generation you want to do:\n"
-            "• Image generation from text prompts\n"
-            "• Image upscaling and enhancement\n"
-            "• Style transfer and variations\n"
-            "• Video generation"
-        )
-
-        # Generation count
         self.ui.ComfyUIGenerationCount.setToolTip(
-            "Number of images to generate.\n\n"
-            "Each generation uses a different seed for variety.\n"
-            "Higher counts take longer but give more options."
+            "How many outputs to generate.\n"
+            "Each one uses a different seed for variety."
         )
-
-        # Seed control
-        self.ui.ComfyUISeed.setToolTip(
-            "Random seed for reproducibility.\n\n"
-            "Same seed + same parameters = same result.\n"
-            "Use this to recreate or iterate on specific outputs."
-        )
-
-        self.ui.ComfyUIRandomizeSeed.setToolTip(
-            "Generate a new random seed.\n\n"
-            "Click to get fresh, unpredictable results."
-        )
-
-        # Submit button
         self.ui.ComfyUISubmit.setToolTip(
-            "Submit workflow to render farm.\n\n"
-            "Jobs are processed by the Deadline render farm.\n"
-            "You can continue working while jobs render."
+            "Send to the render farm for processing.\n"
+            "You can continue working while it renders."
         )
-
-        # Cancel button
         self.ui.ComfyUICancelJobs.setToolTip(
-            "Cancel all running jobs.\n\n"
-            "Stops pending and rendering jobs on the farm."
+            "Cancel all running jobs on the farm"
         )
 
-        # Network path
-        self.ui.ComfyUINetworkPathDisplay.setToolTip(
-            "Network output directory.\n\n"
-            "Generated images are saved here.\n"
-            "Configure in Settings tab."
+    # =========================================================================
+    # INLINE MODEL GRID (replaces full-screen overlay)
+    # =========================================================================
+
+    def _setup_inline_grid(self):
+        """Set up the inline model grid directly in the tab."""
+        self._model_grid = InlineModelGrid(parent=self.ui.modelGridContainer)
+        self.ui.modelGridContainerLayout.addWidget(self._model_grid)
+        self._model_grid.model_selected.connect(self._on_model_selected)
+        self._model_grid.add_model_requested.connect(self._on_add_preset_clicked)
+        self._model_grid.edit_model_requested.connect(self._on_edit_model_from_grid)
+        self._model_grid.delete_model_requested.connect(self._on_delete_model_from_grid)
+
+        # Initial load
+        self._model_grid.refresh()
+
+    def _setup_variant_selector(self):
+        """Set up the variant selector for multi-workflow models."""
+        self._variant_selector = VariantSelector(parent=self.ui.variantSelectorContainer)
+        self.ui.variantSelectorLayout.addWidget(self._variant_selector)
+        self._variant_selector.variant_selected.connect(self._on_workflow_selected)
+
+    # =========================================================================
+    # STATE MACHINE: Grid (A) ↔ Selected (B/C)
+    # =========================================================================
+
+    def _show_model_grid(self):
+        """State A: Show the model grid, hide everything else."""
+        self.ui.modelGridContainer.setVisible(True)
+        self.ui.selectedModelHeader.setVisible(False)
+        self.ui.variantSelectorContainer.setVisible(False)
+        self.ui.noteBanner.setVisible(False)
+        self.ui.comfyuiInputFrame.setVisible(False)
+        self.ui.submitBar.setVisible(False)
+        # Refresh grid to pick up any changes
+        self._model_grid.refresh()
+
+    def _show_selected_state(self):
+        """State B/C: Show selected model header + inputs + submit bar."""
+        self.ui.modelGridContainer.setVisible(False)
+        self.ui.selectedModelHeader.setVisible(True)
+        self.ui.submitBar.setVisible(True)
+
+        # Show edit button for admins
+        self.ui.editModelBtn.setVisible(self.app_state.is_admin)
+
+        # Update header with current model info
+        self._update_selected_header()
+
+        # Show variant selector if multi-workflow
+        self._update_variant_selector()
+
+        # Show note if present
+        self._update_note_display()
+
+        # Input frame visibility depends on whether there are editable widgets
+        has_widgets = len(self.widget_manager.dynamic_widgets) > 0
+        self.ui.comfyuiInputFrame.setVisible(has_widgets)
+
+    def _update_selected_header(self):
+        """Update the selected model header bar with current model info."""
+        from comfyui.presets_manager import get_comfyui_workflow_presets, get_workflow_preset_config
+
+        name = self.state_manager.current_preset_name
+        if not name:
+            return
+
+        display_name = self._get_preset_display_name(name)
+        self.ui.selectedModelName.setText(display_name)
+
+        # Get preset config for badge and description
+        presets = get_comfyui_workflow_presets()
+        preset_data = presets.get(name, {})
+        if isinstance(preset_data, str):
+            preset_data = {"path": preset_data}
+
+        config = get_workflow_preset_config(
+            name, selected_workflow=self.state_manager.current_selected_workflow
+        ) or {}
+
+        # Output type badge
+        output_type = config.get("output_type", preset_data.get("output_type", "image"))
+        type_labels = {
+            "image": "IMAGE", "video": "VIDEO", "3d": "3D MODEL",
+            "audio": "AUDIO", "other": "OTHER",
+        }
+        type_colors = {
+            "image": ("#4a9eff", "rgba(74, 158, 255, 0.15)"),
+            "video": ("#a855f7", "rgba(168, 85, 247, 0.15)"),
+            "3d": ("#10b981", "rgba(16, 185, 129, 0.15)"),
+            "audio": ("#f59e0b", "rgba(245, 158, 11, 0.15)"),
+            "other": ("#797e89", "rgba(121, 126, 137, 0.15)"),
+        }
+        fg, bg = type_colors.get(output_type, type_colors["image"])
+        self.ui.selectedModelBadge.setText(type_labels.get(output_type, "IMAGE"))
+        self.ui.selectedModelBadge.setStyleSheet(
+            f"background-color: {bg}; color: {fg};"
+            "border-radius: 3px; padding: 2px 8px;"
+            "font-size: 10px; font-weight: bold;"
         )
 
-    def _setup_model_picker(self):
-        """Set up the full-screen model picker overlay."""
-        # Create the model picker overlay (parented to main window for full-screen)
-        self._model_picker = ModelPickerOverlay(
-            is_admin=self.app_state.is_admin,
-            parent=self.main_window
-        )
+        # Description (truncated)
+        desc = preset_data.get("description", "")
+        if len(desc) > 80:
+            desc = desc[:77] + "..."
+        self.ui.selectedModelDesc.setText(desc)
 
-        # Connect signals
-        self._model_picker.model_selected.connect(self._on_model_selected)
-        self._model_picker.add_model_requested.connect(self._on_add_preset_clicked)
+    def _on_change_model_clicked(self):
+        """Handle [Change] button — go back to model grid."""
+        self._show_model_grid()
+
+    # Keep old method name as stub for backward compatibility
+    def _setup_model_info_card(self):
+        """Legacy stub — info is now in the header bar."""
+        pass
 
     def _setup_workflow_settings_button(self):
-        """Set up the workflow settings button next to the model button."""
-        from icons import IconManager, DEFAULT_ICON_COLOR
+        """Legacy stub — gear is now in the header bar."""
+        pass
 
-        self._workflow_settings_btn = QPushButton()
-        self._workflow_settings_btn.setFixedWidth(40)
-        self._workflow_settings_btn.setFixedHeight(32)
-        self._workflow_settings_btn.setToolTip(
-            "Workflow settings\n\n"
-            "Adjust workflow-specific parameters like\n"
-            "steps, guidance, denoise, etc."
-        )
-        self._workflow_settings_btn.setVisible(False)
+    def _setup_input_empty_state(self):
+        """Legacy stub — empty state is handled by hiding the input frame."""
+        pass
 
-        try:
-            self._workflow_settings_btn.setIcon(
-                IconManager.get_icon("settings", DEFAULT_ICON_COLOR, 16)
-            )
-        except Exception:
-            self._workflow_settings_btn.setText("\u2699")
-
-        self._workflow_settings_btn.clicked.connect(self._on_workflow_settings_clicked)
-
-        # Insert after the model button (index 1 in preset buttons layout)
-        self.ui.comfyuiPresetButtonsLayout.insertWidget(1, self._workflow_settings_btn, 0)
-
-    def _setup_rating_widget(self):
-        """Set up the interactive rating widget below the model button."""
-        from .star_rating import StarRatingWidget
-
-        # Create container widget for rating
-        self._rating_container = QWidget()
-        rating_layout = QHBoxLayout(self._rating_container)
-        rating_layout.setContentsMargins(0, 4, 0, 4)
-        rating_layout.setSpacing(8)
-
-        # Label
-        rating_label = QLabel("Your rating:")
-        rating_label.setStyleSheet("color: #888; font-size: 11px;")
-        rating_layout.addWidget(rating_label)
-
-        # Star rating widget
-        self._rating_widget = StarRatingWidget(
-            rating=0.0,
-            interactive=True,
-            show_count=True,
-            size=18
-        )
-        self._rating_widget.rating_changed.connect(self._on_model_rated)
-        rating_layout.addWidget(self._rating_widget)
-
-        rating_layout.addStretch()
-
-        # Hide initially until a model is selected
-        self._rating_container.setVisible(False)
-
-        # Insert into workflow layout after the buttons (index 1, after comfyuiPresetButtonsLayout)
-        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
-            self.ui.comfyuiWorkflowLayout.insertWidget(1, self._rating_container)
-
-    def _on_model_rated(self, rating: int):
-        """Handle user rating a model."""
-        from comfyui.ratings import rate_model, get_model_rating
-
-        if not self.state_manager.current_preset_name:
-            return
-
-        model_name = self.state_manager.current_preset_name
-        username = self.app_state.user
-
-        # Save rating
-        if rate_model(model_name, username, rating):
-            # Update rating widget with new average
-            updated_data = get_model_rating(model_name)
-            new_average = updated_data.get("average", 0.0)
-            new_count = updated_data.get("rating_count", 0)
-
-            self._rating_widget.set_rating(new_average)
-            self._rating_widget.set_rating_count(new_count)
-
-            # Update preset button display
-            self._update_model_button_with_rating()
-
-            self.show_status(f"Rated '{model_name}' {rating}/5 stars", "success")
-            logger.info(f"[ComfyUITab] User rated '{model_name}': {rating}/5 (new avg: {new_average:.1f})")
-
+    # Legacy stubs for methods that no longer exist in the new UI
     def _update_rating_widget(self):
-        """Update the rating widget for the currently selected model."""
-        from comfyui.ratings import get_model_rating
+        """Legacy stub — ratings removed from main flow."""
+        pass
 
-        if not self.state_manager.current_preset_name:
-            self._rating_container.setVisible(False)
-            return
-
-        model_name = self.state_manager.current_preset_name
-        username = self.app_state.user
-
-        # Get rating data
-        rating_data = get_model_rating(model_name)
-        average = rating_data.get("average", 0.0)
-        rating_count = rating_data.get("rating_count", 0)
-        user_rating = rating_data.get("ratings", {}).get(username)
-
-        # Update widget
-        self._rating_widget.set_rating(average)
-        self._rating_widget.set_rating_count(rating_count)
-
-        # If user has already rated, set that as the displayed rating
-        if user_rating:
-            # Set the widget to show the user's rating
-            # (the widget will update to show user rating visually)
-            from .star_rating import StarRatingWidget
-            # Update the internal stars to reflect user rating
-            for i, star in enumerate(self._rating_widget._stars):
-                star.set_fill_amount(1.0 if i < user_rating else 0.0)
-
-        self._rating_container.setVisible(True)
+    def _update_model_info_card(self):
+        """Legacy stub — info is in the header bar now."""
+        self._update_selected_header()
 
     def _on_workflow_settings_clicked(self):
         """Show the workflow settings dialog."""
         self.widget_manager.show_settings_dialog()
 
     def _update_workflow_settings_button_visibility(self):
-        """Show/hide the settings button based on whether settings nodes exist."""
-        if hasattr(self, '_workflow_settings_btn'):
-            self._workflow_settings_btn.setVisible(self.widget_manager.has_settings_nodes)
+        """Show/hide the workflow settings gear in the header bar."""
+        self.ui.workflowSettingsBtn.setVisible(self.widget_manager.has_settings_nodes)
 
-    def _on_model_selected(self, model_name: str, workflow_name: str):
-        """Handle model selection from the overlay.
+    def _on_model_selected(self, model_name: str, workflow_name: str = ""):
+        """Handle model selection from the inline grid.
 
         Args:
             model_name: The selected model/preset name
             workflow_name: The selected workflow name (for multi-workflow models)
         """
-        # The overlay hides itself on selection, no need to close here
-
         # Store the workflow name if provided (for multi-workflow models)
         if workflow_name:
             self.state_manager.current_selected_workflow = workflow_name
@@ -519,31 +587,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Select the preset (this updates the UI and loads the workflow)
         self._select_preset(model_name)
 
-        # Update the button text to show the rating
-        self._update_model_button_with_rating()
-
     def _update_model_button_with_rating(self):
-        """Update the model button text to show name + rating stars."""
-        from comfyui.ratings import get_model_rating
-
-        if not self.state_manager.current_preset_name:
-            self.ui.ComfyUIChoosePreset.setText("Choose Model")
-            return
-
-        # Get display name
-        display_name = self._get_preset_display_name(self.state_manager.current_preset_name)
-
-        # Get rating data
-        rating_data = get_model_rating(self.state_manager.current_preset_name)
-        average = rating_data.get("average", 0.0)
-
-        if average > 0:
-            # Format: "Model Name ★★★★☆ (4.2)"
-            filled = int(round(average))
-            stars = "★" * filled + "☆" * (5 - filled)
-            self.ui.ComfyUIChoosePreset.setText(f"{display_name}  {stars} ({average:.1f})")
-        else:
-            self.ui.ComfyUIChoosePreset.setText(display_name)
+        """Legacy stub — now updates the header bar instead."""
+        self._update_selected_header()
 
     def _setup_session_resume_banner(self):
         """Set up the session resume banner if a previous session is available."""
@@ -620,81 +666,126 @@ class ComfyUITab(PollingMixin, BaseTab):
     # WORKFLOW SELECTOR (for multi-workflow models)
     # =========================================================================
 
-    def _setup_workflow_selector(self):
-        """Set up the workflow selector dropdown for multi-workflow models."""
-        # Add workflow selector to the existing button row instead of creating a new row
-        if not hasattr(self.ui, 'comfyuiPresetButtonsLayout'):
+    # =========================================================================
+    # ADVANCED SETTINGS DIALOG (gear icon)
+    # =========================================================================
+
+    def _on_advanced_gear_clicked(self):
+        """Show advanced settings as a popup dialog."""
+        if hasattr(self, '_advanced_dialog') and self._advanced_dialog and self._advanced_dialog.isVisible():
+            self._advanced_dialog.raise_()
             return
 
-        # Add workflow label and combo to button row with proper stretch for symmetry
-        self._workflow_label = QLabel("Workflow:")
-        self._workflow_label.setVisible(False)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_label, 0)
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Advanced Settings")
+        dialog.setMinimumWidth(380)
+        dialog.setStyleSheet(
+            "QDialog { background-color: #282c34; }"
+            "QLabel { color: #c5cad3; font-size: 12px; }"
+        )
 
-        self._workflow_selector_combo = QtWidgets.QComboBox()
-        self._workflow_selector_combo.setMinimumWidth(150)
-        self._workflow_selector_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._workflow_selector_combo.currentTextChanged.connect(self._on_workflow_selected)
-        self._workflow_selector_combo.setVisible(False)
-        # Use stretch factor of 1 to maintain symmetry with the 3 buttons (each also having stretch 1)
-        self.ui.comfyuiPresetButtonsLayout.addWidget(self._workflow_selector_combo, 1)
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
 
-    def _setup_note_display(self):
-        """Set up the note display area for showing model/workflow notes."""
-        # Create note display widget (hidden by default)
-        self._note_display_widget = QWidget()
-        note_layout = QHBoxLayout(self._note_display_widget)
-        note_layout.setContentsMargins(0, 0, 0, 2)
-        note_layout.setSpacing(6)
+        # Seed
+        seed_row = QHBoxLayout()
+        seed_row.setSpacing(8)
+        seed_label = QLabel("Seed:")
+        seed_label.setMinimumWidth(80)
+        seed_row.addWidget(seed_label)
+        seed_row.addWidget(self.ui.ComfyUISeed)
+        self.ui.ComfyUISeed.setVisible(True)
+        seed_row.addWidget(self.ui.ComfyUIRandomizeSeed)
+        self.ui.ComfyUIRandomizeSeed.setVisible(True)
+        try:
+            from icons import IconManager, DEFAULT_ICON_COLOR
+            self.ui.ComfyUIRandomizeSeed.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 16))
+        except Exception:
+            pass
+        layout.addLayout(seed_row)
 
-        note_icon_label = QLabel("Note:")
-        note_icon_label.setFixedWidth(70)
-        note_icon_label.setStyleSheet("color: #4a9eff; font-weight: bold;")
-        note_layout.addWidget(note_icon_label)
+        # Custom name
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        self.ui.ComfyUINameToggle.setVisible(True)
+        name_row.addWidget(self.ui.ComfyUINameToggle)
+        self.ui.ComfyUIName.setVisible(self.ui.ComfyUINameToggle.isChecked())
+        name_row.addWidget(self.ui.ComfyUIName)
+        layout.addLayout(name_row)
 
-        self._note_display_label = QLabel("")
-        self._note_display_label.setWordWrap(True)
-        self._note_display_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
-        note_layout.addWidget(self._note_display_label, 1)
+        # Server behavior
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #3c414b;")
+        layout.addWidget(sep)
 
-        self._note_display_widget.setVisible(False)
+        server_row = QHBoxLayout()
+        server_row.setSpacing(6)
+        server_label = QLabel("If server offline:")
+        server_row.addWidget(server_label)
+        self.ui.ServerBehaviorCombo.setVisible(True)
+        server_row.addWidget(self.ui.ServerBehaviorCombo)
+        self.ui.serverWaitTimeoutLabel.setVisible(
+            self.ui.ServerBehaviorCombo.currentData() == "wait"
+        )
+        server_row.addWidget(self.ui.serverWaitTimeoutLabel)
+        self.ui.ServerWaitTimeoutSpinBox.setVisible(
+            self.ui.ServerBehaviorCombo.currentData() == "wait"
+        )
+        server_row.addWidget(self.ui.ServerWaitTimeoutSpinBox)
+        server_row.addStretch()
+        layout.addLayout(server_row)
 
-        # Insert into comfyuiWorkflowLayout after buttons and path label
-        if hasattr(self.ui, 'comfyuiWorkflowLayout'):
-            self.ui.comfyuiWorkflowLayout.addWidget(self._note_display_widget)
+        # Network output path
+        net_row = QHBoxLayout()
+        net_label = QLabel("Output path:")
+        net_label.setMinimumWidth(80)
+        net_row.addWidget(net_label)
+        self.ui.ComfyUINetworkPathDisplay.setVisible(True)
+        net_row.addWidget(self.ui.ComfyUINetworkPathDisplay)
+        layout.addLayout(net_row)
 
-    def _update_workflow_selector_visibility(self):
-        """Update workflow selector visibility based on current preset."""
+        layout.addStretch()
+
+        # Close button
+        from PySide6.QtWidgets import QDialogButtonBox
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.close)
+        layout.addWidget(buttons)
+
+        self._advanced_dialog = dialog
+        dialog.show()
+
+    def _update_variant_selector(self):
+        """Update variant selector visibility based on current preset."""
         from comfyui.presets_manager import is_workflow_preset_multi, get_workflow_preset_subworkflows
 
         if not self.state_manager.current_preset_name:
-            self._workflow_label.setVisible(False)
-            self._workflow_selector_combo.setVisible(False)
+            self._variant_selector.clear()
+            self.ui.variantSelectorContainer.setVisible(False)
             return
 
         is_multi = is_workflow_preset_multi(self.state_manager.current_preset_name)
-        self._workflow_label.setVisible(is_multi)
-        self._workflow_selector_combo.setVisible(is_multi)
 
         if is_multi:
-            # Populate workflow options
             workflows = get_workflow_preset_subworkflows(self.state_manager.current_preset_name)
-            self._workflow_selector_combo.blockSignals(True)
-            try:
-                self._workflow_selector_combo.clear()
 
-                for wf_name in sorted(workflows.keys()):
-                    self._workflow_selector_combo.addItem(wf_name)
+            # Select the current or first workflow
+            selected = self.state_manager.current_selected_workflow
+            if not selected or selected not in workflows:
+                selected = sorted(workflows.keys())[0]
+                self.state_manager.current_selected_workflow = selected
 
-                # Select first workflow by default or restore previously selected
-                if self.state_manager.current_selected_workflow and self.state_manager.current_selected_workflow in workflows:
-                    self._workflow_selector_combo.setCurrentText(self.state_manager.current_selected_workflow)
-                elif workflows:
-                    first_workflow = sorted(workflows.keys())[0]
-                    self.state_manager.current_selected_workflow = first_workflow
-                    self._workflow_selector_combo.setCurrentText(first_workflow)
-            finally:
-                self._workflow_selector_combo.blockSignals(False)
+            self._variant_selector.set_variants(workflows, selected)
+            self.ui.variantSelectorContainer.setVisible(True)
+        else:
+            self._variant_selector.clear()
+            self.ui.variantSelectorContainer.setVisible(False)
+
+    # Keep old name as alias for backward compat
+    def _update_workflow_selector_visibility(self):
+        self._update_variant_selector()
 
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
@@ -738,11 +829,11 @@ class ComfyUITab(PollingMixin, BaseTab):
         self._save_state()
 
     def _update_note_display(self):
-        """Update the note display based on current preset/workflow."""
+        """Update the note/tip banner based on current preset/workflow."""
         from comfyui.presets_manager import get_workflow_preset_note
 
         if not self.state_manager.current_preset_name:
-            self._note_display_widget.setVisible(False)
+            self.ui.noteBanner.setVisible(False)
             return
 
         note = get_workflow_preset_note(
@@ -751,10 +842,10 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
 
         if note:
-            self._note_display_label.setText(note)
-            self._note_display_widget.setVisible(True)
+            self.ui.noteText.setText(note)
+            self.ui.noteBanner.setVisible(True)
         else:
-            self._note_display_widget.setVisible(False)
+            self.ui.noteBanner.setVisible(False)
 
     # =========================================================================
     # GENERATION SETTINGS
@@ -762,10 +853,21 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_generation_count_changed(self, value):
         """Handle generation count change."""
-        # Update the value label next to the slider
         self.ui.label_count_value.setText(str(value))
         self._validate_inputs()
         self._save_state()
+
+        # Show time estimate if available
+        if self.state_manager.current_preset_name:
+            from core.user_preferences import get_workflow_estimated_time_per_frame
+            from .polling import format_elapsed_time
+            per_frame = get_workflow_estimated_time_per_frame(self.state_manager.current_preset_name)
+            if per_frame:
+                total = per_frame * value
+                self.ui.label_count.setToolTip(
+                    f"Estimated time: ~{format_elapsed_time(total)}\n"
+                    f"({format_elapsed_time(per_frame)} per output)"
+                )
 
     def _on_seed_changed(self, value):
         """Handle seed value change."""
@@ -791,11 +893,8 @@ class ComfyUITab(PollingMixin, BaseTab):
         return full_name
 
     def _on_choose_preset_clicked(self):
-        """Show the full-screen model picker overlay."""
-        # Set current selection for highlighting
-        self._model_picker.set_current_model(self.state_manager.current_preset_name)
-        # Show the overlay
-        self._model_picker.show_overlay()
+        """Legacy stub — redirects to showing the model grid."""
+        self._show_model_grid()
 
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
@@ -810,23 +909,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         self.state_manager.current_preset_name = preset_name
 
-        # Update button text with rating
-        self._update_model_button_with_rating()
-
-        # Update rating widget
-        self._update_rating_widget()
-
         # Check if this is a multi-workflow model
         is_multi = is_workflow_preset_multi(preset_name)
 
         if is_multi:
-            # For multi-workflow models, update selector and select first workflow
             workflows = get_workflow_preset_subworkflows(preset_name)
             if workflows:
-                # Reset selected workflow if switching presets
                 if not self.state_manager.current_selected_workflow or self.state_manager.current_selected_workflow not in workflows:
                     self.state_manager.current_selected_workflow = sorted(workflows.keys())[0]
-
                 workflow_path = get_comfyui_workflow_preset_path(
                     preset_name,
                     selected_workflow=self.state_manager.current_selected_workflow
@@ -835,35 +925,30 @@ class ComfyUITab(PollingMixin, BaseTab):
                 workflow_path = None
                 self.state_manager.current_selected_workflow = None
         else:
-            # Single workflow model
             self.state_manager.current_selected_workflow = None
             workflow_path = get_comfyui_workflow_preset_path(preset_name)
-
-        # Update workflow selector visibility
-        self._update_workflow_selector_visibility()
 
         if workflow_path and os.path.exists(workflow_path):
             self.ui.ComfyUIWorkflowPath.setText(workflow_path)
             self.app_state.comfyui_workflow_path = workflow_path
 
-            # Load per-workflow saved inputs for the new preset
+            # Load per-workflow saved inputs
             saved_inputs = self.state_manager.load_per_workflow_inputs()
             if saved_inputs:
                 self.widget_manager.pending_semantic_values = saved_inputs
 
             self._refresh_editable_nodes()
             self._validate_inputs()
-            self._update_note_display()
             self._save_state()
+
+            # Switch to selected state (header + inputs + submit)
+            self._show_selected_state()
         else:
-            display_name = self._get_preset_display_name(preset_name)
-            self.ui.ComfyUIChoosePreset.setText(f"{display_name} (missing)")
             self.ui.ComfyUIWorkflowPath.setText(f"Workflow file not found: {workflow_path}")
             self.app_state.comfyui_workflow_path = None
             self._refresh_editable_nodes()
             self._validate_inputs()
-            self._update_note_display()
-            # Guard for animator not being initialized yet during tab initialization
+            self._show_selected_state()
             self.show_status(f"Workflow file not found: {workflow_path}", "error")
 
     def _on_add_preset_clicked(self):
@@ -872,14 +957,13 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         wizard = AddModelWizard(parent=self.main_window)
         if wizard.exec_() == QDialog.Accepted:
-            # Get the model name that was just created
             model_name = wizard.field("model_name")
             if model_name:
                 self._select_preset(model_name)
                 self.show_status(f"Model '{model_name}' created", "success")
-                # Refresh the picker if it's visible
-                if hasattr(self, '_model_picker'):
-                    self._model_picker.refresh()
+                # Refresh the inline grid
+                if hasattr(self, '_model_grid'):
+                    self._model_grid.refresh()
 
     def _on_edit_preset_clicked(self):
         """Edit the currently selected workflow preset."""
@@ -923,13 +1007,62 @@ class ComfyUITab(PollingMixin, BaseTab):
 
             # Find the current preset (may have been renamed)
             if current_name not in presets:
-                # Name was changed, find the new name by looking for the preset
-                # that was just modified (most recent save)
-                # For simplicity, just refresh the combo
-                self._refresh_presets_combo()
+                # Name was changed — refresh the inline grid
+                if hasattr(self, '_model_grid'):
+                    self._model_grid.refresh()
             else:
                 self.state_manager.current_selected_workflow = None
                 self._select_preset(self.state_manager.current_preset_name)
+
+    def _on_edit_model_from_grid(self, model_name):
+        """Edit a model from the inline grid context menu."""
+        from comfyui.editable import extract_editable_nodes
+        from comfyui.presets_manager import get_comfyui_workflow_presets
+        from .model_dialog import ModelDialog
+
+        presets = get_comfyui_workflow_presets()
+        preset = presets.get(model_name, {})
+        if isinstance(preset, str):
+            preset = {
+                "path": preset, "description": "", "iteratable": False,
+                "note": "", "node_overrides": {}, "is_multi": False,
+            }
+
+        dialog = ModelDialog(
+            parent=self.main_window,
+            model_name=model_name,
+            preset_data=preset,
+            main_window=self.main_window,
+            extract_editable_nodes_func=extract_editable_nodes,
+        )
+
+        if dialog.exec_() == QDialog.Accepted:
+            self.show_status(f"Model '{model_name}' updated", "success")
+            if hasattr(self, '_model_grid'):
+                self._model_grid.refresh()
+
+    def _on_delete_model_from_grid(self, model_name):
+        """Delete a model from the inline grid context menu."""
+        from comfyui.presets_manager import delete_comfyui_workflow_preset
+        from comfyui.ratings import delete_model_data
+
+        if not confirm_action(
+            "Delete Model",
+            f"Delete model '{model_name}'?\n\nThis will also delete all rating data.",
+            self.main_window,
+        ):
+            return
+
+        delete_comfyui_workflow_preset(model_name)
+        delete_model_data(model_name)
+        self.show_status(f"Model '{model_name}' deleted", "success")
+
+        # If the deleted model was currently selected, go back to grid
+        if self.state_manager.current_preset_name == model_name:
+            self.state_manager.current_preset_name = None
+            self._show_model_grid()
+        elif hasattr(self, '_model_grid'):
+            self._model_grid.refresh()
 
     # =========================================================================
     # EDITABLE NODES
@@ -948,6 +1081,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             )
             if config:
                 node_overrides = config.get("node_overrides", {})
+
+        # Clear dangling prompt widget reference before widgets are recreated
+        self._current_prompt_widget = None
 
         # Use widget manager to refresh widgets
         self.widget_manager.refresh_editable_nodes(
@@ -969,6 +1105,10 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Connect signals for newly created widgets
         self._connect_widget_signals()
+
+        # Show/hide input frame based on whether editable widgets exist
+        has_widgets = len(self.widget_manager.dynamic_widgets) > 0
+        self.ui.comfyuiInputFrame.setVisible(has_widgets)
 
     def _connect_widget_signals(self):
         """Connect signals for dynamically created widgets."""
@@ -1173,12 +1313,18 @@ class ComfyUITab(PollingMixin, BaseTab):
     # TEXT/IMAGE CHANGE HANDLERS
     # =========================================================================
 
+    def _on_name_toggle_changed(self, checked):
+        """Show/hide the custom name field based on toggle state.
+
+        Preserves typed text when hidden so re-enabling restores it.
+        """
+        self.ui.ComfyUIName.setVisible(checked)
+        self._on_text_changed()
+
     def _on_text_changed(self):
         """Handle text change in editable nodes - save state with debounce."""
         if not hasattr(self, '_save_timer'):
-            self._save_timer = QTimer(self.main_window)
-            self._save_timer.setSingleShot(True)
-            self._save_timer.timeout.connect(self._save_state)
+            return  # Called before initialize() — ignore
         # Restart timer on each change (200ms debounce for faster crash recovery)
         self._save_timer.start(200)
 
@@ -1217,17 +1363,24 @@ class ComfyUITab(PollingMixin, BaseTab):
         from comfyui.presets_manager import get_workflow_preset_config
         from .polling import format_elapsed_time
 
+        # Guard against double-submit (re-enabled in _on_submit_result/_on_submit_error)
+        if not self.ui.ComfyUISubmit.isEnabled():
+            return
+        self.ui.ComfyUISubmit.setEnabled(False)
+
         # Immediately save state before submission (crash recovery)
         self._save_state()
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
+            self.ui.ComfyUISubmit.setEnabled(True)
             self.show_status("No workflow selected", "error")
             return
 
         # Get network output path - always use user subfolder
         network_output_dir = safe_get_setting("network_output_path", "")
         if not network_output_dir:
+            self.ui.ComfyUISubmit.setEnabled(True)
             self.show_status("Network output path not configured in Settings", "error")
             return
 
@@ -1287,8 +1440,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Inform user about server status when submitting
         if hasattr(self, '_server_is_online') and self._server_is_online is False:
-            from core.settings_manager import safe_get_setting
-            behavior = safe_get_setting("comfyui_server_not_found_behavior", "fail")
+            behavior = self.ui.ServerBehaviorCombo.currentData()
             behavior_msgs = {
                 "wait": "ComfyUI: Server offline \u2014 job will wait for server to come online",
                 "fail_delete": "ComfyUI: Server offline \u2014 job will fail and be deleted",
@@ -1317,12 +1469,14 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Get output_type from workflow config (for metadata)
         output_type = workflow_config.get("output_type", "image") if workflow_config else "image"
 
-        # Store submission context for callbacks
-        self._submit_context = {
+        # Capture submission context before starting worker (bound via closure
+        # so rapid double-submits don't overwrite the first callback's context)
+        submit_context = {
             "network_output_dir": network_output_dir,
             "generation_count": generation_count,
             "output_type": output_type,
         }
+        self._submit_context = submit_context
 
         # Use start_worker helper for cleaner code
         self.start_worker(
@@ -1344,19 +1498,21 @@ class ComfyUITab(PollingMixin, BaseTab):
                 "output_type": output_type,
                 "custom_name": custom_name if custom_name else None,
             },
-            on_result=self._on_submit_result,
+            on_result=lambda result, ctx=submit_context: self._on_submit_result(result, ctx),
             on_error=self._on_submit_error,
             on_progress=self._on_submit_progress
         )
 
-    def _on_submit_result(self, result):
+    def _on_submit_result(self, result, ctx=None):
         """Handle ComfyUI job submission result."""
         from ui_components import StatusColors
 
+        self.ui.ComfyUISubmit.setEnabled(True)
         try:
             logger.debug(f"[ComfyUI] on_result called with: {result}")
             job_ids, error_msg = result
-            ctx = self._submit_context
+            if ctx is None:
+                ctx = self._submit_context
 
             if job_ids:
                 job_count = len(job_ids)
@@ -1398,6 +1554,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Handle ComfyUI job submission error."""
         from ui_components import StatusColors
 
+        self.ui.ComfyUISubmit.setEnabled(True)
         self.main_window.stop_status_spinner()
         self.show_status(f"Submission error: {error_msg}", "error")
         self.update_status_with_spinner(
@@ -1597,9 +1754,7 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Scan all supported file types (images, videos, 3D models, audio)
         from core.config import COMFYUI_OUTPUT_EXTENSIONS
-        scannable_exts = set(COMFYUI_OUTPUT_EXTENSIONS) | {
-            '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.exr',
-        }
+        scannable_exts = set(COMFYUI_OUTPUT_EXTENSIONS)
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:

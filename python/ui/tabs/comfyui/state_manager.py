@@ -43,6 +43,7 @@ class ComfyUIStateManager:
             "generation_count": ui.ComfyUIGenerationCount.value(),
             "seed": ui.ComfyUISeed.value(),
             "custom_name": ui.ComfyUIName.text().strip(),
+            "custom_name_enabled": ui.ComfyUINameToggle.isChecked(),
         }
 
         # Save editable node values
@@ -87,9 +88,13 @@ class ComfyUIStateManager:
         seed = state.get("seed", random.randint(0, 2147483647))
         ui.ComfyUISeed.setValue(seed)
 
-        # Restore custom name
+        # Restore custom name toggle and text
+        custom_name_enabled = state.get("custom_name_enabled", False)
         custom_name = state.get("custom_name", "")
-        ui.ComfyUIName.setText(custom_name)
+        ui.ComfyUINameToggle.setChecked(custom_name_enabled)
+        ui.ComfyUIName.setVisible(custom_name_enabled)
+        if custom_name_enabled:
+            ui.ComfyUIName.setText(custom_name)
 
         # Return editable values to apply after widgets are created
         return state.get("editable_values", {})
@@ -139,6 +144,8 @@ class ComfyUIStateManager:
         # Restore custom name from metadata
         custom_name = metadata.get("custom_name")
         if custom_name:
+            ui.ComfyUINameToggle.setChecked(True)
+            ui.ComfyUIName.setVisible(True)
             ui.ComfyUIName.setText(custom_name)
 
         # Prepare editable values for restoration

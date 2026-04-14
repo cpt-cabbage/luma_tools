@@ -156,7 +156,16 @@
       "mcp__codebase-memory-mcp__get_code_snippet",
       "Bash(rtk git:*)",
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/settings.ui -o resources/ui/tabs/_compiled/ui_settings.py -g python)",
-      "mcp__codebase-memory-mcp__detect_changes"
+      "mcp__codebase-memory-mcp__detect_changes",
+      "mcp__codebase-memory-mcp__trace_path",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/comfyui.ui -o resources/ui/tabs/_compiled/ui_comfyui.py -g python)",
+      "Bash(xargs -I {} sh -c 'echo \"File: {}\"; head -50 {}')",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/comfyui.ui -g python)",
+      "Bash(L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/venv/Scripts/python.exe -m py_compile L:/tools/_studio_tools/AYON/_dev/christophe/la_shot_tools/luma_tools/python/comfyui/server.py)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/comfyui.ui)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/pass_builder.ui)",
+      "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/settings.ui)",
+      "Bash(awk -F: '{print $2}')"
     ],
     "deny": [
       "Read(./python/venv/**)",

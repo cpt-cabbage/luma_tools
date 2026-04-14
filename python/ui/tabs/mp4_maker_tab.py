@@ -53,7 +53,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
     def initialize(self):
         """Initialize MP4 maker tab."""
         from option_button import IndexedOptionButtonManager
-        from core.settings_manager import get_setting, safe_get_setting
+        from core.settings_manager import safe_get_setting
 
         self.ui.MP4Generate.setEnabled(False)
 
@@ -82,7 +82,6 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.ui.MP4AddToGallery.setChecked(add_to_gallery)
 
         # Load Publish to AYON checkbox states
-        from core.settings_manager import safe_get_setting
         publish_to_ayon = safe_get_setting("mp4_maker_publish_to_ayon", False)
         publish_on_farm = safe_get_setting("mp4_maker_publish_on_farm", False)
         self.ui.MP4PublishToAyon.setChecked(publish_to_ayon)
@@ -91,12 +90,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self._update_publish_availability()
 
         # AYON branding for publish checkboxes
-        from icons import get_ayon_icon
-        from core.config import UIColors
-        self.ui.MP4PublishToAyon.setIcon(get_ayon_icon(14))
-        self.ui.MP4PublishToAyon.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
-        self.ui.MP4PublishOnFarm.setIcon(get_ayon_icon(14))
-        self.ui.MP4PublishOnFarm.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+        self.apply_ayon_checkbox_style(self.ui.MP4PublishToAyon)
+        self.apply_ayon_checkbox_style(self.ui.MP4PublishOnFarm)
 
     @property
     def _quality_index(self):

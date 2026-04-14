@@ -186,6 +186,8 @@ class RenderScanMixin(PublishSourceMixin):
         Default scan implementation using _scan_renders_base().
         Override if tab needs completely custom scanning logic.
         """
+        if not hasattr(self, '_source_manager'):
+            return  # Called before initialize() — ignore
         if self._source == "publish":
             self._on_publish_source_selected()
             return

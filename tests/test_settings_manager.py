@@ -15,9 +15,7 @@ from core.settings_manager import (
     safe_get_setting,
     safe_set_setting,
     clear_settings_cache,
-    is_tab_restricted,
     is_user_in_role,
-    has_elevated_access,
     _validate_comfyui_mode,
     _validate_timeout,
     _validate_server_wait_timeout,
@@ -183,10 +181,10 @@ class TestSetSetting:
         clear_settings_cache()
         mock_save = MagicMock()
         with patch.object(sm._global_settings, "_load_fn", return_value={}), \
-             patch.object(sm._global_settings, "_save_fn", mock_save):
+             patch("core.settings_manager._save_settings_unlocked", mock_save):
             set_setting("comfyui_path", "/new/path", verbose=False)
             mock_save.assert_called_once()
-            saved = mock_save.call_args[0][0]
+            saved = mock_save.call_args[0][1]  # (settings_type, settings)
             assert saved["comfyui_path"] == "/new/path"
 
     def test_raises_for_unknown_key(self):
@@ -198,9 +196,9 @@ class TestSetSetting:
         clear_settings_cache()
         mock_save = MagicMock()
         with patch.object(sm._global_settings, "_load_fn", return_value={}), \
-             patch.object(sm._global_settings, "_save_fn", mock_save):
+             patch("core.settings_manager._save_settings_unlocked", mock_save):
             set_setting("comfyui_mode", "INVALID", verbose=False)
-            saved = mock_save.call_args[0][0]
+            saved = mock_save.call_args[0][1]  # (settings_type, settings)
             assert saved["comfyui_mode"] == "embedded"  # validator returned default
 
 
@@ -243,9 +241,6 @@ class TestGetRoleSettingsKey:
     def test_admin(self):
         assert _get_role_settings_key("admin") == "admin_users"
 
-    def test_sup(self):
-        assert _get_role_settings_key("sup") == "sup_users"
-
     def test_invalid_role_raises(self):
         with pytest.raises(ValueError, match="Unknown role"):
             _get_role_settings_key("viewer")
@@ -270,49 +265,6 @@ class TestIsUserInRole:
     def test_empty_username(self):
         assert is_user_in_role("", "admin") is False
         assert is_user_in_role(None, "admin") is False
-
-
-class TestHasElevatedAccess:
-    def test_admin_has_elevated(self):
-        import core.settings_manager as sm
-        clear_settings_cache()
-        with patch.object(sm._global_settings, "_load_fn",
-                          return_value={"admin_users": ["alice"], "sup_users": []}):
-            assert has_elevated_access("alice") is True
-
-    def test_sup_has_elevated(self):
-        import core.settings_manager as sm
-        clear_settings_cache()
-        with patch.object(sm._global_settings, "_load_fn",
-                          return_value={"admin_users": [], "sup_users": ["bob"]}):
-            assert has_elevated_access("bob") is True
-
-    def test_regular_user_no_elevation(self):
-        import core.settings_manager as sm
-        clear_settings_cache()
-        with patch.object(sm._global_settings, "_load_fn",
-                          return_value={"admin_users": [], "sup_users": []}):
-            assert has_elevated_access("charlie") is False
-
-
-# ============================================================================
-# Tab restrictions
-# ============================================================================
-
-class TestIsTabRestricted:
-    def test_restricted(self):
-        import core.settings_manager as sm
-        clear_settings_cache()
-        with patch.object(sm._global_settings, "_load_fn",
-                          return_value={"restricted_tabs": ["comfyui", "gallery"]}):
-            assert is_tab_restricted("comfyui") is True
-
-    def test_not_restricted(self):
-        import core.settings_manager as sm
-        clear_settings_cache()
-        with patch.object(sm._global_settings, "_load_fn",
-                          return_value={"restricted_tabs": ["comfyui", "gallery"]}):
-            assert is_tab_restricted("passbuilder") is False
 
 
 # ============================================================================

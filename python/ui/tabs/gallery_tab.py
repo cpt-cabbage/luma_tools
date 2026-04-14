@@ -32,31 +32,15 @@ from .gallery.groups_panel import GroupsFilterPanel
 logger = logging.getLogger(__name__)
 
 
+from core.utils import is_valid_username
+
+
 def _validate_username(username: str) -> bool:
-    """
-    Validate username contains only safe characters.
-
-    Args:
-        username: Username to validate
-
-    Returns:
-        True if username is valid, False otherwise
-    """
-    if not username or not isinstance(username, str):
-        return False
-
-    # Strip whitespace and check if empty
-    username = username.strip()
-    if not username:
-        return False
-
-    # Only allow alphanumeric, underscore, hyphen, and period
-    # This prevents path traversal attacks like "../other_user"
-    if not re.match(r'^[a-zA-Z0-9._-]+$', username):
+    """Backwards-compat wrapper that logs the gallery-specific tag."""
+    ok = is_valid_username(username)
+    if not ok:
         logger.error(f"[Gallery] Invalid username characters: {username}")
-        return False
-
-    return True
+    return ok
 
 from core.import_utils import get_event_bus
 pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
@@ -319,6 +303,17 @@ class GalleryTab(BaseTab):
         with self._cache_lock:
             self._section_items.clear()
 
+    def invalidate_user_cache(self, username: str) -> None:
+        """Drop cached gallery items for `username` so the next view rescans.
+
+        Used by other tabs (e.g. ComfyUI polling) when new outputs land for a
+        user the gallery isn't currently showing.
+        """
+        if not username:
+            return
+        with self._cache_lock:
+            self._user_cache.pop(username, None)
+
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         # Re-enable drop targets on gallery widgets
@@ -455,6 +450,7 @@ class GalleryTab(BaseTab):
         base_path = get_setting("network_output_path")
         if not base_path or not isinstance(base_path, str):
             logger.error("[Gallery] network_output_path not configured or invalid")
+            self.show_status("Gallery: network_output_path not configured — see Settings tab", "warning")
             return None
 
         # Strip whitespace
@@ -781,9 +777,8 @@ class GalleryTab(BaseTab):
         """
         self._current_filter = (filter_type, filter_id if filter_id else None)
 
-        # Save collapsed state when filter changes (if collapsed state changed)
-        from core.settings_manager import set_setting
-        set_setting("gallery_sidebar_collapsed", self._groups_panel._is_collapsed, verbose=False)
+        # Note: collapsed state is persisted by _on_sidebar_collapsed when it
+        # actually changes; no need to re-save it on every filter click.
 
         # Redisplay with filter applied
         self._redisplay_items()
@@ -941,13 +936,15 @@ class GalleryTab(BaseTab):
                 widget.update_favorites_state()
 
     def show_status_message(self, message, duration=2000):
-        """Show a status message in the statusbar.
+        """Show a status message in the statusbar, auto-dismissing after duration.
 
         Args:
             message: Message to display
             duration: Duration in milliseconds (default 2000)
         """
         self.show_status(message, "info")
+        if duration > 0:
+            QTimer.singleShot(duration, lambda: self.show_status("", "info"))
 
     # =========================================================================
     # EVENT BUS INTEGRATION (Cross-tab communication)
@@ -958,48 +955,24 @@ class GalleryTab(BaseTab):
         if not EVENT_BUS_AVAILABLE:
             return
 
-        # Subscribe to job output ready for refresh triggers
-        pipeline_events.job_output_ready.connect(self._on_job_output_ready)
-
-        # Subscribe to "use as input" from ourselves (for consistency)
-        pipeline_events.use_as_input.connect(self._on_use_as_input_requested)
-
-        # Subscribe to refresh requests from other tabs (e.g., settings)
-        pipeline_events.gallery_refresh_requested.connect(self._on_refresh_requested)
-
-        # Subscribe to viewer action requests (from image viewers)
-        pipeline_events.toggle_item_like.connect(self._on_toggle_item_like)
-        pipeline_events.add_item_to_group.connect(self._on_add_item_to_group)
-        pipeline_events.create_item_group.connect(self._on_create_item_group)
-        pipeline_events.show_item_properties.connect(self._on_show_item_properties)
-        pipeline_events.publish_item.connect(self._on_publish_item)
-        pipeline_events.view_input_image.connect(self._on_view_input_image)
-        pipeline_events.request_groups_list.connect(self._on_request_groups_list)
-        pipeline_events.request_item_like_status.connect(self._on_request_item_like_status)
+        # Track active subscriptions for clean disconnect on cleanup
+        self._event_bus_subscriptions = [
+            (pipeline_events.gallery_refresh_requested, self._on_refresh_requested),
+            (pipeline_events.view_input_image, self._on_view_input_image),
+        ]
+        for signal, slot in self._event_bus_subscriptions:
+            signal.connect(slot)
 
         logger.debug("Gallery tab subscribed to event bus")
 
-    def _on_job_output_ready(self, job_id: str, output_path: str):
-        """Handle single output ready event - animate new item arrival."""
-        logger.debug(f"[Gallery] Output ready: {output_path}")
-        # The refresh is already triggered by polling, but we could add
-        # special handling here for immediate item highlighting
-
-    def _on_use_as_input_requested(self, paths: list):
-        """Handle request to use gallery images as ComfyUI inputs."""
-        # This is handled by operations_manager, but we could add logic here
-        # to switch tabs or show confirmation
-        pass
-
     def _emit_selection_changed(self):
-        """Emit selection changed event to event bus."""
+        """Update app_state with current selection (for cross-tab access)."""
         if not EVENT_BUS_AVAILABLE:
             return
 
         selected = self._selection_manager.get_selected()
         from core.state_manager import app_state
         app_state.gallery_selected_paths = list(selected)
-        pipeline_events.selection_changed.emit(list(selected), len(selected))
 
     def _on_refresh_requested(self, force: bool = False):
         """Handle refresh request from event bus.
@@ -1015,66 +988,15 @@ class GalleryTab(BaseTab):
                 self.clear_widget_cache()
         self._on_refresh(force=force)
 
-        # Navigate to the image
-        if hasattr(self, 'select_and_scroll_to_item'):
-            self.select_and_scroll_to_item(image_path)
-        elif hasattr(self, '_selection_manager'):
-            self._selection_manager.select_item_by_path(image_path)
-
     # =========================================================================
     # EVENT BUS HANDLERS (image viewer actions)
     # =========================================================================
 
-    def _on_toggle_item_like(self, path: str, source: str):
-        """Handle toggle like request from event bus (e.g., image viewer)."""
-        if not path:
-            return
-        self._favorites_manager.toggle_like(path)
-
-    def _on_add_item_to_group(self, path: str, group_id: str, source: str):
-        """Handle add to group request from event bus."""
-        if not path or not group_id:
-            return
-        self._favorites_manager.add_to_group(path, group_id)
-
-    def _on_create_item_group(self, path: str, group_name: str, color: str, source: str):
-        """Handle create group request from event bus."""
-        if not path or not group_name:
-            return
-        group = self._favorites_manager.create_group(group_name, color)
-        if group:
-            self._favorites_manager.add_to_group(path, group.group_id)
-
-    def _on_show_item_properties(self, path: str, source: str):
-        """Handle show properties request from event bus."""
-        if not path:
-            return
-        self._operations_manager.show_properties_for_path(path)
-
-    def _on_publish_item(self, path: str, source: str):
-        """Handle publish request from event bus."""
-        if not path:
-            return
-        self._operations_manager.publish_items([path])
-
-    def _on_view_input_image(self, path: str, source: str):
+    def _on_view_input_image(self, path: str):
         """Handle view input image request from event bus."""
         if not path:
             return
         self._viewer_manager.open_viewer(path)
-
-    def _on_request_groups_list(self, source: str):
-        """Handle request for groups list from event bus."""
-        if EVENT_BUS_AVAILABLE:
-            groups = self._favorites_manager.get_groups()
-            groups_data = [{"id": g.group_id, "name": g.name, "color": g.color} for g in groups]
-            pipeline_events.groups_list_response.emit(groups_data, source)
-
-    def _on_request_item_like_status(self, path: str, source: str):
-        """Handle request for item like status from event bus."""
-        if EVENT_BUS_AVAILABLE and path:
-            is_liked = self._favorites_manager.is_liked(path)
-            pipeline_events.item_like_status_response.emit(path, is_liked, source)
 
     def _on_favorites_changed(self, *args):
         """Forward favorites changes to event bus for cross-tab sync.
@@ -1284,14 +1206,13 @@ class GalleryTab(BaseTab):
             self._groups_panel.cleanup()
 
         # Disconnect event bus subscriptions
-        if EVENT_BUS_AVAILABLE:
-            try:
-                pipeline_events.job_output_ready.disconnect(self._on_job_output_ready)
-                pipeline_events.use_as_input.disconnect(self._on_use_as_input_requested)
-                pipeline_events.gallery_refresh_requested.disconnect(self._on_refresh_requested)
-            except (RuntimeError, TypeError):
-                # Already disconnected or invalid connection
-                pass
+        if EVENT_BUS_AVAILABLE and hasattr(self, "_event_bus_subscriptions"):
+            for signal, slot in self._event_bus_subscriptions:
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+            self._event_bus_subscriptions = []
 
         # Stop refresh controller timers
         if hasattr(self, '_refresh_controller') and self._refresh_controller:

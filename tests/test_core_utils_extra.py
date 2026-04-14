@@ -6,9 +6,6 @@ from core.utils import (
     replace_frame_tokens,
     format_duration,
     plural,
-    nested_get,
-    nested_set,
-    nested_delete,
 )
 from core.error_handling import CancellationError, check_cancelled
 
@@ -97,68 +94,6 @@ class TestPlural:
 
     def test_negative(self):
         assert plural(-1, "file") == "-1 files"
-
-
-# ============================================================================
-# nested_get / nested_set / nested_delete
-# ============================================================================
-
-class TestNestedGet:
-    def test_basic(self):
-        d = {"a": {"b": {"c": 42}}}
-        assert nested_get(d, ["a", "b", "c"]) == 42
-
-    def test_missing_key(self):
-        d = {"a": {"b": 1}}
-        assert nested_get(d, ["a", "x"]) is None
-
-    def test_custom_default(self):
-        assert nested_get({}, ["a"], "fallback") == "fallback"
-
-    def test_empty_keys(self):
-        d = {"a": 1}
-        assert nested_get(d, []) == d
-
-    def test_intermediate_not_dict(self):
-        d = {"a": "not_a_dict"}
-        assert nested_get(d, ["a", "b"], "default") == "default"
-
-    def test_value_is_none(self):
-        d = {"a": {"b": None}}
-        assert nested_get(d, ["a", "b"]) is None
-
-
-class TestNestedSet:
-    def test_create_path(self):
-        d = {}
-        nested_set(d, ["a", "b", "c"], 42)
-        assert d == {"a": {"b": {"c": 42}}}
-
-    def test_overwrite_existing(self):
-        d = {"a": {"b": 1}}
-        nested_set(d, ["a", "b"], 2)
-        assert d["a"]["b"] == 2
-
-    def test_single_key(self):
-        d = {}
-        nested_set(d, ["key"], "value")
-        assert d == {"key": "value"}
-
-
-class TestNestedDelete:
-    def test_delete_existing(self):
-        d = {"a": {"b": {"c": 42}}}
-        assert nested_delete(d, ["a", "b", "c"]) is True
-        assert d == {"a": {"b": {}}}
-
-    def test_delete_missing(self):
-        d = {"a": 1}
-        assert nested_delete(d, ["x", "y"]) is False
-
-    def test_single_key(self):
-        d = {"key": "value"}
-        assert nested_delete(d, ["key"]) is True
-        assert d == {}
 
 
 # ============================================================================

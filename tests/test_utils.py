@@ -264,27 +264,6 @@ class TestByteSize:
         assert a * 2 == 2048
 
 
-class TestPadFrameNumber:
-    """Tests for pad_frame_number function."""
-
-    def test_default_padding(self):
-        """Test default 4-digit padding."""
-        from core.utils import pad_frame_number
-
-        assert pad_frame_number(1) == "0001"
-        assert pad_frame_number(42) == "0042"
-        assert pad_frame_number(999) == "0999"
-        assert pad_frame_number(1000) == "1000"
-
-    def test_custom_padding(self):
-        """Test custom padding values."""
-        from core.utils import pad_frame_number
-
-        assert pad_frame_number(1, 2) == "01"
-        assert pad_frame_number(1, 6) == "000001"
-        assert pad_frame_number(42, 3) == "042"
-
-
 class TestUpdatePathVersion:
     """Tests for update_path_version function."""
 

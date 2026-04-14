@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QScrollArea, QFrame, QCheckBox,
     QDoubleSpinBox, QTabWidget, QListWidget,
-    QInputDialog, QMessageBox, QComboBox, QSplitter
+    QInputDialog, QComboBox, QSplitter
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette, QKeyEvent
@@ -33,7 +33,7 @@ from dialog_helpers import confirm_action, show_error, show_info
 logger = logging.getLogger(__name__)
 
 
-# Color palette (matching ModelPickerOverlay)
+# Color palette
 OVERLAY_BACKDROP = QColor(0, 0, 0, 180)
 CONTENT_BG = QColor(30, 30, 35)
 CARD_BG = QColor(40, 40, 45)

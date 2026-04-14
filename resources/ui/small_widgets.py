@@ -731,52 +731,9 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
     @staticmethod
     def _extract_video_frame_with_duration(video_path):
-        """Extract first frame and duration from video using FFmpeg.
-
-        Returns:
-            tuple: (image_data: bytes, duration: float) or None on error
-        """
-        import subprocess
-        import tempfile
-        import os
-        from core.config import FFMPEG_PATH
-        from core.utils import get_media_duration
-
-        if not FFMPEG_PATH:
-            return None
-
-        try:
-            # Extract duration
-            duration = get_media_duration(video_path)
-
-            # Extract first frame
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                tmp_path = tmp.name
-            cmd = [
-                FFMPEG_PATH, '-i', video_path,
-                '-vframes', '1', '-y', tmp_path
-            ]
-            import os
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.run(cmd, capture_output=True, timeout=10, creationflags=creationflags)
-            from PySide6.QtGui import QImage
-            from PySide6.QtCore import QBuffer, QIODevice, Qt
-            image = QImage(tmp_path)
-            os.remove(tmp_path)
-            if image.isNull():
-                return None
-
-            scaled = image.scaled(
-                150, 150,  # THUMBNAIL_SIZE
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            buffer = QBuffer()
-            buffer.open(QIODevice.WriteOnly)
-            scaled.save(buffer, "PNG")
-            return (buffer.data().data(), duration)
-        except Exception:
-            return None
+        """Extract first frame and duration from video using FFmpeg."""
+        from thumbnail_base import extract_video_frame_with_duration
+        return extract_video_frame_with_duration(video_path, 150, 150)
 
     def _on_video_thumbnail_loaded(self, result):
         """Handle video thumbnail and duration loaded."""
@@ -1391,7 +1348,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 output_dir,
                 metadata=metadata,
                 parent=parent_window,
-                show_comfyui_features=app_state.has_elevated_access
+                show_comfyui_features=True
             )
             
             dialog.exec()

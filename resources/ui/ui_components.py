@@ -863,9 +863,15 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                 self.thumbnail_label.setPixmap(pixmap)
                 return
 
-        # Load from disk in background
-        self._load_worker = Worker(self._load_image_data, self.path)
-        self._load_worker.signals.result.connect(self._on_image_thumbnail_loaded)
+        # Load from disk in background. Tag the worker with the current path
+        # so a stale completion (e.g. after the widget is recycled to another
+        # path) doesn't paint the wrong thumbnail.
+        self._current_load_path = self.path
+        load_path = self.path
+        self._load_worker = Worker(self._load_image_data, load_path)
+        self._load_worker.signals.result.connect(
+            lambda data, p=load_path: self._on_image_thumbnail_loaded(data, p)
+        )
         self._load_worker.signals.error.connect(lambda msg, tb: self._on_thumbnail_error())
         QThreadPool.globalInstance().start(self._load_worker)
 
@@ -887,8 +893,14 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         scaled.save(buffer, "PNG")
         return buffer.data().data()
 
-    def _on_image_thumbnail_loaded(self, image_data):
+    def _on_image_thumbnail_loaded(self, image_data, loaded_path=None):
         if not isValid(self):
+            return
+        # Drop stale results: if the widget's path changed since we kicked off
+        # this load (or another newer load is in flight), discard.
+        if loaded_path is not None and loaded_path != self.path:
+            return
+        if loaded_path is not None and loaded_path != getattr(self, "_current_load_path", loaded_path):
             return
         if image_data is None:
             self.thumbnail_label.setPixmap(self._create_placeholder("?"))
@@ -974,53 +986,13 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     @staticmethod
     def _extract_video_frame_with_duration(video_path):
-        """
-        Extract first frame and duration from video using FFmpeg.
-
-        Returns:
-            tuple: (image_data: bytes, duration: float) or None on error
-        """
-        import subprocess
-        import tempfile
-        from core.config import FFMPEG_PATH
-        from core.utils import get_media_duration
-
-        if not FFMPEG_PATH:
-            return None
-
-        try:
-            # Extract duration
-            duration = get_media_duration(video_path)
-
-            # Extract first frame
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                tmp_path = tmp.name
-            cmd = [
-                FFMPEG_PATH, '-i', video_path,
-                '-vframes', '1', '-y', tmp_path
-            ]
-            import os
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.run(cmd, capture_output=True, timeout=10, creationflags=creationflags)
-            from PySide6.QtGui import QImage
-            from PySide6.QtCore import QBuffer, QIODevice
-            image = QImage(tmp_path)
-            os.remove(tmp_path)
-            if image.isNull():
-                return None
-
-            scaled = image.scaled(
-                ThumbnailWidget.THUMBNAIL_SIZE[0],
-                ThumbnailWidget.THUMBNAIL_SIZE[1],
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            buffer = QBuffer()
-            buffer.open(QIODevice.WriteOnly)
-            scaled.save(buffer, "PNG")
-            return (buffer.data().data(), duration)
-        except Exception:
-            return None
+        """Extract first frame and duration from video using FFmpeg."""
+        from thumbnail_base import extract_video_frame_with_duration
+        return extract_video_frame_with_duration(
+            video_path,
+            ThumbnailWidget.THUMBNAIL_SIZE[0],
+            ThumbnailWidget.THUMBNAIL_SIZE[1]
+        )
 
     def _on_video_thumbnail_loaded(self, result):
         """Handle video thumbnail and duration loaded."""
@@ -1674,7 +1646,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                 self.output_dir,
                 metadata=metadata,
                 parent=parent_window,
-                show_comfyui_features=app_state.has_elevated_access
+                show_comfyui_features=True
             )
             dialog.exec()
         except Exception as e:

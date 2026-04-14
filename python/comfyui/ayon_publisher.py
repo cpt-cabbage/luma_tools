@@ -416,17 +416,23 @@ class ComfyUIPublishDialog(QDialog):
         self.product_type_combo.addItems(product_types)
 
         # Auto-detect type from file extension
+        from core.config import (
+            IMAGE_EXTENSIONS,
+            VIDEO_EXTENSIONS,
+            AUDIO_EXTENSIONS,
+            MODEL_EXTENSIONS,
+        )
         ext = os.path.splitext(filename)[1].lower()
         default_type = "image"  # Default
-        if ext in ['.glb', '.gltf', '.obj', '.fbx', '.usd', '.usda', '.usdc', '.usdz']:
+        if ext in MODEL_EXTENSIONS:
             default_type = "model"
-        elif ext in ['.abc', '.npz']:
+        elif ext in {'.abc', '.npz'}:
             default_type = "pointcache"
-        elif ext in ['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.exr']:
+        elif ext in IMAGE_EXTENSIONS:
             default_type = "image"
-        elif ext in ['.mp4', '.mov', '.avi']:
+        elif ext in VIDEO_EXTENSIONS:
             default_type = "review"
-        elif ext in ['.wav', '.mp3', '.aiff']:
+        elif ext in AUDIO_EXTENSIONS or ext == '.aiff':
             default_type = "audio"
 
         idx = self.product_type_combo.findText(default_type)

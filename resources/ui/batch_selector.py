@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QPen, QFont, QDrag
 
 
-VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv'}
+from core.config import VIDEO_EXTENSIONS
 
 
 # Global registry for tracking active drags between BatchImageSelector widgets

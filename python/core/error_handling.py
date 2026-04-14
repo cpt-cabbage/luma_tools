@@ -96,36 +96,6 @@ def log_error(operation_name, error, variable=None, log_func=None):
         log_func(f"Error {operation_name}: {error}")
 
 
-def format_error(operation_name, error, variable=None, include_traceback=False):
-    """
-    Format an error message string without logging.
-
-    Args:
-        operation_name: Description of what was being done
-        error: The exception or error message
-        variable: Optional variable/path that was being processed
-        include_traceback: Include full traceback in message
-
-    Returns:
-        str: Formatted error message
-
-    Example:
-        msg = format_error("reading file", e, file_path)
-    """
-    import traceback
-
-    if variable is not None:
-        msg = f"Error {operation_name} {variable}: {error}"
-    else:
-        msg = f"Error {operation_name}: {error}"
-
-    if include_traceback and isinstance(error, Exception):
-        tb = traceback.format_exc()
-        msg = f"{msg}\n{tb}"
-
-    return msg
-
-
 class CancellationError(Exception):
     """Raised when an operation is cancelled by the user."""
     pass

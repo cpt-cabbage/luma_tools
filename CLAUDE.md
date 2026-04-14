@@ -283,8 +283,8 @@ pipeline_events.job_completed.connect(self._on_job_completed)
 
 **Key signal groups:**
 - **ComfyUI → Gallery:** `job_submitted`, `job_progress`, `job_output_ready`, `job_completed`, `job_failed`, `all_jobs_completed`
-- **Gallery → ComfyUI:** `use_as_input`, `copy_settings`, `selection_changed`
-- **Viewer:** `toggle_item_like`, `add_item_to_group`, `show_item_properties`
+- **Gallery → ComfyUI:** `use_as_input`, `copy_settings`
+- **Viewer → Gallery:** `view_input_image`, `gallery_refresh_requested`
 
 Includes thread-safe job tracking via `JobInfo` dataclass and `GalleryContext` for state sharing.
 
@@ -345,7 +345,7 @@ User Workstation                    Farm Worker
 - **3D Loaders:** Strategy pattern in `geo/loaders/factory.py` — `load_model()` tries loaders by format priority (USD→Trimesh→Assimp→Open3D→SMPL)
 - **Pass Building:** `find_renders()` → `detect_passes()` → `PassBuilder.build_passes()` (OIIO/Deadline) → AYON publish
 - **MP4 Generation:** Scan renders → configure quality/burn-in → `services/mp4_maker.py` (FFmpeg)
-- **File Scanners:** Strategy pattern in `services/scanners.py` — `RenderScanner`, `get_scanner(type)`, `scan_files(dir, type)`
+- **File Scanners:** `services/file_operations.py` (`fast_scandir`, `find_renders`, `find_hip_files`, `find_comp_files`); shot-context scans live in `services/scan_service.DirectoryScanner`
 
 ## Configuration
 
@@ -472,6 +472,8 @@ When a bug appears during testing, **always determine if it's pre-existing befor
 
 ### UI Modifications
 Edit `.ui` files in Qt Designer, update tab logic in `python/ui/tabs/`, styles in `resources/ui/la_shot_tools_styles.qss`.
+
+**NEVER modify files under `resources/ui/tabs/_compiled/ui_*.py` directly.** These files are regenerated from the `.ui` source on every deploy (`deploy_production.bat`), so any manual edits, stub widgets, or hand-patched parents get silently wiped and the app breaks in production. No bandaids, no "hidden stub" widgets added to the compiled output to satisfy code references, no monkey-patching widget parents in the compiled `.py`. If `tab.py` references a widget that doesn't exist, the fix is either (a) add the widget properly to the `.ui` file and recompile, or (b) remove the dead reference from the Python code — never (c) hand-edit the compiled `.py`.
 
 **After editing any `.ui` file**, recompile its Python equivalent:
 ```bash

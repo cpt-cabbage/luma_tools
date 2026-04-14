@@ -43,7 +43,10 @@ def detect_passes(render_file):
 
     choutput = result.stdout
 
-    channelsraw = substring_after(choutput, "channel list:")
+    # OIIO `-v` prints additional metadata lines after the channel list.
+    # Take only the first line after the marker so subsequent attribute lines
+    # don't get interpreted as channel names.
+    channelsraw = substring_after(choutput, "channel list:").splitlines()[0] if "channel list:" in choutput else ""
     channelsraw = re.sub(r"\(.*?\)", "", channelsraw)
     channelscaptured = channelsraw.split(",")
 
@@ -123,26 +126,39 @@ def get_pass_file_path(working_dir, render_name):
     return os.path.join(shot_data_dir, f"{render_name}.json")
 
 
-def build_oiio_command(passes_dict, denoised_path, renders_path, output_path):
+def build_oiio_command(passes_dict, denoised_path, renders_path, output_path, is_denoised=True):
     """
     Build OIIO command for combining passes.
 
+    When is_denoised=True (default), beauty channels are read from the denoised
+    file and AOVs from the raw render. When is_denoised=False, everything is read
+    from the raw render file.
+
     Args:
         passes_dict: Dictionary of passes to build
-        denoised_path: Path to denoised renders
+        denoised_path: Path to denoised renders (ignored when is_denoised=False)
         renders_path: Path to raw renders
         output_path: Output path for combined passes
+        is_denoised: Whether denoised renders are available
 
     Returns:
         str: OIIO command arguments
     """
-    # Build Denoise Passes String
+    # When not denoised, read beauty from raw render instead
+    if not is_denoised:
+        denoised_path = renders_path
+    # Build Denoise Passes String — exclude only the actual normal channels
+    # (normal.x/y/z), not arbitrary substrings like 'normal_map' or 'normalize'.
     denoised_passes = ""
+    _NORMAL_CHANNEL_NAMES = {"normal.x", "normal.y", "normal.z"}
     for key, val in passes_dict.items():
+        if key == "normal":
+            continue
         for cur in val:
-            if "normal" not in cur:
-                denoised_passes += str(cur).strip()
-                denoised_passes += ","
+            if str(cur).strip() in _NORMAL_CHANNEL_NAMES:
+                continue
+            denoised_passes += str(cur).strip()
+            denoised_passes += ","
 
     # Remove last comma
     if denoised_passes:

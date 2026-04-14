@@ -1,4 +1,4 @@
-"""Tests for core/caching.py — TTL cache, ThreadSafeCache, CachedProperty."""
+"""Tests for core/caching.py — TTL cache, ThreadSafeCache."""
 
 import time
 import threading

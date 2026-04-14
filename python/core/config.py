@@ -76,7 +76,7 @@ def get_ocio_config():
 
 
 _cached_bundle_name = None
-_bundle_lock = threading.Lock()
+_bundle_lock = threading.RLock()
 
 
 def get_ayon_bundle():
@@ -99,13 +99,9 @@ def get_ayon_bundle():
         logger.debug("AYON bundle from AYON_BUNDLE_NAME env var: %s", env_bundle)
         return env_bundle
 
-    # Return cached result from a previous API call (fast path, no lock needed)
-    if _cached_bundle_name:
-        return _cached_bundle_name
-
     # Resolve from AYON server API (serialize concurrent callers)
     with _bundle_lock:
-        # Double-check after acquiring lock
+        # Check under lock for thread safety
         if _cached_bundle_name:
             return _cached_bundle_name
 
@@ -163,26 +159,22 @@ def _get_cached_tool_path(setting_key: str) -> str:
 # ============================================================================
 
 if _AYON_DIR:
-    OIIO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
-    OIIO_PATH = _safe_glob(OIIO_ROOT)
+    _oiio_root = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "oiiotool*")
+    OIIO_PATH = _safe_glob(_oiio_root)
 
-    OIIO_INFO_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "iinfo*")
-    OIIO_INFO_PATH = _safe_glob(OIIO_INFO_ROOT)
+    _oiio_info_root = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "oiio_*", "bin", "iinfo*")
+    OIIO_INFO_PATH = _safe_glob(_oiio_info_root)
 
-    FFMPEG_ROOT = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
-    FFMPEG_PATH = _safe_glob(FFMPEG_ROOT)
+    _ffmpeg_root = os.path.join(_AYON_DIR, "addons_resources", "ayon_third_party", "ffmpeg_*", "bin", "ffmpeg*")
+    FFMPEG_PATH = _safe_glob(_ffmpeg_root)
 
-    AYON_CONSOLE_ROOT = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
-    AYON_CONSOLE = _safe_glob(AYON_CONSOLE_ROOT)
+    _ayon_console_root = os.path.join(_AYON_DIR, "app", "AYON*", "ayon_console*")
+    AYON_CONSOLE = _safe_glob(_ayon_console_root)
 else:
     # Standalone mode - try to find tools via PATH, then fall back to cached paths
-    OIIO_ROOT = None
     OIIO_PATH = shutil.which("oiiotool") or _get_cached_tool_path("cached_oiio_path")
-    OIIO_INFO_ROOT = None
     OIIO_INFO_PATH = shutil.which("iinfo") or _get_cached_tool_path("cached_oiio_info_path")
-    FFMPEG_ROOT = None
     FFMPEG_PATH = shutil.which("ffmpeg") or _get_cached_tool_path("cached_ffmpeg_path")
-    AYON_CONSOLE_ROOT = None
     AYON_CONSOLE = None
 
 # Deadline - try both AYON path and system PATH
@@ -232,7 +224,7 @@ DEADLINE_PRIORITY_PUBLISH = 50
 DEADLINE_DEPARTMENT = "compositing"
 DEADLINE_CHUNK_SIZE = 1
 
-DEADLINE_GROUP_COMPFYUI = "temp_compute"
+DEADLINE_GROUP_COMFYUI = "temp_compute"
 DEADLINE_PRIORITY_COMFYUI = 50
 DEADLINE_JOB_NAME_PREFIX = "LUMA TOOLS - "
 
@@ -316,7 +308,7 @@ FRAME_PADDING_FORMAT = f"%0{FRAME_PADDING}d"
 # ============================================================================
 
 # Directory structure expectations (relative to task directory)
-RENDERS_SUBPATH = r"img\renders"
+RENDERS_SUBPATH = os.path.join("img", "renders")
 USD_SUBPATH = r"usd_files"
 DEFAULT_TASK = "lookdev"
 
@@ -324,27 +316,59 @@ DEFAULT_TASK = "lookdev"
 COMP_EXTENSIONS = [".nk", ".comp"]
 HIP_EXTENSION = ".hip"
 EXR_EXTENSION = ".exr"
-COMFYUI_SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr", ".hdr", ".dpx", ".tga"]
-# Output file extensions that ComfyUI workflows can generate (images, models, etc.)
-COMFYUI_OUTPUT_EXTENSIONS = [
-    # Images
-    ".png", ".jpg", ".jpeg", ".webp", ".exr", ".tiff", ".tif", ".bmp", ".gif",
-    # 3D/Motion files
-    ".fbx", ".obj", ".gltf", ".glb", ".usd", ".usda", ".usdc", ".usdz",
-    # Video/Animation
-    ".mp4", ".mov", ".avi", ".webm",
-    # Audio
-    ".wav", ".mp3", ".flac", ".ogg",
-    # Other data formats
-    ".npy", ".npz", ".safetensors", ".pt", ".pth", ".ckpt", ".bin",
-]
+# =====================================================================
+# Single source of truth for media file extensions.
+# All other modules MUST import from here rather than redeclare locally —
+# we lost data ('.webm' missing from one publisher) the last time these
+# drifted. Add a new format here and it's available everywhere.
+# =====================================================================
 
-# Gallery file extension sets (used by gallery loader and prewarm)
-GALLERY_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.exr', '.tiff', '.tif', '.bmp', '.gif'}
-GALLERY_MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae'}
-GALLERY_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.webm'}
-GALLERY_AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.ogg'}
-GALLERY_SUPPORTED_EXTENSIONS = GALLERY_IMAGE_EXTENSIONS | GALLERY_MODEL_EXTENSIONS | GALLERY_VIDEO_EXTENSIONS | GALLERY_AUDIO_EXTENSIONS
+# Image formats Luma Tools understands across the gallery, viewers,
+# drag-drop, ComfyUI inputs/outputs, and AYON publishing.
+IMAGE_EXTENSIONS = frozenset({
+    '.png', '.jpg', '.jpeg', '.webp',
+    '.exr', '.hdr', '.dpx',
+    '.tiff', '.tif', '.bmp', '.gif', '.tga',
+})
+
+# Video formats accepted by viewers, drag-drop, and ComfyUI outputs.
+VIDEO_EXTENSIONS = frozenset({
+    '.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv', '.m4v',
+})
+
+# Audio formats accepted by viewers and ComfyUI outputs.
+AUDIO_EXTENSIONS = frozenset({
+    '.wav', '.mp3', '.flac', '.ogg',
+})
+
+# 3D model formats (gallery thumbnails, viewer, ComfyUI 3D widgets, AYON).
+MODEL_EXTENSIONS = frozenset({
+    '.glb', '.gltf', '.fbx', '.obj',
+    '.usd', '.usda', '.usdc', '.usdz',
+    '.dae', '.stl', '.ply',
+})
+
+# Other data formats ComfyUI workflows may emit.
+COMFYUI_DATA_EXTENSIONS = frozenset({
+    '.npy', '.npz', '.safetensors', '.pt', '.pth', '.ckpt', '.bin',
+})
+
+# Backwards-compatible aliases — names used throughout the codebase.
+GALLERY_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS
+GALLERY_VIDEO_EXTENSIONS = VIDEO_EXTENSIONS
+GALLERY_AUDIO_EXTENSIONS = AUDIO_EXTENSIONS
+GALLERY_MODEL_EXTENSIONS = MODEL_EXTENSIONS
+GALLERY_SUPPORTED_EXTENSIONS = (
+    IMAGE_EXTENSIONS | MODEL_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+)
+
+# ComfyUI input formats (what the user can feed into a workflow).
+COMFYUI_SUPPORTED_EXTENSIONS = sorted(IMAGE_EXTENSIONS)
+
+# ComfyUI output formats (what a workflow can produce).
+COMFYUI_OUTPUT_EXTENSIONS = sorted(
+    IMAGE_EXTENSIONS | MODEL_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | COMFYUI_DATA_EXTENSIONS
+)
 
 # File naming patterns
 DENOISED_SUBDIRECTORY = "denoised"

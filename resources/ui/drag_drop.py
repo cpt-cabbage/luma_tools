@@ -35,11 +35,13 @@ MIME_LUMA_FILES = "application/x-luma-files"
 MIME_URI_LIST = "text/uri-list"
 MIME_PLAIN_TEXT = "text/plain"
 
-# Supported file extensions by category
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif', '.exr'}
-VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm'}
-MODEL_EXTENSIONS = {'.glb', '.gltf', '.obj', '.fbx', '.usd', '.usda', '.usdc', '.usdz', '.ply', '.stl'}
-AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.flac', '.aac'}
+# Supported file extensions by category — single source of truth in core.config.
+from core.config import (
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    MODEL_EXTENSIONS,
+    AUDIO_EXTENSIONS,
+)
 
 
 def get_file_category(path: str) -> str:
@@ -155,8 +157,9 @@ def can_accept_files(mime_data: QMimeData, accepted_categories: Set[str]) -> boo
 # BROWSER / CLIPBOARD IMAGE UTILITIES
 # ============================================================================
 
-# Image URL extensions recognized when extracting from HTML or URLs
-_IMAGE_URL_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff')
+# Image URL extensions recognized when extracting from HTML or URLs.
+# Subset of canonical IMAGE_EXTENSIONS minus formats browsers don't typically serve.
+_IMAGE_URL_EXTENSIONS = tuple(sorted(IMAGE_EXTENSIONS - {'.exr', '.hdr', '.dpx', '.tga', '.tif'}))
 
 # Maximum download size (50 MB)
 _MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024

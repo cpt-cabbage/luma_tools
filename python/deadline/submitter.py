@@ -15,7 +15,7 @@ from typing import Optional, Callable, List, Dict, Any, Tuple
 from core.config import (
     DEADLINE_PATH,
     DEADLINE_POOL,
-    DEADLINE_GROUP_COMPFYUI,
+    DEADLINE_GROUP_COMFYUI,
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
     DEADLINE_JOB_NAME_PREFIX,
@@ -107,7 +107,7 @@ def submit_comfyui_to_deadline(
     if pool is None:
         pool = DEADLINE_POOL
     if group is None:
-        group = DEADLINE_GROUP_COMPFYUI
+        group = DEADLINE_GROUP_COMFYUI
 
     import shutil
 
@@ -381,16 +381,16 @@ def submit_comfyui_job(
             logger.error(error_msg)
             return [], error_msg
 
-        # Generate unique job ID and create isolated _job_data/<job_id>/ directory
+        # Generate unique directory ID and create isolated _job_data/<id>/ directory
         # Each submission gets its own directory to avoid race conditions
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_suffix = uuid.uuid4().hex[:8]
-        job_id = f"{timestamp}_{unique_suffix}"
+        job_data_id = f"{timestamp}_{unique_suffix}"
 
-        job_data_dir = os.path.join(current_working_dir, "_job_data", job_id)
+        job_data_dir = os.path.join(current_working_dir, "_job_data", job_data_id)
         ensure_directory(job_data_dir)
 
-        workflow_file = save_workflow(modified, job_data_dir, job_id=job_id)
+        workflow_file = save_workflow(modified, job_data_dir, job_id=job_data_id)
 
         if base_seed is not None:
             seeds = [base_seed + i for i in range(generation_count)]
@@ -398,7 +398,7 @@ def submit_comfyui_job(
             seeds = [random.randint(0, 2**63 - 1) for _ in range(generation_count)]
         seeds_data = {"seeds": seeds, "count": generation_count}
 
-        seeds_file = os.path.join(job_data_dir, f"comfyui_seeds_{job_id}.json")
+        seeds_file = os.path.join(job_data_dir, f"comfyui_seeds_{job_data_id}.json")
         save_json(seeds_file, seeds_data)
 
         prompt_text = extract_prompts_from_editable_values(current_editable_values)

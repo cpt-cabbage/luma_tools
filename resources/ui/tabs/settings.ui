@@ -878,78 +878,6 @@
            </layout>
           </item>
           <item>
-           <layout class="QHBoxLayout" name="serverNotFoundLayout">
-            <item>
-             <widget class="QLabel" name="serverNotFoundLabel">
-              <property name="text">
-               <string>If Server Not Found:</string>
-              </property>
-              <property name="toolTip">
-               <string>Behavior when ComfyUI server is not running in persistent mode</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QComboBox" name="ServerNotFoundCombo">
-              <property name="toolTip">
-               <string>Behavior when ComfyUI server is not running: fail immediately, wait for it, or fail and remove the Deadline job</string>
-              </property>
-              <property name="minimumWidth">
-               <number>150</number>
-              </property>
-              <item>
-               <property name="text">
-                <string>Fail Immediately</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Wait for Server</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Fail and Delete Job</string>
-               </property>
-              </item>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="serverWaitTimeoutLabel">
-              <property name="text">
-               <string>Wait Timeout:</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QSpinBox" name="ServerWaitTimeoutSpinBox">
-              <property name="toolTip">
-               <string>Maximum time in minutes to wait for the server to start</string>
-              </property>
-              <property name="minimum">
-               <number>1</number>
-              </property>
-              <property name="maximum">
-               <number>60</number>
-              </property>
-              <property name="value">
-               <number>5</number>
-              </property>
-              <property name="suffix">
-               <string> min</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <spacer name="serverNotFoundSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-             </spacer>
-            </item>
-           </layout>
-          </item>
-          <item>
            <widget class="QLabel" name="adminUsersHeader">
             <property name="text">
              <string>Admin Users (Full access):</string>
@@ -1017,79 +945,12 @@
            </layout>
           </item>
           <item>
-           <widget class="QLabel" name="supUsersHeader">
-            <property name="text">
-             <string>Supervisor Users (ComfyUI and Gallery access):</string>
-            </property>
-            <property name="toolTip">
-             <string>Supervisors can see ComfyUI and Gallery tabs (not Settings)</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="supUsersContentLayout">
-            <item>
-             <widget class="QListWidget" name="SupUsersList">
-              <property name="toolTip">
-               <string>Users with access to ComfyUI and Gallery tabs (not Settings)</string>
-              </property>
-              <property name="selectionMode">
-               <enum>QAbstractItemView::SingleSelection</enum>
-              </property>
-              <property name="minimumHeight">
-               <number>80</number>
-              </property>
-              <property name="maximumHeight">
-               <number>120</number>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <layout class="QVBoxLayout" name="supUsersButtonsLayout">
-              <item>
-               <widget class="QPushButton" name="AddSupUserButton">
-                <property name="minimumSize">
-                 <size>
-                  <width>100</width>
-                  <height>28</height>
-                 </size>
-                </property>
-                <property name="text">
-                 <string>Add User</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <widget class="QPushButton" name="RemoveSupUserButton">
-                <property name="minimumSize">
-                 <size>
-                  <width>100</width>
-                  <height>28</height>
-                 </size>
-                </property>
-                <property name="text">
-                 <string>Remove User</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <spacer name="supUsersButtonsSpacer">
-                <property name="orientation">
-                 <enum>Qt::Vertical</enum>
-                </property>
-               </spacer>
-              </item>
-             </layout>
-            </item>
-           </layout>
-          </item>
-          <item>
            <widget class="QLabel" name="restrictedTabsHeader">
             <property name="text">
              <string>Restricted Tabs (hidden from regular users):</string>
             </property>
             <property name="toolTip">
-             <string>These tabs are hidden from regular users. Admins and Supervisors can see checked tabs.</string>
+             <string>These tabs are hidden from regular users. Admins can always see all tabs.</string>
             </property>
            </widget>
           </item>

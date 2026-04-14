@@ -666,9 +666,10 @@ def update_model_thumbnail(model_name: str) -> Optional[str]:
         return None
 
     # Find gallery metadata files
+    from comfyui.metadata import GALLERY_METADATA_FILE
     try:
         metadata_files = glob.glob(
-            os.path.join(network_path, "**", "_gallery_metadata.json"),
+            os.path.join(network_path, "**", GALLERY_METADATA_FILE),
             recursive=True
         )
     except Exception as e:

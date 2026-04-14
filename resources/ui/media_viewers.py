@@ -1444,7 +1444,7 @@ class EmbeddedImageViewer(QWidget):
             if hasattr(self, 'video_controls') and self.video_controls:
                 self.video_controls.hide()
 
-            MODEL_EXTENSIONS = {'.glb', '.gltf', '.fbx', '.obj', '.usd', '.usda', '.usdc', '.usdz', '.dae', '.stl', '.ply'}
+            from core.config import MODEL_EXTENSIONS, VIDEO_EXTENSIONS
             if ext in MODEL_EXTENSIONS:
                 self.shading_btn.show()
                 self.lighting_btn.show()
@@ -1489,7 +1489,7 @@ class EmbeddedImageViewer(QWidget):
                     self.message_label.setText("3D Model Viewer Not Available")
                     self.media_stack.setCurrentWidget(self.message_label)
 
-            elif ext in ('.mp4', '.mov', '.avi', '.webm'):
+            elif ext in VIDEO_EXTENSIONS:
                 self.shading_btn.hide()
                 self.lighting_btn.hide()
                 self.light_label.hide()
@@ -2180,7 +2180,7 @@ class EmbeddedImageViewer(QWidget):
                 output_dir,
                 metadata=metadata,
                 parent=self,
-                show_comfyui_features=app_state.has_elevated_access
+                show_comfyui_features=True
             )
             dialog.exec()
         except Exception as e:
@@ -2434,7 +2434,8 @@ class FullscreenImageViewer(QWidget):
             if hasattr(self, 'video_controls') and self.video_controls:
                 self.video_controls.hide()
 
-            if ext in ('.mp4', '.mov', '.avi', '.webm'):
+            from core.config import VIDEO_EXTENSIONS as _VIDEO_EXT
+            if ext in _VIDEO_EXT:
                 # Video file
                 if hasattr(self, '_has_video_player') and self._has_video_player and self.media_player and self.video_widget:
                     from PySide6.QtCore import QUrl
@@ -2841,7 +2842,7 @@ class FullscreenImageViewer(QWidget):
                 output_dir,
                 metadata=metadata,
                 parent=self,
-                show_comfyui_features=app_state.has_elevated_access
+                show_comfyui_features=True
             )
             dialog.exec()
         except Exception as e:

@@ -72,8 +72,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             QPushButton:hover {{ background-color: {UIColors.AYON_GREEN_HOVER}; }}
             QPushButton:disabled {{ background-color: #3c414b; color: #6b6f78; }}
         """)
-        self.ui.RePublishUseCurrentTask.setIcon(get_ayon_icon(14))
-        self.ui.RePublishUseCurrentTask.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+        self.apply_ayon_checkbox_style(self.ui.RePublishUseCurrentTask)
 
         # In standalone mode, show browse button immediately
         if self.app_state.standalone_mode:
@@ -294,43 +293,40 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 self.ui.RePublishStatusLabel.setText("Status: Invalid path")
             return
 
-        # Find EXR sequences
-        # NOTE: Build list locally then assign — ThreadSafeProperty returns
-        # copies on read, so .append() on a read would mutate the copy only.
-        try:
-            sequences = scan_exr_sequences(search_path)
+        # Find EXR sequences off the GUI thread — network paths can stall.
+        self.ui.RePublishStatusLabel.setText("Status: Scanning...")
+
+        def _scan_worker(path=search_path):
+            sequences = scan_exr_sequences(path)
             renders = []
-
+            display_names = []
             for seq in sequences:
-                # Extract subdirectory name if applicable
                 seq_path = str(seq)
-                rel_path = os.path.relpath(os.path.dirname(seq_path), search_path)
+                rel_path = os.path.relpath(os.path.dirname(seq_path), path)
                 subdir = rel_path if rel_path != "." else ""
-
                 renders.append((subdir, seq))
+                display_names.append(
+                    f"{subdir}/{seq.basename()}" if subdir and subdir != "." else seq.basename()
+                )
+            return renders, display_names
 
-                # Display name
-                if subdir and subdir != ".":
-                    display_name = f"{subdir}/{seq.basename()}"
-                else:
-                    display_name = seq.basename()
-
-                self.ui.RePublishRendersList.addItem(display_name)
-
-            # Assign the full list at once (ThreadSafeProperty stores it correctly)
+        def _on_scan_result(result):
+            renders, display_names = result
+            self.ui.RePublishRendersList.clear()
+            for name in display_names:
+                self.ui.RePublishRendersList.addItem(name)
             self.app_state.republish_renders = renders
-
-            # Update status
             count = len(renders)
             self.ui.RePublishStatusLabel.setText(f"Status: Found {count} render sequence(s)")
-
-            # Auto-select first render so the publish button becomes available
             if count > 0:
                 self.ui.RePublishRendersList.setCurrentRow(0)
 
-        except Exception as e:
-            logger.error(f"Error scanning renders for republish: {e}")
-            self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {str(e)}")
+        def _on_scan_error(error_msg, traceback_str=""):
+            logger.error(f"Error scanning renders for republish: {error_msg}")
+            self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {error_msg}")
+            self.show_status(f"rePublish scan error: {error_msg}", "error")
+
+        self.start_worker(_scan_worker, on_result=_on_scan_result, on_error=_on_scan_error)
 
     def _on_render_selection_changed(self):
         """Handle render selection in rePublish list."""

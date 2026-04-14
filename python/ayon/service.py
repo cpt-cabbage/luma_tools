@@ -810,10 +810,29 @@ def create_ayon_metadata(
         # Default to Compositing since this is for render compositing
         task_type = "Compositing"
 
-    # Generate file list
+    # AYON anatomy templates are anchored at the user's `work/` segment.
+    # Fail loudly if the caller picked a render dir outside of that anatomy
+    # rather than emit a malformed `{root[work]}` path that breaks publishing.
+    _normalized_renders = normalize_path(renders_path)
+    _normalized_working = normalize_path(working_dir)
+    if "/work" not in _normalized_renders.lower() or "work/" not in _normalized_working.lower():
+        raise ValueError(
+            "AYON publish requires renders + working_dir to live under a "
+            "'work/' anatomy segment. Got renders_path={!r}, working_dir={!r}".format(
+                renders_path, working_dir
+            )
+        )
+
+    # Generate file list (use FRAME_PADDING from config for consistency)
+    from core.config import FRAME_PADDING
     expected_files = []
+    # Use rsplit to keep dots inside the render name (e.g. "scene_v1.2"),
+    # only stripping the trailing frame.ext if present.
+    render_stem = os.path.splitext(render_name)[0]
+    if "." in render_stem and render_stem.rsplit(".", 1)[1].isdigit():
+        render_stem = render_stem.rsplit(".", 1)[0]
     for frame in range(start_frame, end_frame + 1):
-        expected_files.append(f"{render_name.split('.')[0]}.{frame:04d}.exr")
+        expected_files.append(f"{render_stem}.{frame:0{FRAME_PADDING}d}.exr")
 
     # Build staging directory
     staging_dir_path = os.path.join(renders_path, output_subdirectory)
@@ -993,6 +1012,10 @@ def publish_to_ayon_local(
 
     if not AYON_AVAILABLE:
         logger.warning("AYON not available, skipping publish")
+        return False
+
+    if not AYON_CONSOLE:
+        logger.error("AYON console binary not configured (standalone mode); cannot publish")
         return False
 
     bundle = get_ayon_bundle()

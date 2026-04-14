@@ -70,19 +70,30 @@ class Worker(QRunnable):
 
     @Slot()
     def run(self):
-        """Execute the worker function with error handling."""
+        """Execute the worker function with error handling.
+
+        All signal emits are guarded against `RuntimeError: Signal source has
+        been deleted`, which happens when the QApplication is torn down
+        (e.g. during shutdown) while a worker is still mid-flight.
+        """
+        def _safe_emit(signal, *args):
+            try:
+                signal.emit(*args)
+            except RuntimeError:
+                pass  # QObject already destroyed (app shutting down)
+
         try:
-            self.signals.started.emit()
+            _safe_emit(self.signals.started)
             result = self.fn(*self.args, **self.kwargs)
-            self.signals.result.emit(result)
+            _safe_emit(self.signals.result, result)
         except Exception as e:
             error_msg = str(e)
             tb = traceback.format_exc()
-            self.signals.error.emit(error_msg, tb)
+            _safe_emit(self.signals.error, error_msg, tb)
             logger.error(f"Worker error: {error_msg}")
             logger.error(tb)
         finally:
-            self.signals.finished.emit()
+            _safe_emit(self.signals.finished)
 
 
 def start_worker_thread(func, *args, on_result=None, on_error=None, on_progress=None, worker_kwargs=None):

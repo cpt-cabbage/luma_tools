@@ -236,11 +236,11 @@ class RefreshController(BaseGalleryManager):
 
     def _process_deferred_prewarm(self):
         """Process deferred prewarm items (called after splash screen closes)."""
-        if not hasattr(self, '_deferred_prewarm_items') or not self._deferred_prewarm_items:
-            return
-
-        items = self._deferred_prewarm_items
-        del self._deferred_prewarm_items  # Free memory
+        with self.tab._cache_lock:
+            if not getattr(self, '_deferred_prewarm_items', None):
+                return
+            items = self._deferred_prewarm_items
+            self._deferred_prewarm_items = None  # Free memory
 
         # Now it's safe to create widgets and display without blocking splash
         self._process_scan_results_sync(items)
@@ -298,13 +298,8 @@ class RefreshController(BaseGalleryManager):
             for item in dir_items:
                 filename = os.path.basename(item['path'])
 
-                # Compute content hash if missing
-                if 'content_hash' not in item and compute_file_hash:
-                    try:
-                        item['content_hash'] = compute_file_hash(item['path'])
-                    except Exception:
-                        item['content_hash'] = None
-
+                # Skip hash computation during prewarm (runs on GUI thread).
+                # Hashes will be computed in the background scan worker instead.
                 content_hash = item.get('content_hash')
 
                 # Check if already enriched

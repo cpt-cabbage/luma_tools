@@ -118,7 +118,7 @@
      <item>
       <widget class="QGroupBox" name="rendersGroupBox">
        <property name="title">
-        <string>Denoised Renders</string>
+        <string>Renders</string>
        </property>
        <layout class="QVBoxLayout" name="rendersBoxLayout">
         <item>

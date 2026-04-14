@@ -9,7 +9,8 @@ import os
 import shutil
 from typing import List
 
-from core.error_handling import handle_errors, log_error
+from core.error_handling import handle_errors
+from core.config import RENDERS_SUBPATH, USD_SUBPATH
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,14 @@ def _cleanup_directories(base_path, dirs_to_delete, label):
 def cleanup_renders(lookdev_dir, render_dirs_to_delete):
     """Delete specified render directories."""
     return _cleanup_directories(
-        os.path.join(lookdev_dir, "img", "renders"), render_dirs_to_delete, "render"
+        os.path.join(lookdev_dir, RENDERS_SUBPATH), render_dirs_to_delete, "render"
     )
 
 
 def cleanup_usd(lookdev_dir, usd_dirs_to_delete):
     """Delete specified USD directories."""
     return _cleanup_directories(
-        os.path.join(lookdev_dir, "usd_files"), usd_dirs_to_delete, "USD"
+        os.path.join(lookdev_dir, USD_SUBPATH), usd_dirs_to_delete, "USD"
     )
 
 
@@ -68,12 +69,13 @@ def cleanup_hip_backups(lookdev_dir):
         logger.warning(f"Backup directory not found: {backup_path}")
         return False
 
-    with handle_errors(f"deleting backup directory {backup_path}"):
+    try:
         shutil.rmtree(backup_path)
         logger.info(f"Removed backup directory: {backup_path}")
         return True
-
-    return False
+    except Exception as e:
+        logger.error(f"Error deleting backup directory {backup_path}: {e}")
+        return False
 
 
 def calculate_cleanup_size(lookdev_dir, render_dirs, usd_dirs, include_backups):
@@ -155,12 +157,9 @@ def filter_renders_in_use(all_renders, renders_in_comp):
     Returns:
         list: Renders that are safe to delete (not in comp)
     """
-    safe_to_delete = []
-    for render in all_renders:
-        if not any(comp_render in render for comp_render in renders_in_comp):
-            safe_to_delete.append(render)
-
-    return safe_to_delete
+    # Use set for O(n) lookup instead of O(n*m) nested loop
+    renders_in_comp_set = set(renders_in_comp)
+    return [render for render in all_renders if render not in renders_in_comp_set]
 
 
 def keep_latest_n_versions(all_versions, n=1):

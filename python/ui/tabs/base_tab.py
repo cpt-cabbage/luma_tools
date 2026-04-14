@@ -202,6 +202,8 @@ class BaseTab(ABC):
                     widget = QtWidgets.QWidget(parent)
                     ui_obj = ui_class()
                     ui_obj.setupUi(widget)
+                    if hasattr(ui_obj, 'retranslateUi'):
+                        ui_obj.retranslateUi(widget)
                     # Copy widget references for backward compatibility
                     # (tabs access child widgets via self.ui.WidgetName)
                     for attr_name, value in vars(ui_obj).items():
@@ -266,11 +268,13 @@ class BaseTab(ABC):
             import time
             overlay = self._show_deferred_loading_overlay()
             start = time.perf_counter()
-            self._initialized = True
-            self.initialize()
+            try:
+                self.initialize()
+            finally:
+                self._initialized = True
+                if overlay:
+                    overlay.deleteLater()
             elapsed = time.perf_counter() - start
-            if overlay:
-                overlay.deleteLater()
             logger.info(f"[Startup] {self.tab_name} deferred init: {elapsed*1000:.0f}ms")
 
     def _show_deferred_loading_overlay(self):
@@ -300,7 +304,7 @@ class BaseTab(ABC):
 
             overlay.raise_()
             overlay.show()
-            QApplication.processEvents()
+            overlay.repaint()  # repaint only — avoids re-entering the event loop
             return overlay
         except Exception:
             return None
@@ -358,7 +362,7 @@ class BaseTab(ABC):
         func: Callable[..., Any],
         *args: Any,
         on_result: Optional[Callable[[Any], None]] = None,
-        on_error: Optional[Callable[[tuple], None]] = None,
+        on_error: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[int, str], None]] = None,
         worker_kwargs: Optional[Dict[str, Any]] = None
     ) -> None:
@@ -372,7 +376,7 @@ class BaseTab(ABC):
             func: The function to run in the worker thread
             *args: Arguments to pass to the function
             on_result: Optional callback for successful completion (receives result)
-            on_error: Optional callback for errors (receives (exc_type, exc_value, traceback) tuple)
+            on_error: Optional callback for errors. Signature: ``(error_msg: str, traceback_str: str)``.
             on_progress: Optional callback for progress updates (receives int, str)
             worker_kwargs: Optional dict of keyword arguments to pass to the function
 
@@ -599,3 +603,16 @@ class BaseTab(ABC):
         """
         if widget:
             widget.setEnabled(enabled)
+
+    @staticmethod
+    def apply_ayon_checkbox_style(widget, icon_size: int = 14):
+        """Apply AYON branding (icon + green color) to a checkbox widget.
+
+        Args:
+            widget: QCheckBox to style
+            icon_size: Size for the AYON icon (default: 14)
+        """
+        from icons import get_ayon_icon
+        from core.config import UIColors
+        widget.setIcon(get_ayon_icon(icon_size))
+        widget.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")

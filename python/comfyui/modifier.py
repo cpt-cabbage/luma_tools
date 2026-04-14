@@ -13,22 +13,26 @@ from typing import Optional, Dict, Any, Tuple
 
 from comfyui.workflow import is_api_format, convert_to_api_format
 from comfyui.node_configs import WIDGET_MAPPINGS, EXPORT_NODE_TYPES, OUTPUT_SUFFIX
+from core.config import (
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    AUDIO_EXTENSIONS,
+    MODEL_EXTENSIONS,
+    COMFYUI_DATA_EXTENSIONS,
+)
 
 logger = logging.getLogger(__name__)
 
-# File extensions that indicate a file path input
-FILE_EXTENSIONS = {
-    # Images
-    '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.exr',
-    # Videos
-    '.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v',
-    # 3D Models
-    '.obj', '.fbx', '.glb', '.gltf', '.usd', '.usda', '.usdc', '.usdz', '.ply', '.stl',
-    # Audio
-    '.wav', '.mp3', '.ogg', '.flac', '.m4a', '.aac',
-    # Other
-    '.json', '.txt', '.safetensors', '.pt', '.pth', '.ckpt', '.bin'
-}
+# File extensions that indicate a file path input.
+# Includes a few text/data formats not in the canonical sets.
+FILE_EXTENSIONS = (
+    IMAGE_EXTENSIONS
+    | VIDEO_EXTENSIONS
+    | AUDIO_EXTENSIONS
+    | MODEL_EXTENSIONS
+    | COMFYUI_DATA_EXTENSIONS
+    | {'.m4a', '.aac', '.json', '.txt'}
+)
 
 
 def _is_file_path(value: Any) -> bool:

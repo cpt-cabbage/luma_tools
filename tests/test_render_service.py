@@ -57,6 +57,20 @@ class TestBuildOiioCommand:
         assert "--chnames" in result
         assert "R,G,B,A" in result
 
+    def test_not_denoised_uses_raw_path_for_beauty(self):
+        """When is_denoised=False, beauty should be read from raw render path."""
+        passes = {"diffuse": ["diffuse.R", "diffuse.G", "diffuse.B"]}
+        result = build_oiio_command(passes, "/d.exr", "/r.exr", "/o.exr", is_denoised=False)
+        # Denoised path should be replaced by raw path
+        assert '"/d.exr"' not in result
+        assert '"/r.exr"' in result
+
+    def test_denoised_uses_denoised_path(self):
+        """When is_denoised=True (default), beauty is read from denoised path."""
+        passes = {"diffuse": ["diffuse.R", "diffuse.G", "diffuse.B"]}
+        result = build_oiio_command(passes, "/d.exr", "/r.exr", "/o.exr", is_denoised=True)
+        assert '"/d.exr"' in result
+
 
 # ============================================================================
 # get_pass_file_path

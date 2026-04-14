@@ -39,7 +39,7 @@ import logging
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.subprocess_utils import run_command, start_process
 from core.utils import load_json, ensure_directory
@@ -231,7 +231,16 @@ def setup_logging(global_settings: dict = None, log_dir_override: str = None) ->
 
 
 # Lock to prevent concurrent restart_comfyui() calls from multiple threads
-_restart_lock = threading.Lock()
+_restart_lock = threading.RLock()
+
+# Health check tuning — tolerates GPU-bound operations (e.g. Trellis HR sampling,
+# tiled VAE decoding) that can block ComfyUI's HTTP server thread for tens of seconds
+# during heavy inference. Without these, a single slow probe was triggering false restarts.
+HEALTH_CHECK_TIMEOUT = 30           # Per-request HTTP timeout, seconds
+HEALTH_ACTIVITY_GRACE = 300         # Skip routine probes if stdout was active within this window
+HEALTH_BACKUP_INTERVAL = 120        # Always probe at least this often, even during stdout activity
+HEALTH_MAX_CONSECUTIVE_FAILURES = 3  # Failed probes in a row required before declaring unhealthy
+ORPHANED_PROBE_INTERVAL = 30        # Throttle for orphaned-branch HTTP probes when stdout is silent
 
 # Cached heartbeat directory path — resolved once at startup, used every 20s
 _heartbeat_dir_cache: str = ""
@@ -408,8 +417,6 @@ def wait_for_comfyui(port: int, timeout: int = 300) -> bool:
 def health_monitor_thread(port: int):
     """Background thread to monitor ComfyUI health."""
     consecutive_failures = 0
-    max_consecutive_failures = 2  # Trigger restart after 2 consecutive failures
-    activity_grace_period = 300  # Seconds — skip health check if ComfyUI produced output recently
 
     while not server_state['shutdown_requested']:
         time.sleep(20)
@@ -424,22 +431,22 @@ def health_monitor_thread(port: int):
             # Still perform occasional checks (every 2 min) to detect HTTP-specific failures.
             last_output = state.get('last_output_time')
             last_actual_check = state.get('last_actual_health_check', 0)
-            if last_output and (time.time() - last_output) < activity_grace_period:
-                if time.time() - last_actual_check < 120:
+            if last_output and (time.time() - last_output) < HEALTH_ACTIVITY_GRACE:
+                if time.time() - last_actual_check < HEALTH_BACKUP_INTERVAL:
                     consecutive_failures = 0
                     server_state['last_health_check'] = datetime.now().isoformat()
                     write_heartbeat("online")
                     continue
 
             server_state['last_actual_health_check'] = time.time()
-            healthy = check_server_health(port=port)
+            healthy = check_server_health(port=port, timeout=HEALTH_CHECK_TIMEOUT)
             server_state['last_health_check'] = datetime.now().isoformat()
 
             if healthy:
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
-                logger.warning(f"ComfyUI health check failed ({consecutive_failures}/{max_consecutive_failures})")
+                logger.warning(f"ComfyUI health check failed ({consecutive_failures}/{HEALTH_MAX_CONSECUTIVE_FAILURES})")
 
                 process = state['comfyui_process']
                 if process:
@@ -448,7 +455,7 @@ def health_monitor_thread(port: int):
                         logger.error(f"ComfyUI process died with exit code {ret}")
                         server_state['is_ready'] = False
                         # Main loop will handle crash recovery
-                    elif consecutive_failures >= max_consecutive_failures:
+                    elif consecutive_failures >= HEALTH_MAX_CONSECUTIVE_FAILURES:
                         # Process is running but not responding - request restart
                         logger.warning("ComfyUI unresponsive after multiple health checks, requesting restart...")
                         server_state['restart_requested'] = True
@@ -886,8 +893,10 @@ def write_heartbeat(status: str = "online", global_settings: dict = None):
     state = server_state.snapshot()
     uptime = int(time.time() - state['start_time']) if state['start_time'] else 0
 
+    # Use UTC timestamps so cross-timezone comparisons (farm worker vs
+    # workstation, or DST transitions) don't lie about freshness.
     heartbeat = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "hostname": hostname,
         "port": state['comfyui_port'],
         "status": status,
@@ -1127,6 +1136,12 @@ def main():
     stable_uptime_threshold = 300  # Reset crash counter after 5 min stable uptime
     last_stable_check = time.time()
 
+    # Orphaned-branch tracking: after a self-restart we no longer hold the process
+    # handle, so the main loop probes via HTTP. Throttle and tolerate transient
+    # failures so heavy GPU work doesn't trigger false orphaned restarts.
+    orphaned_failures = 0
+    last_orphaned_check = 0.0
+
     try:
         while not server_state['shutdown_requested']:
             # Handle restart requests (from fatal errors or health checks)
@@ -1147,20 +1162,45 @@ def main():
             if process is not None:
                 ret = process.poll()
             else:
-                # No process handle - always validate health to detect dead processes
-                # (not just when is_ready=False, since is_ready could be stale)
+                # No process handle - validate health to detect dead processes
+                # (not just when is_ready=False, since is_ready could be stale).
+                # Apply the same protections as health_monitor_thread: skip probes
+                # while stdout is active, throttle HTTP requests, and require multiple
+                # consecutive failures before declaring the process orphaned. Without
+                # these, a single slow probe during heavy GPU inference (e.g. Trellis
+                # HR sampling, where a single iteration can block the HTTP thread for
+                # 5+ seconds) was triggering false orphaned restarts.
                 ret = None
                 config = server_state.get('startup_config', {})
                 port = config.get('port', 8188)
-                if not check_server_health(port=port):
-                    logger.warning("No process handle and ComfyUI not responding, restarting...")
-                    server_state['is_ready'] = False
-                    if restart_comfyui(reason="orphaned"):
-                        process = server_state['comfyui_process']
-                        last_stable_check = time.time()
+
+                now = time.time()
+                last_output = server_state.get('last_output_time')
+                output_recent = last_output and (now - last_output) < HEALTH_ACTIVITY_GRACE
+                # During stdout activity, only probe as a periodic backup.
+                # During silence, probe at the regular orphaned interval.
+                probe_interval = HEALTH_BACKUP_INTERVAL if output_recent else ORPHANED_PROBE_INTERVAL
+
+                if now - last_orphaned_check >= probe_interval:
+                    last_orphaned_check = now
+                    if check_server_health(port=port, timeout=HEALTH_CHECK_TIMEOUT):
+                        orphaned_failures = 0
                     else:
-                        logger.error("Failed to restart orphaned ComfyUI")
-                        break
+                        orphaned_failures += 1
+                        logger.warning(
+                            f"No process handle and ComfyUI not responding "
+                            f"({orphaned_failures}/{HEALTH_MAX_CONSECUTIVE_FAILURES})"
+                        )
+                        if orphaned_failures >= HEALTH_MAX_CONSECUTIVE_FAILURES:
+                            logger.warning("ComfyUI orphaned and unresponsive after multiple checks, restarting...")
+                            server_state['is_ready'] = False
+                            if restart_comfyui(reason="orphaned"):
+                                process = server_state['comfyui_process']
+                                last_stable_check = time.time()
+                                orphaned_failures = 0
+                            else:
+                                logger.error("Failed to restart orphaned ComfyUI")
+                                break
 
             if ret is not None:
                 # ComfyUI exited - check if it was a self-restart or a crash

@@ -159,15 +159,25 @@ class ModelData:
 # ============================================================================
 # RE-EXPORT FACTORY API (for backwards compatibility)
 # ============================================================================
+# Lazy via __getattr__ because the loader implementations import from this
+# module (ModelData etc.); a top-level import here triggers a circular import
+# chain when factory or any loader module is imported first.
 
-from .loaders.factory import (
-    load_model,
-    get_loader_availability,
-    get_format_type,
-    is_supported_format,
-    SUPPORTED_EXTENSIONS,
-    ASSIMP_AVAILABLE,
-)
+_FACTORY_REEXPORTS = {
+    "load_model",
+    "get_loader_availability",
+    "get_format_type",
+    "is_supported_format",
+    "SUPPORTED_EXTENSIONS",
+    "ASSIMP_AVAILABLE",
+}
+
+
+def __getattr__(name):
+    if name in _FACTORY_REEXPORTS:
+        from .loaders import factory as _factory
+        return getattr(_factory, name)
+    raise AttributeError(f"module 'geo.loader' has no attribute {name!r}")
 
 __all__ = [
     # Data classes

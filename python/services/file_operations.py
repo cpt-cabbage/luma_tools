@@ -6,22 +6,16 @@ Handles directory scanning, file discovery, and file system queries.
 
 import logging
 import os
-from pathlib import Path
-from typing import List
 
 logger = logging.getLogger(__name__)
 
 from core.config import (
-    RENDERS_SUBPATH,
-    USD_SUBPATH,
     DEFAULT_TASK,
     COMP_EXTENSIONS,
     HIP_EXTENSION,
-    EXR_EXTENSION,
-    DENOISED_SUBDIRECTORY
+    DENOISED_SUBDIRECTORY,
 )
 from core.utils import truncate_at_suffix
-from core.error_handling import safe_operation
 
 
 def fast_scandir(dirname, max_depth=100, _current_depth=0):
@@ -51,70 +45,83 @@ def fast_scandir(dirname, max_depth=100, _current_depth=0):
     return subfolders
 
 
-def scan_directories(root: str, recursive: bool = True) -> List[Path]:
-    """
-    Scan directory and return subdirectories using pathlib.
-
-    Args:
-        root: Root directory to scan
-        recursive: If True, scan recursively; if False, only immediate children
-
-    Returns:
-        List of Path objects for all subdirectories
-    """
-    if not root or not os.path.isdir(root):
-        return []
-
-    root_path = Path(root)
-    if recursive:
-        return [p for p in root_path.rglob("*") if p.is_dir()]
-    else:
-        return [p for p in root_path.iterdir() if p.is_dir()]
-
-
-def scan_files_by_extension(
-    root: str,
-    extensions: set,
-    recursive: bool = True
-) -> List[Path]:
-    """
-    Scan directory for files with specific extensions.
-
-    Args:
-        root: Root directory to scan
-        extensions: Set of extensions to match (lowercase, with dot, e.g., {'.png', '.jpg'})
-        recursive: If True, scan recursively
-
-    Returns:
-        List of Path objects for matching files
-    """
-    if not root or not os.path.isdir(root):
-        return []
-
-    root_path = Path(root)
-    pattern = "**/*" if recursive else "*"
-
-    return [
-        p for p in root_path.glob(pattern)
-        if p.is_file() and p.suffix.lower() in extensions
-    ]
-
-
 def find_renders(render_path):
     """
-    Find render sequences in the denoised subdirectory.
+    Find render sequences in the render directory.
 
-    Delegates to core.utils.scan_exr_sequences for the actual scanning.
+    Scans the root render directory for EXR sequences (raw renders).
+    Falls back to the denoised/ subdirectory if no raw renders exist
+    (e.g., when raw renders have been cleaned up after denoising).
 
     Args:
-        render_path: Base render path (denoised/ subdirectory is appended)
+        render_path: Base render path to scan for EXR sequences
 
     Returns:
         list: List of fileseq.FileSequence objects for found sequences
     """
+    sequences, _ = find_renders_with_source(render_path)
+    return sequences
+
+
+def find_renders_with_source(render_path):
+    """
+    Find render sequences and report which directory they came from.
+
+    Returns the same fallback behavior as `find_renders`, but also returns
+    the actual source directory the sequences were found in. Callers that
+    need to point downstream tools (e.g., OIIO pass building) at the right
+    folder must use this to detect the denoised-only case.
+
+    Returns:
+        tuple: (sequences, source_dir) where source_dir is render_path or
+        the denoised subdirectory, depending on which scan succeeded.
+    """
     from core.utils import scan_exr_sequences
+
+    sequences = scan_exr_sequences(render_path)
+    if sequences:
+        return sequences, render_path
+
     denoised_path = os.path.join(render_path, DENOISED_SUBDIRECTORY)
-    return scan_exr_sequences(denoised_path)
+    sequences = scan_exr_sequences(denoised_path)
+    if sequences:
+        return sequences, denoised_path
+
+    return [], render_path
+
+
+def get_denoised_status(render_path, render_names):
+    """Check which renders have denoised versions available.
+
+    Looks in the denoised/ subdirectory for matching EXR files.
+
+    Args:
+        render_path: Base render directory (parent of denoised/)
+        render_names: List of render names to check
+
+    Returns:
+        dict: {render_name: bool} indicating denoised status
+    """
+    denoised_path = os.path.join(render_path, DENOISED_SUBDIRECTORY)
+    if not os.path.isdir(denoised_path):
+        return {name: False for name in render_names}
+
+    try:
+        denoised_files = os.listdir(denoised_path)
+    except OSError:
+        return {name: False for name in render_names}
+
+    # Pre-build set of EXR prefixes for O(1) lookup per render name.
+    # Use extract_render_name so versioned names like "scene_v1.2" survive.
+    from core.utils import extract_render_name
+    denoised_prefixes = set()
+    for f in denoised_files:
+        if f.endswith(".exr"):
+            prefix = extract_render_name(f, strip_frame_padding=True)
+            if prefix:
+                denoised_prefixes.add(prefix)
+
+    return {name: name in denoised_prefixes for name in render_names}
 
 
 def find_hip_files(dirname, task=None):
@@ -173,7 +180,9 @@ def read_comp_file(compfile, hip_file_name):
     renders_in_comp = []
 
     try:
-        with open(compfile, "r") as f:
+        # Comp files (Nuke .nk) are ASCII but may contain non-ASCII paths;
+        # explicit utf-8 + replace avoids cp1252 decode crashes on Windows.
+        with open(compfile, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if hip_file_name in line:
                     if any(compfile.endswith(ext) for ext in COMP_EXTENSIONS):
@@ -191,92 +200,6 @@ def read_comp_file(compfile, hip_file_name):
         logger.error(f"Error reading comp file {compfile}: {e}")
 
     return renders_in_comp
-
-
-def find_render_directory(shot_path, task=None):
-    """
-    Find the render directory for a given shot path.
-
-    Args:
-        shot_path: Path to shot
-        task: Task name (e.g., 'lighting', 'lookdev'). Falls back to DEFAULT_TASK.
-
-    Returns:
-        tuple: (render_directory, all_render_folders) or (None, [])
-    """
-    try:
-        task_dir = get_task_directory(shot_path, task)
-
-        dirs = fast_scandir(task_dir)
-        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-
-        if render_folders:
-            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-            return render_directory, render_folders
-
-    except Exception as e:
-        logger.error(f"Error finding render directory: {e}")
-
-    return None, []
-
-
-def find_usd_directory(shot_path, task=None):
-    """
-    Find the USD files directory for a given shot path.
-
-    Args:
-        shot_path: Path to shot
-        task: Task name (e.g., 'lighting', 'lookdev'). Falls back to DEFAULT_TASK.
-
-    Returns:
-        tuple: (usd_directory, all_usd_folders) or (None, [])
-    """
-    try:
-        task_dir = get_task_directory(shot_path, task)
-
-        dirs = fast_scandir(task_dir)
-        usd_folders = [d for d in dirs if USD_SUBPATH in d]
-
-        if usd_folders:
-            usd_directory = truncate_at_suffix(usd_folders[0], USD_SUBPATH)
-            return usd_directory, usd_folders
-
-    except Exception as e:
-        logger.error(f"Error finding USD directory: {e}")
-
-    return None, []
-
-
-@safe_operation("scanning render versions", return_on_error=[])
-def scan_render_versions(render_directory, hip_file_name):
-    """
-    Scan for render versions matching the HIP file name.
-
-    Args:
-        render_directory: Directory containing renders
-        hip_file_name: HIP file name to match
-
-    Returns:
-        list: List of render version directory names
-    """
-    render_dirs = sorted(next(os.walk(render_directory))[1])
-    matching_renders = [d for d in render_dirs if hip_file_name in d]
-    return matching_renders
-
-
-@safe_operation("scanning USD versions", return_on_error=[])
-def scan_usd_versions(usd_directory):
-    """
-    Scan for USD versions.
-
-    Args:
-        usd_directory: Directory containing USD files
-
-    Returns:
-        list: List of USD version directory names
-    """
-    usd_dirs = sorted(next(os.walk(usd_directory))[1])
-    return usd_dirs
 
 
 def get_task_directory(shot_path, task=None):
@@ -297,12 +220,6 @@ def get_task_directory(shot_path, task=None):
     task_dir = truncate_at_suffix(shot_path, "work")
     task_dir = os.path.join(task_dir, task_name)
     return task_dir
-
-
-# Keep backward-compatible alias
-def get_lookdev_directory(shot_path, task=None):
-    """Get the task directory from shot path. Alias for get_task_directory."""
-    return get_task_directory(shot_path, task)
 
 
 def get_working_directory(shot_path, task=None):

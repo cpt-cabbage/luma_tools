@@ -17,34 +17,16 @@ from .settings_manager import (
     get_global_settings_path
 )
 from .error_handling import log_error, handle_errors
-from .utils import ensure_directory
+from .utils import ensure_directory, load_json, save_json
 
 logger = logging.getLogger(__name__)
 
 
 def _atomic_json_write(file_path: str, data: Any) -> None:
-    """Write JSON data atomically using temp file + rename.
-
-    This prevents file corruption if multiple processes write simultaneously
-    or if the write is interrupted.
-    """
+    """Write JSON data atomically. Delegates to save_json from core.utils."""
     dir_path = os.path.dirname(file_path)
     ensure_directory(dir_path)
-
-    # Write to temp file in same directory (same filesystem for atomic rename)
-    fd, temp_path = tempfile.mkstemp(suffix='.tmp', dir=dir_path)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        # Atomic rename (on same filesystem)
-        os.replace(temp_path, file_path)
-    except Exception:
-        # Clean up temp file on error
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+    save_json(file_path, data)
 
 
 # ============================================================================
@@ -117,12 +99,19 @@ def append_feature_request(category: str, description: str, username: str) -> bo
             'completed_at': None
         }
 
-        # Read existing requests
+        # Read existing requests — propagate read errors to avoid overwriting
+        # the file with just the new entry if the existing file is corrupted
         requests = []
         if os.path.exists(file_path):
-            with handle_errors("reading existing requests"):
+            try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     requests = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error(
+                    "Refusing to append to corrupted feature requests file "
+                    f"{file_path}: {e}. New request not saved."
+                )
+                return False
 
         # Append new request
         requests.append(new_request)
@@ -160,24 +149,21 @@ def get_feature_requests() -> List[Dict[str, str]]:
 
             file_path = os.path.join(base_dir, filename)
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    user_requests = json.load(f)
-                    if isinstance(user_requests, list):
-                        # Migrate old requests without IDs
-                        modified = False
-                        for req in user_requests:
-                            if 'id' not in req:
-                                # Generate ID from timestamp
-                                req['id'] = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d_%H%M%S_%f")
-                                modified = True
-                                logger.info(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
+                user_requests = load_json(file_path, [])
+                if isinstance(user_requests, list):
+                    # Migrate old requests without IDs
+                    modified = False
+                    for req in user_requests:
+                        if 'id' not in req:
+                            req['id'] = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d_%H%M%S_%f")
+                            modified = True
+                            logger.info(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
 
-                        # Save back if modified (atomic write for safety)
-                        if modified:
-                            _atomic_json_write(file_path, user_requests)
-                            logger.info(f"Updated {filename} with missing IDs")
+                    if modified:
+                        _atomic_json_write(file_path, user_requests)
+                        logger.info(f"Updated {filename} with missing IDs")
 
-                        all_requests.extend(user_requests)
+                    all_requests.extend(user_requests)
             except Exception as e:
                 log_error("reading feature request file", e, filename)
                 continue
@@ -215,9 +201,7 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
 
             file_path = os.path.join(base_dir, filename)
             try:
-                # Read user's requests
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    requests = json.load(f)
+                requests = load_json(file_path, [])
 
                 # Find and update the request
                 modified = False
@@ -276,8 +260,7 @@ def reject_request(request_id: str, admin_username: str, reason: str) -> bool:
 
             file_path = os.path.join(base_dir, filename)
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    requests = json.load(f)
+                requests = load_json(file_path, [])
 
                 # Find and update the request
                 modified = False
@@ -311,87 +294,62 @@ def reject_request(request_id: str, admin_username: str, reason: str) -> bool:
         return False
 
 
-def _notify_user_of_rejection(username: str, request: Dict[str, Any], admin_username: str, reason: str):
-    """Create a notification file for the user about their rejected request.
+def _append_user_notification(username: str, notification: Dict[str, Any]):
+    """Append a notification to the user's notification file.
+
+    Shared helper for completion and rejection notifications. Reads existing
+    notifications, appends the new one, and writes back atomically.
 
     Args:
         username: Username to notify
-        request: The rejected request data
-        admin_username: Admin who rejected it
-        reason: Reason for rejection
+        notification: Notification dict to append (must include 'read': False)
     """
     try:
         base_dir = get_feature_requests_base_dir()
         notification_file = os.path.join(base_dir, f"{username}_notifications.json")
 
-        # Read existing notifications
-        notifications = []
-        if os.path.exists(notification_file):
-            try:
-                with open(notification_file, 'r', encoding='utf-8') as f:
-                    notifications = json.load(f)
-            except Exception:
-                notifications = []
+        notifications = load_json(notification_file, [])
+        if not isinstance(notifications, list):
+            notifications = []
 
-        # Add new notification
-        notification = {
-            'request_id': request['id'],
-            'request_category': request['category'],
-            'request_description': request['description'][:100] + '...' if len(request['description']) > 100 else request['description'],
-            'action': 'rejected',
-            'rejected_by': admin_username,
-            'rejected_at': request['rejected_at'],
-            'reason': reason,
-            'read': False
-        }
         notifications.append(notification)
-
         _atomic_json_write(notification_file, notifications)
-        logger.info(f"Rejection notification created for {username}")
-
-    except Exception as e:
-        log_error("creating rejection notification for", e, username)
-
-
-def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_username: str):
-    """Create a notification file for the user about their completed request.
-
-    Args:
-        username: Username to notify
-        request: The completed request data
-        admin_username: Admin who completed it
-    """
-    try:
-        base_dir = get_feature_requests_base_dir()
-        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
-
-        # Read existing notifications
-        notifications = []
-        if os.path.exists(notification_file):
-            try:
-                with open(notification_file, 'r', encoding='utf-8') as f:
-                    notifications = json.load(f)
-            except Exception:
-                notifications = []
-
-        # Add new notification
-        notification = {
-            'request_id': request['id'],
-            'request_category': request['category'],
-            'request_description': request['description'][:100] + '...' if len(request['description']) > 100 else request['description'],
-            'completed_by': admin_username,
-            'completed_at': request['completed_at'],
-            'read': False
-        }
-        notifications.append(notification)
-
-        # Write notifications atomically
-        _atomic_json_write(notification_file, notifications)
-
-        logger.info(f"Notification created for {username}")
+        logger.info(f"Notification created for {username}: {notification.get('action', 'completed')}")
 
     except Exception as e:
         log_error("creating notification for", e, username)
+
+
+def _truncate_description(description: str, max_len: int = 100) -> str:
+    """Truncate a description string for notification display."""
+    return description[:max_len] + '...' if len(description) > max_len else description
+
+
+def _notify_user_of_rejection(username: str, request: Dict[str, Any], admin_username: str, reason: str):
+    """Create a notification for the user about their rejected request."""
+    _append_user_notification(username, {
+        'request_id': request['id'],
+        'request_category': request['category'],
+        'request_description': _truncate_description(request['description']),
+        'action': 'rejected',
+        'rejected_by': admin_username,
+        'rejected_at': request['rejected_at'],
+        'reason': reason,
+        'read': False
+    })
+
+
+def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_username: str):
+    """Create a notification for the user about their completed request."""
+    _append_user_notification(username, {
+        'request_id': request['id'],
+        'request_category': request['category'],
+        'request_description': _truncate_description(request['description']),
+        'action': 'completed',
+        'completed_by': admin_username,
+        'completed_at': request['completed_at'],
+        'read': False
+    })
 
 
 # ============================================================================
@@ -414,8 +372,7 @@ def get_user_notifications(username: str) -> List[Dict[str, Any]]:
         if not os.path.exists(notification_file):
             return []
 
-        with open(notification_file, 'r', encoding='utf-8') as f:
-            notifications = json.load(f)
+        notifications = load_json(notification_file, [])
 
         # Return only unread notifications
         return [n for n in notifications if not n.get('read', False)]
@@ -438,9 +395,7 @@ def mark_notifications_read(username: str):
         if not os.path.exists(notification_file):
             return
 
-        # Read notifications
-        with open(notification_file, 'r', encoding='utf-8') as f:
-            notifications = json.load(f)
+        notifications = load_json(notification_file, [])
 
         # Mark all as read
         for notification in notifications:

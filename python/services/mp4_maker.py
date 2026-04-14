@@ -85,8 +85,9 @@ def convert_exr_to_png_with_oiio(
     try:
         frame_count = end_frame - start_frame + 1
 
-        # Get OCIO config
+        # Get OCIO config — evaluate once before the loop
         ocio_config = get_ocio_config()
+        use_ocio = bool(ocio_config and os.path.exists(ocio_config))
 
         # Convert per frame using OIIO
         for i, frame in enumerate(range(start_frame, end_frame + 1)):
@@ -107,17 +108,19 @@ def convert_exr_to_png_with_oiio(
             ]
 
             # Add OCIO color conversion if config is available
-            if ocio_config and os.path.exists(ocio_config):
+            if use_ocio:
                 # Use OCIO to convert from ACEScg (linear) to sRGB (display)
                 # This properly handles ACES color management
                 oiio_cmd.extend([
                     "--colorconvert", AYON_COLORSPACE, "sRGB",
                 ])
-                logger.info(f"Using OCIO config: {ocio_config}")
+                if i == 0:
+                    logger.info(f"Using OCIO config: {ocio_config}")
             else:
                 # Fallback: Use simple gamma curve if OCIO not available
                 # This converts linear to sRGB approximation
-                logger.warning("OCIO config not found, using gamma 2.2 fallback")
+                if i == 0:
+                    logger.warning("OCIO config not found, using gamma 2.2 fallback")
                 oiio_cmd.extend([
                     "--powc", "0.4545",  # Gamma 1/2.2 = 0.4545 (linear to sRGB)
                 ])
@@ -491,12 +494,11 @@ def copy_mp4_to_gallery(
         if not os.path.exists(gallery_mp4_path):
             return (False, "Failed to copy MP4 to gallery")
 
-        # Extract render name from source path for metadata
-        source_basename = os.path.basename(source_path)
-        # Remove frame pattern and extension: "render.%04d.exr" -> "render"
-        # Or "render.0001.exr" -> "render"
-        parts = source_basename.split(".")
-        source_render = parts[0] if parts else "unknown"
+        # Extract render name from source path for metadata.
+        # Strip the trailing `.<frame>.<ext>` segments only — names with dots
+        # like "scene_v1.2.0001.exr" must keep the version suffix.
+        from core.utils import extract_render_name
+        source_render = extract_render_name(os.path.basename(source_path)) or "unknown"
 
         # Add metadata
         quality_desc = get_quality_description(quality_index)

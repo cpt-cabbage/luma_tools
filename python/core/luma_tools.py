@@ -384,11 +384,14 @@ class ExpandingTabBar(QTabBar):
 class LumaShotTools(QtWidgets.QWidget):
     """Main application window."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, progress_callback=None, pending_job_recovery=None):
         super(LumaShotTools, self).__init__()
 
+        self._progress_callback = progress_callback or (lambda p, m: None)
+        self._pending_job_recovery = pending_job_recovery
+
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.parent = parent
+        self._parent_widget = parent
 
         # Store tab instances
         self.tabs = {}
@@ -403,6 +406,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self._deployed_version_available = False  # Flag for new deployed version
 
         # Load UI using modular tab system
+        self._progress_callback(25, "Building tab layout...")
         self._load_tabs()
 
         # Set window title based on mode
@@ -428,6 +432,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self._restore_window_state()
 
         # Setup animations
+        self._progress_callback(82, "Setting up animations...")
         self.animator = enhance_ui(self)
         self.animator.redirect_to_splash = False
         self.animator.splash_screen = None
@@ -437,6 +442,7 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tab_glow_manager = TabGlowManager(self.tab_widget, self)
 
         # Setup colorful tab icons
+        self._progress_callback(84, "Loading tab icons...")
         self._setup_tab_icons()
 
         # Restore saved tab order
@@ -444,6 +450,7 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Eagerly initialize the tab that's visible after order is restored
         # (other tabs will be initialized on first activation)
+        self._progress_callback(86, "Initializing active tab...")
         self._initialize_active_tab()
 
         # Hide restricted tabs for non-admin users
@@ -544,19 +551,25 @@ class LumaShotTools(QtWidgets.QWidget):
         import importlib as _importlib
         _total_start = _time.perf_counter()
 
-        for module_path, class_name, restrict_key in TAB_REGISTRY:
-            # Skip ComfyUI and Gallery tabs for users without elevated access
-            # Admins and Supervisors can access these tabs
-            if not app_state.has_elevated_access and restrict_key in ['comfyui', 'gallery']:
-                logging.info(f"Skipping '{restrict_key}' tab for regular user")
-                continue
+        # Calculate progress range for tab loading (28-80%)
+        _tab_progress_start = 28
+        _tab_progress_end = 80
+        _loadable_tabs = [
+            (m, c, r) for m, c, r in TAB_REGISTRY
+            if (r != 'settings' or app_state.is_admin)
+        ]
+        _tab_count = len(_loadable_tabs) or 1
 
-            # Skip settings tab for regular users (admins and supervisors can access)
-            if not app_state.has_elevated_access and restrict_key == 'settings':
-                logging.info(f"Skipping '{restrict_key}' tab for regular user")
-                continue
-
+        for _loaded_idx, (module_path, class_name, restrict_key) in enumerate(_loadable_tabs):
             _tab_start = _time.perf_counter()
+
+            # Report per-tab progress to splash screen
+            _tab_progress = _tab_progress_start + int(
+                (_tab_progress_end - _tab_progress_start) * _loaded_idx / _tab_count
+            )
+            # Derive a friendly display name from class_name (e.g. "ComfyUITab" -> "ComfyUI")
+            _display_name = class_name.replace("Tab", "")
+            self._progress_callback(_tab_progress, f"Loading {_display_name}...")
 
             # Import tab class lazily (module loaded here, not at app import time)
             _module = _importlib.import_module(module_path, 'ui.tabs')
@@ -889,14 +902,12 @@ class LumaShotTools(QtWidgets.QWidget):
         self.tab_widget.setCurrentIndex(0)
 
     def _check_admin_status(self):
-        """Check if current user is an admin or supervisor."""
+        """Check if current user is an admin."""
         # Refresh and check role status (property auto-computes from settings)
         app_state.refresh_admin_status()
 
         if app_state.is_admin:
             logging.info(f"User '{app_state.user}' is an admin (full access)")
-        elif app_state.is_sup:
-            logging.info(f"User '{app_state.user}' is a supervisor (ComfyUI/Gallery access)")
         else:
             logging.info(f"User '{app_state.user}' is a regular user")
 
@@ -1016,12 +1027,11 @@ class LumaShotTools(QtWidgets.QWidget):
         save_window_state(width, height, maximized)
 
     def _hide_restricted_tabs(self):
-        """Hide tabs that are restricted based on user role.
+        """Hide tabs that are restricted based on admin configuration.
 
         Role-based access:
-        - Admins: Full access (all tabs including Settings with full edit access)
-        - Supervisors: Can see ComfyUI, Gallery, and Settings tabs (Settings is read-only, info only)
-        - Regular users: Cannot see any restricted tabs
+        - Admins: Full access (all tabs including Settings)
+        - Regular users: Cannot see tabs listed in restricted_tabs setting
 
         For utility tabs (Settings, Logs), hides the corner-widget button
         instead of calling removeTab.
@@ -1039,10 +1049,6 @@ class LumaShotTools(QtWidgets.QWidget):
         for i in range(self.tab_widget.count() - 1, -1, -1):
             widget = self.tab_widget.widget(i)
             tab_name = widget.objectName()
-
-            # Supervisors can see ComfyUI, Gallery, and Settings tabs (Settings is read-only)
-            if app_state.is_sup and tab_name in ['comfyui', 'gallery', 'settings']:
-                continue
 
             if tab_name in restricted:
                 # For utility tabs, hide their button instead of removing the tab
@@ -1090,17 +1096,26 @@ class LumaShotTools(QtWidgets.QWidget):
                 self.tab_widget.setTabIcon(i, icon)
 
     def _disable_scroll_wheel_on_inputs(self):
-        """Disable scroll wheel on combo boxes and spin boxes to prevent accidental changes."""
+        """Disable scroll wheel on combo boxes and spin boxes to prevent accidental changes.
+
+        Installs an application-wide event filter so dynamically created widgets
+        (e.g. those in deferred tab initialize()) are also covered.
+        """
         from PySide6.QtWidgets import QComboBox, QSpinBox, QDoubleSpinBox
 
-        for combo in self.findChildren(QComboBox):
-            combo.wheelEvent = lambda e: e.ignore()
+        class _ScrollWheelFilter(QtCore.QObject):
+            """Block wheel events on combo/spin boxes app-wide."""
+            _FILTERED_TYPES = (QComboBox, QSpinBox, QDoubleSpinBox)
 
-        for spin in self.findChildren(QSpinBox):
-            spin.wheelEvent = lambda e: e.ignore()
+            def eventFilter(self, obj, event):
+                if (event.type() == QtCore.QEvent.Wheel
+                        and isinstance(obj, self._FILTERED_TYPES)):
+                    event.ignore()
+                    return True
+                return False
 
-        for spin in self.findChildren(QDoubleSpinBox):
-            spin.wheelEvent = lambda e: e.ignore()
+        self._scroll_filter = _ScrollWheelFilter(self)
+        QApplication.instance().installEventFilter(self._scroll_filter)
 
     def _setup_system_tray(self):
         """Setup system tray icon for OS-level notifications."""
@@ -1296,6 +1311,10 @@ class LumaShotTools(QtWidgets.QWidget):
     def enable_log_redirect(self):
         """Enable stdout/stderr redirection to the log widget."""
         if getattr(self, '_log_redirect_pending', False):
+            # Save originals so we can restore in closeEvent
+            self._orig_stdout = sys.stdout
+            self._orig_stderr = sys.stderr
+
             # Redirect stdout/stderr for any remaining print() calls
             sys.stdout = self.log_stream
             sys.stderr = self.log_stream
@@ -1303,10 +1322,10 @@ class LumaShotTools(QtWidgets.QWidget):
             # Bridge logging module → UI logs tab
             # Without this, logger.info() etc. only write to the file handler
             # and never reach the logs tab (LogStream only captures stdout/stderr)
-            ui_handler = logging.StreamHandler(self.log_stream)
-            ui_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
-            ui_handler.setLevel(logging.DEBUG)
-            logging.getLogger().addHandler(ui_handler)
+            self._ui_log_handler = logging.StreamHandler(self.log_stream)
+            self._ui_log_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+            self._ui_log_handler.setLevel(logging.DEBUG)
+            logging.getLogger().addHandler(self._ui_log_handler)
 
             self._log_redirect_pending = False
             logging.info("Log redirection enabled")
@@ -1358,13 +1377,59 @@ class LumaShotTools(QtWidgets.QWidget):
             self._tray_icon.hide()
             self._tray_icon = None
 
+        # Restore stdout/stderr and remove UI log handler
+        if hasattr(self, '_orig_stdout'):
+            sys.stdout = self._orig_stdout
+            sys.stderr = self._orig_stderr
+        if hasattr(self, '_ui_log_handler'):
+            logging.getLogger().removeHandler(self._ui_log_handler)
+
         super().closeEvent(event)
+
+
+_QT_NOISE_PATTERNS = (
+    "QFont::setPointSize: Point size <= 0",
+    "QThreadStorage: entry",
+    "QDxgiVSyncService not destroyed in time",
+)
+
+
+def _filtered_qt_message_handler(mode, context, message):
+    """Drop known cosmetic Qt warnings; forward everything else to logging.
+
+    Qt regularly emits warnings that are not actionable for app code
+    (e.g. point-size queries against pixel-size-only stylesheet fonts, or
+    teardown order complaints in QtWebEngine/Chromium). Filtering them
+    here keeps the log readable.
+    """
+    text = str(message) if message else ""
+    for pat in _QT_NOISE_PATTERNS:
+        if pat in text:
+            return
+    # Forward to Python logging using Qt's mode -> level mapping.
+    try:
+        from PySide6.QtCore import QtMsgType
+        level_map = {
+            QtMsgType.QtDebugMsg: logging.DEBUG,
+            QtMsgType.QtInfoMsg: logging.INFO,
+            QtMsgType.QtWarningMsg: logging.WARNING,
+            QtMsgType.QtCriticalMsg: logging.ERROR,
+            QtMsgType.QtFatalMsg: logging.CRITICAL,
+        }
+        logging.getLogger("Qt").log(level_map.get(mode, logging.WARNING), text)
+    except Exception:
+        pass
 
 
 def main():
     """Main entry point."""
     import traceback
     import time
+    from PySide6.QtCore import qInstallMessageHandler
+
+    # Install Qt message filter before the QApplication starts so all early
+    # widget-init warnings are routed through it.
+    qInstallMessageHandler(_filtered_qt_message_handler)
 
     try:
         # Show splash screen
@@ -1374,16 +1439,21 @@ def main():
         app.processEvents()
 
         # Pre-load settings to populate cache before tabs initialize
-        splash.update_progress(20, "Loading", "Loading settings...")
+        splash.update_progress(5, "Loading", "Loading user settings...")
         app.processEvents()
         try:
-            from core.settings_manager import load_user_settings, load_global_settings
+            from core.settings_manager import load_user_settings, load_global_settings, _migrate_global_to_user
             load_user_settings()  # Populate user settings cache
+            splash.update_progress(8, "Loading", "Loading global settings...")
+            app.processEvents()
             load_global_settings()  # Populate global settings cache (may hit network)
+            _migrate_global_to_user()  # Copy formerly-global settings to user scope
         except Exception as e:
             logging.warning(f"Could not pre-load settings: {e}")
 
         # Cache working tool paths for standalone mode fallback
+        splash.update_progress(12, "Loading", "Detecting tool paths...")
+        app.processEvents()
         try:
             from core.config import cache_tool_paths
             cache_tool_paths()
@@ -1391,6 +1461,8 @@ def main():
             logging.debug(f"Could not cache tool paths: {e}")
 
         # Check for running jobs to recover (show feedback in splash)
+        splash.update_progress(15, "Loading", "Checking for jobs to recover...")
+        app.processEvents()
         pending_job_recovery = None
         try:
             from core.user_preferences import get_comfyui_running_jobs
@@ -1399,12 +1471,12 @@ def main():
                 mode = job_state.get("mode", "unknown")
                 if mode == "iterate":
                     job_id = job_state.get("job_id", "")
-                    splash.update_progress(22, "Loading", f"Found job to recover: {job_id[:8]}...")
+                    splash.update_progress(17, "Loading", f"Found job to recover: {job_id[:8]}...")
                     pending_job_recovery = {"mode": "iterate", "count": 1}
                 elif mode == "batch":
                     job_ids = job_state.get("job_ids", [])
                     count = len(job_ids)
-                    splash.update_progress(22, "Loading", f"Found {count} job(s) to recover...")
+                    splash.update_progress(17, "Loading", f"Found {count} job(s) to recover...")
                     pending_job_recovery = {"mode": "batch", "count": count}
                 app.processEvents()
                 logging.info(f"[Startup] Found {mode} mode jobs to recover")
@@ -1415,17 +1487,25 @@ def main():
         # (scans network directory on-demand with a loading overlay)
 
         # Create main window (job recovery is deferred until after splash closes)
-        splash.update_progress(88, "Loading", "Creating application window...")
+        splash.update_progress(20, "Loading", "Creating application window...")
         app.processEvents()
+
+        def _splash_progress(percent, message):
+            """Callback for LumaShotTools to report init progress to splash."""
+            splash.update_progress(percent, "Loading", message)
+            app.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
 
         global _main_window
         t_start = time.perf_counter()
-        window = LumaShotTools()
+        window = LumaShotTools(
+            progress_callback=_splash_progress,
+            pending_job_recovery=pending_job_recovery,
+        )
         t_elapsed = time.perf_counter() - t_start
         logging.info(f"[Startup] Window creation total: {t_elapsed*1000:.0f}ms")
         _main_window = window  # Store reference for cross-widget access
 
-        splash.update_progress(95, "Loading", "Finalizing...")
+        splash.update_progress(92, "Loading", "Finalizing...")
         app.processEvents()
 
         # Show main window first, then close splash
@@ -1502,11 +1582,13 @@ def main():
         exit_code = app.exec()
         logging.info(f"Application exiting with code {exit_code}")
 
-        # Use os._exit() to bypass Python/Qt destructor chain that causes
-        # access violation (0xC0000005) during Chromium/QWebEngine cleanup.
-        # The aboutToQuit handler above does orderly cleanup; os._exit()
-        # prevents the remaining C++ destructors from crashing.
-        os._exit(exit_code)
+        # Try a normal Python exit. Historically this caused a 0xC0000005
+        # crash deep in the Chromium/QWebEngine destructor chain, which is
+        # why os._exit() was used. The aboutToQuit handler above now does an
+        # orderly QWebEngineView cleanup, so a clean exit should work and
+        # avoids the QThreadStorage warnings caused by os._exit() bypassing
+        # Qt's TLS cleanup.
+        sys.exit(exit_code)
     except Exception as e:
         logging.error(f"FATAL ERROR in main: {e}")
         traceback.print_exc()

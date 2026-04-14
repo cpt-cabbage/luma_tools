@@ -12,7 +12,7 @@ from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass, field
 
 from comfyui.workflow import load_workflow, _is_uuid, _get_subgraph_definitions
-from comfyui.node_configs import EDITABLE_NODE_CONFIGS, SETTINGS_NODE_CONFIGS
+from comfyui.node_configs import EDITABLE_NODE_CONFIGS, SETTINGS_NODE_CONFIGS, WIDGET_MAPPINGS
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,30 @@ def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
     return is_editable, base_title, condition_node
 
 
+def _resolve_widget_index(node_type: str, widget_name: str) -> Optional[int]:
+    """Resolve a widget index, preferring node_info cache and falling back
+    to the manual WIDGET_MAPPINGS table.
+
+    The node_info cache requires a live /object_info query from the ComfyUI
+    server; for custom nodes that were never cached locally (e.g. Trellis2),
+    this fallback lets us still resolve widget positions using the manual
+    mappings in node_configs.py.
+    """
+    from comfyui.node_info import get_widget_index
+
+    idx = get_widget_index(node_type, widget_name)
+    if idx is not None:
+        return idx
+
+    mapping = WIDGET_MAPPINGS.get(node_type)
+    if not mapping:
+        return None
+    try:
+        return mapping.index(widget_name)
+    except ValueError:
+        return None
+
+
 def _resolve_config_entries(node_type: str, config: list) -> list:
     """Resolve config entries to (widget_idx, widget_name, widget_type) tuples.
 
@@ -107,8 +131,10 @@ def _resolve_config_entries(node_type: str, config: list) -> list:
             resolved.append((widget_idx, widget_name, widget_type))
         elif isinstance(entry, (tuple, list)) and len(entry) == 2:
             # (widget_name, override_type) format — type override for special UI widgets
+            # Since the type is explicit, we only need to resolve the index;
+            # fall back to WIDGET_MAPPINGS when node_info doesn't know this node.
             widget_name, override_type = entry
-            widget_idx = get_widget_index(node_type, widget_name)
+            widget_idx = _resolve_widget_index(node_type, widget_name)
             if widget_idx is None:
                 logger.warning(
                     f"Could not resolve widget index for '{widget_name}' on {node_type}"
@@ -537,10 +563,10 @@ def _parse_settings_title(title: str) -> Tuple[bool, str]:
         - is_settings: True if node is a settings node
         - group_name: Title without _settings suffix
     """
-    if '_settings' in title:
-        # Extract the base name before _settings
-        parts = title.split('_settings')
-        group_name = parts[0].replace('_', ' ').strip()
+    # Match `<group>_settings` as an end-of-name marker so titles like
+    # `Upscale_settings_v2` aren't mis-detected.
+    if title.endswith('_settings') or '_settings_' in title:
+        group_name = title.split('_settings', 1)[0].replace('_', ' ').strip()
         return True, group_name
     return False, title
 

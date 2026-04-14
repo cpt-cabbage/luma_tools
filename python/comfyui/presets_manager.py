@@ -23,16 +23,13 @@ logger = logging.getLogger(__name__)
 # WORKFLOW FILE COPYING
 # ============================================================================
 
-DEFAULT_WORKFLOWS_DIRECTORY = "L:/tools/_studio_tools/luma_tools/comfyui/workflows"
-
-
 def get_workflows_directory() -> str:
     """Get the centralized workflows directory path.
 
     Returns:
-        Path to workflows directory from settings, or default.
+        Path to workflows directory from settings, or empty string if not configured.
     """
-    return safe_get_setting("comfyui_workflows_directory", DEFAULT_WORKFLOWS_DIRECTORY)
+    return safe_get_setting("comfyui_workflows_directory", "")
 
 
 def _is_path_under_directory(file_path: str, directory: str) -> bool:
@@ -96,6 +93,11 @@ def copy_workflow_to_central_directory(source_path: str) -> Optional[str]:
         return None
 
     workflows_dir = get_workflows_directory()
+
+    # Setting not configured — skip central copy, caller will use source path as-is.
+    if not workflows_dir:
+        logger.debug("comfyui_workflows_directory not configured; skipping central copy")
+        return source_path
 
     # Check if source is already in the workflows directory
     if _is_path_under_directory(source_path, workflows_dir):

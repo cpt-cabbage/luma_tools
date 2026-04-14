@@ -44,10 +44,11 @@ class LogsTab(BaseTab):
 
     def __init__(self, main_window=None, app_state=None):
         super().__init__(main_window, app_state)
+        from collections import deque
         self._paused = False
         self._paused_messages = []
         self._show_debug = False
-        self._all_messages = []
+        self._all_messages = deque(maxlen=5000)
 
     def connect_signals(self):
         """Connect log tab signals."""

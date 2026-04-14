@@ -54,6 +54,7 @@ class PassBuilder:
         progress_callback: Optional[Callable[[int, str], None]] = None,
         product_name: Optional[str] = None,
         cancel_event=None,
+        is_denoised: bool = True,
     ) -> None:
         """
         Build passes for rendering with optional farm submission and AYON publishing.
@@ -72,6 +73,9 @@ class PassBuilder:
             output_subdirectory: Subdirectory for output files
             do_publish: Whether to publish to AYON
             progress_callback: Optional callback function(progress, message) for progress updates
+            product_name: Optional AYON product name override
+            cancel_event: Optional threading.Event for cancellation
+            is_denoised: Whether denoised renders exist (if False, reads from raw)
         """
         from core.error_handling import check_cancelled
 
@@ -128,9 +132,10 @@ class PassBuilder:
         check_cancelled(cancel_event)
 
         # Build OIIO command
-        report_progress(progress_callback, 40, "Building OIIO command...")
+        denoise_label = "denoised" if is_denoised else "raw"
+        report_progress(progress_callback, 40, f"Building OIIO command ({denoise_label})...")
 
-        oiio_args = build_oiio_command(passes, denoised, renders, output)
+        oiio_args = build_oiio_command(passes, denoised, renders, output, is_denoised=is_denoised)
 
         # Handle farm submission or local execution
         if use_farm:
