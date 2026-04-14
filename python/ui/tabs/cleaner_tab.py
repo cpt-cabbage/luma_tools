@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QTreeWidgetItem
 
 from .base_tab import BaseTab, TabConfig
 from core.utils import ByteSize
+from ui_components import StatusColors
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,11 @@ class CleanerTab(BaseTab):
         # Shot cleanup init
         self.ui.progressBar.setValue(0)
 
-        if self.app_state.lookdev_dir:
-            self._setup_scanner()
+        # Always run scanner setup so the GalleryStatsTree.itemChanged handler
+        # (connected eagerly in connect_signals) doesn't see uninitialized
+        # state if it fires before the first rescan, and so a later rescan
+        # can't double-bind signals onto a fresh DirectoryScanner instance.
+        self._setup_scanner()
 
         # Gallery cleanup init
         self._gallery_footprint = None
@@ -133,12 +137,8 @@ class CleanerTab(BaseTab):
         Args:
             on_complete: Optional callback to call when scanning completes
         """
-        from ui_components import StatusColors
 
-        if not hasattr(self, "scanner"):
-            self._setup_scanner()
-
-        if not hasattr(self, "scanner"):
+        if not hasattr(self, "scanner") or self.scanner is None:
             self.show_status("Scanner not available", "warning")
             return
 
@@ -162,7 +162,6 @@ class CleanerTab(BaseTab):
 
     def _on_scan_result(self, result):
         """Handle scan completion."""
-        from ui_components import StatusColors
 
         # Enable clean button
         self.ui.CleanFiles.setEnabled(True)
@@ -183,7 +182,6 @@ class CleanerTab(BaseTab):
 
     def _on_scan_error(self, error_msg, traceback_str=""):
         """Handle scan error."""
-        from ui_components import StatusColors
 
         self.update_status_with_spinner(
             f"Shot Cleaner: Scan error - {error_msg}", StatusColors.ERROR, start=False
@@ -212,7 +210,6 @@ class CleanerTab(BaseTab):
     def _on_clean_files_clicked(self):
         """Handle cleanup button click."""
         from dialog_helpers import confirm_action
-        from ui_components import StatusColors
         from services.cleanup_service import (
             cleanup_renders,
             cleanup_usd,
@@ -326,7 +323,6 @@ class CleanerTab(BaseTab):
             get_gallery_root_path,
             scan_gallery_footprint,
         )
-        from ui_components import StatusColors
 
         output_path = get_gallery_root_path()
         if not output_path:
@@ -355,7 +351,6 @@ class CleanerTab(BaseTab):
 
     def _on_gallery_scan_complete(self, footprint):
         """Handle gallery scan completion."""
-        from ui_components import StatusColors
 
         self._gallery_footprint = footprint
         self.ui.GalleryScanButton.setEnabled(True)
@@ -371,7 +366,6 @@ class CleanerTab(BaseTab):
 
     def _on_gallery_scan_error(self, error_msg, traceback_str=""):
         """Handle gallery scan error."""
-        from ui_components import StatusColors
         self.ui.GalleryScanButton.setEnabled(True)
         self.ui.galleryProgressBar.setValue(0)
         self.update_status_with_spinner(
@@ -464,7 +458,10 @@ class CleanerTab(BaseTab):
 
     def _on_filter_changed(self, item, column):
         """Handle filter checkbox changes."""
-        if self._updating_tree:
+        # connect_signals() runs eagerly at startup but _updating_tree is set
+        # in initialize() which is deferred until first activation, so this
+        # may fire before initialize. Bail out cleanly in that case.
+        if not hasattr(self, "_updating_tree") or self._updating_tree:
             return
         if column != 0:
             return
@@ -544,7 +541,6 @@ class CleanerTab(BaseTab):
         """Execute gallery cleanup."""
         from dialog_helpers import confirm_action
         from services.gallery_cleanup_service import cleanup_gallery_files
-        from ui_components import StatusColors
 
         if not self._selected_files:
             self.show_status("No files selected for cleanup", "warning")
@@ -577,7 +573,6 @@ class CleanerTab(BaseTab):
 
     def _on_gallery_cleanup_complete(self, result):
         """Handle gallery cleanup completion."""
-        from ui_components import StatusColors
 
         deleted, freed, errors = result
         self.ui.GalleryCleanupButton.setEnabled(True)
@@ -599,7 +594,6 @@ class CleanerTab(BaseTab):
 
     def _on_gallery_cleanup_error(self, error_msg, traceback_str=""):
         """Handle gallery cleanup error."""
-        from ui_components import StatusColors
         self.ui.GalleryCleanupButton.setEnabled(True)
         self.ui.galleryProgressBar.setValue(0)
         self.update_status_with_spinner(

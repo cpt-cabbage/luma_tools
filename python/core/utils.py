@@ -105,49 +105,6 @@ def ensure_directory(path):
     os.makedirs(path, exist_ok=True)
 
 
-def safe_remove(path, log_errors=False):
-    """
-    Safely remove a file, ignoring errors if it doesn't exist.
-
-    Args:
-        path: Path to file to remove
-        log_errors: If True, log warnings on failure
-
-    Returns:
-        bool: True if file was removed, False otherwise
-    """
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-            return True
-    except Exception as e:
-        if log_errors:
-            logger.warning(f"Could not remove {path}: {e}")
-    return False
-
-
-def safe_rmtree(path, log_errors=False):
-    """
-    Safely remove a directory tree, ignoring errors.
-
-    Args:
-        path: Path to directory to remove
-        log_errors: If True, log warnings on failure
-
-    Returns:
-        bool: True if directory was removed, False otherwise
-    """
-    import shutil
-    try:
-        if os.path.exists(path):
-            shutil.rmtree(path)
-            return True
-    except Exception as e:
-        if log_errors:
-            logger.warning(f"Could not remove directory {path}: {e}")
-    return False
-
-
 def replace_frame_tokens(template, frame_num):
     """
     Replace <STARTFRAME%N> tokens with actual frame numbers.

@@ -49,9 +49,6 @@ def _is_websocket_available():
     return _get_websocket() is not None
 
 
-WEBSOCKET_AVAILABLE = None  # Deprecated: use _is_websocket_available() instead
-
-
 # =============================================================================
 # ComfyUI Path Resolution
 # =============================================================================

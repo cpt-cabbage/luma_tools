@@ -1,5 +1,11 @@
 # Luma Tools Changelog
 
+## Version 0.7.1.2
+More bug fixes
+
+## Version 0.7.1.1
+Bug fixes
+
 ## Version 0.7.1
 - ComfyUI: live server status indicator next to the Submit button — shows whether the farm server is online, starting, or offline
 - ComfyUI: new "Fail & Delete Job" option in Settings — automatically removes the Deadline job when the server is unavailable instead of leaving it in a failed state

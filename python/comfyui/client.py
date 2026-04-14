@@ -32,9 +32,9 @@ import argparse
 
 logger = logging.getLogger(__name__)
 
-# Import shared utilities
+# Import shared utilities. client.py is workstation-only — never copied to
+# farm — so the bare `comfyui.*` import is intentional.
 from comfyui.utils import (
-    WEBSOCKET_AVAILABLE,
     check_server_health,
     wait_for_server,
     submit_workflow,

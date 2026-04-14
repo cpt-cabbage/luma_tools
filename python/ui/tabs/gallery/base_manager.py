@@ -144,9 +144,10 @@ class BaseGalleryManager:
         """
         Start a worker thread with standard signal connections.
 
-        Workers are stored in self._active_workers list to prevent garbage
-        collection, even when multiple operations run concurrently. Completed
-        workers are pruned on each new start.
+        Workers are tracked in self._active_workers to prevent garbage
+        collection. Each worker removes itself from the list once its
+        finished signal fires, so the list size tracks live workers and
+        doesn't grow unbounded over a long gallery session.
 
         Args:
             func: Function to run in worker thread
@@ -159,8 +160,6 @@ class BaseGalleryManager:
         from workers import start_worker_thread
         if not hasattr(self, '_active_workers'):
             self._active_workers = []
-        # Prune completed workers (those whose QRunnable has finished)
-        self._active_workers = [w for w in self._active_workers if w is not None]
         worker = start_worker_thread(
             func, *args,
             on_result=on_result,
@@ -169,6 +168,24 @@ class BaseGalleryManager:
             worker_kwargs=worker_kwargs
         )
         self._active_workers.append(worker)
+        # Self-cleanup: drop the worker reference as soon as it finishes so
+        # closures over `self.tab` and large captured args don't outlive the
+        # work itself. `finished` is the QRunnable lifecycle signal exposed
+        # by start_worker_thread.
+        signals = getattr(worker, "signals", None)
+        finished = getattr(signals, "finished", None) if signals is not None else None
+        if finished is not None:
+            try:
+                finished.connect(lambda w=worker: self._discard_worker(w))
+            except Exception:
+                pass
+
+    def _discard_worker(self, worker):
+        """Remove a finished worker from `_active_workers` (no-op if absent)."""
+        try:
+            self._active_workers.remove(worker)
+        except (ValueError, AttributeError):
+            pass
 
     # =========================================================================
     # Settings Helpers

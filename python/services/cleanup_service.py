@@ -97,14 +97,14 @@ def calculate_cleanup_size(lookdev_dir, render_dirs, usd_dirs, include_backups):
     total_size = 0
 
     # Calculate render sizes
-    renders_path = os.path.join(lookdev_dir, "img", "renders")
+    renders_path = os.path.join(lookdev_dir, RENDERS_SUBPATH)
     for dir_name in render_dirs:
         dir_path = Path(os.path.join(renders_path, dir_name))
         if dir_path.exists():
             total_size += get_folder_size(dir_path)
 
     # Calculate USD sizes
-    usd_path = os.path.join(lookdev_dir, "usd_files")
+    usd_path = os.path.join(lookdev_dir, USD_SUBPATH)
     for dir_name in usd_dirs:
         dir_path = Path(os.path.join(usd_path, dir_name))
         if dir_path.exists():
@@ -146,35 +146,3 @@ def get_cleanup_summary(lookdev_dir, render_dirs, usd_dirs, include_backups):
     return summary
 
 
-def filter_renders_in_use(all_renders, renders_in_comp):
-    """
-    Filter out renders that are in use by comp files.
-
-    Args:
-        all_renders: List of all render directories
-        renders_in_comp: List of renders referenced in comp files
-
-    Returns:
-        list: Renders that are safe to delete (not in comp)
-    """
-    # Use set for O(n) lookup instead of O(n*m) nested loop
-    renders_in_comp_set = set(renders_in_comp)
-    return [render for render in all_renders if render not in renders_in_comp_set]
-
-
-def keep_latest_n_versions(all_versions, n=1):
-    """
-    Keep only the latest N versions.
-
-    Args:
-        all_versions: List of version directory names (sorted)
-        n: Number of latest versions to keep
-
-    Returns:
-        list: Versions to delete (excluding the latest N)
-    """
-    if len(all_versions) <= n:
-        return []
-
-    # Keep the last N versions, delete the rest
-    return all_versions[:-n]

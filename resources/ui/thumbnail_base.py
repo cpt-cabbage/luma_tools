@@ -2,6 +2,7 @@
 Base class for thumbnail widgets with shared placeholder functionality.
 """
 import threading
+from collections import OrderedDict
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtWidgets import QWidget
 from PySide6.QtGui import QPainter, QColor, QPixmap, QImage, QFont
@@ -30,6 +31,7 @@ def extract_video_frame_with_duration(video_path, thumb_width=150, thumb_height=
     if not FFMPEG_PATH:
         return None
 
+    tmp_path = None
     try:
         duration = get_media_duration(video_path)
 
@@ -40,12 +42,15 @@ def extract_video_frame_with_duration(video_path, thumb_width=150, thumb_height=
             '-vframes', '1', '-y', tmp_path
         ]
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        subprocess.run(cmd, capture_output=True, timeout=10, creationflags=creationflags)
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=10, creationflags=creationflags
+        )
+        if result.returncode != 0:
+            return None
 
         from PySide6.QtGui import QImage
         from PySide6.QtCore import QBuffer, QIODevice
         image = QImage(tmp_path)
-        os.remove(tmp_path)
         if image.isNull():
             return None
 
@@ -56,29 +61,42 @@ def extract_video_frame_with_duration(video_path, thumb_width=150, thumb_height=
         )
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
-        scaled.save(buffer, "PNG")
-        return (buffer.data().data(), duration)
+        try:
+            scaled.save(buffer, "PNG")
+            return (bytes(buffer.data()), duration)
+        finally:
+            buffer.close()
     except Exception:
         return None
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 class BaseThumbnailWidget(QWidget):
     """Base class for thumbnail widgets with shared placeholder caching logic.
 
-    Thread-safe: Uses QImage for construction (safe on any thread),
-    converts to QPixmap only on the main thread via cache.
+    The placeholder *image* construction is thread-safe and pulled from a
+    bounded LRU. The QPixmap conversion (and therefore _create_placeholder
+    itself) must be called from the GUI thread.
     """
 
     THUMBNAIL_SIZE = (150, 150)
-    _placeholder_cache = {}
+    _PLACEHOLDER_CACHE_MAX = 64
+    _placeholder_cache: "OrderedDict[str, QImage]" = OrderedDict()
     _placeholder_cache_lock = threading.RLock()
 
     def _create_placeholder(self, text, bg_color="#3c414b", fg_color="#888888", font_size=14):
         """
-        Create a placeholder pixmap with cached results.
+        Create a placeholder QPixmap, cached by appearance.
 
-        Thread-safe: Uses QImage for rendering (safe on any thread),
-        then converts to QPixmap for display.
+        Must be called from the main (GUI) thread because QPixmap construction
+        is GUI-thread-only. The underlying QImage cache is thread-safe and
+        bounded so labels for arbitrary file extensions/categories don't grow
+        the cache without bound over a long session.
 
         Args:
             text: Text to display in the placeholder
@@ -89,13 +107,13 @@ class BaseThumbnailWidget(QWidget):
         Returns:
             QPixmap: Cached or newly created placeholder pixmap
         """
-        # Cache QImage (thread-safe to construct), convert to QPixmap on return.
-        # QPixmap construction itself is GUI-thread-only; this method must be
-        # called from the main thread regardless.
         cache_key = f"{text}_{bg_color}_{fg_color}_{font_size}"
 
         with BaseThumbnailWidget._placeholder_cache_lock:
             cached_image = BaseThumbnailWidget._placeholder_cache.get(cache_key)
+            if cached_image is not None:
+                # Mark as most recently used
+                BaseThumbnailWidget._placeholder_cache.move_to_end(cache_key)
 
         if cached_image is None:
             w, h = self.THUMBNAIL_SIZE
@@ -112,7 +130,9 @@ class BaseThumbnailWidget(QWidget):
             painter.end()
 
             with BaseThumbnailWidget._placeholder_cache_lock:
-                BaseThumbnailWidget._placeholder_cache.setdefault(cache_key, cached_image)
-                cached_image = BaseThumbnailWidget._placeholder_cache[cache_key]
+                BaseThumbnailWidget._placeholder_cache[cache_key] = cached_image
+                BaseThumbnailWidget._placeholder_cache.move_to_end(cache_key)
+                while len(BaseThumbnailWidget._placeholder_cache) > self._PLACEHOLDER_CACHE_MAX:
+                    BaseThumbnailWidget._placeholder_cache.popitem(last=False)
 
         return QPixmap.fromImage(cached_image)

@@ -194,7 +194,7 @@ def read_comp_file(compfile, hip_file_name):
                         foundcomps = foundcomps.strip()
                         foundcomps = os.path.dirname(foundcomps)
                         foundcomps = foundcomps.removesuffix('/for_comp').removesuffix('\\for_comp')
-                        foundcomps = foundcomps.split(r"/")[-1]
+                        foundcomps = os.path.basename(foundcomps)
                         renders_in_comp.append(foundcomps)
     except Exception as e:
         logger.error(f"Error reading comp file {compfile}: {e}")

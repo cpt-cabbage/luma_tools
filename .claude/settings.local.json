@@ -165,7 +165,8 @@
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/comfyui.ui)",
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/pass_builder.ui)",
       "Bash(python/venv/Scripts/pyside6-uic.exe resources/ui/tabs/settings.ui)",
-      "Bash(awk -F: '{print $2}')"
+      "Bash(awk -F: '{print $2}')",
+      "Bash(git fetch:*)"
     ],
     "deny": [
       "Read(./python/venv/**)",

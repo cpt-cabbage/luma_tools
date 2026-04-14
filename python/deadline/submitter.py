@@ -21,7 +21,7 @@ from core.config import (
     DEADLINE_JOB_NAME_PREFIX,
 )
 from core.settings_manager import safe_get_setting
-from core.utils import ensure_directory, save_json
+from core.utils import ensure_directory, normalize_path, save_json
 from comfyui.utils import resolve_comfyui_paths
 from comfyui.image_convert import needs_conversion, copy_or_convert
 
@@ -69,7 +69,6 @@ def submit_comfyui_to_deadline(
     priority: Optional[int] = None,
     pool: Optional[str] = None,
     group: Optional[str] = None,
-    use_server_mode: bool = False,
     full_restart: bool = False,
     restart_lowvram: bool = False,
 ) -> Optional[str]:
@@ -91,7 +90,6 @@ def submit_comfyui_to_deadline(
         priority: Job priority (default from config)
         pool: Deadline pool (default from config)
         group: Deadline group (default from config)
-        use_server_mode: If True, keep ComfyUI server running between jobs.
         full_restart: If True, completely restart the ComfyUI server before processing.
         restart_lowvram: If True (and full_restart is True), restart server with --lowvram.
 
@@ -131,15 +129,19 @@ def submit_comfyui_to_deadline(
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
-    for src, dst in [
-        (runner_script_source, runner_script),
-        (utils_script_source, utils_script),
-        (analytics_script_source, analytics_script),
-        (node_configs_script_source, node_configs_script),
-        (metadata_script_source, metadata_script),
-    ]:
-        shutil.copy2(src, dst)
-        logger.info(f"Copied {os.path.basename(src)} to: {dst}")
+    try:
+        for src, dst in [
+            (runner_script_source, runner_script),
+            (utils_script_source, utils_script),
+            (analytics_script_source, analytics_script),
+            (node_configs_script_source, node_configs_script),
+            (metadata_script_source, metadata_script),
+        ]:
+            shutil.copy2(src, dst)
+            logger.info(f"Copied {os.path.basename(src)} to: {dst}")
+    except (OSError, shutil.Error) as e:
+        logger.error(f"Failed to copy farm script {src} -> {dst}: {e}")
+        return None
 
     # Write farm config alongside scripts so farm modules can find network paths
     # without hardcoded production paths. This is the single source of truth for
@@ -148,18 +150,28 @@ def submit_comfyui_to_deadline(
     farm_config_path = os.path.join(job_data_dir, "_farm_config.json")
     save_json(farm_config_path, farm_config)
 
-    input_dir = output_dir
-    port = 8188
+    # All paths embedded in the Deadline job_info / plugin_info files must use
+    # forward slashes, otherwise Deadline's CommandLine plugin parses them as
+    # escape sequences inside quoted Arguments=.
+    workflow_path_n = normalize_path(workflow_path)
+    seeds_file_n = normalize_path(seeds_file)
+    output_dir_n = normalize_path(output_dir)
+    runner_script_n = normalize_path(runner_script)
+    job_data_dir_n = normalize_path(job_data_dir)
+    python_exe_n = normalize_path(python_exe)
 
-    comfyui_path_clean = comfyui_path.rstrip('/\\')
+    input_dir = output_dir_n
+    port = safe_get_setting("comfyui_port", 8188)
+
+    comfyui_path_clean = normalize_path(comfyui_path.rstrip('/\\'))
     timeout = safe_get_setting("comfyui_timeout", 3600)
     runner_args = (
-        f'"{runner_script}" '
+        f'"{runner_script_n}" '
         f'--comfyui-path "{comfyui_path_clean}" '
-        f'--workflow "{workflow_path}" '
-        f'--seeds-file "{seeds_file}" '
+        f'--workflow "{workflow_path_n}" '
+        f'--seeds-file "{seeds_file_n}" '
         f'--input-directory "{input_dir}" '
-        f'--output-directory "{output_dir}" '
+        f'--output-directory "{output_dir_n}" '
         f'--output-prefix "{render_name}" '
         f'--frame <STARTFRAME> '
         f'--port {port} '
@@ -174,7 +186,7 @@ def submit_comfyui_to_deadline(
         if restart_lowvram:
             runner_args += ' --restart-lowvram'
 
-    comfyui_default_output = os.path.join(comfyui_path, "ComfyUI", "output")
+    comfyui_default_output = normalize_path(os.path.join(comfyui_path, "ComfyUI", "output"))
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
 
     job_info_path = os.path.join(job_data_dir, "comfyui_job_info.txt")
@@ -187,16 +199,16 @@ Group={group}
 Priority={priority}
 Frames=1-{generation_count}
 ChunkSize=1
-OutputDirectory0={output_dir}
+OutputDirectory0={output_dir_n}
 OnJobComplete=Delete
 OverrideTaskFailureDetection=True
 FailureDetectionTaskErrors=1
 """
 
     plugin_info_path = os.path.join(job_data_dir, "comfyui_plugin_info.txt")
-    plugin_info_content = f"""Executable={python_exe}
+    plugin_info_content = f"""Executable={python_exe_n}
 Arguments={runner_args}
-StartupDirectory={job_data_dir}
+StartupDirectory={job_data_dir_n}
 ExitCodeTreatedAsFailure=1-255
 """
 
@@ -258,7 +270,6 @@ def submit_comfyui_job(
     base_seed: Optional[int] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     network_output_dir: Optional[str] = None,
-    use_server_mode: bool = True,
     workflow_preset: Optional[str] = None,
     full_restart: bool = False,
     restart_lowvram: bool = False,
@@ -283,7 +294,6 @@ def submit_comfyui_job(
         base_seed: Optional starting seed (sequential if provided, random if None)
         progress_callback: Optional callback for progress updates
         network_output_dir: Network path where ComfyUI writes outputs
-        use_server_mode: Deprecated - server mode is always enabled
         workflow_preset: Full preset name for metadata
         full_restart: If True, restart ComfyUI server before processing
         restart_lowvram: If True (and full_restart is True), restart server with --lowvram
@@ -503,7 +513,6 @@ def submit_comfyui_job(
             render_name=current_job_name,
             generation_count=generation_count,
             job_data_dir=job_data_dir,
-            use_server_mode=True,
             full_restart=full_restart,
             restart_lowvram=restart_lowvram,
         )

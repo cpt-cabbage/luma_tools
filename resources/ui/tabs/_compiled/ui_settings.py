@@ -530,54 +530,6 @@ class Ui_SettingsTab(object):
 
         self.globalSettingsLayout.addLayout(self.adminUsersContentLayout)
 
-        self.restrictedTabsHeader = QLabel(self.globalSettingsGroupBox)
-        self.restrictedTabsHeader.setObjectName(u"restrictedTabsHeader")
-
-        self.globalSettingsLayout.addWidget(self.restrictedTabsHeader)
-
-        self.restrictedTabsGridLayout = QGridLayout()
-        self.restrictedTabsGridLayout.setObjectName(u"restrictedTabsGridLayout")
-        self.restrictedTabsGridLayout.setHorizontalSpacing(20)
-        self.restrictedTabsGridLayout.setVerticalSpacing(8)
-        self.RestrictComfyUI = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictComfyUI.setObjectName(u"RestrictComfyUI")
-        self.RestrictComfyUI.setChecked(True)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictComfyUI, 0, 0, 1, 1)
-
-        self.RestrictGallery = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictGallery.setObjectName(u"RestrictGallery")
-        self.RestrictGallery.setChecked(True)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictGallery, 0, 1, 1, 1)
-
-        self.RestrictPassBuilder = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictPassBuilder.setObjectName(u"RestrictPassBuilder")
-        self.RestrictPassBuilder.setChecked(False)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictPassBuilder, 0, 2, 1, 1)
-
-        self.RestrictMP4Maker = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictMP4Maker.setObjectName(u"RestrictMP4Maker")
-        self.RestrictMP4Maker.setChecked(False)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictMP4Maker, 1, 0, 1, 1)
-
-        self.RestrictRePublish = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictRePublish.setObjectName(u"RestrictRePublish")
-        self.RestrictRePublish.setChecked(False)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictRePublish, 1, 1, 1, 1)
-
-        self.RestrictShotCleaner = QCheckBox(self.globalSettingsGroupBox)
-        self.RestrictShotCleaner.setObjectName(u"RestrictShotCleaner")
-        self.RestrictShotCleaner.setChecked(False)
-
-        self.restrictedTabsGridLayout.addWidget(self.RestrictShotCleaner, 1, 2, 1, 1)
-
-
-        self.globalSettingsLayout.addLayout(self.restrictedTabsGridLayout)
-
         self.categoriesGroupBox = QGroupBox(self.globalSettingsGroupBox)
         self.categoriesGroupBox.setObjectName(u"categoriesGroupBox")
         self.categoriesLayout = QVBoxLayout(self.categoriesGroupBox)
@@ -882,16 +834,6 @@ class Ui_SettingsTab(object):
 #endif // QT_CONFIG(tooltip)
         self.AddAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Add User", None))
         self.RemoveAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Remove User", None))
-        self.restrictedTabsHeader.setText(QCoreApplication.translate("SettingsTab", u"Restricted Tabs (hidden from regular users):", None))
-#if QT_CONFIG(tooltip)
-        self.restrictedTabsHeader.setToolTip(QCoreApplication.translate("SettingsTab", u"These tabs are hidden from regular users. Admins can always see all tabs.", None))
-#endif // QT_CONFIG(tooltip)
-        self.RestrictComfyUI.setText(QCoreApplication.translate("SettingsTab", u"ComfyUI", None))
-        self.RestrictGallery.setText(QCoreApplication.translate("SettingsTab", u"Gallery", None))
-        self.RestrictPassBuilder.setText(QCoreApplication.translate("SettingsTab", u"Pass Builder", None))
-        self.RestrictMP4Maker.setText(QCoreApplication.translate("SettingsTab", u"MP4 Maker", None))
-        self.RestrictRePublish.setText(QCoreApplication.translate("SettingsTab", u"rePublish", None))
-        self.RestrictShotCleaner.setText(QCoreApplication.translate("SettingsTab", u"Shot Cleaner", None))
         self.categoriesGroupBox.setTitle(QCoreApplication.translate("SettingsTab", u"ComfyUI Preset Categories", None))
         self.categoriesInfoLabel.setText(QCoreApplication.translate("SettingsTab", u"Manage categories used to filter presets in the model picker.", None))
 #if QT_CONFIG(tooltip)

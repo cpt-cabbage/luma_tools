@@ -220,6 +220,8 @@ class VideoControlBar(QWidget):
         self.media_player = media_player
         self._is_playing = False
         self._duration = 0
+        self._saved_volume = 100
+        self._live_audio_scrub = False
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.setSingleShot(True)
         self._auto_hide_timer.timeout.connect(self._fade_out)
@@ -571,7 +573,7 @@ class VideoControlBar(QWidget):
             self._saved_volume = self.volume_slider.value()
             self.volume_slider.setValue(0)
         else:
-            self.volume_slider.setValue(self._saved_volume if hasattr(self, '_saved_volume') else 100)
+            self.volume_slider.setValue(self._saved_volume)
 
     def _on_media_status_changed(self, status):
         """Handle media status changes for looping."""
@@ -1237,9 +1239,8 @@ class EmbeddedImageViewer(QWidget):
         self.publish_to_ayon_btn.clicked.connect(self._publish_to_ayon)
 
         try:
-            from state_manager import get_app_state
+            from core.state_manager import app_state
             from ayon.service import AYON_AVAILABLE
-            app_state = get_app_state()
             is_standalone = app_state.standalone_mode
 
             if is_standalone or not AYON_AVAILABLE:

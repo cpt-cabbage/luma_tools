@@ -275,7 +275,7 @@ class SelectionManager(BaseGalleryManager):
                 self.tab.show_status_message(f"Removed {len(paths)} items from {group.name}")
 
     def select_all(self):
-        """Select all items in the gallery."""
+        """Select all items in the gallery, including collapsed stacks."""
         if not hasattr(self.tab, '_widget_cache'):
             return
 
@@ -283,6 +283,14 @@ class SelectionManager(BaseGalleryManager):
         for path, widget in self.get_widget_cache_copy().items():
             if hasattr(widget, 'set_selected'):
                 widget.set_selected(True)
+
+        # Stacks live in a separate map and would otherwise be excluded from
+        # Ctrl+A — match the symmetry of clear_selection() which already
+        # handles them.
+        if hasattr(self.tab, '_manager') and hasattr(self.tab._manager, '_stack_widgets'):
+            for stack in self.tab._manager._stack_widgets.values():
+                if hasattr(stack, 'set_selected'):
+                    stack.set_selected(True)
 
         count = len(self.tab._selected_items)
         self.tab.log(f"[Gallery] Selected all {count} items")
@@ -445,9 +453,12 @@ class SelectionManager(BaseGalleryManager):
         """Select a single item by its path, checking both widget cache and stacks."""
         from small_widgets import StackedThumbnailWidget
 
-        # Check widget cache first
-        if path in self.tab._widget_cache:
-            self.tab._widget_cache[path].set_selected(True)
+        # Check widget cache first via the lock-protected accessor — direct
+        # access via `self.tab._widget_cache[path]` would TOCTOU-race the
+        # hash worker that mutates the cache.
+        cached = self.tab.get_cached_widget(path) if hasattr(self.tab, "get_cached_widget") else None
+        if cached is not None:
+            cached.set_selected(True)
             return
 
         # Check if it's in a collapsed stack

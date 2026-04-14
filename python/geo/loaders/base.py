@@ -7,7 +7,15 @@ Defines the interface that all model loaders must implement.
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Set
 
-import numpy as np
+# numpy is optional. The test suite uses NUMPY_WORKS to skip numpy-dependent
+# tests on broken venvs; we mirror that here so the entire geo.loaders import
+# graph doesn't blow up just because numpy can't be loaded.
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    np = None
+    _HAS_NUMPY = False
 
 if TYPE_CHECKING:
     # Avoid circular import: geo.loader imports loaders.factory which
@@ -91,6 +99,10 @@ class BaseModelLoader(ABC):
 
     def _calculate_bounds(self, model: "ModelData") -> None:
         """Calculate bounding box for the model."""
+        if not _HAS_NUMPY:
+            # Without numpy we can't vectorise the min/max; leave bounds unset
+            # (callers already handle the None case as "unbounded").
+            return
         if not model.meshes:
             return
 

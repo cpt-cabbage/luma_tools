@@ -85,6 +85,7 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
         "global"
     ),
     "comfyui_timeout": SettingDef("comfyui_timeout", 3600, "global", _validate_timeout),
+    "comfyui_port": SettingDef("comfyui_port", 8188, "global"),
     "comfyui_server_not_found_behavior": SettingDef(
         "comfyui_server_not_found_behavior", "fail", "user", _validate_server_behavior
     ),
@@ -161,8 +162,6 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_convert_colorspace": SettingDef("comfyui_convert_colorspace", True, "user"),
     # Viewer settings
     "viewer_live_audio_scrub": SettingDef("viewer_live_audio_scrub", False, "user"),
-    # Global Settings (Settings tab is admin-only, not configurable via restricted_tabs)
-    "restricted_tabs": SettingDef("restricted_tabs", [], "global"),
 }
 
 # ============================================================================

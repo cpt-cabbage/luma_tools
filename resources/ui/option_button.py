@@ -66,11 +66,34 @@ class OptionButtonManager:
         self.parent_window = parent_window
         self.label_func = label_func
 
-        # Connect button click
+        # Disconnect any previous OptionButtonManager attached to this button
+        # so replacing the manager doesn't accumulate connections (multi-popup
+        # bug). We tag the bound slot on the button itself and disconnect it
+        # before reconnecting.
+        previous = getattr(button, "_option_button_show_menu", None)
+        if previous is not None:
+            try:
+                button.clicked.disconnect(previous)
+            except (TypeError, RuntimeError):
+                pass
         button.clicked.connect(self._show_menu)
+        button._option_button_show_menu = self._show_menu
 
         # Set initial text
         self._update_text()
+
+    def disconnect(self):
+        """Detach this manager from its button.
+
+        Call before discarding the manager (or replacing it with a new one)
+        so the bound `_show_menu` slot doesn't keep firing.
+        """
+        try:
+            self.button.clicked.disconnect(self._show_menu)
+        except (TypeError, RuntimeError):
+            pass
+        if getattr(self.button, "_option_button_show_menu", None) is self._show_menu:
+            self.button._option_button_show_menu = None
 
     def _get_label_for_value(self, value: Any) -> str:
         """Get the display label for a value."""

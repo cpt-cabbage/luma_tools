@@ -173,6 +173,9 @@ def scan_gallery_footprint(
     supported_extensions = {ext.lower() for ext in GALLERY_SUPPORTED_EXTENSIONS}
     files_to_process = []
     metadata_cache = {}  # Cache metadata per directory
+    # Pre-built per-directory list of (prefix, prefix_data) so the per-file
+    # loop is O(prefixes_in_this_dir) instead of O(all_metadata_keys).
+    prefix_index: Dict[str, list] = {}
 
     try:
         # First level: user directories
@@ -189,8 +192,15 @@ def scan_gallery_footprint(
 
                 user_dir = user_entry.path
 
-                # Load metadata for this user's directory
-                metadata_cache[user_dir] = load_gallery_metadata(user_dir)
+                # Load metadata for this user's directory and pre-build prefix index
+                user_metadata = load_gallery_metadata(user_dir)
+                metadata_cache[user_dir] = user_metadata
+                prefix_index[user_dir] = [
+                    (key[8:], value)
+                    for key, value in user_metadata.items()
+                    if isinstance(key, str) and key.startswith("_prefix_")
+                    and isinstance(value, dict)
+                ]
 
                 # Scan files in user directory (non-recursive for simplicity)
                 try:
@@ -224,20 +234,16 @@ def scan_gallery_footprint(
 
     # Process files and extract metadata
     for idx, (path, name, size, mtime, ext, username, user_dir) in enumerate(files_to_process):
-        # Look up workflow preset from cached metadata
+        # Look up workflow preset from the pre-built prefix index for this dir
         workflow_preset = None
         job_prefix = None
-        metadata = metadata_cache.get(user_dir, {})
 
-        # Try to find metadata for this file
         basename = os.path.splitext(name)[0]
-        for key, value in metadata.items():
-            if key.startswith("_prefix_"):
-                prefix = key[8:]
-                if basename.startswith(prefix):
-                    workflow_preset = value.get("workflow_preset")
-                    job_prefix = value.get("job_prefix", prefix)
-                    break
+        for prefix, value in prefix_index.get(user_dir, ()):
+            if basename.startswith(prefix):
+                workflow_preset = value.get("workflow_preset")
+                job_prefix = value.get("job_prefix", prefix)
+                break
 
         # Determine output type from extension
         output_type = classify_file_type(ext)

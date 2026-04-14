@@ -16,7 +16,7 @@ import time
 import socket
 import logging
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,9 @@ def record_execution(
 
     workflow_preset = _read_workflow_preset(output_directory)
     hostname = socket.gethostname()
-    timestamp = datetime.now()
+    # Use timezone-aware UTC so cross-host correlations (heartbeat <-> analytics)
+    # don't break across DST or workers in different timezones.
+    timestamp = datetime.now(timezone.utc)
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
     # Sanitize prefix for filename
@@ -289,7 +291,7 @@ def aggregate_node_timing(
         return {}
 
     executions_dir = os.path.join(analytics_dir, 'executions')
-    cutoff = datetime.now() - timedelta(days=max_age_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
 
     # Collect timing data: workflow -> node_type -> [durations]
     by_workflow: Dict[str, Dict[str, List[float]]] = {}
@@ -319,9 +321,13 @@ def aggregate_node_timing(
         if not isinstance(record, dict):
             continue
 
-        # Check age
+        # Check age. fromisoformat handles both naive (legacy records) and
+        # tz-aware timestamps; promote naive to UTC so comparison with the
+        # tz-aware cutoff doesn't raise TypeError.
         try:
             record_time = datetime.fromisoformat(record.get('timestamp', ''))
+            if record_time.tzinfo is None:
+                record_time = record_time.replace(tzinfo=timezone.utc)
             if record_time < cutoff:
                 continue
         except (ValueError, TypeError):
@@ -392,7 +398,7 @@ def aggregate_node_timing(
 
     summary = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_executions": total_executions,
         "total_frames": total_frames,
         "by_workflow": summary_by_workflow,

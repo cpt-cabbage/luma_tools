@@ -36,6 +36,11 @@ class PublishSourceMixin:
         from PySide6.QtWidgets import QComboBox, QLabel
         from PySide6.QtCore import QSize
 
+        # Idempotency guard — if a future code path calls this twice, don't
+        # duplicate the four widgets in the layout.
+        if getattr(self, '_publish_product_combo', None) is not None:
+            return
+
         self._publish_products = []
         self._publish_versions = []
 
@@ -223,6 +228,18 @@ class PublishSourceMixin:
 
         if versions:
             self._on_publish_version_changed(self._publish_version_combo.currentIndex())
+        else:
+            render_list = self.get_widget(self._render_list_widget) if hasattr(self, '_render_list_widget') else None
+            if render_list:
+                render_list.clear()
+                render_list.addItem("No published versions with renders found")
+                render_list.setEnabled(False)
+
+            action_button = self.get_widget(self._action_button) if hasattr(self, '_action_button') else None
+            if action_button:
+                action_button.setEnabled(False)
+
+            self.show_status("No published versions with renders found", "warning")
 
     def _on_publish_version_changed(self, index):
         """When version changes, resolve path and scan for renders."""

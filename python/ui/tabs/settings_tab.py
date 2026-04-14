@@ -151,9 +151,12 @@ class SettingsTab(BaseTab):
         self._load_user_settings_ui()
         self._load_global_settings_ui()
         self._load_admin_users_ui()
-        self._load_restricted_tabs_ui()
         self._load_hdri_list_ui()
         self._load_categories_ui()
+
+        # Global settings group is admin-only
+        if hasattr(self.ui, 'globalSettingsGroupBox'):
+            self.ui.globalSettingsGroupBox.setVisible(self.app_state.is_admin)
 
     def _setup_deadline_poll_interval_ui(self):
         """Create and add Deadline poll interval spinbox to global settings."""
@@ -347,16 +350,16 @@ class SettingsTab(BaseTab):
             (setting_key, widget_name, widget_type[, load_converter, save_converter])
         Widgets that don't exist in the UI are silently skipped.
         """
-        from core.settings_manager import get_setting
+        from core.settings_manager import safe_get_setting
 
         # Snapshot all values first to avoid partial reads during external changes
         values = {}
         for entry in settings_map:
             key = entry[0]
-            try:
-                values[key] = get_setting(key)
-            except Exception:
-                values[key] = None
+            value = safe_get_setting(key, None)
+            values[key] = value
+            if value is None:
+                logger.warning("Setting '%s' missing or unreadable; using widget default", key)
 
         for entry in settings_map:
             key, widget_name, widget_type = entry[0], entry[1], entry[2]
@@ -459,7 +462,7 @@ class SettingsTab(BaseTab):
 
     def _load_global_settings_ui(self):
         """Load global settings into the settings UI."""
-        from core.settings_manager import get_global_settings_path, get_setting
+        from core.settings_manager import get_global_settings_path, safe_get_setting
 
         # Global settings path (custom display logic)
         global_path = get_global_settings_path()
@@ -467,7 +470,7 @@ class SettingsTab(BaseTab):
         self.ui.globalSettingsCurrentPath.setText(f"Current: {global_path}")
 
         # ComfyUI mode - set via OptionButtonManager
-        self._comfyui_mode_manager.set_value(get_setting("comfyui_mode"))
+        self._comfyui_mode_manager.set_value(safe_get_setting("comfyui_mode", "embedded"))
 
         # Load all mapped settings (paths, checkboxes, spinboxes with converters)
         self._load_settings_from_map(_GLOBAL_SETTINGS_MAP)
@@ -725,9 +728,6 @@ class SettingsTab(BaseTab):
         # Save all mapped global settings (paths, checkboxes, spinboxes with converters)
         self._save_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
-        # Save restricted tabs configuration
-        self._save_restricted_tabs_settings()
-
         # Clear cached paths so logging and other modules pick up the new values
         try:
             from core.logging_utils import clear_path_cache
@@ -743,7 +743,7 @@ class SettingsTab(BaseTab):
         except ImportError:
             pass
 
-        self.show_status("Global settings saved (tab visibility changes require restart)", "success")
+        self.show_status("Global settings saved", "success")
 
     def _on_add_admin_user(self):
         """Add an admin user."""
@@ -783,47 +783,6 @@ class SettingsTab(BaseTab):
         remove_user_from_role(username, "admin")
         self._load_admin_users_ui()
         self.show_status(f"Removed admin user: {username}", "success")
-
-    # =========================================================================
-    # RESTRICTED TABS
-    # =========================================================================
-
-    def _get_restricted_tab_checkbox_map(self):
-        """Get the mapping of tab names to their restriction checkboxes.
-
-        Returns:
-            dict: {tab_name: checkbox_widget} (Settings is admin-only, not configurable here)
-        """
-        return {
-            "comfyui": getattr(self.ui, 'RestrictComfyUI', None),
-            "gallery": getattr(self.ui, 'RestrictGallery', None),
-            "passbuilder": getattr(self.ui, 'RestrictPassBuilder', None),
-            "mp4maker": getattr(self.ui, 'RestrictMP4Maker', None),
-            "republish": getattr(self.ui, 'RestrictRePublish', None),
-            "cleaner": getattr(self.ui, 'RestrictShotCleaner', None),
-        }
-
-    def _load_restricted_tabs_ui(self):
-        """Load restricted tabs settings into the checkboxes."""
-        from core.settings_manager import get_setting
-
-        restricted = get_setting("restricted_tabs")
-        for tab_name, checkbox in self._get_restricted_tab_checkbox_map().items():
-            if checkbox:
-                checkbox.setChecked(tab_name in restricted)
-
-    def _save_restricted_tabs_settings(self):
-        """Save restricted tabs settings from the checkboxes."""
-        from core.settings_manager import set_setting
-
-        restricted = [
-            tab_name
-            for tab_name, checkbox in self._get_restricted_tab_checkbox_map().items()
-            if checkbox and checkbox.isChecked()
-        ]
-
-        set_setting("restricted_tabs", restricted, verbose=False)
-        logger.info(f"Updated restricted tabs: {restricted}")
 
     def _load_feature_request_ui(self):
         """Configure feature request buttons based on user role."""
@@ -947,19 +906,14 @@ class SettingsTab(BaseTab):
         if hasattr(self, '_feature_request_badge'):
             self._feature_request_badge.hide_badge()
 
-        # Show dialog
+        # Show dialog (Qt6 spelling — the Accepted branch was a no-op so we
+        # don't bother capturing the return value).
         dialog = FeatureRequestDialog(
             parent=self.main_window,
             user=self.app_state.user,
             is_admin=self.app_state.is_admin
         )
-
-        # If dialog completes requests, reopen to show updated list
-        if dialog.exec_() == QDialog.Accepted:
-            # Check if any requests were marked as completed (dialog will close after marking)
-            # We can tell by checking if the dialog's method was triggered
-            # For simplicity, just reopen if user wants to see updated state
-            pass
+        dialog.exec()
 
     def _load_hdri_list_ui(self):
         """Load HDRI list from global settings."""

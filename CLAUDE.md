@@ -212,7 +212,7 @@ with self._cache_lock:
 ### Settings
 
 - **User:** `~/.luma_tools/settings.json` (window state, tab order, last dirs)
-- **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, restricted_tabs)
+- **Global:** `L:/tools/_studio_tools/luma_tools/global_settings/global_settings.json` (presets, admin users, paths)
 - **Key global setting:** `network_output_path` — network path for outputs, centralized logs, and inter-process communication (currently `W:/LumaRND/luma_tools`). Used by runner.py, server.py, luma_tools.py for log file destinations, by gallery/submitter for output paths, and by the server heartbeat system for status reporting. This path is the **only shared filesystem** between the user's workstation and farm workers.
 
 Use `get_setting(key)` / `set_setting(key, val)` from `core.settings_manager`.
@@ -256,9 +256,8 @@ app_state.jobname = "MyJob"
 current = app_state.jobname
 
 # Role checks (cached, thread-safe)
-if app_state.is_admin:       # Full access including Settings tab
-if app_state.is_sup:         # Supervisor access (ComfyUI, Gallery)
-if app_state.has_elevated_access:  # Admin or supervisor
+if app_state.is_admin:             # Full access including Settings tab
+if app_state.has_elevated_access:  # Currently equivalent to is_admin
 app_state.refresh_admin_status()   # Force re-check after role changes
 
 # Shot context
@@ -282,9 +281,11 @@ pipeline_events.job_completed.connect(self._on_job_completed)
 ```
 
 **Key signal groups:**
-- **ComfyUI → Gallery:** `job_submitted`, `job_progress`, `job_output_ready`, `job_completed`, `job_failed`, `all_jobs_completed`
+- **ComfyUI → Gallery:** `job_progress`, `job_completed`, `all_jobs_completed`
 - **Gallery → ComfyUI:** `use_as_input`, `copy_settings`
 - **Viewer → Gallery:** `view_input_image`, `gallery_refresh_requested`
+
+Job tracking methods (`register_job`, `update_job_progress`, `record_job_output`, `complete_job`) update `_active_jobs` and emit the surviving signals. The earlier `job_submitted`, `job_output_ready`, `job_failed`, and `favorites_changed` signals had no listeners and were removed.
 
 Includes thread-safe job tracking via `JobInfo` dataclass and `GalleryContext` for state sharing.
 

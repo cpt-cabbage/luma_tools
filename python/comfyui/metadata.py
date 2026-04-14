@@ -164,34 +164,6 @@ def cleanup_job_temp_files(output_dir: str) -> int:
     return deleted_count
 
 
-def scan_output_directory(output_dir: str) -> List[Dict[str, Any]]:
-    """Scan directory for generated ComfyUI output files."""
-    import glob
-
-    if not output_dir or not os.path.exists(output_dir):
-        return []
-
-    output_files = []
-
-    for ext in COMFYUI_OUTPUT_EXTENSIONS:
-        pattern = os.path.join(output_dir, '**', f'*{ext}')
-        for path in glob.glob(pattern, recursive=True):
-            try:
-                stat = os.stat(path)
-                output_files.append({
-                    'path': path,
-                    'filename': os.path.basename(path),
-                    'created': datetime.fromtimestamp(stat.st_ctime),
-                    'size': stat.st_size,
-                    'extension': ext,
-                })
-            except Exception as e:
-                logger.debug(f"Skipping inaccessible file {path}: {e}")
-
-    output_files.sort(key=lambda x: x['created'], reverse=True)
-    return output_files
-
-
 # ============================================================================
 # GALLERY METADATA
 # ============================================================================
@@ -645,27 +617,6 @@ def is_known_input_file(output_dir: str, filename: str) -> bool:
     return False
 
 
-def find_file_by_hash(output_dir: str, content_hash: str) -> Optional[str]:
-    """Look up a filename by its content hash.
-
-    Args:
-        output_dir: Directory containing the metadata file
-        content_hash: SHA-256 hash to look up
-
-    Returns:
-        Filename string if found, None otherwise
-    """
-    if not content_hash:
-        return None
-
-    metadata = load_gallery_metadata(output_dir)
-    hash_key = f"_hash_{content_hash}"
-    hash_entry = metadata.get(hash_key)
-    if isinstance(hash_entry, dict):
-        return hash_entry.get("filename")
-    return None
-
-
 def mark_as_input_file(output_dir: str, filename: str, used_by_job: str = None) -> bool:
     """Explicitly mark a file as an input file.
 
@@ -1061,8 +1012,17 @@ def auto_establish_lineage_from_job_metadata(output_dir: str) -> int:
     Returns:
         int: Number of lineage relationships established
     """
+    if not os.path.isdir(output_dir):
+        return 0
+
     metadata = load_gallery_metadata(output_dir)
     established = 0
+
+    try:
+        dir_listing = os.listdir(output_dir)
+    except OSError as e:
+        logger.warning(f"Cannot list {output_dir} for lineage scan: {e}")
+        return 0
 
     # First pass: collect all files and their source_images from job metadata
     for key, value in metadata.items():
@@ -1080,8 +1040,8 @@ def auto_establish_lineage_from_job_metadata(output_dir: str) -> int:
 
         parent_filename = source_images[0]
 
-        # Find files that match this job prefix
-        for filename in os.listdir(output_dir):
+        # Find files that match this job prefix (snapshot listing taken above)
+        for filename in dir_listing:
             if not filename.startswith(job_prefix):
                 continue
 

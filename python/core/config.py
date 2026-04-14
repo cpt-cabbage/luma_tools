@@ -180,6 +180,16 @@ else:
 # Deadline - try both AYON path and system PATH
 DEADLINE_PATH = shutil.which("deadlinecommand", path=_DEADLINE_DIR) if _DEADLINE_DIR else shutil.which("deadlinecommand")
 
+# MP4 burn-in font. First existing path in the list wins; None means "no font".
+# Override globally by editing the list below — the mp4_maker uses the first hit.
+_MP4_BURN_IN_FONT_CANDIDATES = (
+    r"C:\Windows\Fonts\consola.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/Library/Fonts/Arial.ttf",
+)
+MP4_BURN_IN_FONT = next((p for p in _MP4_BURN_IN_FONT_CANDIDATES if os.path.isfile(p)), None)
+
 
 def cache_tool_paths():
     """Cache working tool paths to user settings for standalone mode fallback.

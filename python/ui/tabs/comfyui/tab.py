@@ -466,6 +466,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.ui.noteBanner.setVisible(False)
         self.ui.comfyuiInputFrame.setVisible(False)
         self.ui.submitBar.setVisible(False)
+        # The bottom verticalSpacer_comfy is Expanding and would eat all the
+        # extra vertical space. Neutralize it so the model frame fills the tab.
+        if hasattr(self.ui, 'verticalSpacer_comfy'):
+            self.ui.verticalSpacer_comfy.changeSize(
+                0, 0, QSizePolicy.Minimum, QSizePolicy.Minimum
+            )
+            self.ui.comfyuiLayout.invalidate()
         # Refresh grid to pick up any changes
         self._model_grid.refresh()
 
@@ -474,6 +481,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.ui.modelGridContainer.setVisible(False)
         self.ui.selectedModelHeader.setVisible(True)
         self.ui.submitBar.setVisible(True)
+        # Restore the bottom spacer so content stays anchored to the top
+        # in selected state (input frame's own verstretch=3 still dominates).
+        if hasattr(self.ui, 'verticalSpacer_comfy'):
+            self.ui.verticalSpacer_comfy.changeSize(
+                0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding
+            )
+            self.ui.comfyuiLayout.invalidate()
 
         # Show edit button for admins
         self.ui.editModelBtn.setVisible(self.app_state.is_admin)
@@ -671,7 +685,13 @@ class ComfyUITab(PollingMixin, BaseTab):
     # =========================================================================
 
     def _on_advanced_gear_clicked(self):
-        """Show advanced settings as a popup dialog."""
+        """Show advanced settings as a popup dialog.
+
+        The dialog reparents UI widgets from `comfyuiInputFrame` (seed, name,
+        server-behavior combo, network path) into its own layout. When the
+        dialog closes we put them back into their original layouts/positions
+        so the main tab layout doesn't end up with empty slots.
+        """
         if hasattr(self, '_advanced_dialog') and self._advanced_dialog and self._advanced_dialog.isVisible():
             self._advanced_dialog.raise_()
             return
@@ -683,6 +703,47 @@ class ComfyUITab(PollingMixin, BaseTab):
             "QDialog { background-color: #282c34; }"
             "QLabel { color: #c5cad3; font-size: 12px; }"
         )
+
+        # Snapshot original (layout, index) for every widget we're about to
+        # reparent, so closing the dialog can restore them in place.
+        moved_widgets = []
+
+        def _snapshot(widget):
+            """Return (layout, index) for widget so we can re-insert later."""
+            parent = widget.parentWidget()
+            if parent is None:
+                return None
+            parent_layout = parent.layout()
+            if parent_layout is None:
+                return None
+            for i in range(parent_layout.count()):
+                item = parent_layout.itemAt(i)
+                if item is not None and item.widget() is widget:
+                    return (parent_layout, i)
+            return None
+
+        for w in (
+            self.ui.ComfyUISeed,
+            self.ui.ComfyUIRandomizeSeed,
+            self.ui.ComfyUINameToggle,
+            self.ui.ComfyUIName,
+            self.ui.ServerBehaviorCombo,
+            self.ui.serverWaitTimeoutLabel,
+            self.ui.ServerWaitTimeoutSpinBox,
+            self.ui.ComfyUINetworkPathDisplay,
+        ):
+            snap = _snapshot(w)
+            if snap is not None:
+                moved_widgets.append((w, snap))
+
+        def _restore_widgets():
+            for widget, (orig_layout, orig_idx) in moved_widgets:
+                try:
+                    orig_layout.insertWidget(orig_idx, widget)
+                except RuntimeError:
+                    pass
+
+        dialog.finished.connect(lambda *_: _restore_widgets())
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(10)
@@ -1111,8 +1172,17 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.ui.comfyuiInputFrame.setVisible(has_widgets)
 
     def _connect_widget_signals(self):
-        """Connect signals for dynamically created widgets."""
+        """Connect signals for dynamically created widgets.
+
+        Each container is tagged with `_signals_connected` after its first
+        wire-up so a subsequent `_refresh_editable_nodes` call (e.g. settings
+        nodes refreshing without a full clear) doesn't accumulate duplicate
+        connections that fire `_save_state` and `_on_text_changed` multiple
+        times per change.
+        """
         for node_id, container in self.widget_manager.dynamic_widgets.items():
+            if getattr(container, '_signals_connected', False):
+                continue
             input_widget = getattr(container, 'input_widget', None)
             if not input_widget:
                 continue
@@ -1128,7 +1198,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                     input_widget.stateChanged.connect(
                         lambda state, name=toggle_name: self.widget_manager.on_toggle_changed(state != 0, name)
                     )
-                    input_widget.stateChanged.connect(lambda: self._save_state())
+                    input_widget.stateChanged.connect(lambda state: self._save_state())
 
             # Connect text/image change handlers
             elif node.widget_type == 'text':
@@ -1155,8 +1225,12 @@ class ComfyUITab(PollingMixin, BaseTab):
                 if hasattr(input_widget, 'textChanged'):
                     input_widget.textChanged.connect(self._on_text_changed)
 
+            container._signals_connected = True
+
         # Connect settings widget signals for auto-save
         for (node_id, widget_name), container in self.widget_manager.settings_widgets.items():
+            if getattr(container, '_signals_connected', False):
+                continue
             input_widget = getattr(container, 'input_widget', None)
             if not input_widget:
                 continue
@@ -1165,7 +1239,8 @@ class ComfyUITab(PollingMixin, BaseTab):
             elif hasattr(input_widget, 'currentTextChanged'):
                 input_widget.currentTextChanged.connect(self._on_text_changed)
             elif hasattr(input_widget, 'stateChanged'):
-                input_widget.stateChanged.connect(lambda: self._on_text_changed())
+                input_widget.stateChanged.connect(lambda state: self._on_text_changed())
+            container._signals_connected = True
 
     # =========================================================================
     # PROMPT PRESETS
@@ -1357,7 +1432,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_submit_clicked(self):
         """Submit the workflow to ComfyUI/Deadline."""
-        from ui_components import StatusColors
         from deadline.submitter import submit_comfyui_job
         from core.settings_manager import safe_get_setting
         from comfyui.presets_manager import get_workflow_preset_config
@@ -1454,9 +1528,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             )
         self.animate_button_click(self.ui.ComfyUISubmit)
 
-        # Server mode is always enabled (persistent ComfyUI)
-        use_server_mode = True
-
         # Get seed value
         base_seed = self.ui.ComfyUISeed.value()
 
@@ -1489,7 +1560,6 @@ class ComfyUITab(PollingMixin, BaseTab):
                 "generation_count": generation_count,
                 "job_name": job_name,
                 "editable_values": editable_values,
-                "use_server_mode": use_server_mode,
                 "base_seed": base_seed,
                 "network_output_dir": network_output_dir,
                 "workflow_preset": self.state_manager.current_preset_name,
@@ -1505,7 +1575,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_submit_result(self, result, ctx=None):
         """Handle ComfyUI job submission result."""
-        from ui_components import StatusColors
 
         self.ui.ComfyUISubmit.setEnabled(True)
         try:
@@ -1552,7 +1621,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_submit_error(self, error_msg, traceback_str=""):
         """Handle ComfyUI job submission error."""
-        from ui_components import StatusColors
 
         self.ui.ComfyUISubmit.setEnabled(True)
         self.main_window.stop_status_spinner()
@@ -1567,7 +1635,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def _on_submit_progress(self, progress, message):
         """Handle ComfyUI job submission progress."""
-        from ui_components import StatusColors
 
         self.update_status_with_spinner(
             f"ComfyUI: {message}",

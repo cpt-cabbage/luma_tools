@@ -856,19 +856,30 @@ class GalleryTab(BaseTab):
         # Build path set once for efficient lookups
         item_paths = {item['path'] for item in items}
 
-        # Count liked items using set intersection (O(min(n,m)) instead of O(n*m))
+        # Snapshot favorites/group state under the manager's lock so the
+        # background scan thread can't mutate _liked_items / _group_items
+        # mid-iteration (which would raise "set changed size during iteration").
         self._favorites_manager._ensure_loaded()
-        liked_count = len(item_paths & self._favorites_manager._liked_items)
+        with self._favorites_manager._favorites_lock:
+            liked_snapshot = set(self._favorites_manager._liked_items)
+            group_items_snapshot = {
+                gid: set(paths)
+                for gid, paths in self._favorites_manager._group_items.items()
+            }
+            group_list = sorted(self._favorites_manager._groups.values(), key=lambda g: g.order)
+
+        # Count liked items using set intersection (O(min(n,m)) instead of O(n*m))
+        liked_count = len(item_paths & liked_snapshot)
 
         # Count items per group using reverse index (O(1) per group instead of O(n))
         group_counts = {}
-        for group in self._favorites_manager.get_groups():
-            group_items = self._favorites_manager._group_items.get(group.group_id, set())
+        for group in group_list:
+            group_items = group_items_snapshot.get(group.group_id, set())
             group_counts[group.group_id] = len(item_paths & group_items)
 
         # Count ungrouped items - items not in any group
         all_grouped_paths = set()
-        for paths in self._favorites_manager._group_items.values():
+        for paths in group_items_snapshot.values():
             all_grouped_paths.update(paths)
         ungrouped_count = len(item_paths - all_grouped_paths)
 
@@ -999,13 +1010,13 @@ class GalleryTab(BaseTab):
         self._viewer_manager.open_viewer(path)
 
     def _on_favorites_changed(self, *args):
-        """Forward favorites changes to event bus for cross-tab sync.
+        """Forward favorites changes to local handlers.
 
-        Called when likes or group assignments change. Emits favorites_changed
-        signal on the event bus so other tabs can sync.
+        Called when likes or group assignments change. The cross-tab
+        pipeline_events.favorites_changed signal was removed because nothing
+        listened to it; this handler is kept as a connection point in case
+        future cross-tab sync is added.
         """
-        if EVENT_BUS_AVAILABLE:
-            pipeline_events.favorites_changed.emit()
 
     def _on_favorites_batch_changed(self, paths: list):
         """Handle batch favorites changes with targeted widget updates.
@@ -1017,12 +1028,10 @@ class GalleryTab(BaseTab):
         Args:
             paths: List of paths that were affected by the batch operation
         """
-        # Update only affected widgets
+        # Update only affected widgets. The cross-tab favorites_changed
+        # signal was removed (no listeners); keep this method as a single
+        # entry point for batched updates.
         self._refresh_favorites_state_for_paths(paths)
-
-        # Forward to event bus for cross-tab sync
-        if EVENT_BUS_AVAILABLE:
-            pipeline_events.favorites_changed.emit()
 
     # =========================================================================
     # DRAG-TO-GROUP HANDLERS
@@ -1050,15 +1059,16 @@ class GalleryTab(BaseTab):
         if not name:
             return
 
-        # Create the group
-        group = self._favorites_manager.create_group(name, color)
-        if not group:
+        # Create the group — returns the new group_id (str), not a GroupDef.
+        group_id = self._favorites_manager.create_group(name, color)
+        if not group_id:
             self.show_status_message("Failed to create group", duration=2000)
             return
 
-        # Add all items to the group
-        for path in paths:
-            self._favorites_manager.add_to_group(path, group.group_id)
+        # Add all items to the group in a single batched call so we acquire
+        # the lock once, write the JSON once, and emit one batch signal
+        # instead of N separate writes per drop.
+        self._favorites_manager.add_items_to_group(paths, group_id)
 
         logger.info(f"[Gallery] Created group '{name}' with {len(paths)} items")
         self.show_status_message(f"Created group '{name}' with {len(paths)} items")
@@ -1189,11 +1199,23 @@ class GalleryTab(BaseTab):
         scroll_area.verticalScrollBar().setValue(target_scroll)
 
     def _clear_all_filters(self):
-        """Clear all active filters to show all items."""
-        if hasattr(self, '_ui_manager'):
-            # Reset filter buttons
-            self.ui.GalleryShowAllButton.setChecked(True)
-            self._ui_manager._current_filter = 'all'
+        """Clear all active filters to show all items.
+
+        Resets the authoritative filter tuple on the tab. The previous
+        implementation referenced a non-existent `GalleryShowAllButton`
+        widget, which raised AttributeError whenever
+        `select_and_scroll_to_item` couldn't find its target.
+        """
+        self._current_filter = ("all", None)
+        if hasattr(self, "_groups_panel") and self._groups_panel is not None:
+            try:
+                # Re-fire filter handler with the all/None tuple so the
+                # sidebar UI updates its highlight.
+                self._groups_panel._on_filter_clicked("all", None)
+            except Exception as e:
+                logger.debug(f"groups panel filter reset failed: {e}")
+        if hasattr(self, "_ui_manager") and self._ui_manager is not None:
+            self._ui_manager._current_filter = "all"
 
     def cleanup(self):
         """Clean up resources when tab is being destroyed.
@@ -1214,8 +1236,18 @@ class GalleryTab(BaseTab):
                     pass
             self._event_bus_subscriptions = []
 
-        # Stop refresh controller timers
+        # Stop refresh controller timers (watcher + network polling). There
+        # is no `stop_all` aggregate method — the controller exposes the two
+        # stops separately and `cleanup()` was previously calling a non-existent
+        # method, raising AttributeError on every shutdown.
         if hasattr(self, '_refresh_controller') and self._refresh_controller:
-            self._refresh_controller.stop_all()
+            try:
+                self._refresh_controller.stop_watcher()
+            except Exception as e:
+                logger.debug(f"stop_watcher failed: {e}")
+            try:
+                self._refresh_controller.stop_network_polling()
+            except Exception as e:
+                logger.debug(f"stop_network_polling failed: {e}")
 
         logger.debug("Gallery tab cleanup completed")

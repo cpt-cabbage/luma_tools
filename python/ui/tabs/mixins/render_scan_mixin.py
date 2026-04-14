@@ -309,6 +309,61 @@ class RenderScanMixin(PublishSourceMixin):
         from core.utils import scan_exr_sequences
         return scan_exr_sequences(staging_dir)
 
+    @staticmethod
+    def _scan_render_directory_worker(task_dir, task):
+        """Scan a task directory for the latest render version (worker thread).
+
+        Shared by Pass Builder and rePublish initial scans. Returns
+        ``{'latest_render', 'render_directory'}`` or None if nothing found.
+        """
+        from services.file_operations import fast_scandir, find_renders, find_hip_files
+        from core.config import RENDERS_SUBPATH
+        from core.utils import truncate_at_suffix
+
+        try:
+            dirs = fast_scandir(task_dir)
+        except Exception as e:
+            logger.warning(f"Render scan: error in {task_dir}: {e}")
+            return None
+
+        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+        if not render_folders:
+            return None
+
+        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+
+        hip_files = find_hip_files(task_dir, task)
+        hip_file = ""
+        if hip_files:
+            hip_file = sorted(hip_files)[0].rsplit("_", 1)[0]
+
+        try:
+            render_dirs = sorted(next(os.walk(render_directory))[1])
+        except StopIteration:
+            return None
+
+        if hip_file:
+            matching = [d for d in render_dirs if hip_file in d]
+            if matching:
+                render_dirs = matching
+
+        if not render_dirs:
+            return None
+
+        latest_render = None
+        for render_version in reversed(render_dirs):
+            version_path = os.path.join(render_directory, render_version)
+            if find_renders(version_path):
+                latest_render = render_version
+                break
+        if not latest_render:
+            latest_render = render_dirs[-1]
+
+        return {
+            "latest_render": latest_render,
+            "render_directory": render_directory,
+        }
+
     def _get_selected_frame_range(self) -> Optional[Tuple[int, int]]:
         """
         Get frame range of the currently selected render.

@@ -8,25 +8,17 @@ Each user has their own requests file stored in the ComfyUI network output folde
 import os
 import json
 import logging
-import tempfile
 from typing import Dict, Any, List
 from datetime import datetime
 from .settings_manager import (
-    get_setting, set_setting,
-    load_user_settings, save_user_settings,
-    get_global_settings_path
+    safe_get_setting, safe_set_setting,
+    load_user_settings,
+    get_global_settings_path,
 )
-from .error_handling import log_error, handle_errors
-from .utils import ensure_directory, load_json, save_json
+from .error_handling import log_error
+from .utils import ensure_directory, is_valid_username, load_json, save_json
 
 logger = logging.getLogger(__name__)
-
-
-def _atomic_json_write(file_path: str, data: Any) -> None:
-    """Write JSON data atomically. Delegates to save_json from core.utils."""
-    dir_path = os.path.dirname(file_path)
-    ensure_directory(dir_path)
-    save_json(file_path, data)
 
 
 # ============================================================================
@@ -35,11 +27,18 @@ def _atomic_json_write(file_path: str, data: Any) -> None:
 
 def get_feature_requests_base_dir() -> str:
     """Get base path for feature requests (network output path)."""
-    network_path = get_setting("network_output_path")
+    network_path = safe_get_setting("network_output_path", "")
     if not network_path:
         # Fallback to global settings if network path not configured
         return os.path.join(get_global_settings_path(), "feature_requests")
     return os.path.join(network_path, ".feature_requests")
+
+
+def _user_notification_file(username: str) -> str:
+    """Get path to a user's notification file. Validates username for path safety."""
+    if not is_valid_username(username):
+        raise ValueError(f"Invalid username: {username!r}")
+    return os.path.join(get_feature_requests_base_dir(), f"{username}_notifications.json")
 
 
 def get_user_feature_requests_file(username: str) -> str:
@@ -53,7 +52,12 @@ def get_user_feature_requests_file(username: str) -> str:
 
     Returns:
         Full path to user's requests file
+
+    Raises:
+        ValueError: If username contains characters unsafe for filesystem paths.
     """
+    if not is_valid_username(username):
+        raise ValueError(f"Invalid username: {username!r}")
     base_dir = get_feature_requests_base_dir()
     return os.path.join(base_dir, f"{username}_requests.json")
 
@@ -117,7 +121,7 @@ def append_feature_request(category: str, description: str, username: str) -> bo
         requests.append(new_request)
 
         # Write back to file atomically
-        _atomic_json_write(file_path, requests)
+        save_json(file_path, requests)
 
         logger.info(f"Feature request created: {category} by {username}")
         return True
@@ -151,16 +155,20 @@ def get_feature_requests() -> List[Dict[str, str]]:
             try:
                 user_requests = load_json(file_path, [])
                 if isinstance(user_requests, list):
-                    # Migrate old requests without IDs
-                    modified = False
-                    for req in user_requests:
-                        if 'id' not in req:
-                            req['id'] = datetime.strptime(req['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d_%H%M%S_%f")
-                            modified = True
-                            logger.info(f"Migrated request without ID: {req['timestamp']} by {req.get('username', 'Unknown')}")
-
-                    if modified:
-                        _atomic_json_write(file_path, user_requests)
+                    # Migrate old requests without IDs (skip the per-entry scan
+                    # entirely if every entry already has one — this runs on
+                    # every admin panel refresh)
+                    if any('id' not in req for req in user_requests):
+                        for req in user_requests:
+                            if 'id' not in req:
+                                req['id'] = datetime.strptime(
+                                    req['timestamp'], "%Y-%m-%d %H:%M:%S"
+                                ).strftime("%Y%m%d_%H%M%S_%f")
+                                logger.info(
+                                    f"Migrated request without ID: {req['timestamp']}"
+                                    f" by {req.get('username', 'Unknown')}"
+                                )
+                        save_json(file_path, user_requests)
                         logger.info(f"Updated {filename} with missing IDs")
 
                     all_requests.extend(user_requests)
@@ -215,7 +223,7 @@ def mark_request_completed(request_id: str, admin_username: str) -> bool:
 
                 if modified:
                     # Write back to file atomically
-                    _atomic_json_write(file_path, requests)
+                    save_json(file_path, requests)
                     logger.info(f"Marked request {request_id} as completed by {admin_username}")
                     # Notify the user who made the request
                     for req in requests:
@@ -274,7 +282,7 @@ def reject_request(request_id: str, admin_username: str, reason: str) -> bool:
                         break
 
                 if modified:
-                    _atomic_json_write(file_path, requests)
+                    save_json(file_path, requests)
                     logger.info(f"Rejected request {request_id} by {admin_username}: {reason}")
                     for req in requests:
                         if req.get('id') == request_id:
@@ -305,15 +313,14 @@ def _append_user_notification(username: str, notification: Dict[str, Any]):
         notification: Notification dict to append (must include 'read': False)
     """
     try:
-        base_dir = get_feature_requests_base_dir()
-        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+        notification_file = _user_notification_file(username)
 
         notifications = load_json(notification_file, [])
         if not isinstance(notifications, list):
             notifications = []
 
         notifications.append(notification)
-        _atomic_json_write(notification_file, notifications)
+        save_json(notification_file, notifications)
         logger.info(f"Notification created for {username}: {notification.get('action', 'completed')}")
 
     except Exception as e:
@@ -366,8 +373,7 @@ def get_user_notifications(username: str) -> List[Dict[str, Any]]:
         List of unread notification dicts
     """
     try:
-        base_dir = get_feature_requests_base_dir()
-        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+        notification_file = _user_notification_file(username)
 
         if not os.path.exists(notification_file):
             return []
@@ -389,8 +395,7 @@ def mark_notifications_read(username: str):
         username: Username
     """
     try:
-        base_dir = get_feature_requests_base_dir()
-        notification_file = os.path.join(base_dir, f"{username}_notifications.json")
+        notification_file = _user_notification_file(username)
 
         if not os.path.exists(notification_file):
             return
@@ -402,7 +407,7 @@ def mark_notifications_read(username: str):
             notification['read'] = True
 
         # Write back atomically
-        _atomic_json_write(notification_file, notifications)
+        save_json(notification_file, notifications)
 
         logger.info(f"Marked all notifications as read for {username}")
 
@@ -475,7 +480,7 @@ def mark_feature_requests_as_read(username: str):
     try:
         # Save current timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        set_setting("feature_requests_last_read", timestamp, verbose=False)
+        safe_set_setting("feature_requests_last_read", timestamp)
         logger.info(f"Marked feature requests as read for {username} at {timestamp}")
 
     except Exception as e:

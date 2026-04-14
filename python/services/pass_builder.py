@@ -79,6 +79,11 @@ class PassBuilder:
         """
         from core.error_handling import check_cancelled
 
+        # Reset per-call state so a reused PassBuilder instance can't leak the
+        # previous run's job id into this one.
+        self.build_job_id = None
+        self.render_name = None
+
         # Report initial progress
         if progress_callback:
             progress_callback(30, "Validating configuration...")

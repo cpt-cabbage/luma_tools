@@ -103,7 +103,7 @@ def publish_comfyui_asset_to_ayon(
             publish_to_ayon_local,
             convert_to_ayon_folder_path
         )
-        from core.state_manager import get_app_state
+        from core.state_manager import app_state
 
         if not AYON_AVAILABLE:
             show_warning(
@@ -113,7 +113,6 @@ def publish_comfyui_asset_to_ayon(
             )
             return False
 
-        app_state = get_app_state()
 
         if app_state.standalone_mode:
             show_warning(

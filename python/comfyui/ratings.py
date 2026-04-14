@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.metadata_file import MetadataFile, get_metadata_file
-from core.settings_manager import get_setting
+from core.settings_manager import safe_get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _get_ratings_file() -> Optional[MetadataFile]:
     Returns:
         MetadataFile instance or None if network path not configured
     """
-    network_path = get_setting("network_output_path")
+    network_path = safe_get_setting("network_output_path", "")
     if not network_path:
         logger.warning("[Ratings] Network output path not configured")
         return None
@@ -661,7 +661,7 @@ def update_model_thumbnail(model_name: str) -> Optional[str]:
 
     from core.utils import ensure_directory, load_json
 
-    network_path = get_setting("network_output_path")
+    network_path = safe_get_setting("network_output_path", "")
     if not network_path:
         return None
 
@@ -676,24 +676,56 @@ def update_model_thumbnail(model_name: str) -> Optional[str]:
         logger.warning(f"[Ratings] Error searching for metadata: {e}")
         return None
 
-    # Find outputs matching this model
+    # Find outputs matching this model. Schema uses `_prefix_<job_prefix>`
+    # entries (one per job) plus optional `_file_<basename>` per-file entries.
+    # A file belongs to a job if its basename starts with the prefix.
     candidates = []
     for meta_file in metadata_files:
         try:
             metadata = load_json(meta_file, {})
-            files_data = metadata.get("files", {})
             base_dir = os.path.dirname(meta_file)
+            if not os.path.isdir(base_dir):
+                continue
 
-            for filename, file_data in files_data.items():
-                if file_data.get("workflow_preset") == model_name:
+            # Collect (prefix, prefix_data) for prefixes matching this model
+            matching_prefixes = []
+            for key, value in metadata.items():
+                if not isinstance(key, str) or not key.startswith("_prefix_"):
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                if value.get("workflow_preset") != model_name:
+                    continue
+                matching_prefixes.append((key[8:], value))  # strip "_prefix_"
+
+            if not matching_prefixes:
+                continue
+
+            try:
+                dir_files = os.listdir(base_dir)
+            except OSError:
+                continue
+
+            for prefix, prefix_data in matching_prefixes:
+                if not prefix:
+                    continue
+                for filename in dir_files:
+                    if not filename.startswith(prefix):
+                        continue
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+                        continue
                     file_path = os.path.join(base_dir, filename)
-                    if os.path.exists(file_path):
-                        candidates.append({
-                            "path": file_path,
-                            "rating": file_data.get("user_rating", 0),
-                            "timestamp": file_data.get("timestamp", 0),
-                            "is_liked": file_data.get("is_liked", False)
-                        })
+                    if not os.path.exists(file_path):
+                        continue
+                    # Per-file metadata may carry rating/like; fall back to job
+                    file_meta = metadata.get(f"_file_{filename}", {}) or {}
+                    candidates.append({
+                        "path": file_path,
+                        "rating": file_meta.get("user_rating", 0),
+                        "timestamp": file_meta.get("timestamp", prefix_data.get("timestamp", 0)),
+                        "is_liked": file_meta.get("is_liked", False),
+                    })
         except Exception:
             continue
 

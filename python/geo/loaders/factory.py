@@ -68,12 +68,26 @@ def get_format_type(path: str) -> str:
         return 'obj'
     elif ext in {'.usd', '.usda', '.usdc', '.usdz'}:
         return 'usd'
-    elif ext == '.dae':
+    elif ext in {'.dae', '.3ds', '.blend'}:
+        # Only Assimp can load these — bucket them with collada so the
+        # priority list reaches Assimp first instead of burning failed
+        # Open3D/Trimesh attempts.
         return 'collada'
     elif ext == '.npz':
         return 'npz'
     else:
         return 'other'
+
+
+def _reset_loaders() -> None:
+    """Test-only: clear the singleton loader cache so a subsequent import
+    can re-evaluate optional dependency availability.
+
+    Production code should never need this.
+    """
+    global _loaders
+    with _loaders_lock:
+        _loaders = None
 
 
 def is_supported_format(path: str) -> bool:

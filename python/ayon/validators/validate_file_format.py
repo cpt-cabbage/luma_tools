@@ -70,7 +70,10 @@ class ValidateFileFormat(BaseValidator):
     label = "File Format"
     description = "Validate that file extension matches product type"
     enabled = True
-    optional = False  # This is a blocking validator
+    # Soft validator: unknown product types are silently skipped (see below),
+    # so making known-type mismatches a hard block creates an inconsistent
+    # error model. Mark as optional so users can override per-case.
+    optional = True
 
     def validate(self, instance: InstanceData) -> ValidationResult:
         """

@@ -41,6 +41,11 @@ class Ui_ComfyUITab(object):
         self.comfyuiLayout.setContentsMargins(16, 12, 16, 12)
         self.comfyuiModelFrame = QFrame(self.comfyuiScrollContent)
         self.comfyuiModelFrame.setObjectName(u"comfyuiModelFrame")
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(1)
+        sizePolicy.setHeightForWidth(self.comfyuiModelFrame.sizePolicy().hasHeightForWidth())
+        self.comfyuiModelFrame.setSizePolicy(sizePolicy)
         self.comfyuiModelFrame.setStyleSheet(u"\n"
 "            QFrame#comfyuiModelFrame {\n"
 "              background-color: #282c34;\n"
@@ -55,22 +60,6 @@ class Ui_ComfyUITab(object):
         self.modelHeaderLayout = QHBoxLayout()
         self.modelHeaderLayout.setSpacing(10)
         self.modelHeaderLayout.setObjectName(u"modelHeaderLayout")
-        self.modelStepBadge = QLabel(self.comfyuiModelFrame)
-        self.modelStepBadge.setObjectName(u"modelStepBadge")
-        self.modelStepBadge.setMinimumSize(QSize(26, 26))
-        self.modelStepBadge.setMaximumSize(QSize(26, 26))
-        self.modelStepBadge.setAlignment(Qt.AlignCenter)
-        self.modelStepBadge.setStyleSheet(u"\n"
-"                 background-color: #4a9eff;\n"
-"                 color: white;\n"
-"                 font-weight: bold;\n"
-"                 font-size: 12px;\n"
-"                 border-radius: 13px;\n"
-"                 padding: 0px;\n"
-"               ")
-
-        self.modelHeaderLayout.addWidget(self.modelStepBadge)
-
         self.modelStepTitle = QLabel(self.comfyuiModelFrame)
         self.modelStepTitle.setObjectName(u"modelStepTitle")
         self.modelStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
@@ -90,11 +79,11 @@ class Ui_ComfyUITab(object):
         self.ComfyUIChoosePreset = QPushButton(self.comfyuiModelFrame)
         self.ComfyUIChoosePreset.setObjectName(u"ComfyUIChoosePreset")
         self.ComfyUIChoosePreset.setVisible(False)
-        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        sizePolicy.setHorizontalStretch(1)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.ComfyUIChoosePreset.sizePolicy().hasHeightForWidth())
-        self.ComfyUIChoosePreset.setSizePolicy(sizePolicy)
+        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy1.setHorizontalStretch(1)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.ComfyUIChoosePreset.sizePolicy().hasHeightForWidth())
+        self.ComfyUIChoosePreset.setSizePolicy(sizePolicy1)
         self.ComfyUIChoosePreset.setMinimumSize(QSize(0, 38))
         self.ComfyUIChoosePreset.setStyleSheet(u"\n"
 "                 QPushButton {\n"
@@ -120,11 +109,8 @@ class Ui_ComfyUITab(object):
 
         self.modelGridContainer = QWidget(self.comfyuiModelFrame)
         self.modelGridContainer.setObjectName(u"modelGridContainer")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(1)
-        sizePolicy1.setHeightForWidth(self.modelGridContainer.sizePolicy().hasHeightForWidth())
-        self.modelGridContainer.setSizePolicy(sizePolicy1)
+        sizePolicy.setHeightForWidth(self.modelGridContainer.sizePolicy().hasHeightForWidth())
+        self.modelGridContainer.setSizePolicy(sizePolicy)
         self.modelGridContainerLayout = QVBoxLayout(self.modelGridContainer)
         self.modelGridContainerLayout.setSpacing(0)
         self.modelGridContainerLayout.setObjectName(u"modelGridContainerLayout")
@@ -240,22 +226,6 @@ class Ui_ComfyUITab(object):
         self.inputHeaderLayout = QHBoxLayout()
         self.inputHeaderLayout.setSpacing(10)
         self.inputHeaderLayout.setObjectName(u"inputHeaderLayout")
-        self.inputStepBadge = QLabel(self.comfyuiInputFrame)
-        self.inputStepBadge.setObjectName(u"inputStepBadge")
-        self.inputStepBadge.setMinimumSize(QSize(26, 26))
-        self.inputStepBadge.setMaximumSize(QSize(26, 26))
-        self.inputStepBadge.setAlignment(Qt.AlignCenter)
-        self.inputStepBadge.setStyleSheet(u"\n"
-"                 background-color: #4a9eff;\n"
-"                 color: white;\n"
-"                 font-weight: bold;\n"
-"                 font-size: 12px;\n"
-"                 border-radius: 13px;\n"
-"                 padding: 0px;\n"
-"               ")
-
-        self.inputHeaderLayout.addWidget(self.inputStepBadge)
-
         self.inputStepTitle = QLabel(self.comfyuiInputFrame)
         self.inputStepTitle.setObjectName(u"inputStepTitle")
         self.inputStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
@@ -350,22 +320,6 @@ class Ui_ComfyUITab(object):
         self.settingsHeaderLayout = QHBoxLayout()
         self.settingsHeaderLayout.setSpacing(10)
         self.settingsHeaderLayout.setObjectName(u"settingsHeaderLayout")
-        self.settingsStepBadge = QLabel(self.comfyuiSettingsFrame)
-        self.settingsStepBadge.setObjectName(u"settingsStepBadge")
-        self.settingsStepBadge.setMinimumSize(QSize(26, 26))
-        self.settingsStepBadge.setMaximumSize(QSize(26, 26))
-        self.settingsStepBadge.setAlignment(Qt.AlignCenter)
-        self.settingsStepBadge.setStyleSheet(u"\n"
-"                   background-color: #4a9eff;\n"
-"                   color: white;\n"
-"                   font-weight: bold;\n"
-"                   font-size: 12px;\n"
-"                   border-radius: 13px;\n"
-"                   padding: 0px;\n"
-"                 ")
-
-        self.settingsHeaderLayout.addWidget(self.settingsStepBadge)
-
         self.settingsStepTitle = QLabel(self.comfyuiSettingsFrame)
         self.settingsStepTitle.setObjectName(u"settingsStepTitle")
         self.settingsStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
@@ -400,8 +354,8 @@ class Ui_ComfyUITab(object):
 
         self.ComfyUIGenerationCount = QSlider(self.comfyuiSettingsFrame)
         self.ComfyUIGenerationCount.setObjectName(u"ComfyUIGenerationCount")
-        sizePolicy.setHeightForWidth(self.ComfyUIGenerationCount.sizePolicy().hasHeightForWidth())
-        self.ComfyUIGenerationCount.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.ComfyUIGenerationCount.sizePolicy().hasHeightForWidth())
+        self.ComfyUIGenerationCount.setSizePolicy(sizePolicy1)
         self.ComfyUIGenerationCount.setMinimum(1)
         self.ComfyUIGenerationCount.setMaximum(100)
         self.ComfyUIGenerationCount.setValue(1)
@@ -467,8 +421,8 @@ class Ui_ComfyUITab(object):
 
         self.ComfyUISeed = QSpinBox(self.advancedSettingsContainer)
         self.ComfyUISeed.setObjectName(u"ComfyUISeed")
-        sizePolicy.setHeightForWidth(self.ComfyUISeed.sizePolicy().hasHeightForWidth())
-        self.ComfyUISeed.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.ComfyUISeed.sizePolicy().hasHeightForWidth())
+        self.ComfyUISeed.setSizePolicy(sizePolicy1)
         self.ComfyUISeed.setMinimum(0)
         self.ComfyUISeed.setMaximum(2147483647)
 
@@ -581,22 +535,6 @@ class Ui_ComfyUITab(object):
         self.submitHeaderLayout = QHBoxLayout()
         self.submitHeaderLayout.setSpacing(10)
         self.submitHeaderLayout.setObjectName(u"submitHeaderLayout")
-        self.submitStepBadge = QLabel(self.comfyuiSubmitFrame)
-        self.submitStepBadge.setObjectName(u"submitStepBadge")
-        self.submitStepBadge.setMinimumSize(QSize(26, 26))
-        self.submitStepBadge.setMaximumSize(QSize(26, 26))
-        self.submitStepBadge.setAlignment(Qt.AlignCenter)
-        self.submitStepBadge.setStyleSheet(u"\n"
-"                   background-color: #4a9eff;\n"
-"                   color: white;\n"
-"                   font-weight: bold;\n"
-"                   font-size: 12px;\n"
-"                   border-radius: 13px;\n"
-"                   padding: 0px;\n"
-"                 ")
-
-        self.submitHeaderLayout.addWidget(self.submitStepBadge)
-
         self.submitStepTitle = QLabel(self.comfyuiSubmitFrame)
         self.submitStepTitle.setObjectName(u"submitStepTitle")
         self.submitStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
@@ -780,7 +718,6 @@ class Ui_ComfyUITab(object):
     # setupUi
 
     def retranslateUi(self, ComfyUITab):
-        self.modelStepBadge.setText("")
         self.modelStepTitle.setText(QCoreApplication.translate("ComfyUITab", u"Choose Model", None))
         self.ComfyUIChoosePreset.setText(QCoreApplication.translate("ComfyUITab", u"Choose Model...", None))
 #if QT_CONFIG(tooltip)
@@ -802,10 +739,8 @@ class Ui_ComfyUITab(object):
 #endif // QT_CONFIG(tooltip)
         self.selectedModelDesc.setText("")
         self.ComfyUIWorkflowPath.setText(QCoreApplication.translate("ComfyUITab", u"No model selected", None))
-        self.inputStepBadge.setText("")
         self.inputStepTitle.setText(QCoreApplication.translate("ComfyUITab", u"Input", None))
         self.noteText.setText("")
-        self.settingsStepBadge.setText("")
         self.settingsStepTitle.setText(QCoreApplication.translate("ComfyUITab", u"Settings", None))
         self.advancedGearBtn.setText("")
 #if QT_CONFIG(tooltip)
@@ -835,7 +770,6 @@ class Ui_ComfyUITab(object):
         self.ServerWaitTimeoutSpinBox.setSuffix(QCoreApplication.translate("ComfyUITab", u" min", None))
         self.label_network_output.setText(QCoreApplication.translate("ComfyUITab", u"Output path:", None))
         self.ComfyUINetworkPathDisplay.setText(QCoreApplication.translate("ComfyUITab", u"(Not configured)", None))
-        self.submitStepBadge.setText("")
         self.submitStepTitle.setText(QCoreApplication.translate("ComfyUITab", u"Submit", None))
         self.ComfyUISubmit.setText(QCoreApplication.translate("ComfyUITab", u"Submit to Farm", None))
         self.ComfyUICancelJobs.setText(QCoreApplication.translate("ComfyUITab", u"Cancel Jobs", None))

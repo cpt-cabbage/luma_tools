@@ -279,14 +279,23 @@ def generate_mp4(
         filters = []
 
         if burn_in_timecode:
-            safe_start_frame = int(start_frame)  # Ensure integer for FFmpeg filter
-            timecode_filter = (
-                f"drawtext=fontfile=C\\\\:/Windows/Fonts/consola.ttf:"
-                f"text='Frame\\: %{{expr\\:n+{safe_start_frame}}}':"
-                f"fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:"
-                f"boxborderw=5:x=10:y=10"
-            )
-            filters.append(timecode_filter)
+            from core.config import MP4_BURN_IN_FONT
+            if not MP4_BURN_IN_FONT:
+                logger.warning(
+                    "Burn-in requested but no font found on this machine; "
+                    "skipping timecode overlay."
+                )
+            else:
+                safe_start_frame = int(start_frame)  # Ensure integer for FFmpeg filter
+                # Escape backslashes and the drive-letter colon for FFmpeg filter syntax
+                font_escaped = MP4_BURN_IN_FONT.replace("\\", "/").replace(":", "\\\\:")
+                timecode_filter = (
+                    f"drawtext=fontfile={font_escaped}:"
+                    f"text='Frame\\: %{{expr\\:n+{safe_start_frame}}}':"
+                    f"fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:"
+                    f"boxborderw=5:x=10:y=10"
+                )
+                filters.append(timecode_filter)
 
         if filters:
             cmd.extend(["-vf", ",".join(filters)])
@@ -321,7 +330,10 @@ def generate_mp4(
                 logger.info("Cancellation requested, killing FFmpeg process")
                 process.kill()
                 try:
-                    process.wait(timeout=10)
+                    # Drain stderr first so the child doesn't block on a full
+                    # pipe buffer after kill() — otherwise wait() will time out
+                    # and we leak a zombie.
+                    process.communicate(timeout=10)
                 except subprocess.TimeoutExpired:
                     pass
                 raise CancellationError("MP4 generation cancelled by user")

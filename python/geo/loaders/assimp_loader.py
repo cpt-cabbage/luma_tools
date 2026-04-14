@@ -19,10 +19,15 @@ from geo.loader import (
     BoneAnimation, VectorKeyframe, QuaternionKeyframe
 )
 
-# Add libs folder to PATH for native Assimp DLL
+# Add libs folder to PATH for native Assimp DLL.
+# Guarded so re-imports don't keep prepending the same directory — without
+# this, hot-reload during dev or test isolation grows PATH without bound and
+# the modified env is inherited by every child process (FFmpeg/OIIO/Deadline).
 _LIBS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "libs")
 if os.path.isdir(_LIBS_DIR):
-    os.environ['PATH'] = _LIBS_DIR + os.pathsep + os.environ.get('PATH', '')
+    _existing_path = os.environ.get('PATH', '')
+    if _LIBS_DIR not in _existing_path.split(os.pathsep):
+        os.environ['PATH'] = _LIBS_DIR + os.pathsep + _existing_path
 
 from core.import_utils import safe_import
 

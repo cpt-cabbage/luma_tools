@@ -6,13 +6,13 @@ Handles the terminal log output display and clear functionality.
 import logging
 
 from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QClipboard
-
-logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import QMenu, QApplication
 from PySide6.QtCore import Qt
 
 from .base_tab import BaseTab, TabConfig
-from core.settings_manager import get_setting, set_setting
+from core.settings_manager import safe_get_setting, safe_set_setting
+
+logger = logging.getLogger(__name__)
 
 # Prefixes that indicate debug messages
 # These are filtered from the UI log view when "Show debug" is unchecked
@@ -61,7 +61,7 @@ class LogsTab(BaseTab):
 
     def initialize(self):
         """Initialize the logs tab with saved settings."""
-        self._show_debug = get_setting("show_verbose_logs")
+        self._show_debug = safe_get_setting("show_verbose_logs", False)
         self.ui.VerboseLogsCheckbox.blockSignals(True)
         self.ui.VerboseLogsCheckbox.setChecked(self._show_debug)
         self.ui.VerboseLogsCheckbox.blockSignals(False)
@@ -80,7 +80,7 @@ class LogsTab(BaseTab):
         """
         checked = state == 2  # Qt.Checked
         self._show_debug = checked
-        set_setting("show_verbose_logs", checked, verbose=False)
+        safe_set_setting("show_verbose_logs", checked)
         self._rerender_log()
 
     def _show_log_context_menu(self, position):
@@ -245,13 +245,22 @@ class LogsTab(BaseTab):
         """Re-render the entire log applying the current debug filter.
 
         Called when the 'Show debug' checkbox is toggled so that previously
-        hidden messages appear (or visible debug messages disappear).
+        hidden messages appear (or visible debug messages disappear). With
+        5000 buffered messages, calling _append_colored_text in a tight loop
+        triggers a layout reflow per message and visibly freezes the UI;
+        wrapping the loop in setUpdatesEnabled(False) batches the redraws
+        into a single repaint at the end.
         """
-        self.ui.LogOutput.clear()
-        for msg in self._all_messages:
-            if not self._show_debug and self._is_debug_message(msg):
-                continue
-            self._append_colored_text(msg)
+        log = self.ui.LogOutput
+        log.setUpdatesEnabled(False)
+        try:
+            log.clear()
+            for msg in self._all_messages:
+                if not self._show_debug and self._is_debug_message(msg):
+                    continue
+                self._append_colored_text(msg)
+        finally:
+            log.setUpdatesEnabled(True)
         # Scroll to bottom after re-render
-        v_scrollbar = self.ui.LogOutput.verticalScrollBar()
+        v_scrollbar = log.verticalScrollBar()
         v_scrollbar.setValue(v_scrollbar.maximum())

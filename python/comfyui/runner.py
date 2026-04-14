@@ -25,6 +25,7 @@ import signal
 import shutil
 import logging
 from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ logger = logging.getLogger(__name__)
 # Try package import first (for development), fall back to local file (for farm execution)
 try:
     from comfyui.utils import (
-        WEBSOCKET_AVAILABLE,
         check_server_health,
         wait_for_server,
         submit_workflow,
@@ -47,7 +47,6 @@ try:
 except ImportError:
     # When running standalone on farm, import from copied utils file
     from comfyui_utils import (
-        WEBSOCKET_AVAILABLE,
         check_server_health,
         wait_for_server,
         submit_workflow,
@@ -67,13 +66,17 @@ try:
 except ImportError:
     _USE_CENTRAL_LOGGING = False
 
-# Try to import image conversion (available when running with full package)
+# Image conversion lives in the workstation-only `comfyui.image_convert`
+# module (it depends on `core.config` / OCIO setup which are not on the
+# farm). The submitter already converts non-PNG inputs to PNG on the user's
+# machine *before* the job is queued, so by the time runner.py executes the
+# input directory should only contain native formats. We try to import it
+# anyway for the rare case that a future caller skips the workstation step.
 try:
     from comfyui.image_convert import needs_conversion, copy_or_convert
     _HAS_IMAGE_CONVERT = True
 except ImportError:
-    _HAS_IMAGE_CONVERT = False
-    logger.warning("Image conversion module not available (comfyui.image_convert)")
+    _HAS_IMAGE_CONVERT = False  # Normal on farm; submitter handled conversion already
 
 
 
@@ -146,26 +149,30 @@ def _setup_logging_fallback(job_name: str = None, network_output_dir: str = None
 
     def get_network_log_dir_local(subdirectory: str = "runner") -> str:
         """Get network log directory from farm config or global settings."""
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            # Try farm config first (written by submitter alongside this script),
-            # then fall back to relative global_settings.json from full installation
-            settings_paths = [
-                os.path.join(script_dir, '_farm_config.json'),
-                os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
-            ]
-            for settings_path in settings_paths:
-                norm_path = os.path.normpath(settings_path)
-                if os.path.exists(norm_path):
-                    with open(norm_path, 'r') as f:
-                        settings = json.load(f)
-                    network_path = settings.get('network_output_path', '')
-                    if network_path and os.path.isdir(network_path):
-                        log_dir = os.path.join(network_path, '_logs', subdirectory)
-                        os.makedirs(log_dir, exist_ok=True)
-                        return log_dir
-        except Exception:
-            pass
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Try farm config first (written by submitter alongside this script),
+        # then fall back to relative global_settings.json from full installation
+        settings_paths = [
+            os.path.join(script_dir, '_farm_config.json'),
+            os.path.join(script_dir, '..', '..', 'global_settings', 'global_settings.json'),
+        ]
+        for settings_path in settings_paths:
+            norm_path = os.path.normpath(settings_path)
+            if not os.path.exists(norm_path):
+                continue
+            try:
+                with open(norm_path, 'r') as f:
+                    settings = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                # Logging isn't set up yet; print straight to stderr so
+                # Deadline's task log captures the diagnostic.
+                print(f"Warning: farm config read failed for {norm_path}: {e}", file=sys.stderr)
+                continue
+            network_path = settings.get('network_output_path', '')
+            if network_path and os.path.isdir(network_path):
+                log_dir = os.path.join(network_path, '_logs', subdirectory)
+                os.makedirs(log_dir, exist_ok=True)
+                return log_dir
         return None
 
     # Determine log directory
@@ -263,16 +270,27 @@ def signal_server_restart(port: int, health_port: int = None, lowvram: bool = Fa
         return False
 
 
-def wait_for_server_restart(port: int, timeout: int = 300) -> bool:
-    """Wait for server to complete restart and become ready again."""
+def wait_for_server_restart(port: int, timeout: int = 300, down_wait: Optional[int] = None) -> bool:
+    """Wait for server to complete restart and become ready again.
+
+    Args:
+        port: Server port to probe.
+        timeout: Total wait budget in seconds.
+        down_wait: Optional override for the "wait for server to go down"
+            window. Defaults to ``min(timeout // 4, 60)`` so large model
+            unloads get more grace than the previous hardcoded 30s cap.
+    """
     import urllib.request
+
+    if down_wait is None:
+        down_wait = min(max(timeout // 4, 30), 60)
 
     url = f"http://127.0.0.1:{port}/system_stats"
     start_time = time.time()
 
     logger.info("Waiting for server to restart...")
     down_detected = False
-    while time.time() - start_time < 30:
+    while time.time() - start_time < down_wait:
         try:
             urllib.request.urlopen(url, timeout=2)
             time.sleep(0.5)
@@ -489,8 +507,6 @@ def main():
                         shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
                         logger.info(f"  Copied (conversion failed): {image_name}")
                 else:
-                    if not _HAS_IMAGE_CONVERT:
-                        logger.warning(f"Image conversion not available - copying {src_path} as-is")
                     shutil.copy2(src_path, os.path.join(comfyui_input_dir, image_name))
                     logger.info(f"  Copied: {image_name} -> {comfyui_input_dir}")
             except Exception as e:
@@ -536,13 +552,16 @@ def main():
             else:
                 logger.warning(f"Image not found locally: {image_path}")
 
-    # Cleanup handler
+    # Cleanup handler. Always exits — the server itself stays alive in
+    # persistent mode, but the runner process must terminate so Deadline can
+    # release the slot.
     def cleanup(signum=None, frame=None, exit_code=None):
         logger.info("Persistent mode - server stays running")
         if signum is not None:
             sys.exit(1)
-        elif exit_code is not None:
+        if exit_code is not None:
             sys.exit(exit_code)
+        sys.exit(0)
 
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)

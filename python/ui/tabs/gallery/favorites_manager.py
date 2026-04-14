@@ -451,7 +451,8 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def get_groups(self) -> List[GroupDef]:
         """Get list of all groups sorted by order."""
         self._ensure_loaded()
-        return sorted(self._groups.values(), key=lambda g: g.order)
+        with self._favorites_lock:
+            return sorted(self._groups.values(), key=lambda g: g.order)
 
     def get_group(self, group_id: str) -> Optional[GroupDef]:
         """Get a group by ID."""
@@ -742,9 +743,14 @@ class FavoritesManager(BaseGalleryManager, QObject):
         items = []
         exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
 
+        # Snapshot the liked set under the lock so the worker thread can't
+        # mutate it mid-iteration.
+        with self._favorites_lock:
+            liked_snapshot = list(self._liked_items)
+
         # Batch stat calls by grouping paths by directory and using scandir
         paths_by_dir = {}
-        for path in self._liked_items:
+        for path in liked_snapshot:
             if exclude_dir_norm and os.path.normpath(path).startswith(exclude_dir_norm):
                 continue
             dir_path = os.path.dirname(path)
@@ -801,7 +807,10 @@ class FavoritesManager(BaseGalleryManager, QObject):
         self._ensure_loaded()
         items = []
         exclude_dir_norm = os.path.normpath(exclude_dir) if exclude_dir else None
-        group_paths = self.get_items_in_group(group_id)
+        # Snapshot under the lock so the worker thread can't mutate the
+        # group membership while we iterate it.
+        with self._favorites_lock:
+            group_paths = list(self._group_items.get(group_id, set()))
 
         # Batch stat calls by grouping paths by directory and using scandir
         paths_by_dir = {}

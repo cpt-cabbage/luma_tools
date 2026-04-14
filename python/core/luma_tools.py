@@ -75,16 +75,38 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--in-process-gpu"
 
 # PySide6 imports
 from PySide6 import QtCore, QtWidgets
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QtMsgType
 from PySide6.QtGui import QIcon, QPainter, QColor, QPen
 from PySide6.QtWidgets import QApplication, QTabBar
 
-# Suppress known Qt warnings that are harmless in our environment
-def _qt_message_filter(mode, context, message):
-    if "QtWebEngineProcess" in message and "sandbox" in message:
-        return
-    sys.stderr.write(message + "\n")
-QtCore.qInstallMessageHandler(_qt_message_filter)
+# Drop known cosmetic Qt warnings; route everything else through Python logging.
+# Installed at module import (before any Qt widgets are created) so all
+# early-init warnings hit the same handler that main() relies on.
+_QT_NOISE_PATTERNS = (
+    "QFont::setPointSize: Point size <= 0",
+    "QThreadStorage: entry",
+    "QDxgiVSyncService not destroyed in time",
+    "sandbox",  # QtWebEngineProcess sandbox warnings
+)
+
+_QT_LEVEL_MAP = {
+    QtMsgType.QtDebugMsg: logging.DEBUG,
+    QtMsgType.QtInfoMsg: logging.INFO,
+    QtMsgType.QtWarningMsg: logging.WARNING,
+    QtMsgType.QtCriticalMsg: logging.ERROR,
+    QtMsgType.QtFatalMsg: logging.CRITICAL,
+}
+
+
+def _filtered_qt_message_handler(mode, context, message):
+    text = str(message) if message else ""
+    for pat in _QT_NOISE_PATTERNS:
+        if pat in text:
+            return
+    logging.getLogger("Qt").log(_QT_LEVEL_MAP.get(mode, logging.WARNING), text)
+
+
+QtCore.qInstallMessageHandler(_filtered_qt_message_handler)
 
 # Import UI components
 from ui_components import enhance_ui, apply_stylesheet, LoadingStyles, TabGlowManager, InlineSpinner
@@ -453,9 +475,6 @@ class LumaShotTools(QtWidgets.QWidget):
         self._progress_callback(86, "Initializing active tab...")
         self._initialize_active_tab()
 
-        # Hide restricted tabs for non-admin users
-        self._hide_restricted_tabs()
-
         # Hide tabs that require shot context in standalone mode
         self._hide_standalone_incompatible_tabs()
 
@@ -554,10 +573,7 @@ class LumaShotTools(QtWidgets.QWidget):
         # Calculate progress range for tab loading (28-80%)
         _tab_progress_start = 28
         _tab_progress_end = 80
-        _loadable_tabs = [
-            (m, c, r) for m, c, r in TAB_REGISTRY
-            if (r != 'settings' or app_state.is_admin)
-        ]
+        _loadable_tabs = list(TAB_REGISTRY)
         _tab_count = len(_loadable_tabs) or 1
 
         for _loaded_idx, (module_path, class_name, restrict_key) in enumerate(_loadable_tabs):
@@ -951,13 +967,8 @@ class LumaShotTools(QtWidgets.QWidget):
             return
 
         try:
-            # Re-read the version.json file from disk
-            from core.config import _ROOT_DIR
-            from core.utils import load_json
-            version_file = os.path.join(_ROOT_DIR, "resources", "version.json")
-
-            data = load_json(version_file, {"version": "unknown"})
-            deployed_version = data.get("version", "unknown")
+            from core.config import _load_version
+            deployed_version = _load_version()
 
             # Compare with the version we started with
             if deployed_version != APP_VERSION and deployed_version != "unknown":
@@ -978,6 +989,11 @@ class LumaShotTools(QtWidgets.QWidget):
         # Show badge on the Settings utility button
         if 'settings' in self._utility_badges:
             self._utility_badges['settings'].show_badge()
+
+        # Stop the periodic check — we found a new version, no need to keep polling
+        timer = getattr(self, '_version_check_timer', None)
+        if timer is not None:
+            timer.stop()
 
 
     def _restore_window_state(self):
@@ -1026,38 +1042,6 @@ class LumaShotTools(QtWidgets.QWidget):
 
         save_window_state(width, height, maximized)
 
-    def _hide_restricted_tabs(self):
-        """Hide tabs that are restricted based on admin configuration.
-
-        Role-based access:
-        - Admins: Full access (all tabs including Settings)
-        - Regular users: Cannot see tabs listed in restricted_tabs setting
-
-        For utility tabs (Settings, Logs), hides the corner-widget button
-        instead of calling removeTab.
-        """
-        from core.settings_manager import get_setting
-
-        # Admins can see all tabs
-        if app_state.is_admin:
-            return
-
-        restricted = get_setting("restricted_tabs")
-        if not restricted:
-            return
-
-        for i in range(self.tab_widget.count() - 1, -1, -1):
-            widget = self.tab_widget.widget(i)
-            tab_name = widget.objectName()
-
-            if tab_name in restricted:
-                # For utility tabs, hide their button instead of removing the tab
-                if tab_name in self._utility_buttons:
-                    self._utility_buttons[tab_name].hide()
-                    logging.info(f"Hidden restricted utility button: {tab_name}")
-                else:
-                    self.tab_widget.removeTab(i)
-                    logging.info(f"Hidden restricted tab: {tab_name}")
 
     def _hide_standalone_incompatible_tabs(self):
         """Hide tabs that require shot context in standalone mode."""
@@ -1311,9 +1295,13 @@ class LumaShotTools(QtWidgets.QWidget):
     def enable_log_redirect(self):
         """Enable stdout/stderr redirection to the log widget."""
         if getattr(self, '_log_redirect_pending', False):
-            # Save originals so we can restore in closeEvent
-            self._orig_stdout = sys.stdout
-            self._orig_stderr = sys.stderr
+            # Save the *real* originals (sys.__stdout__/__stderr__), not the
+            # current sys.stdout. Earlier setup_file_logging may have already
+            # wrapped sys.stdout in a TeeStream whose file handle is closed by
+            # atexit; restoring to that wrapper after close would leave
+            # sys.stdout pointing at a closed fd.
+            self._orig_stdout = sys.__stdout__
+            self._orig_stderr = sys.__stderr__
 
             # Redirect stdout/stderr for any remaining print() calls
             sys.stdout = self.log_stream
@@ -1387,50 +1375,11 @@ class LumaShotTools(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
-_QT_NOISE_PATTERNS = (
-    "QFont::setPointSize: Point size <= 0",
-    "QThreadStorage: entry",
-    "QDxgiVSyncService not destroyed in time",
-)
-
-
-def _filtered_qt_message_handler(mode, context, message):
-    """Drop known cosmetic Qt warnings; forward everything else to logging.
-
-    Qt regularly emits warnings that are not actionable for app code
-    (e.g. point-size queries against pixel-size-only stylesheet fonts, or
-    teardown order complaints in QtWebEngine/Chromium). Filtering them
-    here keeps the log readable.
-    """
-    text = str(message) if message else ""
-    for pat in _QT_NOISE_PATTERNS:
-        if pat in text:
-            return
-    # Forward to Python logging using Qt's mode -> level mapping.
-    try:
-        from PySide6.QtCore import QtMsgType
-        level_map = {
-            QtMsgType.QtDebugMsg: logging.DEBUG,
-            QtMsgType.QtInfoMsg: logging.INFO,
-            QtMsgType.QtWarningMsg: logging.WARNING,
-            QtMsgType.QtCriticalMsg: logging.ERROR,
-            QtMsgType.QtFatalMsg: logging.CRITICAL,
-        }
-        logging.getLogger("Qt").log(level_map.get(mode, logging.WARNING), text)
-    except Exception:
-        pass
-
-
 def main():
     """Main entry point."""
     import traceback
     import time
-    from PySide6.QtCore import qInstallMessageHandler
-
-    # Install Qt message filter before the QApplication starts so all early
-    # widget-init warnings are routed through it.
-    qInstallMessageHandler(_filtered_qt_message_handler)
-
+    # Qt message handler is installed at module import (see top of file).
     try:
         # Show splash screen
         splash = SplashScreen()

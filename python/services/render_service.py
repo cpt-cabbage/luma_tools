@@ -12,9 +12,13 @@ import shlex
 logger = logging.getLogger(__name__)
 
 from core.config import OIIO_INFO_PATH, EXCLUDED_CHANNELS, NORMAL_CHANNELS
-from core.utils import substring_after, truncate_at_suffix, ensure_directory, replace_frame_tokens, load_json, save_json
+from core.utils import substring_after, truncate_at_suffix, ensure_directory, normalize_path, replace_frame_tokens, load_json, save_json
 from core.subprocess_utils import run_command
 from core.progress_utils import report_progress
+
+# Hard cap on iinfo / oiiotool calls. Network EXR mounts can hang indefinitely
+# and the calls run on worker threads, so we never want to block forever.
+_OIIO_CMD_TIMEOUT = 60
 
 
 def detect_passes(render_file):
@@ -36,7 +40,7 @@ def detect_passes(render_file):
         return {}
 
     # Look for passes in file using OIIO
-    result = run_command([OIIO_INFO_PATH, '-v', '-m', 'channel', render_file])
+    result = run_command([OIIO_INFO_PATH, '-v', '-m', 'channel', render_file], timeout=_OIIO_CMD_TIMEOUT)
     if result.returncode != 0:
         logger.error(f"OIIO command failed: {result.stderr}")
         return {}
@@ -70,8 +74,9 @@ def detect_passes(render_file):
             channelgroup.append(ch.strip())
             channels[key] = channelgroup
 
-    # Manual Passes - Normals
-    channels["normal"] = NORMAL_CHANNELS
+    # Manual Passes - Normals (only if the file actually has normal.* channels)
+    if any(c.strip() in {"normal.x", "normal.y", "normal.z"} for c in channelscaptured):
+        channels["normal"] = NORMAL_CHANNELS
 
     return channels
 
@@ -144,15 +149,24 @@ def build_oiio_command(passes_dict, denoised_path, renders_path, output_path, is
     Returns:
         str: OIIO command arguments
     """
-    # When not denoised, read beauty from raw render instead
+    # When not denoised, read beauty from raw render instead.
+    # Always normalize Windows paths to forward slashes so the eventual
+    # shlex.split call doesn't mangle backslashes inside quoted tokens.
     if not is_denoised:
         denoised_path = renders_path
-    # Build Denoise Passes String — exclude only the actual normal channels
-    # (normal.x/y/z), not arbitrary substrings like 'normal_map' or 'normalize'.
+    denoised_path = normalize_path(denoised_path)
+    renders_path = normalize_path(renders_path)
+    output_path = normalize_path(output_path)
+
+    # Build Denoise Passes String — exclude actual normal channels
+    # (normal.x/y/z) and the Crypto* keys, which are emitted separately into
+    # render_passes below. Without the Crypto skip the same channel names
+    # appear in both --chnames lists, producing duplicate channel mappings.
     denoised_passes = ""
     _NORMAL_CHANNEL_NAMES = {"normal.x", "normal.y", "normal.z"}
+    _CRYPTO_KEYS = {"CryptoMaterials", "CryptoPrimitives"}
     for key, val in passes_dict.items():
-        if key == "normal":
+        if key == "normal" or key in _CRYPTO_KEYS:
             continue
         for cur in val:
             if str(cur).strip() in _NORMAL_CHANNEL_NAMES:
@@ -242,7 +256,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         logger.info(f"Local Command: {local_command}")
 
         try:
-            result = run_command(local_command, shell=False)
+            result = run_command(local_command, shell=False, timeout=_OIIO_CMD_TIMEOUT)
             logger.info(f"STDOUT: {result.stdout}")
             if result.stderr:
                 logger.info(f"STDERR: {result.stderr}")
@@ -296,7 +310,7 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         )
 
         try:
-            result = run_command(local_command, shell=False)
+            result = run_command(local_command, shell=False, timeout=_OIIO_CMD_TIMEOUT)
 
             if result.returncode != 0:
                 error_msg = f"Frame {frame_num} failed with code {result.returncode}"
@@ -320,15 +334,3 @@ def execute_oiio_local(oiio_path, oiio_args, start_frame=None, end_frame=None, p
         return True
 
 
-def get_render_basename(render_path):
-    """
-    Extract base name from render path.
-
-    Args:
-        render_path: Full path to render
-
-    Returns:
-        str: Base name without extension
-    """
-    filename = os.path.basename(render_path)
-    return filename.split(".")[0]

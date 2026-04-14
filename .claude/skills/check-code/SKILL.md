@@ -217,12 +217,11 @@ Check: Use appropriate role check for the feature.
 # For admin-only features (Settings tab)
 if app_state.is_admin:
 
-# For elevated access (ComfyUI, Gallery supervisor features)
+# For elevated access (currently equivalent to is_admin)
 if app_state.has_elevated_access:
-
-# For supervisor-specific features
-if app_state.is_sup:
 ```
+
+Supervisor role was removed. Do not introduce `is_sup` or supervisor-only paths.
 
 ## Category 7: Event Bus (if applicable)
 

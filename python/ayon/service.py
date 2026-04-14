@@ -134,6 +134,10 @@ def submit_oiio_to_deadline(
     Returns:
         str: Deadline job ID or None if failed
     """
+    if not DEADLINE_PATH:
+        logger.error("Deadline not available — cannot submit OIIO pass build")
+        return None
+
     deadline_command = []
     deadline_command.append(DEADLINE_PATH)
     deadline_command.append('-SubmitCommandLineJob')
@@ -879,7 +883,7 @@ def create_ayon_metadata(
         "families": ["render", "review"],
         "folderPath": folder_path,
         "task": task,
-        "host": "houdini",  # Host application - required for review extraction
+        "host": "luma_tools",  # Host application - required for review extraction
         "frameStart": start_frame,
         "frameEnd": end_frame,
         "frameStartHandle": start_frame,
@@ -887,10 +891,15 @@ def create_ayon_metadata(
         "handleStart": 0,
         "handleEnd": 0,
         "fps": AYON_DEFAULT_FPS,
-        # Normalize working_dir before splitting on "work/" — Windows callers
-        # may pass backslashes which would otherwise leave the split untouched
-        # and produce a broken AYON source path containing the drive letter.
-        "source": "{root[work]}/" + normalize_path(working_dir).split("work/")[-1] + render_file,
+        # Normalize working_dir then split on the FIRST 'work' segment so that
+        # parent directories that happen to contain 'work' (e.g.
+        # animation_work) don't truncate the source path. Mirrors the
+        # `_build_paths` regex below.
+        "source": (
+            "{root[work]}/"
+            + re.split(r'[/\\]work(?=[/\\]|$)', normalize_path(working_dir), maxsplit=1)[-1].lstrip("/")
+            + render_file
+        ),
         "representations": representations,
         # farm=True tells AYON to defer file integration to a farm job
         # farm=False tells AYON to integrate files immediately (local publish)
@@ -980,9 +989,11 @@ def write_metadata_file(metadata_dict, output_path):
 
     if missing_fields:
         logger.error(f"MISSING REQUIRED FIELDS: {missing_fields}")
-    else:
-        logger.info(f"All required fields present: {required_fields}")
+        # Return None so callers gating on `if not metadata_path:` see the
+        # failure instead of treating a half-written file as a successful publish.
+        return None
 
+    logger.info(f"All required fields present: {required_fields}")
     return output_path
 
 

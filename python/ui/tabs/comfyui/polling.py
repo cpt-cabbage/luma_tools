@@ -170,7 +170,6 @@ class PollingMixin:
             network_output_dir: Path where outputs will be saved
             output_type: Type of output ("image", "video", "3d", "audio", "other")
         """
-        from ui_components import StatusColors
 
         self.app_state.comfyui_current_job_id = job_id
         self._iterate_network_output_dir = network_output_dir
@@ -245,7 +244,6 @@ class PollingMixin:
 
     def _handle_iterate_poll_result(self, result):
         """Process iterate poll result and update UI."""
-        from ui_components import StatusColors
 
         status = result.get("status", "Unknown")
         progress = result.get("progress", 0)
@@ -455,19 +453,22 @@ class PollingMixin:
 
     def _handle_iterate_job_completed(self):
         """Handle iterate job completion and record timing."""
-        from ui_components import StatusColors
         from comfyui.metadata import get_job_output_files, cleanup_job_temp_files
 
         elapsed = time.time() - self._iterate_start_time if self._iterate_start_time else 0
         elapsed_str = format_elapsed_time(elapsed)
         frames = self._iterate_total_tasks
 
-        # Record per-frame execution time for future estimates
-        if frames > 0 and hasattr(self, '_current_preset_name') and self._current_preset_name:
+        # Record per-frame execution time for future estimates. Read from the
+        # authoritative state_manager rather than the stale tab-level shadow
+        # so job-recovery paths that don't go through _on_submit_result still
+        # record timings.
+        preset_name = getattr(self.state_manager, 'current_preset_name', '') if hasattr(self, 'state_manager') else ''
+        if frames > 0 and preset_name:
             from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / frames
-            record_workflow_execution_time(self._current_preset_name, per_frame_time)
-            logger.info(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")
+            record_workflow_execution_time(preset_name, per_frame_time)
+            logger.info(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{preset_name}'")
 
         self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
         self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
@@ -622,7 +623,6 @@ class PollingMixin:
             network_output_dir: Path where outputs will be saved
             output_type: Type of output ("image", "video", "3d", "audio", "other")
         """
-        from ui_components import StatusColors
 
         gen_count = self.ui.ComfyUIGenerationCount.value()
 
@@ -722,7 +722,7 @@ class PollingMixin:
         with self._batch_poll_lock:
             if self._batch_poll_pending_results > 0:
                 started = getattr(self, "_batch_poll_cycle_started_at", 0.0)
-                interval_s = max(self._cached_poll_interval_ms or 5000, 1000) / 1000.0
+                interval_s = max(_get_poll_interval_ms(), 1000) / 1000.0
                 if started and (now - started) > (interval_s * 4):
                     logger.warning(
                         "[Batch] Poll watchdog: previous cycle stuck "
@@ -788,8 +788,6 @@ class PollingMixin:
             with self._batch_poll_lock:
                 poll_results = dict(self._batch_poll_results)
             logger.debug(f"[Batch Poll] Processing {len(poll_results)} results...")
-
-            from ui_components import StatusColors
 
             logger.debug(f"[Batch] Processing {len(poll_results)} poll results")
             had_new_frames = False
@@ -1018,7 +1016,6 @@ class PollingMixin:
 
     def _handle_batch_jobs_completed(self, had_failures=False):
         """Handle batch jobs completion and cleanup."""
-        from ui_components import StatusColors
         from comfyui.metadata import cleanup_job_temp_files
 
         was_recovery = getattr(self, '_batch_recovery_mode', False)
@@ -1034,11 +1031,12 @@ class PollingMixin:
         completed_frames = sum(self._batch_completed_tasks.values())
 
         # Record per-frame execution time for future estimates
-        if completed_frames > 0 and getattr(self, '_current_preset_name', ''):
+        preset_name = getattr(self.state_manager, 'current_preset_name', '') if hasattr(self, 'state_manager') else ''
+        if completed_frames > 0 and preset_name:
             from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / completed_frames
-            record_workflow_execution_time(self._current_preset_name, per_frame_time)
-            logger.info(f"[Batch] Recorded {format_elapsed_time(per_frame_time)} per frame for '{self._current_preset_name}'")
+            record_workflow_execution_time(preset_name, per_frame_time)
+            logger.info(f"[Batch] Recorded {format_elapsed_time(per_frame_time)} per frame for '{preset_name}'")
 
         if had_failures:
             logger.warning("[Batch] Jobs finished with failures!")
@@ -1168,7 +1166,6 @@ class PollingMixin:
 
     def _on_cancel_complete(self, result):
         """Handle cancel jobs completion."""
-        from ui_components import StatusColors
 
         succeeded, failed, errors = result
 
@@ -1419,7 +1416,6 @@ class PollingMixin:
                 if not polling_active:
                     try:
                         if self.animator:
-                            from ui_components import StatusColors
                             self.animator.update_status_animated(
                                 "Ready", StatusColors.INFO
                             )
@@ -1437,7 +1433,6 @@ class PollingMixin:
                         elif mode == "batch":
                             self.show_status("Previous ComfyUI batch completed while app was closed", "success")
                         # Reset to "Ready" after showing the completion message briefly
-                        from ui_components import StatusColors
                         from shiboken6 import isValid
                         QTimer.singleShot(4000, lambda: (
                             self.animator.update_status_animated("Ready", StatusColors.INFO)
@@ -1506,7 +1501,6 @@ class PollingMixin:
             running_jobs: List of job dicts from find_user_running_jobs
             persisted_state: Persisted job state for additional metadata, or None
         """
-        from ui_components import StatusColors
 
         if not running_jobs:
             return
@@ -1690,7 +1684,6 @@ class PollingMixin:
                 logger.info(f"[Recovery] Fast-recovering {len(job_ids)} batch job(s), starting async polling...")
 
                 # Show immediate feedback
-                from ui_components import StatusColors
                 self.animator.update_status_animated(
                     f"Recovering {len(job_ids)} ComfyUI job(s)...",
                     StatusColors.INFO
@@ -1739,7 +1732,6 @@ class PollingMixin:
             job_state: The persisted job state dictionary
             status_result: Result from poll_deadline_job_status
         """
-        from ui_components import StatusColors
 
         job_id = job_state.get("job_id")
         network_output_dir = job_state.get("network_output_dir")

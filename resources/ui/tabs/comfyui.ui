@@ -55,6 +55,12 @@
        <!-- ===== STEP 1: CHOOSE MODEL ===== -->
        <item>
         <widget class="QFrame" name="comfyuiModelFrame">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
          <property name="styleSheet">
           <string notr="true">
             QFrame#comfyuiModelFrame {
@@ -87,32 +93,6 @@
             <property name="spacing">
              <number>10</number>
             </property>
-            <item>
-             <widget class="QLabel" name="modelStepBadge">
-              <property name="text">
-               <string></string>
-              </property>
-              <property name="minimumSize">
-               <size><width>26</width><height>26</height></size>
-              </property>
-              <property name="maximumSize">
-               <size><width>26</width><height>26</height></size>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">
-                 background-color: #4a9eff;
-                 color: white;
-                 font-weight: bold;
-                 font-size: 12px;
-                 border-radius: 13px;
-                 padding: 0px;
-               </string>
-              </property>
-             </widget>
-            </item>
             <item>
              <widget class="QLabel" name="modelStepTitle">
               <property name="text">
@@ -407,32 +387,6 @@
              <number>10</number>
             </property>
             <item>
-             <widget class="QLabel" name="inputStepBadge">
-              <property name="text">
-               <string></string>
-              </property>
-              <property name="minimumSize">
-               <size><width>26</width><height>26</height></size>
-              </property>
-              <property name="maximumSize">
-               <size><width>26</width><height>26</height></size>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">
-                 background-color: #4a9eff;
-                 color: white;
-                 font-weight: bold;
-                 font-size: 12px;
-                 border-radius: 13px;
-                 padding: 0px;
-               </string>
-              </property>
-             </widget>
-            </item>
-            <item>
              <widget class="QLabel" name="inputStepTitle">
               <property name="text">
                <string>Input</string>
@@ -582,32 +536,6 @@
               <property name="spacing">
                <number>10</number>
               </property>
-              <item>
-               <widget class="QLabel" name="settingsStepBadge">
-                <property name="text">
-                 <string></string>
-                </property>
-                <property name="minimumSize">
-                 <size><width>26</width><height>26</height></size>
-                </property>
-                <property name="maximumSize">
-                 <size><width>26</width><height>26</height></size>
-                </property>
-                <property name="alignment">
-                 <set>Qt::AlignCenter</set>
-                </property>
-                <property name="styleSheet">
-                 <string notr="true">
-                   background-color: #4a9eff;
-                   color: white;
-                   font-weight: bold;
-                   font-size: 12px;
-                   border-radius: 13px;
-                   padding: 0px;
-                 </string>
-                </property>
-               </widget>
-              </item>
               <item>
                <widget class="QLabel" name="settingsStepTitle">
                 <property name="text">
@@ -990,32 +918,6 @@
               <property name="spacing">
                <number>10</number>
               </property>
-              <item>
-               <widget class="QLabel" name="submitStepBadge">
-                <property name="text">
-                 <string></string>
-                </property>
-                <property name="minimumSize">
-                 <size><width>26</width><height>26</height></size>
-                </property>
-                <property name="maximumSize">
-                 <size><width>26</width><height>26</height></size>
-                </property>
-                <property name="alignment">
-                 <set>Qt::AlignCenter</set>
-                </property>
-                <property name="styleSheet">
-                 <string notr="true">
-                   background-color: #4a9eff;
-                   color: white;
-                   font-weight: bold;
-                   font-size: 12px;
-                   border-radius: 13px;
-                   padding: 0px;
-                 </string>
-                </property>
-               </widget>
-              </item>
               <item>
                <widget class="QLabel" name="submitStepTitle">
                 <property name="text">

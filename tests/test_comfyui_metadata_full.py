@@ -8,7 +8,6 @@ import pytest
 
 from comfyui.metadata import (
     get_job_output_files,
-    scan_output_directory,
     _validate_output_dir,
 )
 
@@ -64,28 +63,6 @@ class TestGetJobOutputFiles:
 
     def test_empty_string(self):
         assert get_job_output_files("") == []
-
-
-# ============================================================================
-# scan_output_directory
-# ============================================================================
-
-class TestScanOutputDirectory:
-    def test_empty(self, tmp_path):
-        assert scan_output_directory(str(tmp_path)) == []
-
-    def test_finds_files(self, tmp_path):
-        (tmp_path / "test.png").write_bytes(b"PNG")
-        result = scan_output_directory(str(tmp_path))
-        assert len(result) == 1
-        assert result[0]["filename"] == "test.png"
-        assert result[0]["size"] == 3
-
-    def test_nonexistent(self):
-        assert scan_output_directory("/nonexistent") == []
-
-    def test_empty_string(self):
-        assert scan_output_directory("") == []
 
 
 # ============================================================================

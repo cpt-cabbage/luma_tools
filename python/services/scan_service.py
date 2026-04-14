@@ -283,21 +283,21 @@ class DirectoryScanner:
                 if self.state.latestrender:
                     found_render_files.remove(self.state.latestrender)
                     self.signals.set_label_text.emit('LatestRender', f"Latest Render: {self.state.latestrender}")
-                    latestver = get_trailing_number(self.state.latestrender)
+                    latestver = get_trailing_number(self.state.latestrender) or 0
                     self.signals.set_spinbox_range.emit('CurrentVer', 0, int(latestver))
                 else:
                     # No versions have renders - fall back to latest version
                     self.state.latestrender = found_render_files[-1]
                     found_render_files.pop(-1)
                     self.signals.set_label_text.emit('LatestRender', f"Latest Render: {self.state.latestrender} (empty)")
-                    latestver = get_trailing_number(self.state.latestrender)
+                    latestver = get_trailing_number(self.state.latestrender) or 0
                     self.signals.set_spinbox_range.emit('CurrentVer', 0, int(latestver))
 
             # Set render path
             if self.state.latestrender:
                 self.state.searchpath = os.path.join(render_directory, self.state.latestrender)
                 self.signals.set_label_text.emit('RenderPath', self.state.searchpath)
-                currentver = get_trailing_number(self.state.latestrender)
+                currentver = get_trailing_number(self.state.latestrender) or 0
                 self.signals.set_spinbox_value.emit('CurrentVer', int(currentver))
 
         return found_render_files
@@ -311,7 +311,11 @@ class DirectoryScanner:
         """
         found_usd_files = []
         if usd_directory:
-            usddir = sorted(next(os.walk(usd_directory))[1])
+            try:
+                usddir = sorted(next(os.walk(usd_directory))[1])
+            except (StopIteration, OSError) as e:
+                logger.warning(f"USD directory not walkable: {usd_directory}: {e}")
+                return found_usd_files
 
             for dir_name in usddir:
                 found_usd_files.append(dir_name)
@@ -413,7 +417,7 @@ class DirectoryScanner:
         if render_directory != "" and self.state.latestrender:
             searchpath = os.path.join(render_directory, self.state.latestrender)
             self.signals.set_label_text.emit('MP4RenderPath', searchpath)
-            currentver = get_trailing_number(self.state.latestrender)
+            currentver = get_trailing_number(self.state.latestrender) or 0
             self.signals.set_spinbox_value.emit('MP4CurrentVer', int(currentver))
             self.signals.set_spinbox_range.emit('MP4CurrentVer', 0, int(currentver))
 
@@ -428,7 +432,7 @@ class DirectoryScanner:
             searchpath = os.path.join(render_directory, self.state.latestrender)
             self.state.republish_searchpath = searchpath
             self.signals.set_label_text.emit('RePublishRenderPath', searchpath)
-            currentver = get_trailing_number(self.state.latestrender)
+            currentver = get_trailing_number(self.state.latestrender) or 0
             self.signals.set_spinbox_value.emit('RePublishCurrentVer', int(currentver))
             self.signals.set_spinbox_range.emit('RePublishCurrentVer', 0, int(currentver))
 

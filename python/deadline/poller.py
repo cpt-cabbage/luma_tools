@@ -8,10 +8,12 @@ and task log analysis for ComfyUI workflows.
 import os
 import re
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
 from core.config import DEADLINE_PATH, DEADLINE_JOB_NAME_PREFIX
 from core.subprocess_utils import run_command
+from core.caching import cached_with_ttl
 from deadline.parser import (
     parse_job_info,
     get_task_counts,
@@ -21,6 +23,22 @@ from deadline.parser import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_deadline_date(date_str: str) -> datetime:
+    """Parse a Deadline SubmitDate string into a datetime for proper sorting.
+
+    Falls back to ``datetime.min`` so jobs with missing/malformed dates sort
+    last instead of crashing the lambda key.
+    """
+    if not date_str:
+        return datetime.min
+    for fmt in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    return datetime.min
 
 
 def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
@@ -349,6 +367,54 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     }
 
 
+@cached_with_ttl(seconds=30)
+def _fetch_pending_luma_jobs() -> Tuple[List[Dict[str, Any]], str]:
+    """Fetch and sort the current set of pending luma_tools jobs on Deadline.
+
+    Cached for 30 s so the poll-tick hot path doesn't spam the farm with up to
+    101 sequential GetJob calls per tab refresh.
+
+    Returns:
+        Tuple of (sorted jobs_info, error_string). On error returns ([], err).
+    """
+    if not DEADLINE_PATH:
+        return [], "Deadline not available"
+
+    result = run_command([DEADLINE_PATH, "GetJobIdsFilter", "Status=Pending"], timeout=30)
+    if result.returncode != 0:
+        return [], result.stderr.strip()
+
+    pending_job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+    if not pending_job_ids:
+        return [], ""
+
+    MAX_JOBS_TO_CHECK = 100
+    jobs_info: List[Dict[str, Any]] = []
+    for pending_id in pending_job_ids[:MAX_JOBS_TO_CHECK]:
+        job_result = run_command([DEADLINE_PATH, "GetJob", pending_id], timeout=15)
+        if job_result.returncode != 0:
+            continue
+        job_info = parse_job_info(job_result.stdout)
+        priority = job_info.get("Priority", 50)
+        submit_date = job_info.get("SubmitDate", "")
+        job_name = job_info.get("Name", "")
+        job_user = job_info.get("User", "")
+        if job_name.startswith(DEADLINE_JOB_NAME_PREFIX):
+            jobs_info.append({
+                "id": pending_id,
+                "priority": priority,
+                "submit_date": submit_date,
+                "name": job_name,
+                "user": job_user,
+            })
+
+    # Higher priority first, then earlier submit date first.
+    # _parse_deadline_date converts MM/DD/YYYY strings to datetime so the
+    # sort doesn't break across month/year boundaries.
+    jobs_info.sort(key=lambda x: (-x["priority"], _parse_deadline_date(x["submit_date"])))
+    return jobs_info, ""
+
+
 def get_queue_info(job_id: str) -> Dict[str, Any]:
     """
     Get queue position information for a job.
@@ -367,48 +433,11 @@ def get_queue_info(job_id: str) -> Dict[str, Any]:
             - error: Error message if query failed
     """
     try:
-        if not DEADLINE_PATH:
-            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": "Deadline not available"}
-
-        # Get all pending (queued) jobs
-        result = run_command([DEADLINE_PATH, "GetJobIdsFilter", "Status=Pending"], timeout=30)
-
-        if result.returncode != 0:
-            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": result.stderr.strip()}
-
-        # Parse job IDs from output (one per line)
-        pending_job_ids = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-
-        if not pending_job_ids:
+        jobs_info, error = _fetch_pending_luma_jobs()
+        if error:
+            return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": error}
+        if not jobs_info:
             return {"queue_position": 0, "total_queued": 0, "jobs_ahead": 0, "error": ""}
-
-        # Get job details for pending jobs to sort by priority/submission time
-        # Filter to only luma_tools ComfyUI jobs
-        # Limit to prevent unbounded memory/time on busy farms
-        MAX_JOBS_TO_CHECK = 100
-        jobs_info = []
-        for pending_id in pending_job_ids[:MAX_JOBS_TO_CHECK]:
-            job_result = run_command([DEADLINE_PATH, "GetJob", pending_id], timeout=15)
-
-            if job_result.returncode == 0:
-                job_info = parse_job_info(job_result.stdout)
-                priority = job_info.get("Priority", 50)
-                submit_date = job_info.get("SubmitDate", "")
-                job_name = job_info.get("Name", "")
-                job_user = job_info.get("User", "")
-
-                # Only include luma_tools jobs (matches submission name format)
-                if job_name.startswith(DEADLINE_JOB_NAME_PREFIX):
-                    jobs_info.append({
-                        "id": pending_id,
-                        "priority": priority,
-                        "submit_date": submit_date,
-                        "name": job_name,
-                        "user": job_user
-                    })
-
-        # Sort by priority (higher first), then by submit date (earlier first)
-        jobs_info.sort(key=lambda x: (-x["priority"], x["submit_date"]))
 
         # Get current user from environment (matches job submission user)
         current_user = os.environ.get("USERNAME", "").lower()

@@ -4,11 +4,24 @@ Animation utilities for 3D model handling.
 Provides interpolation functions and data structures for skeletal animation.
 """
 
+# Defer all annotation evaluation so the module can still be imported when
+# numpy isn't installed — dataclass field annotations would otherwise be
+# evaluated at class-definition time and raise NameError on `np.ndarray`.
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Tuple
 
-import numpy as np
+# numpy is optional. Importing geo.loader transitively pulls this module in,
+# so a broken numpy install would otherwise crash the whole geo subsystem
+# at import time even for code paths that never touch animation.
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    np = None  # type: ignore
+    _HAS_NUMPY = False
 
 
 # ============================================================================

@@ -310,13 +310,3 @@ class ApplicationState:
 
 # Global application state instance
 app_state = ApplicationState()
-
-
-def get_app_state():
-    """
-    Get the global application state instance.
-
-    Returns:
-        ApplicationState: The global state instance
-    """
-    return app_state

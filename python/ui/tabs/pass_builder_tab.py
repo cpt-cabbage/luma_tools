@@ -148,61 +148,6 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             logger.warning(f"Pass Builder: Task directory not found: {task_dir}")
             return
 
-        def _scan_worker(task_dir, task, shotpath):
-            """Background worker for initial render scan."""
-            from services.file_operations import fast_scandir, find_renders, find_hip_files
-            from core.config import RENDERS_SUBPATH
-            from core.utils import truncate_at_suffix, get_trailing_number
-
-            try:
-                dirs = fast_scandir(task_dir)
-            except Exception as e:
-                logger.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
-                return None
-
-            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-            if not render_folders:
-                logger.warning(f"Pass Builder: No render directory found in {task_dir}")
-                return None
-
-            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-
-            hip_files = find_hip_files(task_dir, task)
-            hip_file = ""
-            if hip_files:
-                hip_files = sorted(hip_files)
-                hip_file = hip_files[0].rsplit("_", 1)[0]
-
-            try:
-                render_dirs = sorted(next(os.walk(render_directory))[1])
-            except StopIteration:
-                return None
-
-            if hip_file:
-                matching = [d for d in render_dirs if hip_file in d]
-                if matching:
-                    render_dirs = matching
-
-            if not render_dirs:
-                return None
-
-            latest_render = None
-            for render_version in reversed(render_dirs):
-                version_path = os.path.join(render_directory, render_version)
-                test_renders = find_renders(version_path)
-                if len(test_renders) > 0:
-                    latest_render = render_version
-                    break
-
-            if not latest_render:
-                latest_render = render_dirs[-1]
-
-            return {
-                'latest_render': latest_render,
-                'render_directory': render_directory,
-                'task': task,
-            }
-
         def _on_scan_result(result):
             if not result:
                 return
@@ -210,7 +155,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
             self.app_state.latestrender = result['latest_render']
             self.app_state.searchpath = os.path.join(result['render_directory'], result['latest_render'])
-            self.app_state.working_dir = truncate_at_suffix(result['render_directory'], result['task'])
+            self.app_state.working_dir = truncate_at_suffix(result['render_directory'], task)
 
             self.ui.RenderPath.setText(self.app_state.searchpath)
             ver_str = get_trailing_number(result['latest_render'])
@@ -225,9 +170,62 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self._initial_scan_done = True
 
         self.start_worker(
-            _scan_worker, task_dir, task, self.app_state.shotpath,
+            self._scan_render_directory_worker, task_dir, task,
             on_result=_on_scan_result
         )
+
+    def _scan_render_directory_worker(self, task_dir, task):
+        """Background worker: locate the latest render version under task_dir."""
+        from services.file_operations import fast_scandir, find_renders, find_hip_files
+        from core.config import RENDERS_SUBPATH
+        from core.utils import truncate_at_suffix
+
+        try:
+            dirs = fast_scandir(task_dir)
+        except Exception as e:
+            logger.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
+            return None
+
+        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
+        if not render_folders:
+            logger.warning(f"Pass Builder: No render directory found in {task_dir}")
+            return None
+
+        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
+
+        hip_files = find_hip_files(task_dir, task)
+        hip_file = ""
+        if hip_files:
+            hip_files = sorted(hip_files)
+            hip_file = hip_files[0].rsplit("_", 1)[0]
+
+        try:
+            render_dirs = sorted(next(os.walk(render_directory))[1])
+        except StopIteration:
+            return None
+
+        if hip_file:
+            matching = [d for d in render_dirs if hip_file in d]
+            if matching:
+                render_dirs = matching
+
+        if not render_dirs:
+            return None
+
+        latest_render = None
+        for render_version in reversed(render_dirs):
+            version_path = os.path.join(render_directory, render_version)
+            if find_renders(version_path):
+                latest_render = render_version
+                break
+
+        if not latest_render:
+            latest_render = render_dirs[-1]
+
+        return {
+            'latest_render': latest_render,
+            'render_directory': render_directory,
+        }
 
     @property
     def _build_type(self):
@@ -271,8 +269,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
     def _scan_available_render_variants(self):
         """Scan work directory for available render variant names.
 
-        If a task is set, scans only that task directory. Otherwise scans all
-        task directories under work/ to support task-less browsing.
+        Scans the *current task* first (cheap and almost always sufficient).
+        Only falls back to scanning every sibling task when the current task
+        produced no renders, since each extra task triggers a full
+        `fast_scandir` over the network share.
 
         Returns:
             dict[str, set[str]]: Mapping of task_lowercase → set of variant
@@ -285,28 +285,30 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         available = {}
         shot_path = self.app_state.shotpath
 
-        # Determine which task directories to scan
-        task = self.app_state.task
-        # Always scan all task directories — renders may belong to a different
-        # task than the one the app was launched from (e.g., compositing→lighting)
+        # Prefer the launch-time task; fall back to scanning all tasks only
+        # when nothing was found there.
+        current_task = (self.app_state.task or "").strip()
         work_dir = truncate_at_suffix(shot_path, "work")
-        if os.path.isdir(work_dir):
+        if not os.path.isdir(work_dir):
+            return available
+
+        if current_task:
+            tasks_to_scan = [current_task]
+        else:
             tasks_to_scan = [
                 d for d in os.listdir(work_dir)
                 if os.path.isdir(os.path.join(work_dir, d))
             ]
-        else:
-            return available
 
-        for t in tasks_to_scan:
+        def _scan_one_task(t: str) -> None:
             task_dir = get_task_directory(shot_path, t)
             if not os.path.isdir(task_dir):
-                continue
+                return
             try:
                 dirs = fast_scandir(task_dir)
                 render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
                 if not render_folders:
-                    continue
+                    return
 
                 render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
                 render_dirs = sorted(next(os.walk(render_directory))[1])
@@ -320,9 +322,22 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                             name = extract_render_name(os.path.basename(str(seq)))
                             variants.add(name.lower())
                         available[t.lower()] = variants
-                        break
+                        return
             except Exception as e:
                 logger.warning(f"Pass Builder: Error scanning render variants for task '{t}': {e}")
+
+        for t in tasks_to_scan:
+            _scan_one_task(t)
+
+        # If the current-task scan found nothing, broaden to sibling tasks so
+        # cross-task browsing still works.
+        if not available and current_task:
+            sibling_tasks = [
+                d for d in os.listdir(work_dir)
+                if os.path.isdir(os.path.join(work_dir, d)) and d != current_task
+            ]
+            for t in sibling_tasks:
+                _scan_one_task(t)
 
         logger.info(f"Pass Builder: Available render variants: {available}")
         return available
@@ -382,12 +397,6 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                     f"Pass Builder: Hiding version v{v['version']:03d} "
                     "(no work renders found)"
                 )
-
-        if not filtered:
-            logger.warning(
-                "Pass Builder: No versions have work renders, showing all"
-            )
-            return versions
 
         logger.info(
             f"Pass Builder: Showing {len(filtered)} of {len(versions)} "
@@ -845,7 +854,6 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
     def _on_build_passes_clicked(self):
         """Build passes for the selected render, or cancel if already building."""
-        from ui_components import StatusColors
 
         # If already building, cancel the operation
         if getattr(self, '_is_building', False):

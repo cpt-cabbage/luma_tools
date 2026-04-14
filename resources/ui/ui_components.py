@@ -890,8 +890,11 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         )
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
-        scaled.save(buffer, "PNG")
-        return buffer.data().data()
+        try:
+            scaled.save(buffer, "PNG")
+            return bytes(buffer.data())
+        finally:
+            buffer.close()
 
     def _on_image_thumbnail_loaded(self, image_data, loaded_path=None):
         if not isValid(self):

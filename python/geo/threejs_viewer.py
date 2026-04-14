@@ -55,14 +55,13 @@ class ShadingMode(Enum):
 _prewarm_viewer = None
 
 
-def set_prewarm_viewer(viewer):
-    """Store a pre-warmed viewer instance for later reuse."""
-    global _prewarm_viewer
-    _prewarm_viewer = viewer
-
-
 def get_prewarm_viewer():
-    """Get and consume the pre-warmed viewer instance (one-time use)."""
+    """Get and consume the pre-warmed viewer instance (one-time use).
+
+    The prewarm viewer is set directly on the module global by
+    `gallery_prewarm.py` during application startup; there's no setter wrapper
+    because the assignment site is in the same trust boundary as this module.
+    """
     global _prewarm_viewer
     viewer = _prewarm_viewer
     _prewarm_viewer = None
@@ -249,11 +248,13 @@ class ThreeJSViewerWidget(QWidget):
         self._web_view.hide()
         layout.addWidget(self._web_view)
 
-        # Enable WebGL and local file access
+        # Enable WebGL and local file access. We deliberately do NOT enable
+        # LocalContentCanAccessRemoteUrls — Three.js loads from bundled local
+        # files only, and turning this on would let user-supplied glTF files
+        # fetch arbitrary remote textures.
         settings = self._web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.Accelerated2dCanvasEnabled, True)
 
         # Create bridge and channel
@@ -323,6 +324,7 @@ class ThreeJSViewerWidget(QWidget):
         else:
             logger.warning(f"Three.js viewer not found at {viewer_path}")
             self._viewer_ready = True  # Mark as ready to prevent hanging
+            self._bridge._viewer_ready = True  # Keep bridge in sync (H35)
             # Show error message in widget
             self._web_view.setHtml(f"""
                 <html>
@@ -340,8 +342,18 @@ class ThreeJSViewerWidget(QWidget):
         """Called when the HTML page finishes loading."""
         if ok:
             logger.info("Three.js viewer HTML loaded, waiting for JS initialization...")
+            return
+        # Page-load failure is terminal — flip both ready flags so subsequent
+        # load_file() calls don't sit forever in _pending_model_path, and emit
+        # exactly one error for any path the caller already queued up.
+        logger.error("Three.js viewer page failed to load")
+        self._viewer_ready = True
+        self._bridge._viewer_ready = True
+        pending = self._pending_model_path
+        self._pending_model_path = None
+        if pending:
+            self.loadError.emit(f"Viewer page failed to load (pending: {pending})")
         else:
-            logger.error("Three.js viewer page failed to load")
             self.loadError.emit("Failed to load viewer page")
 
     def _on_viewer_ready(self):
@@ -402,7 +414,17 @@ class ThreeJSViewerWidget(QWidget):
         if self._viewer_ready:
             self._do_load_model(file_path)
         else:
-            # Queue for loading after viewer is ready
+            # Queue for loading after viewer is ready. If a previous request
+            # is still pending, surface its failure so any UI spinner gets
+            # cleared before we replace the slot.
+            if self._pending_model_path:
+                logger.warning(
+                    f"Discarding queued model load for {self._pending_model_path}"
+                    f" — replaced by {file_path}"
+                )
+                self.loadError.emit(
+                    f"Replaced before viewer was ready: {self._pending_model_path}"
+                )
             logger.info(f"Queuing model load (viewer not ready): {file_path}")
             self._pending_model_path = file_path
 
@@ -826,7 +848,17 @@ class ThreeJSViewerDialog(QWidget):
             self._info_bar.show()
 
     def exec(self):
-        """Show dialog modally (compatibility with QDialog interface)."""
+        """Show the viewer window (non-modal).
+
+        ThreeJSViewerDialog is a QWidget, not a QDialog — it cannot run a
+        local event loop without breaking the QtWebEngine's own one. Use
+        ``show_window()`` for clarity in new code; ``exec()`` is kept for
+        backwards compat with call sites that mistook it for QDialog.exec.
+        """
+        self.show_window()
+
+    def show_window(self):
+        """Show the viewer as a non-modal top-level window."""
         self.show()
         self.raise_()
         self.activateWindow()
@@ -834,10 +866,4 @@ class ThreeJSViewerDialog(QWidget):
 
 def is_threejs_viewer_available() -> bool:
     """Check if Three.js viewer is available."""
-    return WEBENGINE_AVAILABLE
-
-
-# For backwards compatibility
-def is_viewer_available() -> bool:
-    """Check if any viewer is available."""
     return WEBENGINE_AVAILABLE

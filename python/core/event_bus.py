@@ -65,25 +65,13 @@ class PipelineEventBus(QObject):
     # ComfyUI -> Gallery Events
     # =========================================================================
 
-    # Emitted when a job is submitted to Deadline
-    # Args: job_id (str), expected_output_count (int), job_prefix (str)
-    job_submitted = Signal(str, int, str)
-
     # Emitted periodically during job execution
     # Args: job_id (str), progress_percent (int), status_message (str)
     job_progress = Signal(str, int, str)
 
-    # Emitted when a single output file is ready
-    # Args: job_id (str), output_path (str)
-    job_output_ready = Signal(str, str)
-
     # Emitted when all outputs from a job are complete
     # Args: job_id (str), output_paths (list of str)
     job_completed = Signal(str, list)
-
-    # Emitted when a job fails
-    # Args: job_id (str), error_message (str)
-    job_failed = Signal(str, str)
 
     # Emitted when all active jobs are done (batch completion)
     # Args: total_outputs (int), elapsed_seconds (float)
@@ -108,10 +96,6 @@ class PipelineEventBus(QObject):
     # Emitted to request gallery refresh (e.g., after settings change)
     # Args: force (bool) - if True, forces full refresh ignoring cache
     gallery_refresh_requested = Signal(bool)
-
-    # Emitted when favorites data changes (likes, groups)
-    # Args: None - listeners should re-query their items
-    favorites_changed = Signal()
 
     # =========================================================================
     # Viewer Events (for image viewers to request gallery actions)
@@ -160,7 +144,6 @@ class PipelineEventBus(QObject):
         with self._jobs_lock:
             self._active_jobs[job_id] = job_info
         logger.info(f"Registered job {job_id}: {expected_outputs} outputs expected")
-        self.job_submitted.emit(job_id, expected_outputs, job_prefix)
         return job_info
 
     def update_job_progress(self, job_id: str, progress: int, status: str,
@@ -213,7 +196,6 @@ class PipelineEventBus(QObject):
                     job.output_paths.append(output_path)
                     job.completed_outputs = len(job.output_paths)
 
-        self.job_output_ready.emit(job_id, output_path)
         logger.debug(f"Job {job_id} output ready: {output_path}")
 
     def complete_job(self, job_id: str, success: bool = True,
@@ -244,7 +226,8 @@ class PipelineEventBus(QObject):
                 self.job_completed.emit(job_id, output_paths)
                 logger.info(f"Job {job_id} completed: {len(output_paths)} outputs")
             else:
-                self.job_failed.emit(job_id, error_message)
+                # job_failed signal was removed (no listeners). Failures are
+                # surfaced via per-tab status bars, not the bus.
                 logger.warning(f"Job {job_id} failed: {error_message}")
 
             # Check if all jobs are done; clean up completed jobs afterward

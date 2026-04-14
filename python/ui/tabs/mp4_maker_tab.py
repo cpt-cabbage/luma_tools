@@ -168,7 +168,6 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
     def _on_generate_clicked(self):
         """Generate MP4 from selected render, or cancel if already generating."""
-        from ui_components import StatusColors
 
         # If already generating, cancel the operation
         if getattr(self, '_is_generating', False):
@@ -336,9 +335,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
     def _on_add_to_gallery_changed(self, state):
         """Save Add to Gallery checkbox state to user settings."""
-        from core.settings_manager import set_setting
+        from core.settings_manager import safe_set_setting
         from PySide6.QtCore import Qt
-        set_setting("mp4_maker_add_to_gallery", state == Qt.Checked, verbose=False)
+        safe_set_setting("mp4_maker_add_to_gallery", state == Qt.Checked)
 
     def _update_publish_availability(self):
         """Enable/disable publish checkboxes based on AYON/Deadline availability and context."""
@@ -383,7 +382,6 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             source_path: EXR input pattern used for gallery metadata.
             publish_after: If True, chain AYON publish after gallery copy completes.
         """
-        from ui_components import StatusColors
         from services.mp4_maker import copy_mp4_to_gallery
 
         def on_gallery_result(result):
@@ -455,7 +453,6 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
     def _publish_mp4_to_ayon(self):
         """Publish the generated MP4 to AYON as a review file."""
-        from ui_components import StatusColors
 
         use_farm = self.ui.MP4PublishOnFarm.isChecked() and self.ui.MP4PublishOnFarm.isEnabled()
         mp4_path = self.app_state.mp4_output_path

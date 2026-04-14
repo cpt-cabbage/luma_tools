@@ -235,15 +235,24 @@ class RefreshController(BaseGalleryManager):
             clear_prewarm_cache()
 
     def _process_deferred_prewarm(self):
-        """Process deferred prewarm items (called after splash screen closes)."""
+        """Process deferred prewarm items (called after splash screen closes).
+
+        Sets ``_scan_in_progress`` for the duration of the display so a
+        concurrently-firing poll/refresh tick (which checks that flag) can't
+        run a parallel `display_items` and produce duplicated entries.
+        """
         with self.tab._cache_lock:
             if not getattr(self, '_deferred_prewarm_items', None):
                 return
             items = self._deferred_prewarm_items
             self._deferred_prewarm_items = None  # Free memory
 
-        # Now it's safe to create widgets and display without blocking splash
-        self._process_scan_results_sync(items)
+        self._scan_in_progress = True
+        try:
+            # Now it's safe to create widgets and display without blocking splash
+            self._process_scan_results_sync(items)
+        finally:
+            self._scan_in_progress = False
 
         # _initial_scan_done already set in use_prewarm_cache_sync() to prevent race condition
         self.tab.log(f"[Gallery] Displayed {len(items)} pre-warmed items")

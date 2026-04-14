@@ -13,9 +13,14 @@ from typing import Any, Callable, Dict, Optional
 
 from PySide6 import QtCore, QtWidgets, QtUiTools
 
-# Import StatusColors at module level - it's just an enum with no side effects
-# This avoids repeated lazy imports in tab methods
+# Import StatusColors at module level - it's just an enum with no side effects.
+# This avoids repeated lazy imports in tab methods. We expose it under both
+# names: `_StatusColors` for the class-level alias `BaseTab.StatusColors` so
+# subclasses can reference `self.StatusColors.X`, and `StatusColors` for
+# direct use inside this module's methods (which were previously importing
+# it lazily inside every function body).
 from ui_components import StatusColors as _StatusColors
+StatusColors = _StatusColors
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +480,6 @@ class BaseTab(ABC):
             with self.spinner_context("Saving..."):
                 save_data()
         """
-        from ui_components import StatusColors
 
         self.update_status_with_spinner(message, StatusColors.INFO)
         try:
@@ -508,7 +512,6 @@ class BaseTab(ABC):
                 on_result=lambda result: self.on_worker_success("Operation complete!")
             )
         """
-        from ui_components import StatusColors
 
         self.update_status_with_spinner(
             status_message or message,
@@ -544,7 +547,6 @@ class BaseTab(ABC):
                 on_error=lambda msg, tb: self.on_worker_error(msg, tb, "Build")
             )
         """
-        from ui_components import StatusColors
 
         full_msg = f"{status_prefix}: {error_msg}" if status_prefix else error_msg
 

@@ -122,60 +122,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
             logger.warning(f"Republish: Task directory not found: {task_dir}")
             return
 
-        def _scan_worker(task_dir, task):
-            from services.file_operations import fast_scandir, find_renders, find_hip_files
-            from core.config import RENDERS_SUBPATH
-            from core.utils import truncate_at_suffix, get_trailing_number
-
-            try:
-                dirs = fast_scandir(task_dir)
-            except Exception as e:
-                logger.warning(f"Republish: Error scanning {task_dir}: {e}")
-                return None
-
-            render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-            if not render_folders:
-                logger.warning(f"Republish: No render directory found in {task_dir}")
-                return None
-
-            render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-
-            hip_files = find_hip_files(task_dir, task)
-            hip_file = ""
-            if hip_files:
-                hip_files = sorted(hip_files)
-                hip_file = hip_files[0].rsplit("_", 1)[0]
-
-            try:
-                render_dirs = sorted(next(os.walk(render_directory))[1])
-            except StopIteration:
-                return None
-
-            if hip_file:
-                matching = [d for d in render_dirs if hip_file in d]
-                if matching:
-                    render_dirs = matching
-
-            if not render_dirs:
-                return None
-
-            # Find latest version that has renders
-            latest_render = None
-            for render_version in reversed(render_dirs):
-                version_path = os.path.join(render_directory, render_version)
-                test_renders = find_renders(version_path)
-                if len(test_renders) > 0:
-                    latest_render = render_version
-                    break
-
-            if not latest_render:
-                latest_render = render_dirs[-1]
-
-            return {
-                'latest_render': latest_render,
-                'render_directory': render_directory,
-            }
-
         def _on_scan_result(result):
             if not result:
                 return
@@ -204,7 +150,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             self._on_scan_renders_clicked()
 
         self.start_worker(
-            _scan_worker, task_dir, task,
+            self._scan_render_directory_worker, task_dir, task,
             on_result=_on_scan_result
         )
 
@@ -440,7 +386,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.ui.RePublishPublish.setText("Cancel")
 
         # Show status bar progress
-        from ui_components import StatusColors
         self.update_status_with_spinner(
             "AYON: Preparing files for publish...",
             StatusColors.INFO
@@ -623,7 +568,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
     def _on_publish_progress(self, progress, message):
         """Handle progress updates from worker."""
         if self.animator:
-            from ui_components import StatusColors
             self.animator.update_status_animated(
                 f"AYON: {message}",
                 StatusColors.INFO
@@ -639,7 +583,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_publish_complete(self, result):
         """Handle successful publish completion."""
-        from ui_components import StatusColors
         self._reset_publish_button()
         self.ui.RePublishStatusLabel.setText(f"Status: {result['message']}")
 
@@ -652,7 +595,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def _on_publish_error(self, error_msg, traceback_str):
         """Handle publish errors or cancellation."""
-        from ui_components import StatusColors
         self._reset_publish_button()
 
         if getattr(self, '_cancel_event', None) and self._cancel_event.is_set():

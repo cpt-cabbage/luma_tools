@@ -12,6 +12,7 @@ import os
 from typing import Dict, Any
 
 from .base_manager import BaseGalleryManager
+from ui_components import StatusColors
 
 # Try to import event bus for cross-tab communication
 try:
@@ -50,8 +51,6 @@ class OperationsManager(BaseGalleryManager):
             parent=self.tab.main_window,
         ):
             return
-
-        from ui_components import StatusColors
         self.tab.update_status_with_spinner(
             f"Gallery: Deleting {count} item(s)...", StatusColors.INFO
         )
@@ -250,7 +249,6 @@ class OperationsManager(BaseGalleryManager):
             return
 
         # Show status with spinner
-        from ui_components import StatusColors
         self.tab.update_status_with_spinner(
             f"Gallery: Publishing {count} item(s)...",
             StatusColors.INFO
@@ -298,7 +296,6 @@ class OperationsManager(BaseGalleryManager):
     def _on_publish_complete(self, results):
         """Handle publish batch completion."""
         from dialog_helpers import show_warning
-        from ui_components import StatusColors
 
         self._publish_in_progress = False
 
