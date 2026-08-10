@@ -9,6 +9,7 @@ import logging
 import threading
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
+from ui_components import StatusColors
 from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
 

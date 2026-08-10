@@ -10,6 +10,7 @@ import logging
 import threading
 from PySide6 import QtWidgets
 
+from ui_components import StatusColors
 from .base_tab import BaseTab, TabConfig
 from .mixins.publish_source_mixin import PublishSourceMixin
 

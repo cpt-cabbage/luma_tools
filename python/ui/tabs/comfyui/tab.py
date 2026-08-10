@@ -26,6 +26,7 @@ from PySide6.QtGui import QPixmap
 
 from ..base_tab import BaseTab, TabConfig
 from dialog_helpers import confirm_action
+from ui_components import StatusColors
 from .polling import PollingMixin
 from .ui_manager import ComfyUIWidgetManager
 from .state_manager import ComfyUIStateManager

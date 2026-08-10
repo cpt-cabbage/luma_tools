@@ -8,6 +8,7 @@ import os
 import logging
 import threading
 
+from ui_components import StatusColors
 from .base_tab import BaseTab, TabConfig
 from .mixins.render_scan_mixin import RenderScanMixin
 

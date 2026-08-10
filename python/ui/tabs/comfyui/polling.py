@@ -10,6 +10,7 @@ import logging
 import threading
 from PySide6.QtCore import QTimer, QThreadPool, Qt
 from dialog_helpers import confirm_action
+from ui_components import StatusColors
 
 logger = logging.getLogger(__name__)
 
@@ -1129,7 +1130,7 @@ class PollingMixin:
 
     def _on_cancel_jobs_clicked(self):
         """Handle cancel jobs button click."""
-        from ui_components import Worker, StatusColors
+        from ui_components import Worker
         from deadline.poller import cancel_deadline_jobs
 
         job_ids = []
