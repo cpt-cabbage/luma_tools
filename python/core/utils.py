@@ -22,7 +22,13 @@ def is_valid_username(username) -> bool:
     username = username.strip()
     if not username:
         return False
-    return bool(_USERNAME_RE.match(username))
+    if not _USERNAME_RE.match(username):
+        return False
+    # Reject pure-dot names ("." / "..") — they pass the character class but
+    # are path components that traverse instead of naming a folder
+    if set(username) == {'.'}:
+        return False
+    return True
 
 
 def get_trailing_number(s):

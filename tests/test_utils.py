@@ -305,6 +305,18 @@ class TestExtractRenderName:
 
         assert extract_render_name("render_name") == "render_name"
 
+    def test_is_valid_username(self):
+        """Dots allowed in usernames, but pure-dot traversal names rejected."""
+        from core.utils import is_valid_username
+
+        assert is_valid_username("christophe.leyder")
+        assert is_valid_username("andre-heyneke_2")
+        assert not is_valid_username("..")
+        assert not is_valid_username(".")
+        assert not is_valid_username("../evil")
+        assert not is_valid_username("")
+        assert not is_valid_username(None)
+
     def test_version_sort_key(self):
         """Latest-version pickers must sort numerically: v10 after v9
         (plain string sort put 'v9' after 'v10' for unpadded names)."""

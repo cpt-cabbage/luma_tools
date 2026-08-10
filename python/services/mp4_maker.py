@@ -478,8 +478,16 @@ def copy_mp4_to_gallery(
         if not gallery_base:
             return (False, "Gallery path not configured in settings")
 
-        # Sanitize username to prevent path traversal
-        safe_user = re.sub(r'[^\w\-]', '_', user or "standalone")
+        # Use the SAME username rule as the gallery's path builder
+        # (core.utils.is_valid_username allows dots). The old sanitizer
+        # replaced dots with underscores, so "christophe.leyder" MP4s landed
+        # in "christophe_leyder" — a folder the gallery never displays —
+        # while the log still reported "successfully added".
+        from core.utils import is_valid_username
+        safe_user = (user or "").strip() or "standalone"
+        if not is_valid_username(safe_user):
+            # Fallback sanitize for genuinely unsafe names — keep dots
+            safe_user = re.sub(r'[^\w.\-]', '_', safe_user)
 
         # Construct user subfolder
         gallery_user_dir = os.path.join(gallery_base, safe_user)
