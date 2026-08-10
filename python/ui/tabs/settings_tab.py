@@ -17,6 +17,31 @@ from core.config import APP_VERSION, get_changelog, get_latest_changelog
 
 logger = logging.getLogger(__name__)
 
+
+def _clear_thumbnail_caches() -> int:
+    """Delete all cached thumbnails (worker function — no Qt access).
+
+    Returns the number of image-thumbnail files removed.
+    """
+    # Clear model thumbnail cache
+    from geo.thumbnail_service import get_model_thumbnail_service
+    get_model_thumbnail_service().clear_cache()
+    logger.info("Cleared model thumbnail cache")
+
+    # Clear image thumbnail cache (if it exists)
+    thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
+    count = 0
+    if os.path.exists(thumbnail_cache_dir):
+        for filename in os.listdir(thumbnail_cache_dir):
+            filepath = os.path.join(thumbnail_cache_dir, filename)
+            try:
+                os.remove(filepath)
+                count += 1
+            except OSError as e:
+                logger.debug(f"Could not remove cached thumbnail {filepath}: {e}")
+    return count
+
+
 # Widget type constants for settings mapping
 _CHECKBOX = "checkbox"
 _TEXT = "text"
@@ -251,12 +276,25 @@ class SettingsTab(BaseTab):
         self.signals.request_attention.emit()
 
     def _check_user_notifications(self):
-        """Check if user has notifications about completed or rejected requests."""
-        from core.feature_requests import get_user_notifications, mark_notifications_read
+        """Check if user has notifications about completed or rejected requests.
+
+        The notification store lives on the network share — fetch in a worker
+        so a slow share can't freeze the tab during deferred init.
+        """
+        from core.feature_requests import get_user_notifications
+
+        self.start_worker(
+            get_user_notifications,
+            self.app_state.user,
+            on_result=self._on_user_notifications_loaded,
+            on_error=lambda msg, tb="": logger.error(f"Error checking user notifications: {msg}"),
+        )
+
+    def _on_user_notifications_loaded(self, notifications):
+        """Display fetched notifications (GUI thread via worker signal)."""
+        from core.feature_requests import mark_notifications_read
 
         try:
-            notifications = get_user_notifications(self.app_state.user)
-
             if notifications:
                 # Separate completed and rejected notifications
                 # Missing 'action' field is treated as "completed" for backwards compatibility
@@ -291,8 +329,8 @@ class SettingsTab(BaseTab):
                             "warning"
                         )
 
-                # Mark as read
-                mark_notifications_read(self.app_state.user)
+                # Mark as read (network write — keep it off the GUI thread)
+                self.start_worker(mark_notifications_read, self.app_state.user)
 
         except Exception as e:
             logger.error(f"Error checking user notifications: {e}")
@@ -614,36 +652,24 @@ class SettingsTab(BaseTab):
             "They will be regenerated when you view the gallery.\n\nContinue?",
             self.main_window
         ):
-            try:
-                # Clear model thumbnail cache
-                from geo.thumbnail_service import get_model_thumbnail_service
-                service = get_model_thumbnail_service()
-                service.clear_cache()
-                logger.info("Cleared model thumbnail cache")
+            # Deleting thousands of cached files synchronously froze the UI —
+            # run the sweep in a worker and refresh the gallery afterwards
+            self.update_status_with_spinner("Clearing thumbnail cache...", self.StatusColors.INFO)
+            self.start_worker(
+                _clear_thumbnail_caches,
+                on_result=self._on_thumbnails_cleared,
+                on_error=lambda msg, tb="": self.on_worker_error(msg, tb, "Thumbnails"),
+            )
 
-                # Clear image thumbnail cache (if it exists)
-                thumbnail_cache_dir = os.path.join(os.path.expanduser("~"), ".luma_tools", "thumbnails")
-                if os.path.exists(thumbnail_cache_dir):
-                    import shutil
-                    count = 0
-                    for filename in os.listdir(thumbnail_cache_dir):
-                        filepath = os.path.join(thumbnail_cache_dir, filename)
-                        try:
-                            os.remove(filepath)
-                            count += 1
-                        except Exception:
-                            pass
-                    logger.info(f"Cleared {count} cached thumbnail files")
+    def _on_thumbnails_cleared(self, count):
+        """Handle thumbnail cache sweep completion (GUI thread)."""
+        logger.info(f"Cleared {count} cached thumbnail files")
 
-                # Notify gallery tab to refresh via event bus
-                from core.event_bus import pipeline_events
-                pipeline_events.gallery_refresh_requested.emit(True)  # force=True
+        # Notify gallery tab to refresh via event bus
+        from core.event_bus import pipeline_events
+        pipeline_events.gallery_refresh_requested.emit(True)  # force=True
 
-                self.show_status("Thumbnail cache cleared", "success")
-
-            except Exception as e:
-                logger.error(f"Error clearing thumbnails: {e}")
-                self.show_status(f"Error: {e}", "error")
+        self.update_status_with_spinner("Thumbnail cache cleared", self.StatusColors.SUCCESS, start=False)
 
     def _on_browse_global_settings_path(self):
         """Browse for global settings directory."""
@@ -795,22 +821,34 @@ class SettingsTab(BaseTab):
             is_admin = self.app_state.is_admin
             self.ui.viewFeatureRequestsButton.setVisible(is_admin)
 
-            # Check for unread requests (admins only)
+            # Check for unread requests (admins only). The request store is
+            # on the network share — fetch in a worker so deferred init
+            # doesn't block the GUI thread on a slow share.
             if is_admin:
                 from core.feature_requests import get_unread_feature_request_count
-                unread_count = get_unread_feature_request_count(self.app_state.user)
+                self.start_worker(
+                    get_unread_feature_request_count,
+                    self.app_state.user,
+                    on_result=self._on_unread_request_count_loaded,
+                    on_error=lambda msg, tb="": logger.error(
+                        f"Error checking unread feature requests: {msg}"
+                    ),
+                )
 
-                if unread_count > 0:
-                    # Add notification indicator with count in text
-                    self.ui.viewFeatureRequestsButton.setText(f"View Requests ({unread_count})")
-                    # Create and show notification badge
-                    from effects import ButtonNotificationBadge
-                    self._feature_request_badge = ButtonNotificationBadge(
-                        self.ui.viewFeatureRequestsButton
-                    )
-                    self._feature_request_badge.show_badge()
-                    # Request attention (pulsing glow)
-                    self.signals.request_attention.emit()
+    def _on_unread_request_count_loaded(self, unread_count):
+        """Show the unread-requests badge (GUI thread via worker signal)."""
+        if not unread_count or not hasattr(self.ui, 'viewFeatureRequestsButton'):
+            return
+        # Add notification indicator with count in text
+        self.ui.viewFeatureRequestsButton.setText(f"View Requests ({unread_count})")
+        # Create and show notification badge
+        from effects import ButtonNotificationBadge
+        self._feature_request_badge = ButtonNotificationBadge(
+            self.ui.viewFeatureRequestsButton
+        )
+        self._feature_request_badge.show_badge()
+        # Request attention (pulsing glow)
+        self.signals.request_attention.emit()
 
     def _on_submit_feature_request(self):
         """Show feature request submission dialog."""

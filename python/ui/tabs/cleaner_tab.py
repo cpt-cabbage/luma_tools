@@ -153,12 +153,21 @@ class CleanerTab(BaseTab):
         # Show status bar progress
         self.update_status_with_spinner("Shot Cleaner: Scanning directories...", StatusColors.INFO)
 
-        # Use base class worker helper
+        # Use base class worker helper. scan_all accepts a progress_callback
+        # (auto-injected by Worker), so on_progress surfaces real progress —
+        # previously the progress bar sat at 0 for the whole multi-minute scan.
         self.start_worker(
             self.scanner.scan_all,
             on_result=self._on_scan_result,
             on_error=self._on_scan_error,
+            on_progress=self._on_scan_progress,
         )
+
+    def _on_scan_progress(self, percent, message):
+        """Update the progress bar and status during the scan."""
+        self.ui.progressBar.setValue(int(percent))
+        if message:
+            self.set_status(message)
 
     def _on_scan_result(self, result):
         """Handle scan completion."""
@@ -486,7 +495,10 @@ class CleanerTab(BaseTab):
             self.ui.GalleryAgeLabel.setText("All ages")
         else:
             self.ui.GalleryAgeLabel.setText(f"Older than {value} days")
-        self._update_preview_size()
+        # May fire before deferred initialize() creates _gallery_footprint /
+        # _selected_files (same guard as _on_filter_changed)
+        if hasattr(self, "_gallery_footprint"):
+            self._update_preview_size()
 
     def _get_selected_filters(self):
         """Get currently selected filter criteria."""
@@ -542,7 +554,8 @@ class CleanerTab(BaseTab):
         from dialog_helpers import confirm_action
         from services.gallery_cleanup_service import cleanup_gallery_files
 
-        if not self._selected_files:
+        # Guard against firing before deferred initialize() creates state
+        if not getattr(self, '_selected_files', None):
             self.show_status("No files selected for cleanup", "warning")
             return
 

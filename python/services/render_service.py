@@ -108,8 +108,11 @@ def save_pass_config(pass_file, passes_dict):
         pass_file: Path to save pass configuration
         passes_dict: Dictionary of passes to save
     """
-    # Ensure directory exists
-    ensure_directory(os.path.dirname(pass_file))
+    # Ensure directory exists (dirname is "" for a bare filename — guard it,
+    # os.makedirs("") raises FileNotFoundError)
+    pass_dir = os.path.dirname(pass_file)
+    if pass_dir:
+        ensure_directory(pass_dir)
 
     save_json(pass_file, passes_dict)
 

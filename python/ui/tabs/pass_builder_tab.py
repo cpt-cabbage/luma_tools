@@ -60,7 +60,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         )
 
         # "Publish to AYON" checkbox — on by default, controls whether build publishes
-        from core.settings_manager import safe_get_setting, safe_set_setting
+        from core.settings_manager import safe_get_setting
         self._publish_to_ayon_cb = QtWidgets.QCheckBox("Publish to AYON")
         self.apply_ayon_checkbox_style(self._publish_to_ayon_cb)
         self._publish_to_ayon_cb.setToolTip("When enabled, built passes are published to AYON")
@@ -170,63 +170,13 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             logger.info(f"Pass Builder: Found render path: {self.app_state.searchpath}")
             self._initial_scan_done = True
 
+        # Shared scan implementation lives on RenderScanMixin (a ~50-line
+        # verbatim copy used to live here)
+        from ui.tabs.mixins.render_scan_mixin import RenderScanMixin
         self.start_worker(
-            self._scan_render_directory_worker, task_dir, task,
+            RenderScanMixin._scan_render_directory_worker, task_dir, task,
             on_result=_on_scan_result
         )
-
-    def _scan_render_directory_worker(self, task_dir, task):
-        """Background worker: locate the latest render version under task_dir."""
-        from services.file_operations import fast_scandir, find_renders, find_hip_files
-        from core.config import RENDERS_SUBPATH
-        from core.utils import truncate_at_suffix
-
-        try:
-            dirs = fast_scandir(task_dir)
-        except Exception as e:
-            logger.warning(f"Pass Builder: Error scanning {task_dir}: {e}")
-            return None
-
-        render_folders = [d for d in dirs if RENDERS_SUBPATH in d]
-        if not render_folders:
-            logger.warning(f"Pass Builder: No render directory found in {task_dir}")
-            return None
-
-        render_directory = truncate_at_suffix(render_folders[0], RENDERS_SUBPATH)
-
-        hip_files = find_hip_files(task_dir, task)
-        hip_file = ""
-        if hip_files:
-            hip_files = sorted(hip_files)
-            hip_file = hip_files[0].rsplit("_", 1)[0]
-
-        try:
-            render_dirs = sorted(next(os.walk(render_directory))[1])
-        except StopIteration:
-            return None
-
-        if hip_file:
-            matching = [d for d in render_dirs if hip_file in d]
-            if matching:
-                render_dirs = matching
-
-        if not render_dirs:
-            return None
-
-        latest_render = None
-        for render_version in reversed(render_dirs):
-            version_path = os.path.join(render_directory, render_version)
-            if find_renders(version_path):
-                latest_render = render_version
-                break
-
-        if not latest_render:
-            latest_render = render_dirs[-1]
-
-        return {
-            'latest_render': latest_render,
-            'render_directory': render_directory,
-        }
 
     @property
     def _build_type(self):
@@ -706,6 +656,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self.app_state.passesfile = get_pass_file_path(
                 self.app_state.working_dir, self.app_state.currentrender
             )
+        else:
+            # Clear the stale path from the previous render — otherwise
+            # _select_saved_passes restores the WRONG saved pass selection
+            self.app_state.passesfile = ""
 
         # Populate AYON product selector
         self._populate_product_combo()

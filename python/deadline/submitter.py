@@ -23,7 +23,7 @@ from core.config import (
 from core.settings_manager import safe_get_setting
 from core.utils import ensure_directory, normalize_path, save_json
 from comfyui.utils import resolve_comfyui_paths
-from comfyui.image_convert import needs_conversion, copy_or_convert
+from comfyui.image_convert import copy_or_convert
 
 logger = logging.getLogger(__name__)
 
@@ -115,17 +115,24 @@ def submit_comfyui_to_deadline(
     # Scripts are in comfyui package — copy to job_data_dir for farm access
     ensure_directory(job_data_dir)
 
-    comfyui_package_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "comfyui")
+    python_root = os.path.dirname(os.path.dirname(__file__))
+    comfyui_package_dir = os.path.join(python_root, "comfyui")
+    core_package_dir = os.path.join(python_root, "core")
     runner_script_source = os.path.join(comfyui_package_dir, "runner.py")
     utils_script_source = os.path.join(comfyui_package_dir, "utils.py")
     analytics_script_source = os.path.join(comfyui_package_dir, "analytics.py")
     node_configs_script_source = os.path.join(comfyui_package_dir, "node_configs.py")
     metadata_script_source = os.path.join(comfyui_package_dir, "metadata.py")
+    # core/metadata_file.py is farm-copied too: comfyui_metadata.py imports it
+    # (as comfyui_metadata_file) so farm workers write gallery metadata with the
+    # same locked, atomic implementation the workstation uses.
+    metadata_file_script_source = os.path.join(core_package_dir, "metadata_file.py")
     runner_script = os.path.join(job_data_dir, "comfyui_runner.py")
     utils_script = os.path.join(job_data_dir, "comfyui_utils.py")
     analytics_script = os.path.join(job_data_dir, "comfyui_analytics.py")
     node_configs_script = os.path.join(job_data_dir, "comfyui_node_configs.py")
     metadata_script = os.path.join(job_data_dir, "comfyui_metadata.py")
+    metadata_file_script = os.path.join(job_data_dir, "comfyui_metadata_file.py")
 
     # Copy scripts to output directory for farm access
     # Always copy to ensure latest version (files are small, no performance impact)
@@ -136,6 +143,7 @@ def submit_comfyui_to_deadline(
             (analytics_script_source, analytics_script),
             (node_configs_script_source, node_configs_script),
             (metadata_script_source, metadata_script),
+            (metadata_file_script_source, metadata_file_script),
         ]:
             shutil.copy2(src, dst)
             logger.info(f"Copied {os.path.basename(src)} to: {dst}")
@@ -212,9 +220,9 @@ StartupDirectory={job_data_dir_n}
 ExitCodeTreatedAsFailure=1-255
 """
 
-    with open(job_info_path, 'w') as f:
+    with open(job_info_path, 'w', encoding='utf-8') as f:
         f.write(job_info_content)
-    with open(plugin_info_path, 'w') as f:
+    with open(plugin_info_path, 'w', encoding='utf-8') as f:
         f.write(plugin_info_content)
 
     logger.info(f"Submitting Luma Tools job: {render_name}")
@@ -313,6 +321,16 @@ def submit_comfyui_job(
         progress_callback(5, "Loading workflow...")
 
     workflow = load_workflow(workflow_path)
+    if not workflow:
+        # load_workflow swallows JSONDecodeError and returns {} — without
+        # this check a corrupt/missing workflow was submitted to the farm
+        # as an empty job that "succeeded" while producing nothing
+        error = (
+            f"Workflow could not be loaded (missing or invalid JSON): {workflow_path}"
+        )
+        logger.error(error)
+        return [], error
+
     batch_files, input_node_id = _collect_batch_images(editable_values)
 
     if not batch_files and input_image and os.path.exists(input_image):

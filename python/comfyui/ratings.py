@@ -164,25 +164,26 @@ def rate_model(model_name: str, username: str, rating: int) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    # mutate() holds the cross-process file lock across load+save so
+    # simultaneous users on different workstations can't drop each
+    # other's ratings (this file lives on the shared network path)
+    outcome = {"action": "added"}
 
-    # Get or create model entry
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
+    def _apply(data):
+        data.setdefault("version", RATINGS_VERSION)
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        model_data = models[model_name]
+        if model_data.get("ratings", {}).get(username):
+            outcome["action"] = "updated"
+        model_data.setdefault("ratings", {})[username] = rating
+        _recalculate_average(model_data)
 
-    model_data = models[model_name]
-
-    # Update user's rating
-    old_rating = model_data.get("ratings", {}).get(username)
-    model_data.setdefault("ratings", {})[username] = rating
-
-    # Recalculate average
-    _recalculate_average(model_data)
-
-    if ratings_file.save(data):
-        action = "updated" if old_rating else "added"
-        logger.info(f"[Ratings] User {username} {action} rating for '{model_name}': {rating}")
+    if ratings_file.mutate(_apply):
+        logger.info(
+            f"[Ratings] User {username} {outcome['action']} rating for '{model_name}': {rating}"
+        )
         return True
     return False
 
@@ -201,18 +202,15 @@ def clear_model_ratings(model_name: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.get("models", {})
+    def _apply(data):
+        model_data = data.get("models", {}).get(model_name)
+        if model_data is None:
+            return  # Nothing to clear
+        model_data["ratings"] = {}
+        model_data["average"] = 0.0
+        model_data["rating_count"] = 0
 
-    if model_name not in models:
-        return True  # Nothing to clear
-
-    model_data = models[model_name]
-    model_data["ratings"] = {}
-    model_data["average"] = 0.0
-    model_data["rating_count"] = 0
-
-    if ratings_file.save(data):
+    if ratings_file.mutate(_apply):
         logger.info(f"[Ratings] Cleared all ratings for '{model_name}'")
         return True
     return False
@@ -232,18 +230,16 @@ def increment_model_usage(model_name: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    def _apply(data):
+        data.setdefault("version", RATINGS_VERSION)
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        model_data = models[model_name]
+        model_data["total_uses"] = model_data.get("total_uses", 0) + 1
+        model_data["last_used"] = datetime.now().isoformat()
 
-    # Get or create model entry
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
-
-    model_data = models[model_name]
-    model_data["total_uses"] = model_data.get("total_uses", 0) + 1
-    model_data["last_used"] = datetime.now().isoformat()
-
-    return ratings_file.save(data)
+    return ratings_file.mutate(_apply)
 
 
 def set_model_thumbnail(
@@ -266,17 +262,16 @@ def set_model_thumbnail(
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    def _apply(data):
+        data.setdefault("version", RATINGS_VERSION)
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        model_data = models[model_name]
+        model_data["thumbnail_path"] = thumbnail_path
+        model_data["thumbnail_source"] = source if thumbnail_path else None
 
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
-
-    model_data = models[model_name]
-    model_data["thumbnail_path"] = thumbnail_path
-    model_data["thumbnail_source"] = source if thumbnail_path else None
-
-    if ratings_file.save(data):
+    if ratings_file.mutate(_apply):
         logger.info(f"[Ratings] Set thumbnail for '{model_name}': {thumbnail_path} ({source})")
         return True
     return False
@@ -297,16 +292,15 @@ def set_model_tags(model_name: str, tags: List[str]) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    def _apply(data):
+        data.setdefault("version", RATINGS_VERSION)
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        model_data = models[model_name]
+        model_data["tags"] = list(tags)  # Copy to avoid reference issues
 
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
-
-    model_data = models[model_name]
-    model_data["tags"] = list(tags)  # Copy to avoid reference issues
-
-    if ratings_file.save(data):
+    if ratings_file.mutate(_apply):
         logger.info(f"[Ratings] Set tags for '{model_name}': {tags}")
         return True
     return False
@@ -457,16 +451,13 @@ def delete_model_data(model_name: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.get("models", {})
+    def _apply(data):
+        data.get("models", {}).pop(model_name, None)
 
-    if model_name in models:
-        del models[model_name]
-        if ratings_file.save(data):
-            logger.info(f"[Ratings] Deleted data for '{model_name}'")
-            return True
-
-    return True  # Nothing to delete
+    if ratings_file.mutate(_apply):
+        logger.info(f"[Ratings] Deleted data for '{model_name}'")
+        return True
+    return False
 
 
 def rename_model_data(old_name: str, new_name: str) -> bool:
@@ -484,17 +475,15 @@ def rename_model_data(old_name: str, new_name: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.get("models", {})
+    def _apply(data):
+        models = data.get("models", {})
+        if old_name in models:
+            models[new_name] = models.pop(old_name)
 
-    if old_name in models:
-        models[new_name] = models.pop(old_name)
-        if ratings_file.save(data):
-            logger.info(f"[Ratings] Renamed data from '{old_name}' to '{new_name}'")
-            return True
-        return False
-
-    return True  # Nothing to rename
+    if ratings_file.mutate(_apply):
+        logger.info(f"[Ratings] Renamed data from '{old_name}' to '{new_name}'")
+        return True
+    return False
 
 
 # =============================================================================
@@ -556,22 +545,19 @@ def toggle_favorite(model_name: str, username: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    outcome = {"was_favorite": False}
 
-    # Get or create model entry
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
+    def _apply(data):
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        is_favorite = models[model_name].setdefault("is_favorite", {})
+        current = is_favorite.get(username, False)
+        outcome["was_favorite"] = current
+        is_favorite[username] = not current
 
-    model_data = models[model_name]
-
-    # Toggle favorite
-    is_favorite = model_data.setdefault("is_favorite", {})
-    current = is_favorite.get(username, False)
-    is_favorite[username] = not current
-
-    if ratings_file.save(data):
-        action = "unfavorited" if current else "favorited"
+    if ratings_file.mutate(_apply):
+        action = "unfavorited" if outcome["was_favorite"] else "favorited"
         logger.info(f"[Ratings] User {username} {action} '{model_name}'")
         return True
     return False
@@ -593,16 +579,13 @@ def set_favorite(model_name: str, username: str, is_favorite: bool) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    models = data.setdefault("models", {})
+    def _apply(data):
+        models = data.setdefault("models", {})
+        if model_name not in models:
+            models[model_name] = _get_default_model_data()
+        models[model_name].setdefault("is_favorite", {})[username] = is_favorite
 
-    if model_name not in models:
-        models[model_name] = _get_default_model_data()
-
-    model_data = models[model_name]
-    model_data.setdefault("is_favorite", {})[username] = is_favorite
-
-    return ratings_file.save(data)
+    return ratings_file.mutate(_apply)
 
 
 def add_to_recents(model_name: str, username: str) -> bool:
@@ -620,23 +603,19 @@ def add_to_recents(model_name: str, username: str) -> bool:
     if not ratings_file:
         return False
 
-    data = ratings_file.load(default=_get_default_ratings_data())
-    user_recents = data.setdefault("user_recents", {})
+    def _apply(data):
+        user_recents = data.setdefault("user_recents", {})
+        recents = user_recents.setdefault(username, [])
 
-    # Get or create user's recents list
-    recents = user_recents.setdefault(username, [])
+        # Remove if already present (will re-add at front)
+        if model_name in recents:
+            recents.remove(model_name)
 
-    # Remove if already present (will re-add at front)
-    if model_name in recents:
-        recents.remove(model_name)
+        # Add to front, trimmed to max length
+        recents.insert(0, model_name)
+        user_recents[username] = recents[:MAX_RECENTS]
 
-    # Add to front
-    recents.insert(0, model_name)
-
-    # Trim to max length
-    user_recents[username] = recents[:MAX_RECENTS]
-
-    return ratings_file.save(data)
+    return ratings_file.mutate(_apply)
 
 
 # =============================================================================

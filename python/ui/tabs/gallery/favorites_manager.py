@@ -457,7 +457,8 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def get_group(self, group_id: str) -> Optional[GroupDef]:
         """Get a group by ID."""
         self._ensure_loaded()
-        return self._groups.get(group_id)
+        with self._favorites_lock:
+            return self._groups.get(group_id)
 
     def get_group_count(self) -> int:
         """Get number of groups."""
@@ -608,7 +609,8 @@ class FavoritesManager(BaseGalleryManager, QObject):
         Performance optimization: Uses reverse index for O(1) lookup instead of O(n) scan.
         """
         self._ensure_loaded()
-        return list(self._group_items.get(group_id, set()))
+        with self._favorites_lock:
+            return list(self._group_items.get(group_id, set()))
 
     def get_group_item_count(self, group_id: str) -> int:
         """Get number of items in a group."""
@@ -617,7 +619,8 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def get_ungrouped_items(self, all_paths: List[str]) -> List[str]:
         """Get items that are not in any group."""
         self._ensure_loaded()
-        return [p for p in all_paths if p not in self._item_groups or not self._item_groups[p]]
+        with self._favorites_lock:
+            return [p for p in all_paths if not self._item_groups.get(p)]
 
     # =========================================================================
     # BATCH OPERATIONS
@@ -695,7 +698,9 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def filter_liked(self, items: List[Dict]) -> List[Dict]:
         """Filter items to only liked ones."""
         self._ensure_loaded()
-        return [item for item in items if item.get('path') in self._liked_items]
+        with self._favorites_lock:
+            liked = set(self._liked_items)
+        return [item for item in items if item.get('path') in liked]
 
     def filter_by_group(self, items: List[Dict], group_id: str) -> List[Dict]:
         """Filter items to only those in a specific group."""
@@ -706,7 +711,25 @@ class FavoritesManager(BaseGalleryManager, QObject):
     def filter_ungrouped(self, items: List[Dict]) -> List[Dict]:
         """Filter items to only ungrouped ones."""
         self._ensure_loaded()
-        return [item for item in items if item.get('path') not in self._item_groups or not self._item_groups.get(item.get('path'))]
+        with self._favorites_lock:
+            grouped = {p for p, gids in self._item_groups.items() if gids}
+        return [item for item in items if item.get('path') not in grouped]
+
+    def get_state_snapshot(self):
+        """Get a consistent snapshot of likes/groups state under the lock.
+
+        Returns:
+            Tuple of (liked_paths_set, {group_id: paths_set}, [GroupDef sorted by order]).
+            Use this from display code (e.g. filter-count updates) instead of
+            reaching into the private state — it keeps the locking contract
+            in one place.
+        """
+        self._ensure_loaded()
+        with self._favorites_lock:
+            liked = set(self._liked_items)
+            group_items = {gid: set(paths) for gid, paths in self._group_items.items()}
+            groups = sorted(self._groups.values(), key=lambda g: g.order)
+        return liked, group_items, groups
 
     def _get_file_type(self, path: str) -> str:
         """Determine file type from extension."""

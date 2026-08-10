@@ -86,8 +86,30 @@ class BaseThumbnailWidget(QWidget):
 
     THUMBNAIL_SIZE = (150, 150)
     _PLACEHOLDER_CACHE_MAX = 64
-    _placeholder_cache: "OrderedDict[str, QImage]" = OrderedDict()
+    # Values are QImage (from _create_placeholder) or QPixmap (from the
+    # video/audio/3D placeholder builders); keys are disjoint per builder.
+    # Always access through _placeholder_cache_get/_placeholder_cache_put so
+    # every entry gets the same LRU bookkeeping.
+    _placeholder_cache: "OrderedDict[str, object]" = OrderedDict()
     _placeholder_cache_lock = threading.RLock()
+
+    @classmethod
+    def _placeholder_cache_get(cls, cache_key):
+        """LRU-aware cache read (marks the entry most-recently-used)."""
+        with cls._placeholder_cache_lock:
+            value = cls._placeholder_cache.get(cache_key)
+            if value is not None:
+                cls._placeholder_cache.move_to_end(cache_key)
+            return value
+
+    @classmethod
+    def _placeholder_cache_put(cls, cache_key, value):
+        """LRU-aware cache write with bounded eviction."""
+        with cls._placeholder_cache_lock:
+            cls._placeholder_cache[cache_key] = value
+            cls._placeholder_cache.move_to_end(cache_key)
+            while len(cls._placeholder_cache) > cls._PLACEHOLDER_CACHE_MAX:
+                cls._placeholder_cache.popitem(last=False)
 
     def _create_placeholder(self, text, bg_color="#3c414b", fg_color="#888888", font_size=14):
         """
@@ -109,11 +131,7 @@ class BaseThumbnailWidget(QWidget):
         """
         cache_key = f"{text}_{bg_color}_{fg_color}_{font_size}"
 
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            cached_image = BaseThumbnailWidget._placeholder_cache.get(cache_key)
-            if cached_image is not None:
-                # Mark as most recently used
-                BaseThumbnailWidget._placeholder_cache.move_to_end(cache_key)
+        cached_image = BaseThumbnailWidget._placeholder_cache_get(cache_key)
 
         if cached_image is None:
             w, h = self.THUMBNAIL_SIZE
@@ -129,10 +147,6 @@ class BaseThumbnailWidget(QWidget):
             painter.drawText(QRect(0, 0, w, h), Qt.AlignCenter, text)
             painter.end()
 
-            with BaseThumbnailWidget._placeholder_cache_lock:
-                BaseThumbnailWidget._placeholder_cache[cache_key] = cached_image
-                BaseThumbnailWidget._placeholder_cache.move_to_end(cache_key)
-                while len(BaseThumbnailWidget._placeholder_cache) > self._PLACEHOLDER_CACHE_MAX:
-                    BaseThumbnailWidget._placeholder_cache.popitem(last=False)
+            BaseThumbnailWidget._placeholder_cache_put(cache_key, cached_image)
 
         return QPixmap.fromImage(cached_image)

@@ -12,7 +12,6 @@ import time
 import copy
 import uuid
 import shutil
-import glob
 import threading
 import logging
 import urllib.request
@@ -1031,17 +1030,15 @@ def move_output_files(
     os.makedirs(target_dir, exist_ok=True)
     cutoff_time = time.time() - (recent_minutes * 60)
 
+    # Single walk of the output tree instead of two glob passes per
+    # extension (which was 44 full tree walks for the 22 default extensions;
+    # the non-recursive pattern was a strict subset of the recursive one)
+    ext_suffixes = tuple(ext.lower() for ext in extensions)
     all_matches = []
-    for ext in extensions:
-        top_pattern = os.path.join(comfyui_output_dir, f"*{ext}")
-        top_matches = glob.glob(top_pattern)
-        all_matches.extend(top_matches)
-
-        recursive_pattern = os.path.join(comfyui_output_dir, "**", f"*{ext}")
-        recursive_matches = glob.glob(recursive_pattern, recursive=True)
-        all_matches.extend(recursive_matches)
-
-    all_matches = list(set(all_matches))
+    for root, _dirs, files in os.walk(comfyui_output_dir):
+        for name in files:
+            if name.lower().endswith(ext_suffixes):
+                all_matches.append(os.path.join(root, name))
     recent_files = []
     for file_path in all_matches:
         try:
@@ -1076,13 +1073,17 @@ def move_output_files(
             counter += 1
 
         try:
-            initial_size = os.path.getsize(src_path)
-            for _ in range(5):
-                time.sleep(0.5)
-                current_size = os.path.getsize(src_path)
-                if current_size == initial_size:
-                    break
-                initial_size = current_size
+            # Only wait for the size to settle when the file was modified
+            # moments ago (may still be mid-write). The old unconditional
+            # loop added >=0.5s latency per moved file, serially.
+            if time.time() - mtime < 2.0:
+                initial_size = os.path.getsize(src_path)
+                for _ in range(5):
+                    time.sleep(0.5)
+                    current_size = os.path.getsize(src_path)
+                    if current_size == initial_size:
+                        break
+                    initial_size = current_size
 
             shutil.move(src_path, dest_path)
             moved_files.append(dest_path)

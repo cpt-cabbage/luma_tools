@@ -126,7 +126,17 @@ def run_validators(
         if not validator.enabled:
             continue
 
-        result = validator.validate(instance)
+        try:
+            result = validator.validate(instance)
+        except Exception as e:
+            # A crashing validator must fail its own check, not abort the
+            # whole publish with an unhandled exception
+            logger.error(f"[Validator] {validator.name} crashed: {e}", exc_info=True)
+            result = ValidationResult(
+                validator=validator.name,
+                passed=False,
+                message=f"Validator crashed: {e}",
+            )
         results.append(result)
 
         if not result.passed:

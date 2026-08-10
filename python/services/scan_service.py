@@ -53,31 +53,44 @@ class DirectoryScanner:
     cross-thread communication.
     """
 
-    def __init__(self, state, ui, animator):
+    def __init__(self, state, ui=None, animator=None):
         """
-        Initialize scanner with application state and UI references.
+        Initialize scanner with application state.
 
         Args:
             state: ApplicationState instance
-            ui: UI widget instance
-            animator: UI animator instance
+            ui: Unused (kept for call-site compatibility) — all UI updates
+                go through self.signals
+            animator: Optional UI animator instance
         """
         self.state = state
-        self.ui = ui
         self.animator = animator
         self.signals = DirectoryScannerSignals()
+        self._progress_callback = None
 
     def scan_all(self, progress_callback=None):
         """
         Run a complete scan of all directories.
 
         Args:
-            progress_callback: Optional callback function(progress, message)
+            progress_callback: Optional callback function(percent, message) —
+                Worker auto-injects this, so start_worker(..., on_progress=...)
+                surfaces scan progress in the UI.
         """
+        self._progress_callback = progress_callback
         self._update_progress(0, "Scanning Directories", "Initializing scan...")
 
-        # Get task directory (e.g., lighting, lookdev)
-        self.state.lookdev_dir = get_task_directory(self.state.shotpath, self.state.task)
+        # Get task directory (e.g., lighting, lookdev). Shot paths without a
+        # 'work' component raise ValueError — degrade to scanning the shot
+        # path itself instead of aborting the whole scan at step 1.
+        try:
+            self.state.lookdev_dir = get_task_directory(self.state.shotpath, self.state.task)
+        except ValueError as e:
+            logger.warning(
+                f"Could not derive task directory from '{self.state.shotpath}' "
+                f"(no 'work' component): {e} — scanning shot path directly"
+            )
+            self.state.lookdev_dir = self.state.shotpath
         logger.info(f"Task Dir: {self.state.lookdev_dir}")
 
         # Scan directory tree once (shared between render and USD directory lookups)
@@ -374,7 +387,13 @@ class DirectoryScanner:
         Args:
             hip_file: Base name of HIP file
         """
-        comp_dir = get_comp_directory(self.state.shotpath)
+        try:
+            comp_dir = get_comp_directory(self.state.shotpath)
+        except ValueError as e:
+            # Shot path without a 'work' component — no comp dir to derive
+            logger.warning(f"Could not derive comp directory from '{self.state.shotpath}': {e}")
+            self.signals.set_label_text.emit('Complabel', 'Comp Directory Not Found!')
+            return []
 
         try:
             dirs = fast_scandir(comp_dir)
@@ -441,14 +460,22 @@ class DirectoryScanner:
 
     def _update_progress(self, progress, main_text, sub_text=""):
         """
-        Update progress through animator.
+        Update progress through the worker progress callback (and animator
+        when one was provided).
 
         Args:
             progress: Progress percentage (0-100)
             main_text: Main status text
             sub_text: Sub-status text
         """
-        # Progress updates handled via status bar (no overlay)
+        callback = self._progress_callback
+        if callback:
+            message = f"{main_text} — {sub_text}" if sub_text else main_text
+            try:
+                callback(int(progress), message)
+            except Exception as e:
+                logger.debug(f"Scan progress callback failed: {e}")
+
         if self.animator:
             if hasattr(self.animator, 'update_loading_message'):
                 self.animator.update_loading_message(main_text, sub_text)

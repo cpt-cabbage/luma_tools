@@ -6,7 +6,6 @@ Provides QThread workers for running functions without blocking the GUI.
 import logging
 import traceback
 from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, Slot
-from PySide6.QtWidgets import QApplication
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +58,16 @@ class Worker(QRunnable):
         self.kwargs = kwargs
         self.signals = WorkerSignals()
 
-        # Only add progress_callback if the function accepts it
+        # Only add progress_callback if the function accepts it.
+        # inspect.signature raises ValueError/TypeError for some builtins and
+        # C functions — treat those as "no progress support" instead of
+        # failing the Worker constructor.
         import inspect
-        sig = inspect.signature(fn)
-        if 'progress_callback' in sig.parameters:
+        try:
+            sig = inspect.signature(fn)
+        except (ValueError, TypeError):
+            sig = None
+        if sig is not None and 'progress_callback' in sig.parameters:
             # Replace progress_callback with signal emitter if present
             if 'progress_callback' in self.kwargs:
                 del self.kwargs['progress_callback']

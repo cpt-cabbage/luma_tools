@@ -41,7 +41,8 @@ from typing import Callable
 
 # Project root is parent of scripts folder
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+# NOTE: the installed package list is the hardcoded PACKAGES below, NOT
+# requirements.txt — keep them in sync manually when adding dependencies.
 
 
 def get_venv_dir(platform_name: str | None = None) -> Path:
@@ -71,8 +72,7 @@ def get_venv_dir(platform_name: str | None = None) -> Path:
 # Default to current platform
 VENV_DIR = get_venv_dir()
 
-# Retry configuration
-MAX_RETRIES = 3
+# Retry configuration (retry count is len(strategies) in install_package)
 RETRY_DELAY_SECONDS = 2
 
 # Known problematic packages and their fallback versions
@@ -563,9 +563,13 @@ def remove_venv(venv_path: Path, force: bool = False) -> bool:
         except Exception as e:
             print_warning(f"rm -rf failed: {e}, trying shutil...")
 
-    # Try normal removal with error handler (cross-platform fallback)
+    # Try normal removal with error handler (cross-platform fallback).
+    # onexc replaced onerror in Python 3.12 (onerror is deprecated).
     try:
-        shutil.rmtree(venv_path, onerror=_rmtree_onerror)
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(venv_path, onexc=_rmtree_onerror)
+        else:
+            shutil.rmtree(venv_path, onerror=_rmtree_onerror)
         if not venv_path.exists():
             print_success("Venv removed successfully.")
             return True

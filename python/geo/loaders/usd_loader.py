@@ -8,13 +8,35 @@ Supports USD, USDA, USDC, and USDZ formats.
 import os
 from typing import Set
 
-import numpy as np
+# numpy is optional (mirrors base.py) — a broken venv must not make the
+# whole geo.loaders import graph blow up; this loader just reports
+# unavailable instead.
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData, Bone, Skeleton
-from core.import_utils import safe_import_multiple
 
-(Usd, UsdGeom, UsdSkel), USD_AVAILABLE = safe_import_multiple("pxr", "Usd", "UsdGeom", "UsdSkel")
+# pxr is imported lazily on first availability check — importing every 3D
+# library eagerly cost ~11.5 s at `import geo.loaders` time, before any
+# file was ever opened.
+Usd = UsdGeom = UsdSkel = None
+USD_AVAILABLE = False
+_pxr_checked = False
+
+
+def _ensure_pxr() -> bool:
+    """Import pxr on first use and report availability."""
+    global Usd, UsdGeom, UsdSkel, USD_AVAILABLE, _pxr_checked
+    if not _pxr_checked:
+        from core.import_utils import safe_import_multiple
+        (Usd, UsdGeom, UsdSkel), USD_AVAILABLE = safe_import_multiple(
+            "pxr", "Usd", "UsdGeom", "UsdSkel"
+        )
+        _pxr_checked = True
+    return USD_AVAILABLE and np is not None
 
 
 class USDModelLoader(BaseModelLoader):
@@ -30,7 +52,7 @@ class USDModelLoader(BaseModelLoader):
 
     @property
     def is_available(self) -> bool:
-        return USD_AVAILABLE
+        return _ensure_pxr()
 
     def load(self, path: str) -> ModelData:
         """Load a USD file using OpenUSD."""

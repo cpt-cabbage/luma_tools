@@ -242,9 +242,12 @@ HEALTH_BACKUP_INTERVAL = 120        # Always probe at least this often, even dur
 HEALTH_MAX_CONSECUTIVE_FAILURES = 3  # Failed probes in a row required before declaring unhealthy
 ORPHANED_PROBE_INTERVAL = 30        # Throttle for orphaned-branch HTTP probes when stdout is silent
 
-# Cached heartbeat directory path — resolved once at startup, used every 20s
+# Cached heartbeat directory path — resolved at startup, re-resolved by
+# write_heartbeat whenever empty so a boot-time network outage doesn't
+# disable heartbeats for the life of the (long-lived) server process
 _heartbeat_dir_cache: str = ""
 _heartbeat_dir_resolved: bool = False
+_heartbeat_failure_logged: bool = False  # one-shot warning, reset on recovery
 
 # Server state — wrapped in ThreadSafeState for multi-thread access
 server_state = ThreadSafeState({
@@ -653,9 +656,9 @@ def _restart_comfyui_locked(reason: str):
     server_state['self_restart_pending'] = False
 
     # Apply one-time lowvram override if requested (per-model restart setting)
-    extra_args = list(config['extra_args'])
     if server_state.get('restart_lowvram_override'):
         server_state['restart_lowvram_override'] = False
+        extra_args = list(config['extra_args'])  # copy — don't mutate config
         for flag in ('--highvram', '--normalvram'):
             if flag in extra_args:
                 extra_args.remove(flag)
@@ -878,13 +881,21 @@ def write_heartbeat(status: str = "online", global_settings: dict = None):
         global_settings: Loaded global settings dict (used for first-time resolution only).
     """
     import socket
-    global _heartbeat_dir_cache, _heartbeat_dir_resolved
+    global _heartbeat_dir_cache, _heartbeat_dir_resolved, _heartbeat_failure_logged
 
-    # Resolve on first call if not done at startup
-    if not _heartbeat_dir_resolved:
+    # Resolve on first call, and RE-resolve whenever a previous attempt
+    # failed — e.g. the network share was momentarily unavailable at server
+    # startup. Caching the failure forever left the UI reporting "offline"
+    # for the whole life of the server.
+    if not _heartbeat_dir_resolved or not _heartbeat_dir_cache:
         _resolve_heartbeat_dir(global_settings)
 
     if not _heartbeat_dir_cache:
+        if not _heartbeat_failure_logged:
+            logger.warning(
+                "Heartbeat not written: network output path unavailable (will keep retrying)"
+            )
+            _heartbeat_failure_logged = True
         return
 
     hostname = socket.gethostname()
@@ -912,8 +923,14 @@ def write_heartbeat(status: str = "online", global_settings: dict = None):
         with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(heartbeat, f)
         os.replace(tmp_file, heartbeat_file)
+        _heartbeat_failure_logged = False
     except Exception as e:
-        logger.debug(f"Failed to write heartbeat: {e}")
+        # One warning per outage (not per 20s tick), then debug
+        if not _heartbeat_failure_logged:
+            logger.warning(f"Failed to write heartbeat (will keep retrying): {e}")
+            _heartbeat_failure_logged = True
+        else:
+            logger.debug(f"Failed to write heartbeat: {e}")
 
 
 def _save_node_info_to_network(port: int, global_settings: dict = None):

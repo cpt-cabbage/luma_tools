@@ -58,14 +58,12 @@ def group_items_by_prefix(
     """
     groups = {}  # prefix -> (first_seen_index, [items])
     input_group = []
-    input_first_index = None
 
     for idx, item in enumerate(items):
-        # Separate input images into their own group
+        # Separate input images into their own group (always appended last,
+        # so no first-seen index is needed for it)
         if separate_inputs and item.get('is_input', False):
             input_group.append(item)
-            if input_first_index is None:
-                input_first_index = idx
             continue
 
         prefix = item.get('job_prefix') or 'Other'

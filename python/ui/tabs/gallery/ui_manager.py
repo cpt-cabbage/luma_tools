@@ -516,12 +516,7 @@ class UIManager(BaseGalleryManager):
 
     def populate_user_selector(self):
         """Initialize user selector with async discovery."""
-        from ui_components import Worker
-
-        def discover_users():
-            return self._discover_users_sync()
-
-        self.start_worker(discover_users, on_result=self._on_users_discovered)
+        self.start_worker(self._discover_users_sync, on_result=self._on_users_discovered)
 
     def _discover_users_sync(self):
         """Discover available users from the network gallery path.

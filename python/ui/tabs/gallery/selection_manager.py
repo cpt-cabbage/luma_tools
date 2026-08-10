@@ -118,54 +118,10 @@ class SelectionManager(BaseGalleryManager):
         self._box_filter = BoxSelectionEventFilter(self)
         self.tab.ui.galleryScrollArea.viewport().installEventFilter(self._box_filter)
 
-    def handle_key_press(self, event):
-        """
-        Handle keyboard shortcuts for selection.
-
-        Returns True if event was handled, False otherwise.
-        """
-        # Ctrl+A: Select all items
-        if event.key() == Qt.Key_A and event.modifiers() == Qt.ControlModifier:
-            self.select_all()
-            return True
-
-        # Escape: Clear selection
-        if event.key() == Qt.Key_Escape:
-            if self.tab._selected_items:
-                self.clear_selection()
-                return True
-
-        # L: Toggle like on selected items
-        if event.key() == Qt.Key_L:
-            self._toggle_like_selected()
-            return True
-
-        # G: Open group menu for selected items
-        if event.key() == Qt.Key_G:
-            if event.modifiers() == Qt.ControlModifier:
-                # Ctrl+G: Create new group
-                self._create_new_group()
-            else:
-                # G: Show group menu
-                self._show_group_menu()
-            return True
-
-        # Number keys 1-9: Quick add to group by index
-        if Qt.Key_1 <= event.key() <= Qt.Key_9:
-            group_index = event.key() - Qt.Key_1
-            if event.modifiers() == Qt.ShiftModifier:
-                self._remove_from_group_by_index(group_index)
-            else:
-                self._add_to_group_by_index(group_index)
-            return True
-
-        # C: Compare two selected items
-        if event.key() == Qt.Key_C and not event.modifiers():
-            if len(self.tab._selected_items) == 2:
-                self.tab._operations_manager.compare_selected()
-                return True
-
-        return False
+    # NOTE: Keyboard shortcuts are installed as QShortcuts by
+    # GalleryTab._install_shortcuts() (BaseTab is not a QWidget, so a
+    # keyPressEvent-based dispatch never fired). The slots below are
+    # connected there.
 
     def _toggle_like_selected(self):
         """Toggle like status for all selected items."""

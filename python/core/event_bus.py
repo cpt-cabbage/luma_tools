@@ -328,9 +328,15 @@ class PipelineEventBus(QObject):
                     setattr(self._gallery_context, key, value)
 
     def get_gallery_context(self) -> GalleryContext:
-        """Get current gallery context."""
+        """Get a snapshot of the current gallery context.
+
+        Returns a copy — handing out the shared mutable dataclass let
+        callers read fields outside the lock while update_gallery_context()
+        mutated the same object (every other accessor here returns copies).
+        """
+        import copy
         with self._gallery_context_lock:
-            return self._gallery_context
+            return copy.copy(self._gallery_context)
 
     # =========================================================================
     # Storytelling / Message Helpers

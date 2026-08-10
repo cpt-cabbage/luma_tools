@@ -549,8 +549,10 @@ class PollingMixin:
             self.ui.ComfyUIUseAsInput.setEnabled(True)
             self.show_status("Image generated! Click 'Use as Input' to iterate.", "success")
 
+            # Only refresh an initialized gallery — before first activation
+            # its managers don't exist yet (initial scan happens on activation)
             gallery_tab = self.main_window.get_tab("gallery")
-            if gallery_tab:
+            if gallery_tab and gallery_tab._initialized:
                 logger.debug("[Iterate] Triggering gallery refresh...")
                 gallery_tab._on_refresh(show_status=False)
 
@@ -1119,8 +1121,10 @@ class PollingMixin:
 
         self._batch_failed_jobs.clear()
 
+        # Only refresh an initialized gallery — before first activation its
+        # managers don't exist yet (initial scan happens on activation)
         gallery_tab = self.main_window.get_tab("gallery")
-        if gallery_tab:
+        if gallery_tab and gallery_tab._initialized:
             logger.debug("[Batch] Triggering gallery refresh...")
             gallery_tab._on_refresh(show_status=False)
 
@@ -1225,16 +1229,26 @@ class PollingMixin:
     def _refresh_gallery_for_new_frames(self, log_prefix):
         """Refresh gallery and request attention for new jobs."""
         gallery_tab = self.main_window.get_tab("gallery")
-        if gallery_tab:
-            logger.debug(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
-            # Invalidate cache for current user so new items are detected when switching back
-            # This handles the case where user is viewing another user's gallery when renders complete
-            current_user = getattr(self.app_state, 'user', None)
-            if current_user and hasattr(gallery_tab, 'invalidate_user_cache'):
-                gallery_tab.invalidate_user_cache(current_user)
-                logger.debug(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
-            gallery_tab._on_refresh(show_status=False)
-            gallery_tab.signals.request_attention.emit()
+        if not gallery_tab:
+            return
+
+        # The attention pulse is safe on an uninitialized tab (signals exist
+        # from __init__), but cache/refresh state only exists after the tab's
+        # deferred initialize() has run — calling earlier raised AttributeError
+        gallery_tab.signals.request_attention.emit()
+
+        if not gallery_tab._initialized:
+            logger.debug(f"{log_prefix} Gallery not initialized yet — initial scan will pick up new frames")
+            return
+
+        logger.debug(f"{log_prefix} Triggering gallery refresh and attention for new jobs")
+        # Invalidate cache for current user so new items are detected when switching back
+        # This handles the case where user is viewing another user's gallery when renders complete
+        current_user = getattr(self.app_state, 'user', None)
+        if current_user and hasattr(gallery_tab, 'invalidate_user_cache'):
+            gallery_tab.invalidate_user_cache(current_user)
+            logger.debug(f"{log_prefix} Invalidated gallery cache for user: {current_user}")
+        gallery_tab._on_refresh(show_status=False)
 
     # =========================================================================
     # JOB STATE PERSISTENCE FOR APP RESTART RECOVERY

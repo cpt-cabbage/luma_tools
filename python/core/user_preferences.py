@@ -5,7 +5,6 @@ Handles user-specific settings like window state, tab order, default passes,
 version tracking, and workflow execution time tracking.
 """
 
-import threading
 from typing import Dict, Any, List, Optional
 from .settings_manager import (
     get_setting, set_setting,
@@ -29,12 +28,18 @@ def get_window_state() -> Dict[str, Any]:
 
 
 def save_window_state(width: int, height: int, maximized: bool):
-    """Save the window state (single disk write)."""
-    settings = load_user_settings()
-    settings["window_width"] = width
-    settings["window_height"] = height
-    settings["window_maximized"] = maximized
-    save_user_settings(settings)
+    """Save the window state (single disk write).
+
+    Locked like every other read-modify-write in this module — closeEvent
+    runs this while worker threads may be writing other settings, and an
+    unlocked stale snapshot would overwrite their keys.
+    """
+    with _settings_cache_lock:
+        settings = load_user_settings()
+        settings["window_width"] = width
+        settings["window_height"] = height
+        settings["window_maximized"] = maximized
+        save_user_settings(settings)
 
 
 # ============================================================================

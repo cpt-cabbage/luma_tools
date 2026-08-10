@@ -164,8 +164,9 @@ class StacksDialog(QWidget):
     def keyPressEvent(self, event):
         """Handle key press - close on Escape."""
         if event.key() == Qt.Key_Escape:
+            # close() triggers closeEvent, which emits `closed` — emitting
+            # here too double-fired the close handler
             self.close()
-            self.closed.emit()
         else:
             super().keyPressEvent(event)
 

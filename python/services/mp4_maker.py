@@ -248,8 +248,7 @@ def generate_mp4(
             # Use PNG files as input for FFmpeg — match the padding width detected
             # from the input EXR sequence (convert_exr_to_png_with_oiio writes
             # frame_%0Nd.png where N is the input pattern's padding width).
-            import re as _re
-            _pad_match = _re.search(r"%0(\d+)d", input_sequence_path)
+            _pad_match = re.search(r"%0(\d+)d", input_sequence_path)
             _pad_width = int(_pad_match.group(1)) if _pad_match else 4
             ffmpeg_input_pattern = os.path.join(temp_dir, f"frame_%0{_pad_width}d.png")
         else:

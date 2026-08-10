@@ -18,10 +18,8 @@ Cross-tab communication:
 import os
 import logging
 import threading
-import re
 
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import Qt, QTimer, QThreadPool
+from PySide6.QtCore import Qt, QTimer
 
 from .base_tab import BaseTab, TabConfig
 from .gallery_loader import GalleryLoader
@@ -97,7 +95,6 @@ class GalleryTab(BaseTab):
         self._known_items = set()
         self._initial_scan_done = False
         self._new_items = set()
-        self._first_scan_after_prewarm = False
 
         # Cache for scanned items
         self._cached_items = None
@@ -155,21 +152,57 @@ class GalleryTab(BaseTab):
         # Set initial output directory
         self._update_gallery_path()
 
-        # Use pre-warmed cache from splash screen
-        self._refresh_controller.use_prewarm_cache_sync()
+        # Install keyboard shortcuts (Ctrl+A, L, G, 1-9, Esc, C)
+        self._install_shortcuts()
 
         # Subscribe to event bus for cross-tab communication
         self._setup_event_bus_subscriptions()
 
-    def keyPressEvent(self, event):
-        """Handle keyboard shortcuts for gallery actions."""
-        # Delegate to selection manager first
-        if self._selection_manager.handle_key_press(event):
-            event.accept()
-            return
+    def _install_shortcuts(self):
+        """Install gallery keyboard shortcuts as QShortcuts on the tab widget.
 
-        # Pass unhandled events to parent
-        super().keyPressEvent(event)
+        BaseTab is not a QWidget, so a keyPressEvent override is never
+        dispatched by Qt — shortcuts must be QShortcut instances parented to
+        the tab widget. WidgetWithChildrenShortcut scopes them to when focus
+        is inside the gallery (text fields still win for plain letters via
+        ShortcutOverride), and the viewer manager disables them while the
+        embedded viewer is open so its own key handling isn't shadowed.
+        """
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        self._shortcuts = []
+        sm = self._selection_manager
+
+        def add(sequence, slot):
+            shortcut = QShortcut(QKeySequence(sequence), self.ui)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(slot)
+            self._shortcuts.append(shortcut)
+
+        add("Ctrl+A", sm.select_all)
+        add(Qt.Key_Escape, self._on_escape_shortcut)
+        add("L", sm._toggle_like_selected)
+        add("G", sm._show_group_menu)
+        add("Ctrl+G", sm._create_new_group)
+        add("C", self._on_compare_shortcut)
+        for number in range(1, 10):
+            add(str(number), lambda idx=number - 1: sm._add_to_group_by_index(idx))
+            add(f"Shift+{number}", lambda idx=number - 1: sm._remove_from_group_by_index(idx))
+
+    def set_shortcuts_enabled(self, enabled: bool):
+        """Enable/disable gallery shortcuts (disabled while the viewer is open)."""
+        for shortcut in getattr(self, '_shortcuts', []):
+            shortcut.setEnabled(enabled)
+
+    def _on_escape_shortcut(self):
+        """Escape: clear the current selection."""
+        if self._selected_items:
+            self._selection_manager.clear_selection()
+
+    def _on_compare_shortcut(self):
+        """C: compare when exactly two items are selected."""
+        if len(self._selected_items) == 2:
+            self._operations_manager.compare_selected()
 
     # =========================================================================
     # MANAGER DELEGATION - Signal handlers and cross-manager coordination
@@ -293,15 +326,35 @@ class GalleryTab(BaseTab):
         with self._cache_lock:
             return dict(self._section_items)
 
+    def get_section_items(self, section_id: str) -> list:
+        """Thread-safe access to get one section's items (copy)."""
+        with self._cache_lock:
+            return list(self._section_items.get(section_id, []))
+
     def set_section_items(self, section_id: str, items: list):
         """Thread-safe access to set section items."""
         with self._cache_lock:
             self._section_items[section_id] = items
 
+    def remove_section_items(self, section_id: str):
+        """Thread-safe access to remove one section's items."""
+        with self._cache_lock:
+            self._section_items.pop(section_id, None)
+
     def clear_section_items(self):
         """Thread-safe access to clear section items."""
         with self._cache_lock:
             self._section_items.clear()
+
+    def set_hash_path(self, content_hash: str, path: str):
+        """Thread-safe access to record a content_hash -> path mapping."""
+        with self._cache_lock:
+            self._hash_to_path[content_hash] = path
+
+    def get_hash_path(self, content_hash: str):
+        """Thread-safe access to look up a path by content hash."""
+        with self._cache_lock:
+            return self._hash_to_path.get(content_hash)
 
     def invalidate_user_cache(self, username: str) -> None:
         """Drop cached gallery items for `username` so the next view rescans.
@@ -316,6 +369,11 @@ class GalleryTab(BaseTab):
 
     def on_tab_activated(self):
         """Called when tab becomes visible."""
+        # Give focus to the gallery so WidgetWithChildrenShortcut shortcuts
+        # (L, G, 1-9, ...) are active without requiring a click first
+        if self.ui:
+            self.ui.setFocus()
+
         # Re-enable drop targets on gallery widgets
         self._set_gallery_drop_enabled(True)
 
@@ -404,9 +462,6 @@ class GalleryTab(BaseTab):
 
         # Display items (use incremental update after initial scan to avoid flashing)
         # Incremental mode compares existing items vs new and only adds/removes differences
-        if self._first_scan_after_prewarm:
-            self._first_scan_after_prewarm = False
-            logging.debug("[Gallery] First scan after prewarm, using incremental sync")
         incremental = self._initial_scan_done
         self._manager.display_items(sorted_items, self._view_mode, incremental=incremental)
 
@@ -491,7 +546,6 @@ class GalleryTab(BaseTab):
             self._known_items.clear()
             self._new_items.clear()
             self._initial_scan_done = False
-            self._first_scan_after_prewarm = False
             self._cached_items = None
         # Update watcher
         if self._current_path:
@@ -530,16 +584,22 @@ class GalleryTab(BaseTab):
         if not paths:
             return
 
-        # Emit event through event bus if available
-        if EVENT_BUS_AVAILABLE:
-            pipeline_events.use_as_input.emit(paths)
-        else:
-            # Fallback: direct call to comfyui tab
-            comfyui_tab = self.main_window.get_tab("comfyui")
-            if comfyui_tab and hasattr(comfyui_tab, '_on_use_images_from_gallery'):
-                comfyui_tab._on_use_images_from_gallery(paths)
-
+        # Switch tabs FIRST: the ComfyUI tab's event-bus subscriptions are
+        # connected in its deferred initialize(), which runs on activation.
+        # Emitting before the switch fired into the void if the tab had
+        # never been opened, silently losing the handoff.
         self.main_window.select_tab_by_name("comfyui")
+        comfyui_tab = self.main_window.get_tab("comfyui")
+
+        if EVENT_BUS_AVAILABLE and comfyui_tab and comfyui_tab._initialized:
+            pipeline_events.use_as_input.emit(paths)
+        elif comfyui_tab and hasattr(comfyui_tab, '_on_use_images_from_gallery'):
+            # Fallback: direct call to comfyui tab
+            comfyui_tab._on_use_images_from_gallery(paths)
+        else:
+            self.show_status("ComfyUI tab is not available", "warning")
+            return
+
         self.show_status(f"Added {len(paths)} image(s) to ComfyUI input", "success")
 
     def _get_item_metadata(self, path: str) -> dict:
@@ -638,16 +698,20 @@ class GalleryTab(BaseTab):
         # Add the output directory to metadata so source images can be found
         metadata['_output_dir'] = os.path.dirname(path)
 
-        # Emit through event bus or direct call
-        if EVENT_BUS_AVAILABLE:
-            pipeline_events.copy_settings.emit(metadata)
-        else:
-            comfyui_tab = self.main_window.get_tab("comfyui")
-            if comfyui_tab and hasattr(comfyui_tab, 'apply_settings_from_metadata'):
-                comfyui_tab.apply_settings_from_metadata(metadata)
-
-        # Switch to ComfyUI tab
+        # Switch tabs FIRST so the ComfyUI tab's deferred initialize() runs
+        # and its copy_settings subscription exists before we emit (see
+        # _on_use_in_comfyui for the failure mode this prevents)
         self.main_window.select_tab_by_name("comfyui")
+        comfyui_tab = self.main_window.get_tab("comfyui")
+
+        if EVENT_BUS_AVAILABLE and comfyui_tab and comfyui_tab._initialized:
+            pipeline_events.copy_settings.emit(metadata)
+        elif comfyui_tab and hasattr(comfyui_tab, 'apply_settings_from_metadata'):
+            comfyui_tab.apply_settings_from_metadata(metadata)
+        else:
+            self.show_status("ComfyUI tab is not available", "warning")
+            return
+
         self.show_status("Settings restored in ComfyUI tab", "success")
 
     def _setup_groups_panel(self):
@@ -859,14 +923,9 @@ class GalleryTab(BaseTab):
         # Snapshot favorites/group state under the manager's lock so the
         # background scan thread can't mutate _liked_items / _group_items
         # mid-iteration (which would raise "set changed size during iteration").
-        self._favorites_manager._ensure_loaded()
-        with self._favorites_manager._favorites_lock:
-            liked_snapshot = set(self._favorites_manager._liked_items)
-            group_items_snapshot = {
-                gid: set(paths)
-                for gid, paths in self._favorites_manager._group_items.items()
-            }
-            group_list = sorted(self._favorites_manager._groups.values(), key=lambda g: g.order)
+        liked_snapshot, group_items_snapshot, group_list = (
+            self._favorites_manager.get_state_snapshot()
+        )
 
         # Count liked items using set intersection (O(min(n,m)) instead of O(n*m))
         liked_count = len(item_paths & liked_snapshot)
@@ -1050,8 +1109,9 @@ class GalleryTab(BaseTab):
         if not paths or len(paths) < 2:
             return
 
-        # Show quick group dialog
-        dialog = QuickGroupDialog(item_count=len(paths), parent=self)
+        # Show quick group dialog (parent must be a QWidget — the tab's ui
+        # widget, not the BaseTab instance itself)
+        dialog = QuickGroupDialog(item_count=len(paths), parent=self.ui)
         if dialog.exec() != dialog.Accepted:
             return
 

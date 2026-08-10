@@ -177,9 +177,13 @@ class TabGlowEffect(QObject):
             self._direction = 1
             self._current_pulses += 1
 
-            # Check if we've completed the requested pulses
+            # Check if we've completed the requested pulses. Stop animating
+            # (no more 20 FPS icon repaints) but keep a static notification
+            # dot so the attention indicator remains until the tab is visited.
             if self._pulse_count > 0 and self._current_pulses >= self._pulse_count:
-                self.stop()
+                self._is_running = False
+                self._timer.stop()
+                self._update_tab_style(0.6)
                 return
 
         self._update_tab_style(self._intensity)
@@ -304,14 +308,18 @@ class TabGlowManager(QObject):
         if self.tab_widget.currentIndex() == tab_index:
             return
 
-        # Stop existing glow on this tab if any
-        if tab_index in self._active_glows:
-            self._active_glows[tab_index].stop()
+        # Reuse the existing effect for this tab — replacing it leaked the
+        # old QObject (parented to this manager) with its timer
+        glow = self._active_glows.get(tab_index)
+        if glow is not None:
+            glow.stop()
+        else:
+            glow = TabGlowEffect(self.tab_widget, tab_index, color, self)
+            self._active_glows[tab_index] = glow
 
-        # Create and start new glow
-        glow = TabGlowEffect(self.tab_widget, tab_index, color, self)
-        self._active_glows[tab_index] = glow
-        glow.start()
+        # Finite pulse count: after ~30 pulses the animation stops and a
+        # static dot remains, instead of repainting the icon 20x/s forever
+        glow.start(pulse_count=30)
 
     def stop_glow(self, tab_index):
         """
@@ -321,8 +329,9 @@ class TabGlowManager(QObject):
             tab_index: Index of the tab to stop glowing
         """
         if tab_index in self._active_glows:
-            self._active_glows[tab_index].stop()
-            del self._active_glows[tab_index]
+            glow = self._active_glows.pop(tab_index)
+            glow.stop()
+            glow.deleteLater()  # actually free the effect (it is our child)
 
             # Reset tab text color to default
             tab_bar = self.tab_widget.tabBar()
@@ -884,33 +893,45 @@ class UIAnimations:
         self._apply_status_update(message, color)
 
     def _setup_button_hover_effects(self):
-        """Add subtle hover effects to buttons."""
-        buttons = [
-            self.ui.BuildPasses,
-            self.ui.ScanRenders,
-            self.ui.CleanFiles,
-            self.ui.RescanCleanFiles,
-            self.ui.MP4ScanRenders,
-            self.ui.MP4BrowseOutput,
-            self.ui.MP4BrowseCustomPath,
-            self.ui.MP4Generate
+        """Add subtle hover effects to buttons.
+
+        Widget names come from individual tab .ui files (flattened onto the
+        synthetic main-window ui by luma_tools.py) — resolve with getattr so
+        a renamed/removed widget degrades gracefully instead of crashing
+        startup with AttributeError.
+        """
+        button_names = [
+            'BuildPasses', 'ScanRenders', 'CleanFiles', 'RescanCleanFiles',
+            'MP4ScanRenders', 'MP4BrowseOutput', 'MP4BrowseCustomPath', 'MP4Generate',
         ]
 
-        for button in buttons:
-            if hasattr(button, 'installEventFilter'):
+        for name in button_names:
+            button = getattr(self.ui, name, None)
+            if button is not None and hasattr(button, 'installEventFilter'):
                 button.installEventFilter(self.parent)
 
     def _setup_progress_animation(self):
         """Setup smooth progress bar animation."""
-        self.progress_animation = QPropertyAnimation(self.ui.progressBar, b"value")
+        progress_bar = getattr(self.ui, 'progressBar', None)
+        if progress_bar is None:
+            self.progress_animation = None
+            return
+        self.progress_animation = QPropertyAnimation(progress_bar, b"value")
         self.progress_animation.setDuration(500)
         self.progress_animation.setEasingCurve(QEasingCurve.InOutQuad)
         self._animations.append(self.progress_animation)
 
     def _setup_status_animations(self):
         """Setup animations for status label updates."""
-        self.status_opacity = QGraphicsOpacityEffect(self.ui.StatusLabel)
-        self.ui.StatusLabel.setGraphicsEffect(self.status_opacity)
+        status_label = getattr(self.ui, 'StatusLabel', None)
+        if status_label is None:
+            self.status_opacity = None
+            self._last_status_message = None
+            self._last_status_color = None
+            self._last_status_context = None
+            return
+        self.status_opacity = QGraphicsOpacityEffect(status_label)
+        status_label.setGraphicsEffect(self.status_opacity)
         self.status_opacity.setOpacity(1.0)
         self._last_status_message = None
         self._last_status_color = None
@@ -1037,11 +1058,15 @@ class UIAnimations:
             "background-color: #5cadff; border: 2px solid #4a9eff;"
         )
 
-        # Connect to clicked signal to reset styling
+        # Connect to clicked signal to reset styling. Keep the slot callable
+        # itself for the disconnect — disconnect(<connection handle>) raised
+        # TypeError in PySide6 and was silently swallowed, so every
+        # pulse/reset cycle stacked another closure on the button.
         def on_clicked():
             self._reset_button_style(button)
 
-        button._ready_connection = button.clicked.connect(on_clicked)
+        button._ready_slot = on_clicked
+        button.clicked.connect(on_clicked)
 
     def _reset_button_style(self, button):
         """Reset a button's style back to its original state."""
@@ -1052,13 +1077,17 @@ class UIAnimations:
         original_style = self._ready_buttons.pop(button)
         button.setStyleSheet(original_style)
 
-        # Disconnect the click handler
-        if hasattr(button, '_ready_connection'):
+        # Disconnect the click handler (by slot, which PySide6 supports)
+        slot = getattr(button, '_ready_slot', None)
+        if slot is not None:
             try:
-                button.clicked.disconnect(button._ready_connection)
+                button.clicked.disconnect(slot)
             except (RuntimeError, TypeError):
-                pass  # Connection already disconnected
-            delattr(button, '_ready_connection')
+                pass  # Signal already gone (widget being destroyed)
+            try:
+                delattr(button, '_ready_slot')
+            except AttributeError:
+                pass
 
     def clear_button_ready(self, button):
         """

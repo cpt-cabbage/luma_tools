@@ -114,7 +114,7 @@ def discover_python_modules() -> list[str]:
     return sorted(modules)
 
 
-def clean_python_modules(modules: list[str]) -> None:
+def clean_python_modules() -> None:
     """Remove all Python modules from target for fresh install.
 
     Removes ALL directories in TARGET/python/ except venv.
@@ -159,6 +159,14 @@ def copy_python_modules(modules: list[str]) -> None:
     """Copy all Python modules recursively, excluding cache files."""
     print("\nCopying Python modules...")
     print(f"Auto-discovered {len(modules)} modules: {', '.join(modules)}\n")
+
+    # Root-level python/*.py files: clean_python_modules deletes them from
+    # production, so they must be re-copied or a future root-level script
+    # would silently vanish from every deploy
+    for src_file in sorted((SOURCE / "python").glob("*.py")):
+        dst_file = TARGET / "python" / src_file.name
+        print(f"  Copying {src_file.name}")
+        shutil.copy2(src_file, dst_file)
 
     for module in modules:
         src_module = SOURCE / "python" / module
@@ -386,8 +394,8 @@ def copy_venv(update: bool) -> None:
             shutil.copy2(src_path, dst_path)
             copied += 1
 
-            # Show progress every 5%
-            percent = int((copied / total_files) * 100)
+            # Show progress every 5% (guard: total_files can be 0)
+            percent = int((copied / total_files) * 100) if total_files else 100
             if percent != last_percent and percent % 5 == 0:
                 print(f"  Progress: {percent}% ({copied}/{total_files} files)")
                 last_percent = percent
@@ -463,7 +471,7 @@ def main():
 
     # --- Copy Files ---
     copy_launcher()
-    clean_python_modules(modules)
+    clean_python_modules()
     copy_python_modules(modules)
     copy_venv(update_venv)
     copy_resources()

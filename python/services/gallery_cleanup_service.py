@@ -111,9 +111,8 @@ class GalleryFootprint:
 def get_gallery_root_path() -> Optional[str]:
     """Get the gallery network root from settings (not user-scoped).
 
-    Distinct from the user-scoped helper in `ui/gallery_prewarm.py`, which
-    returns `<network>/<user>`. Use this when scanning the entire gallery
-    tree for cleanup/footprint stats.
+    Use this when scanning the entire gallery tree for cleanup/footprint
+    stats (per-user gallery paths are `<network>/<user>`).
     """
     path = safe_get_setting("network_output_path", "")
     if path and os.path.isdir(path):

@@ -11,28 +11,37 @@ The test simulates that environment:
 3. Try to import each copied module.
 """
 import importlib
+import json
 import os
 import shutil
 import sys
-import tempfile
 
 import pytest
 
-# Source directory of the comfyui package
-_COMFYUI_PKG = os.path.join(
+_PYTHON_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "python", "comfyui",
+    "python",
 )
+# Source directories of the farm-copied packages
+_COMFYUI_PKG = os.path.join(_PYTHON_ROOT, "comfyui")
+_CORE_PKG = os.path.join(_PYTHON_ROOT, "core")
 
-# Files copied to the farm, mapping source basename -> farm basename
+# Files copied to the farm, mapping (source dir, source basename) -> farm basename
 # Must stay in sync with deadline/submitter.py
 FARM_COPIES = {
-    "runner.py": "comfyui_runner.py",
-    "utils.py": "comfyui_utils.py",
-    "analytics.py": "comfyui_analytics.py",
-    "node_configs.py": "comfyui_node_configs.py",
-    "metadata.py": "comfyui_metadata.py",
+    (_COMFYUI_PKG, "runner.py"): "comfyui_runner.py",
+    (_COMFYUI_PKG, "utils.py"): "comfyui_utils.py",
+    (_COMFYUI_PKG, "analytics.py"): "comfyui_analytics.py",
+    (_COMFYUI_PKG, "node_configs.py"): "comfyui_node_configs.py",
+    (_COMFYUI_PKG, "metadata.py"): "comfyui_metadata.py",
+    (_CORE_PKG, "metadata_file.py"): "comfyui_metadata_file.py",
 }
+
+# Package prefixes that do NOT exist on farm workers. The fixture must purge
+# these from sys.modules AND keep their paths off sys.path, otherwise a
+# workstation-only import (e.g. `from core.metadata_file import ...`) would
+# silently succeed in the test and mask a real farm failure.
+_WORKSTATION_ONLY_PACKAGES = ("comfyui", "core")
 
 
 @pytest.fixture()
@@ -40,30 +49,36 @@ def farm_env(tmp_path):
     """Create an isolated directory mimicking the farm _job_data/ folder.
 
     Copies the farm scripts, puts *only* that directory on sys.path, and
-    removes any path entries that would let ``import comfyui`` succeed.
+    removes any path entries that would let ``import comfyui`` or
+    ``import core`` succeed.
     """
     # Copy files
-    for src_name, dst_name in FARM_COPIES.items():
-        src = os.path.join(_COMFYUI_PKG, src_name)
+    for (src_dir, src_name), dst_name in FARM_COPIES.items():
+        src = os.path.join(src_dir, src_name)
         dst = os.path.join(tmp_path, dst_name)
         shutil.copy2(src, dst)
+
+    def _is_workstation_module(name):
+        return any(name == pkg or name.startswith(pkg + ".") or name.startswith("comfyui_")
+                   for pkg in _WORKSTATION_ONLY_PACKAGES)
 
     # Snapshot original state
     original_path = sys.path[:]
     original_modules = {k: v for k, v in sys.modules.items()
-                        if k.startswith("comfyui")}
+                        if _is_workstation_module(k)}
 
-    # Purge comfyui from sys.modules so re-imports hit our copies
+    # Purge workstation packages from sys.modules so re-imports hit our copies
     for key in list(sys.modules):
-        if key.startswith("comfyui"):
+        if _is_workstation_module(key):
             del sys.modules[key]
 
     # Build a clean sys.path: only the temp dir + stdlib/site-packages
-    # (no entry that contains a comfyui/ package directory)
+    # (no entry that contains a comfyui/ or core/ package directory)
     clean_path = [str(tmp_path)]
     for p in original_path:
-        if os.path.isdir(os.path.join(p, "comfyui")):
-            continue  # skip — would let `import comfyui` succeed
+        if any(os.path.isdir(os.path.join(p, pkg))
+               for pkg in _WORKSTATION_ONLY_PACKAGES):
+            continue  # skip — would let workstation packages import
         clean_path.append(p)
     sys.path[:] = clean_path
 
@@ -73,7 +88,7 @@ def farm_env(tmp_path):
     sys.path[:] = original_path
     # Remove modules we loaded from the temp dir
     for key in list(sys.modules):
-        if key.startswith("comfyui"):
+        if _is_workstation_module(key):
             del sys.modules[key]
     # Put back the originals
     sys.modules.update(original_modules)
@@ -106,6 +121,56 @@ class TestFarmImportIsolation:
         mod = importlib.import_module("comfyui_metadata")
         assert hasattr(mod, "add_per_file_metadata")
 
+    def test_metadata_file_imports(self, farm_env):
+        """core/metadata_file.py is farm-copied as comfyui_metadata_file."""
+        mod = importlib.import_module("comfyui_metadata_file")
+        assert hasattr(mod, "get_metadata_file")
+
+
+class TestFarmMetadataWorks:
+    """The farm scripts must not just import — they must actually WORK.
+
+    Regression test for the bug where comfyui/metadata.py imported
+    core.metadata_file unguarded: the import error was swallowed and every
+    farm job silently lost its per-file metadata (seeds, hashes, lineage).
+    """
+
+    def test_add_per_file_metadata_writes_in_farm_env(self, farm_env, tmp_path):
+        mod = importlib.import_module("comfyui_metadata")
+        output_dir = str(tmp_path / "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+
+        result = mod.add_per_file_metadata(
+            output_dir=output_dir,
+            filename="test_output_00001.png",
+            frame_index=1,
+            actual_seed=12345,
+            execution_time_ms=1000,
+            content_hash="deadbeef",
+        )
+        assert result is True, "add_per_file_metadata must succeed on the farm"
+
+        metadata_path = os.path.join(output_dir, mod.GALLERY_METADATA_FILE)
+        assert os.path.isfile(metadata_path), "gallery metadata file must be written"
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        entry = data.get("_file_test_output_00001")
+        assert entry is not None, "per-file entry must exist"
+        assert entry["actual_seed"] == 12345
+        assert entry["content_hash"] == "deadbeef"
+        assert "_hash_deadbeef" in data, "hash index entry must exist"
+
+    def test_lineage_works_in_farm_env(self, farm_env, tmp_path):
+        mod = importlib.import_module("comfyui_metadata")
+        output_dir = str(tmp_path / "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+
+        assert mod.add_per_file_metadata(output_dir, "parent.png", file_id="p-1")
+        assert mod.establish_lineage(output_dir, "child.png", "parent.png") is True
+        child = mod.get_per_file_metadata(output_dir, "child.png")
+        assert child is not None
+        assert child["parent_id"] == "p-1"
+
 
 class TestSubmitterCopyListComplete:
     """Verify every comfyui.* import in the farm scripts has a matching copy."""
@@ -134,8 +199,8 @@ class TestSubmitterCopyListComplete:
         farm_modules = {os.path.splitext(b)[0] for b in farm_basenames}
 
         missing = set()
-        for src_name in FARM_COPIES:
-            src_path = os.path.join(_COMFYUI_PKG, src_name)
+        for src_dir, src_name in FARM_COPIES:
+            src_path = os.path.join(src_dir, src_name)
             needed = self._collect_comfyui_fallback_imports(src_path)
             for mod in needed:
                 if mod not in farm_modules:

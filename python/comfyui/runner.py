@@ -691,9 +691,9 @@ def main():
                             if _compute_hash:
                                 try:
                                     file_hash = _compute_hash(dest_path)
-                                except Exception:
-                                    pass
-                            add_per_file_metadata(
+                                except Exception as e:
+                                    logger.debug(f"Could not hash {dest_path}: {e}")
+                            stored = add_per_file_metadata(
                                 output_dir=args.output_directory,
                                 filename=filename,
                                 frame_index=frame_num,
@@ -702,8 +702,16 @@ def main():
                                 node_execution_trace=node_execution_trace,
                                 content_hash=file_hash,
                             )
+                            if not stored:
+                                logger.warning(
+                                    f"Per-file metadata was NOT stored for {filename} "
+                                    f"(seed/lineage traceability lost for this file)"
+                                )
                         except Exception:
-                            pass  # Silently skip metadata storage failures
+                            logger.warning(
+                                f"Per-file metadata storage failed for {dest_path}",
+                                exc_info=True,
+                            )
 
                 # Collect frame result for analytics
                 frame_results.append({
@@ -740,7 +748,9 @@ def main():
                 failed=failed,
                 frame_results=frame_results,
             )
-            aggregate_node_timing()
+            # Debounced: concurrent frames of the same job skip re-aggregating
+            # (each full aggregation re-reads every record over the network)
+            aggregate_node_timing(skip_if_fresh_seconds=600)
         except ImportError:
             logger.debug("Analytics module not available, skipping")
         except Exception as e:
@@ -765,8 +775,10 @@ def main():
         exit_code = 0 if failed == 0 else 1
         cleanup(exit_code=exit_code)
 
-    except Exception as e:
-        logger.error(f"Error: {e}")
+    except Exception:
+        # Full traceback — the runner log is the only diagnostic an artist
+        # gets from a failed farm job, so never reduce this to str(e).
+        logger.exception("Runner failed with unhandled error")
         cleanup(exit_code=1)
 
 

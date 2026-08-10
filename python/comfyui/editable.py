@@ -8,6 +8,7 @@ suffix in their title) and extracting their configuration for dynamic UI generat
 import os
 import re
 import logging
+import threading
 from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass, field
 
@@ -169,6 +170,11 @@ _COMFYUI_TYPE_MAP = {
 
 # Phantom/internal widgets that should be skipped
 _PHANTOM_WIDGET_NAMES = {'control_after_generate'}
+
+# Memoization for extract_editable_nodes: path -> (mtime, result).
+# Bounded implicitly by the number of workflow presets in use.
+_editable_cache = {}
+_editable_cache_lock = threading.RLock()
 
 
 def _extract_subgraph_widgets(
@@ -377,10 +383,35 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     if not workflow_path or not os.path.exists(workflow_path):
         return []
 
+    # Central mtime-based memoization: several UI paths (model pickers,
+    # dialogs) call this directly per invocation, each re-reading and
+    # re-parsing the workflow JSON from the network workflows directory
+    try:
+        mtime = os.path.getmtime(workflow_path)
+    except OSError:
+        mtime = None
+    if mtime is not None:
+        with _editable_cache_lock:
+            cached = _editable_cache.get(workflow_path)
+            if cached is not None and cached[0] == mtime:
+                return cached[1]
+
     try:
         workflow = load_workflow(workflow_path)
     except Exception as e:
         logger.error(f"Error loading workflow for editable nodes: {e}")
+        return []
+
+    # Editable-node extraction only understands the UI/nodes format — an
+    # API-format workflow has no 'nodes' list and silently produced an empty
+    # dynamic UI with no way for the user to tell why
+    from comfyui.workflow import is_api_format
+    if is_api_format(workflow):
+        logger.warning(
+            f"Workflow '{os.path.basename(workflow_path)}' is in API format — "
+            f"editable (_editable) nodes require the UI/nodes format. "
+            f"Re-export the preset with 'Save (not API)' to make its fields editable."
+        )
         return []
 
     nodes = workflow.get('nodes', [])
@@ -527,6 +558,10 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         condition_info = f" (visible when {node.condition_node})" if node.condition_node else ""
         logger.info(f"  - {node.display_name} ({node.node_type}): {node.widget_type}{condition_info}")
 
+    if mtime is not None:
+        with _editable_cache_lock:
+            _editable_cache[workflow_path] = (mtime, editable_nodes)
+
     return editable_nodes
 
 
@@ -591,6 +626,15 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
         workflow = load_workflow(workflow_path)
     except Exception as e:
         logger.error(f"Error loading workflow for settings nodes: {e}")
+        return []
+
+    # Same limitation as extract_editable_nodes: API format has no 'nodes'
+    from comfyui.workflow import is_api_format
+    if is_api_format(workflow):
+        logger.warning(
+            f"Workflow '{os.path.basename(workflow_path)}' is in API format — "
+            f"settings (_settings) nodes require the UI/nodes format."
+        )
         return []
 
     nodes = workflow.get('nodes', [])

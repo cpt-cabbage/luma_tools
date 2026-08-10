@@ -144,6 +144,23 @@ def interpolate_bone_animation(bone_anim: BoneAnimation, time: float) -> Tuple[n
     return position, rotation, scale
 
 
+def _find_key_segment(keys, time: float) -> int:
+    """Binary-search the keyframe segment index containing `time`.
+
+    Returns the index i such that keys[i].time <= time <= keys[i+1].time,
+    or -1 if time is before the first key, or len(keys)-1 if after the last.
+    Keyframes are sorted by time, so bisect keeps per-frame lookups O(log n)
+    instead of the previous O(n) scan per bone per frame.
+    """
+    import bisect
+    if time < keys[0].time:
+        return -1
+    if time >= keys[-1].time:
+        return len(keys) - 1
+    # rightmost key with key.time <= time
+    return bisect.bisect_right([k.time for k in keys], time) - 1
+
+
 def _interpolate_vector_keys(keys: List[VectorKeyframe], time: float) -> np.ndarray:
     """Interpolate vector keyframes at a given time."""
     if not keys:
@@ -152,17 +169,17 @@ def _interpolate_vector_keys(keys: List[VectorKeyframe], time: float) -> np.ndar
     if len(keys) == 1:
         return keys[0].value.copy()
 
-    for i in range(len(keys) - 1):
-        if keys[i].time <= time <= keys[i + 1].time:
-            dt = keys[i + 1].time - keys[i].time
-            if dt <= 0:
-                return keys[i].value.copy()
-            t = (time - keys[i].time) / dt
-            return lerp(keys[i].value, keys[i + 1].value, t)
-
-    if time < keys[0].time:
+    i = _find_key_segment(keys, time)
+    if i < 0:
         return keys[0].value.copy()
-    return keys[-1].value.copy()
+    if i >= len(keys) - 1:
+        return keys[-1].value.copy()
+
+    dt = keys[i + 1].time - keys[i].time
+    if dt <= 0:
+        return keys[i].value.copy()
+    t = (time - keys[i].time) / dt
+    return lerp(keys[i].value, keys[i + 1].value, t)
 
 
 def _interpolate_quaternion_keys(keys: List[QuaternionKeyframe], time: float) -> np.ndarray:
@@ -173,14 +190,14 @@ def _interpolate_quaternion_keys(keys: List[QuaternionKeyframe], time: float) ->
     if len(keys) == 1:
         return keys[0].value.copy()
 
-    for i in range(len(keys) - 1):
-        if keys[i].time <= time <= keys[i + 1].time:
-            dt = keys[i + 1].time - keys[i].time
-            if dt <= 0:
-                return keys[i].value.copy()
-            t = (time - keys[i].time) / dt
-            return slerp(keys[i].value, keys[i + 1].value, t)
-
-    if time < keys[0].time:
+    i = _find_key_segment(keys, time)
+    if i < 0:
         return keys[0].value.copy()
-    return keys[-1].value.copy()
+    if i >= len(keys) - 1:
+        return keys[-1].value.copy()
+
+    dt = keys[i + 1].time - keys[i].time
+    if dt <= 0:
+        return keys[i].value.copy()
+    t = (time - keys[i].time) / dt
+    return slerp(keys[i].value, keys[i + 1].value, t)

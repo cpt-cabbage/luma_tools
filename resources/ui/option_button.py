@@ -200,8 +200,16 @@ class IndexedOptionButtonManager:
         self.on_changed = on_changed
         self.parent_window = parent_window
 
-        # Connect button click
+        # Disconnect any previous manager attached to this button — same
+        # duplicate-connection guard as OptionButtonManager (multi-popup bug)
+        previous = getattr(button, "_option_button_show_menu", None)
+        if previous is not None:
+            try:
+                button.clicked.disconnect(previous)
+            except (TypeError, RuntimeError):
+                pass
         button.clicked.connect(self._show_menu)
+        button._option_button_show_menu = self._show_menu
 
         # Set initial text
         self._update_text()

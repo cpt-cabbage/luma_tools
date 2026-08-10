@@ -417,12 +417,23 @@ class NodeInfoCache:
                     node_entry['required_input_names'] = node_info.required_input_names
                 data['nodes'][class_type] = node_entry
 
+            # Atomic write (unique tmp + rename): this multi-MB file is read
+            # by every workstation while the server writes it — a plain
+            # open('w') exposed a truncation window that silently degraded
+            # widget/type resolution on readers.
+            tmp_path = f"{path}.{os.getpid()}.tmp"
             try:
-                with open(path, 'w', encoding='utf-8') as f:
+                with open(tmp_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, path)
                 logger.info(f"Saved {len(self._node_types)} node types to: {path}")
             except Exception as e:
                 logger.error(f"Failed to save cache to {path}: {e}")
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def update_from_server(self, raw_object_info: Dict) -> int:
         """Parse raw /object_info response and update cache.

@@ -103,8 +103,14 @@ class ValidateFileFormat(BaseValidator):
                 details="Please select a product type (model, image, review, etc.)"
             )
 
-        # Get file extension (lowercase)
-        ext = os.path.splitext(source_file)[1].lower()
+        # Get file extension (lowercase). Handle known double extensions —
+        # os.path.splitext reduces ".bgeo.sc" to just ".sc", which made the
+        # pointcache mapping's ".bgeo.sc" entry unreachable.
+        basename = os.path.basename(source_file).lower()
+        if basename.endswith(".bgeo.sc"):
+            ext = ".bgeo.sc"
+        else:
+            ext = os.path.splitext(source_file)[1].lower()
 
         if not ext:
             return ValidationResult(

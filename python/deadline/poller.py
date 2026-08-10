@@ -7,6 +7,7 @@ and task log analysis for ComfyUI workflows.
 
 import os
 import re
+import time
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -144,6 +145,10 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         }
 
     except Exception as e:
+        # Log with traceback: callers treat "Unknown" as "job may have been
+        # auto-deleted after completion", so a genuine polling/parsing bug
+        # would otherwise be indistinguishable from normal job completion.
+        logger.warning(f"poll_deadline_job_status failed for {job_id}: {e}", exc_info=True)
         return {"status": "Unknown", "progress": 0, "error_message": str(e)}
 
 
@@ -205,8 +210,7 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
 
             if log_files:
                 latest_log = max(log_files, key=os.path.getmtime)
-                with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
-                    return f.read()
+                return _read_log_tail(latest_log)
 
         # Fallback: search in output directory itself (legacy location)
         if output_dir and os.path.isdir(output_dir):
@@ -215,13 +219,29 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
 
             if log_files:
                 latest_log = max(log_files, key=os.path.getmtime)
-                with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
-                    return f.read()
+                return _read_log_tail(latest_log)
 
         return None
 
     except Exception:
         return None
+
+
+# Runner logs grow to tens of MB over a job's lifetime and live on the network
+# share; polling re-reads them every few seconds per job. Everything
+# extract_task_progress needs (current progress, node name, loading state) is
+# near the end of the file, so read only the tail instead of the whole log.
+_LOG_TAIL_BYTES = 256 * 1024
+
+
+def _read_log_tail(path: str, max_bytes: int = _LOG_TAIL_BYTES) -> str:
+    """Read only the last max_bytes of a (potentially huge, remote) log file."""
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes))
+        data = f.read()
+    return data.decode('utf-8', errors='replace')
 
 
 def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
@@ -241,8 +261,6 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
         Dict with progress_pct, current_node, total_nodes, elapsed_seconds, is_loading_model
         or None if no progress found
     """
-    import re
-
     if not log_content:
         return None
 
@@ -388,9 +406,21 @@ def _fetch_pending_luma_jobs() -> Tuple[List[Dict[str, Any]], str]:
     if not pending_job_ids:
         return [], ""
 
+    # Bound both job count AND total wall time: this runs from per-job polling
+    # workers, and on a busy farm 100 sequential GetJob calls at 15 s timeout
+    # each could occupy a QThreadPool slot (and starve concurrent pollers
+    # waiting on the cache) for minutes.
     MAX_JOBS_TO_CHECK = 100
+    MAX_TOTAL_SECONDS = 30
+    start_time = time.monotonic()
     jobs_info: List[Dict[str, Any]] = []
     for pending_id in pending_job_ids[:MAX_JOBS_TO_CHECK]:
+        if time.monotonic() - start_time > MAX_TOTAL_SECONDS:
+            logger.debug(
+                f"_fetch_pending_luma_jobs: time budget exhausted after "
+                f"{len(jobs_info)} job(s); queue info will be partial"
+            )
+            break
         job_result = run_command([DEADLINE_PATH, "GetJob", pending_id], timeout=15)
         if job_result.returncode != 0:
             continue
@@ -584,8 +614,10 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
                         "output_dir": output_dir,
                     })
 
-        # Sort by submit date (oldest first) so we process in order
-        running_jobs.sort(key=lambda x: x["submit_date"])
+        # Sort by submit date (oldest first) so we process in order.
+        # Parse the MM/DD/YYYY string — sorting the raw string breaks
+        # across month/year boundaries.
+        running_jobs.sort(key=lambda x: _parse_deadline_date(x["submit_date"]))
 
         if running_jobs:
             logger.info(f"[Deadline] Found {len(running_jobs)} running jobs for user {username}")

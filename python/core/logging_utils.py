@@ -300,13 +300,28 @@ def setup_file_logging(
         # Server-style: file + console handlers, no stdout redirect
         _setup_dual_handlers(log_path)
     else:
-        # App/runner-style: file handler + stdout/stderr tee
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s [%(levelname)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-            handlers=[logging.FileHandler(log_path, encoding='utf-8')],
-        )
+        # App/runner-style: file handler + stdout/stderr tee.
+        # basicConfig silently no-ops when the root logger already has
+        # handlers — a second caller would then believe it created a new log
+        # file that is never written. Attach the handler explicitly instead.
+        root_logger = logging.getLogger()
+        if root_logger.handlers:
+            logging.warning(
+                f"setup_file_logging called again — adding additional log file: {log_path}"
+            )
+            file_handler = logging.FileHandler(log_path, encoding='utf-8')
+            file_handler.setFormatter(logging.Formatter(
+                '%(asctime)s [%(levelname)s] %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S',
+            ))
+            root_logger.addHandler(file_handler)
+        else:
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format='%(asctime)s [%(levelname)s] %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S',
+                handlers=[logging.FileHandler(log_path, encoding='utf-8')],
+            )
 
         if redirect_stdout:
             # Clean up any existing tee writers before creating new ones

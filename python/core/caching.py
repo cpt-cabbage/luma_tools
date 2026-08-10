@@ -57,6 +57,7 @@ def cached_with_ttl(seconds: int, maxsize: int = 128):
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         cache: Dict[tuple, tuple] = {}  # key -> (result, timestamp)
         lock = threading.RLock()
+        in_flight: Dict[tuple, threading.Event] = {}  # key -> computing event
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
@@ -77,27 +78,57 @@ def cached_with_ttl(seconds: int, maxsize: int = 128):
                 if current_time - timestamp < seconds:
                     return result
 
-            # Slow path: acquire lock and re-check before computing
+            # Slow path: single-flight per key. The function is called OUTSIDE
+            # the lock — a slow func (e.g. minutes of subprocess calls) must
+            # not block every other cached function's callers or unrelated
+            # keys. Concurrent callers of the same key either get the stale
+            # value (better than blocking) or wait for the computing thread.
             with lock:
                 # Double-check after acquiring lock (another thread may have computed)
-                current_time = time.time()
-                if key in cache:
-                    result, timestamp = cache[key]
-                    if current_time - timestamp < seconds:
+                entry = cache.get(key)
+                if entry is not None:
+                    result, timestamp = entry
+                    if time.time() - timestamp < seconds:
                         return result
 
-                # Cache miss or expired - call function INSIDE lock to prevent
-                # thundering herd (multiple threads computing same value)
-                result = func(*args, **kwargs)
+                event = in_flight.get(key)
+                if event is None:
+                    event = threading.Event()
+                    in_flight[key] = event
+                    is_computing_thread = True
+                else:
+                    is_computing_thread = False
+                    stale = entry  # may be None
 
+            if not is_computing_thread:
+                # Another thread is already computing this key
+                if stale is not None:
+                    return stale[0]  # serve the stale value instead of blocking
+                event.wait()
+                entry = cache.get(key)
+                if entry is not None:
+                    return entry[0]
+                # Computing thread failed — fall through and compute ourselves
+                return func(*args, **kwargs)
+
+            try:
+                result = func(*args, **kwargs)
+            except Exception:
+                # Wake waiters (they will compute for themselves) and re-raise
+                with lock:
+                    in_flight.pop(key, None)
+                event.set()
+                raise
+
+            with lock:
                 # Evict oldest entries if at capacity
                 if maxsize > 0 and len(cache) >= maxsize:
-                    # Remove oldest entry
                     oldest_key = min(cache.keys(), key=lambda k: cache[k][1])
                     del cache[oldest_key]
-
-                cache[key] = (result, current_time)
-                return result
+                cache[key] = (result, time.time())
+                in_flight.pop(key, None)
+            event.set()
+            return result
 
         def clear_cache() -> None:
             """Clear all cached results."""

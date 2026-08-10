@@ -136,6 +136,18 @@ def publish_comfyui_asset_to_ayon(
         use_farm = dialog.get_use_farm()
         comment = dialog.get_comment()
 
+        # A cleared product name would produce an unnamed product and a
+        # metadata file like "ayon_comfyui_.json"
+        if not product_name:
+            logger.warning("[AYON Publish] Aborted: product name is empty")
+            from dialog_helpers import show_warning
+            show_warning(
+                "Publish to AYON",
+                "Product name cannot be empty.",
+                parent=parent_widget,
+            )
+            return False
+
         # Run validators before proceeding (Phase 2 AYON integration)
         logger.info("[AYON Publish] Running validators...")
         validators_passed, validator_error = _run_publish_validators(

@@ -37,6 +37,15 @@ except ImportError:
             os.makedirs(path, exist_ok=True)
         return path
 
+# The metadata file abstraction is farm-copied alongside this module as
+# `comfyui_metadata_file.py` (see deadline/submitter.py), so farm workers get
+# the same locked, atomic implementation the workstation uses. Without this
+# fallback, farm metadata writes fail with ImportError and are silently lost.
+try:
+    from core.metadata_file import get_metadata_file, clear_metadata_file_cache
+except ImportError:
+    from comfyui_metadata_file import get_metadata_file, clear_metadata_file_cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,13 +190,11 @@ def _validate_output_dir(output_dir: str) -> bool:
 
 def _get_gallery_metadata_file(output_dir: str):
     """Get MetadataFile instance for gallery metadata (uses centralized caching)."""
-    from core.metadata_file import get_metadata_file
     return get_metadata_file(output_dir, GALLERY_METADATA_FILE)
 
 
 def clear_gallery_metadata_cache(output_dir: str = None) -> None:
     """Clear the gallery metadata cache. Thread-safe."""
-    from core.metadata_file import clear_metadata_file_cache
     if output_dir:
         clear_metadata_file_cache(output_dir, GALLERY_METADATA_FILE)
     else:
@@ -224,6 +231,31 @@ def save_gallery_metadata(output_dir: str, metadata: Dict[str, Dict[str, Any]]) 
         return metadata_file.save(metadata)
     except Exception as e:
         logger.error(f"[Metadata] Error saving gallery metadata: {e}")
+        return False
+
+
+def mutate_gallery_metadata(output_dir: str, mutator) -> bool:
+    """Atomically load-modify-save gallery metadata.
+
+    Safe against concurrent writers in other threads AND other processes
+    (farm workers writing the same file over the network). Prefer this over
+    load_gallery_metadata() + save_gallery_metadata() for any read-modify-write.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        mutator: Callable that mutates the metadata dict in place
+
+    Returns:
+        bool: True if saved successfully
+    """
+    if not output_dir or not _validate_output_dir(output_dir):
+        return False
+
+    try:
+        metadata_file = _get_gallery_metadata_file(output_dir)
+        return metadata_file.mutate(mutator)
+    except Exception as e:
+        logger.error(f"[Metadata] Error mutating gallery metadata: {e}")
         return False
 
 
@@ -266,12 +298,6 @@ def add_item_metadata(
     Returns:
         bool: True if metadata saved successfully, False otherwise
     """
-    try:
-        metadata = load_gallery_metadata(output_dir)
-    except Exception as e:
-        logger.error(f"[Metadata] Error loading metadata, starting fresh: {e}")
-        metadata = {}
-
     # Extract all source images and models from editable values
     source_images = []
     source_models = []
@@ -380,12 +406,12 @@ def add_item_metadata(
             "custom_name": custom_name if custom_name else None,
         }
 
-        metadata[f"_prefix_{prefix_key}"] = entry
+        def _apply(metadata):
+            metadata[f"_prefix_{prefix_key}"] = entry
 
-        # Also mark source images as inputs explicitly
-        # This ensures input files are correctly identified even if they have
-        # filenames that look like outputs (e.g., with _001 suffix)
-        if source_images:
+            # Also mark source images as inputs explicitly
+            # This ensures input files are correctly identified even if they have
+            # filenames that look like outputs (e.g., with _001 suffix)
             for source_image in source_images:
                 input_key = f"_input_{source_image}"
                 content_hash = source_image_hashes.get(source_image) if source_image_hashes else None
@@ -410,8 +436,7 @@ def add_item_metadata(
                             "is_input": True,
                         }
 
-        # Same for source models
-        if source_models:
+            # Same for source models
             for source_model in source_models:
                 input_key = f"_input_{source_model}"
                 if input_key not in metadata:
@@ -422,7 +447,7 @@ def add_item_metadata(
                         "timestamp": datetime.now().isoformat(),
                     }
 
-        return save_gallery_metadata(output_dir, metadata)
+        return mutate_gallery_metadata(output_dir, _apply)
     except Exception as e:
         logger.error(f"[Metadata] Error saving metadata: {e}")
         return False
@@ -632,15 +657,19 @@ def mark_as_input_file(output_dir: str, filename: str, used_by_job: str = None) 
         metadata = load_gallery_metadata(output_dir)
         input_key = f"_input_{filename}"
 
-        if input_key not in metadata:
-            metadata[input_key] = {
-                "is_output": False,
-                "is_input": True,
-                "used_by_job": used_by_job,
-                "timestamp": datetime.now().isoformat(),
-            }
-            return save_gallery_metadata(output_dir, metadata)
-        return True  # Already marked
+        if input_key in metadata:
+            return True  # Already marked
+
+        def _apply(data):
+            if input_key not in data:
+                data[input_key] = {
+                    "is_output": False,
+                    "is_input": True,
+                    "used_by_job": used_by_job,
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        return mutate_gallery_metadata(output_dir, _apply)
     except Exception as e:
         logger.error(f"[Metadata] Error marking {filename} as input: {e}")
         return False
@@ -674,12 +703,6 @@ def add_mp4_maker_metadata(
     Returns:
         bool: True if metadata saved successfully, False otherwise
     """
-    try:
-        metadata = load_gallery_metadata(output_dir)
-    except Exception as e:
-        logger.error(f"[Metadata] Error loading metadata for MP4 Maker: {e}")
-        metadata = {}
-
     # Use basename without extension as key
     basename = os.path.splitext(filename)[0]
     mp4_key = f"_mp4maker_{basename}"
@@ -696,10 +719,11 @@ def add_mp4_maker_metadata(
         "timestamp": datetime.now().isoformat(),
     }
 
-    metadata[mp4_key] = entry
-
     try:
-        return save_gallery_metadata(output_dir, metadata)
+        def _apply(metadata):
+            metadata[mp4_key] = entry
+
+        return mutate_gallery_metadata(output_dir, _apply)
     except Exception as e:
         logger.error(f"[Metadata] Error saving MP4 Maker metadata: {e}")
         return False
@@ -734,16 +758,16 @@ def get_model_note(output_dir: str, filename: str) -> str:
 
 def set_model_note(output_dir: str, filename: str, note: str) -> bool:
     """Set a user note for a specific model file."""
-    metadata = load_gallery_metadata(output_dir)
     basename = os.path.splitext(filename)[0]
     note_key = f"_note_{basename}"
 
-    if note.strip():
-        metadata[note_key] = note.strip()
-    elif note_key in metadata:
-        del metadata[note_key]
+    def _apply(metadata):
+        if note.strip():
+            metadata[note_key] = note.strip()
+        elif note_key in metadata:
+            del metadata[note_key]
 
-    return save_gallery_metadata(output_dir, metadata)
+    return mutate_gallery_metadata(output_dir, _apply)
 
 
 # ============================================================================
@@ -786,12 +810,6 @@ def add_per_file_metadata(
     """
     import uuid
 
-    try:
-        metadata = load_gallery_metadata(output_dir)
-    except Exception as e:
-        logger.error(f"[Metadata] Error loading metadata for per-file: {e}")
-        metadata = {}
-
     # Generate file_id if not provided
     if file_id is None:
         file_id = str(uuid.uuid4())
@@ -816,20 +834,21 @@ def add_per_file_metadata(
     # Remove None values to keep JSON clean
     entry = {k: v for k, v in entry.items() if v is not None}
 
-    metadata[file_key] = entry
+    def _apply(metadata):
+        metadata[file_key] = entry
 
-    # Create hash index entry for reverse lookup
-    if content_hash:
-        hash_key = f"_hash_{content_hash}"
-        if hash_key not in metadata:
-            metadata[hash_key] = {
-                "filename": filename,
-                "job_prefix": None,  # Output file, not tied to a specific job prefix
-                "is_input": False,
-            }
+        # Create hash index entry for reverse lookup
+        if content_hash:
+            hash_key = f"_hash_{content_hash}"
+            if hash_key not in metadata:
+                metadata[hash_key] = {
+                    "filename": filename,
+                    "job_prefix": None,  # Output file, not tied to a specific job prefix
+                    "is_input": False,
+                }
 
     try:
-        return save_gallery_metadata(output_dir, metadata)
+        return mutate_gallery_metadata(output_dir, _apply)
     except Exception as e:
         logger.error(f"[Metadata] Error saving per-file metadata: {e}")
         return False
@@ -984,13 +1003,19 @@ def establish_lineage(output_dir: str, child_filename: str, parent_filename: str
         # Get or create child's per-file metadata with parent_id
         child_meta = get_per_file_metadata(output_dir, child_filename)
         if child_meta:
-            # Update existing entry with parent_id
-            metadata = load_gallery_metadata(output_dir)
+            # Update existing entry with parent_id (create it if it vanished
+            # between the lookup above and the locked mutation below)
             basename = os.path.splitext(child_filename)[0]
             file_key = f"_file_{basename}"
-            if file_key in metadata:
-                metadata[file_key]['parent_id'] = parent_id
-                return save_gallery_metadata(output_dir, metadata)
+
+            def _apply(metadata):
+                entry = metadata.get(file_key)
+                if isinstance(entry, dict):
+                    entry['parent_id'] = parent_id
+                else:
+                    metadata[file_key] = dict(child_meta, parent_id=parent_id)
+
+            return mutate_gallery_metadata(output_dir, _apply)
         else:
             # Create new entry with parent_id
             return add_per_file_metadata(output_dir, child_filename, parent_id=parent_id)

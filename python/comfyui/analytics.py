@@ -238,7 +238,9 @@ def record_execution(
     # Sanitize prefix for filename
     safe_prefix = "".join(c if c.isalnum() or c in "-_" else "_" for c in output_prefix)
 
-    filename = f"{timestamp_str}_{hostname}_{safe_prefix}.json"
+    # PID keeps concurrent frames (separate runner processes on the same
+    # worker, same prefix, same second) from overwriting each other's record.
+    filename = f"{timestamp_str}_{hostname}_{safe_prefix}_p{os.getpid()}.json"
     record_path = os.path.join(analytics_dir, 'executions', filename)
 
     record = {
@@ -264,9 +266,26 @@ def record_execution(
 # AGGREGATE NODE TIMING
 # =============================================================================
 
+def _parse_record_timestamp_from_name(entry_name: str) -> Optional[datetime]:
+    """Parse the leading YYYYMMDD_HHMMSS timestamp from a record filename.
+
+    Lets the aggregator age-filter records WITHOUT opening them — with
+    hundreds of records on an SMB share, reading each one per farm frame
+    was the dominant cost.
+    """
+    try:
+        return datetime.strptime(entry_name[:15], "%Y%m%d_%H%M%S").replace(
+            tzinfo=timezone.utc
+        )
+    except (ValueError, TypeError):
+        return None
+
+
 def aggregate_node_timing(
     network_path: Optional[str] = None,
     max_age_days: int = 90,
+    skip_if_fresh_seconds: int = 0,
+    prune_old_records: bool = True,
 ) -> Dict[str, Any]:
     """Aggregate node timing data from all execution records.
 
@@ -276,6 +295,13 @@ def aggregate_node_timing(
     Args:
         network_path: Override for network output path (auto-detected if None).
         max_age_days: Maximum age of records to include (default 90 days).
+        skip_if_fresh_seconds: If > 0 and the existing report is younger than
+            this, return it instead of re-aggregating. Used by the farm runner
+            so N concurrent frames don't each re-read every record and race to
+            rewrite the report.
+        prune_old_records: Delete records older than max_age_days (they are
+            never included in any aggregation, so keeping them only slows
+            every future scan down).
 
     Returns:
         The generated summary dict, or empty dict on failure.
@@ -289,6 +315,17 @@ def aggregate_node_timing(
     analytics_dir = _ensure_analytics_dirs(network_path)
     if not analytics_dir:
         return {}
+
+    report_path = os.path.join(analytics_dir, 'reports', 'node_timing_summary.json')
+    if skip_if_fresh_seconds > 0:
+        try:
+            if time.time() - os.path.getmtime(report_path) < skip_if_fresh_seconds:
+                logger.debug("[Analytics] Report is fresh, skipping re-aggregation")
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+                return existing if isinstance(existing, dict) else {}
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            pass  # No report / unreadable — aggregate normally
 
     executions_dir = os.path.join(analytics_dir, 'executions')
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
@@ -306,11 +343,25 @@ def aggregate_node_timing(
     except OSError:
         entries = []
 
+    pruned = 0
     for entry_name in entries:
         if not entry_name.endswith('.json'):
             continue
 
         record_path = os.path.join(executions_dir, entry_name)
+
+        # Age-filter (and optionally prune) by filename timestamp before
+        # opening the file — avoids reading every record over the network.
+        name_time = _parse_record_timestamp_from_name(entry_name)
+        if name_time is not None and name_time < cutoff:
+            if prune_old_records:
+                try:
+                    os.remove(record_path)
+                    pruned += 1
+                except OSError as e:
+                    logger.debug(f"[Analytics] Could not prune {entry_name}: {e}")
+            continue
+
         try:
             with open(record_path, 'r', encoding='utf-8') as f:
                 record = json.load(f)
@@ -406,11 +457,11 @@ def aggregate_node_timing(
     }
 
     # Write summary report
-    report_path = os.path.join(analytics_dir, 'reports', 'node_timing_summary.json')
     if _atomic_write_json(report_path, summary):
         logger.info(
             f"[Analytics] Summary report updated: {total_executions} executions, "
             f"{total_frames} frames, {len(global_stats)} node types"
+            + (f", pruned {pruned} expired record(s)" if pruned else "")
         )
 
     return summary

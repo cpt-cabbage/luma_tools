@@ -292,31 +292,45 @@ def extract_render_name(filename, strip_frame_padding=False):
     """
     Extract render name from a sequence filename.
 
+    Strips only the trailing `.<frame>.<ext>` (or `.####.<ext>`) segments so
+    dotted version names survive — the previous `split(".")[0]` truncated
+    "scene_v1.2.0001.exr" to "scene_v1".
+
     This handles common sequence naming patterns:
     - Simple: "render_name.0001.exr" -> "render_name"
     - With padding: "render_name.####.exr" -> "render_name"
+    - Dotted versions: "scene_v1.2.0001.exr" -> "scene_v1.2"
 
     Args:
         filename: Filename or basename to extract render name from
-        strip_frame_padding: If True, also strips frame padding markers (####)
-                           from the result. Use this for fileseq basenames.
+        strip_frame_padding: Kept for backwards compatibility — padding
+                           markers (####) are always stripped now.
 
     Returns:
-        str: The render name (first part before dots)
+        str: The render name (filename minus extension and frame segment)
 
     Example:
         >>> extract_render_name("beauty_v001.0042.exr")
         'beauty_v001'
         >>> extract_render_name("beauty_v001.####.exr", strip_frame_padding=True)
         'beauty_v001'
+        >>> extract_render_name("scene_v1.2.0001.exr")
+        'scene_v1.2'
     """
-    if strip_frame_padding:
-        # Handle fileseq basenames with #### padding markers
-        parts = [p for p in filename.split('.') if p and not all(c == '#' for c in p)]
-        return parts[0] if parts else filename.replace("#", "").strip(".")
-    else:
-        # Simple extraction - just get first part before any dot
-        return filename.split(".")[0]
+    parts = [p for p in filename.split(".") if p != ""]
+    if not parts:
+        return filename.strip(".")
+
+    # Drop a trailing extension (any segment containing a letter: exr, mp4, ...)
+    if len(parts) > 1 and any(c.isalpha() for c in parts[-1]):
+        parts = parts[:-1]
+
+    # Drop at most ONE trailing frame segment (digits or #### padding) so a
+    # dotted version number before the frame is preserved
+    if len(parts) > 1 and (parts[-1].isdigit() or all(c == '#' for c in parts[-1])):
+        parts = parts[:-1]
+
+    return ".".join(parts)
 
 
 # ============================================================================

@@ -47,8 +47,6 @@ class ViewerManager(BaseGalleryManager):
             fullscreen: If True, open in fullscreen mode
             media_paths: Optional list of specific media paths to show (for filtered view)
         """
-        from ui_components import EmbeddedImageViewer, FullscreenImageViewer
-
         # Use provided media paths or collect all from gallery
         if media_paths is None:
             media_paths = self._get_media_paths()
@@ -108,10 +106,14 @@ class ViewerManager(BaseGalleryManager):
             self._set_layout_visible(self.tab.ui.galleryFooterLayout, False)
 
         # Guard against duplicate creation requests (rapid double-click)
-        if self._viewer_creation_pending or (self._embedded_viewer is not None and not self._embedded_viewer.isVisible()):
-            logger.debug("[Viewer] Creation already pending or viewer exists, ignoring subsequent request")
-            if self._viewer_creation_pending:
-                return
+        if self._viewer_creation_pending:
+            logger.debug("[Viewer] Creation already pending, ignoring subsequent request")
+            return
+
+        # Gallery-level shortcuts (L, G, 1-9, Esc, ...) must not steal keys
+        # from the viewer's own keyPressEvent while it is open
+        if hasattr(self.tab, 'set_shortcuts_enabled'):
+            self.tab.set_shortcuts_enabled(False)
 
         # Create embedded viewer if not exists
         if self._embedded_viewer is None:
@@ -231,10 +233,10 @@ class ViewerManager(BaseGalleryManager):
                 self.tab.show_status_message("Removed from Likes")
 
         # Update the thumbnail widget's like state if visible
-        if hasattr(self.tab, '_widget_cache') and path in self.tab._widget_cache:
+        if hasattr(self.tab, 'get_cached_widget'):
             from shiboken6 import isValid
-            widget = self.tab._widget_cache[path]
-            if isValid(widget) and hasattr(widget, 'update_favorites_state'):
+            widget = self.tab.get_cached_widget(path)
+            if widget and isValid(widget) and hasattr(widget, 'update_favorites_state'):
                 widget.update_favorites_state()
 
     def close_embedded(self):
@@ -249,7 +251,17 @@ class ViewerManager(BaseGalleryManager):
             self._viewer_loading_widget.hide()
 
         if self._embedded_viewer:
+            # Stop video/audio explicitly — hide() alone left media playing
+            if hasattr(self._embedded_viewer, 'stop_playback'):
+                self._embedded_viewer.stop_playback()
             self._embedded_viewer.hide()
+
+        # Re-enable gallery shortcuts and return focus to the gallery so
+        # they are active again (WidgetWithChildrenShortcut context)
+        if hasattr(self.tab, 'set_shortcuts_enabled'):
+            self.tab.set_shortcuts_enabled(True)
+        if self.tab.ui:
+            self.tab.ui.setFocus()
 
         # Show the gallery splitter (contains scroll area and groups panel)
         if hasattr(self.tab, '_gallery_splitter'):

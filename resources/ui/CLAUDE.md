@@ -53,8 +53,8 @@ Base class for thumbnail widgets with disk/memory cache management.
 ### splash_screen.py
 Application splash screen with async loading progress.
 
-### spinners.py
-Loading spinner widgets for async operations.
+### loading_widgets.py
+Loading spinner widgets and overlays for async operations.
 
 ### effects.py
 UI animation effects (pulse, glow, fade).

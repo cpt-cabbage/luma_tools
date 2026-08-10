@@ -8,6 +8,20 @@ from typing import Tuple, Any, Optional
 import importlib
 
 
+def _resolve_attr(module: Any, module_path: str, attr: str) -> Any:
+    """Resolve an attribute of a module, falling back to submodule import.
+
+    For namespace packages (e.g. ``pxr``), submodules are NOT bound as
+    attributes of the parent until explicitly imported — a plain getattr made
+    ``safe_import("pxr", "Usd")`` fail even with usd-core installed, which
+    permanently disabled the USD loader.
+    """
+    try:
+        return getattr(module, attr)
+    except AttributeError:
+        return importlib.import_module(f"{module_path}.{attr}")
+
+
 def safe_import(module_path: str, attr: Optional[str] = None) -> Tuple[Optional[Any], bool]:
     """
     Safely import a module or attribute with availability flag.
@@ -27,7 +41,7 @@ def safe_import(module_path: str, attr: Optional[str] = None) -> Tuple[Optional[
     try:
         module = importlib.import_module(module_path)
         if attr:
-            return getattr(module, attr), True
+            return _resolve_attr(module, module_path, attr), True
         return module, True
     except (ImportError, AttributeError, ModuleNotFoundError):
         return None, False
@@ -53,9 +67,9 @@ def safe_import_multiple(module_path: str, *attrs: str) -> Tuple[Tuple[Optional[
         return tuple(None for _ in attrs), False
 
     try:
-        values = tuple(getattr(module, attr) for attr in attrs)
+        values = tuple(_resolve_attr(module, module_path, attr) for attr in attrs)
         return values, True
-    except AttributeError as e:
+    except (ImportError, AttributeError, ModuleNotFoundError) as e:
         import logging
         logging.getLogger(__name__).warning(
             f"Module '{module_path}' imported but attribute missing: {e}"

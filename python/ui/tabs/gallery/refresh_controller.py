@@ -5,7 +5,6 @@ Handles gallery content refresh mechanisms:
 - File system watcher for local paths
 - Polling timer for network paths
 - Scan operations and caching
-- Pre-warm cache handling from startup
 """
 
 import os
@@ -44,9 +43,6 @@ class RefreshController(BaseGalleryManager):
         # Scan state
         self._scan_in_progress = False
 
-        # Flag to skip first auto-refresh after prewarm (avoid duplicate scan)
-        self._skip_next_auto_refresh = False
-
     def on_refresh(self, force=False, show_status=True):
         """
         Handle refresh request.
@@ -55,13 +51,6 @@ class RefreshController(BaseGalleryManager):
             force: If True, bypass scan-in-progress check
             show_status: If True, show status bar feedback (False for auto-refreshes)
         """
-        # Skip first automatic refresh after prewarm to avoid duplicate scan
-        # Only skip non-forced, silent (automatic) refreshes
-        if self._skip_next_auto_refresh and not force and not show_status:
-            self._skip_next_auto_refresh = False
-            self.tab.log("[Gallery] Skipping auto-refresh (prewarm cache active)")
-            return
-
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
             # Only show status message for user-initiated refreshes, not auto-refreshes
@@ -91,12 +80,6 @@ class RefreshController(BaseGalleryManager):
 
         if self._scan_in_progress:
             return
-
-        # Don't refresh if prewarm processing is in progress (prevents cache corruption)
-        with self.tab._cache_lock:
-            if getattr(self, '_deferred_prewarm_items', None):
-                logger.info("[Gallery] Skipping refresh - prewarm processing in progress")
-                return
 
         self._scan_in_progress = True
 
@@ -172,306 +155,6 @@ class RefreshController(BaseGalleryManager):
                 self.tab.animator.end_activity("gallery_scan")
             self.show_status(f"Gallery scan failed: {msg}", "error")
 
-    def use_prewarm_cache_sync(self):
-        """Use pre-warmed cache but defer display until after window is shown."""
-        from ui.gallery_prewarm import get_prewarm_cache, clear_prewarm_cache
-        from PySide6.QtCore import QTimer
-
-        try:
-            prewarm_cache = get_prewarm_cache()
-            if prewarm_cache is not None and prewarm_cache.get('items'):
-                # THREAD-SAFE: Lock during validation to prevent race conditions
-                with self.tab._cache_lock:
-                    # Normalize usernames: treat None and "" consistently
-                    cached_username = prewarm_cache.get('username')
-                    cached_username = cached_username.strip() if cached_username else None
-
-                    current_username = self.tab._selected_user
-                    current_username = current_username.strip() if current_username else None
-
-                    # SECURITY: Validate that cache is for current user
-                    if cached_username != current_username:
-                        logger.warning(
-                            f"[Gallery] Prewarm cache mismatch: cached for '{cached_username}', "
-                            f"but current user is '{current_username}'. Discarding cache."
-                        )
-                        clear_prewarm_cache()
-                        # Don't use the cache - let the gallery do a fresh scan
-                        return
-
-                    prewarm_items = prewarm_cache['items']
-                    logger.info(f"[Gallery] Using pre-warmed cache for '{current_username}': {len(prewarm_items)} items")
-
-                    # Mark initial scan as done IMMEDIATELY to prevent race condition
-                    # with on_tab_activated() triggering a duplicate refresh
-                    self.tab._initial_scan_done = True
-
-                    # First real scan after prewarm should replace (not add incrementally)
-                    # to avoid duplicates from any prewarm/full-scan output differences
-                    self.tab._first_scan_after_prewarm = True
-
-                    # Skip the next automatic refresh (network polling) since we have prewarm data
-                    # This prevents the full scan from running and causing items to "pop up"
-                    self._skip_next_auto_refresh = True
-
-                    # Enrich items with additional data if needed
-                    items = self._enrich_prewarm_items(prewarm_items)
-
-                    # Store items for deferred processing after window is shown
-                    # This prevents blocking the splash screen
-                    self._deferred_prewarm_items = items
-
-                    # Clear the prewarm cache (one-time use)
-                    clear_prewarm_cache()
-
-                    # Schedule display for after splash screen closes (100ms delay)
-                    # This allows the main window to show first
-                    QTimer.singleShot(100, self._process_deferred_prewarm)
-            else:
-                logger.info("[Gallery] No pre-warmed cache available, will scan on tab activation")
-        except Exception as e:
-            logger.error(f"[Gallery] Error processing prewarm cache: {e}", exc_info=True)
-            # CRITICAL: Always clear cache on error to prevent stale data reuse
-            clear_prewarm_cache()
-
-    def _process_deferred_prewarm(self):
-        """Process deferred prewarm items (called after splash screen closes).
-
-        Sets ``_scan_in_progress`` for the duration of the display so a
-        concurrently-firing poll/refresh tick (which checks that flag) can't
-        run a parallel `display_items` and produce duplicated entries.
-        """
-        with self.tab._cache_lock:
-            if not getattr(self, '_deferred_prewarm_items', None):
-                return
-            items = self._deferred_prewarm_items
-            self._deferred_prewarm_items = None  # Free memory
-
-        self._scan_in_progress = True
-        try:
-            # Now it's safe to create widgets and display without blocking splash
-            self._process_scan_results_sync(items)
-        finally:
-            self._scan_in_progress = False
-
-        # _initial_scan_done already set in use_prewarm_cache_sync() to prevent race condition
-        self.tab.log(f"[Gallery] Displayed {len(items)} pre-warmed items")
-
-    def _enrich_prewarm_items(self, items):
-        """Add missing data to pre-warmed items (job_prefix, is_input, metadata)."""
-        if not items:
-            return items
-
-        try:
-            from ui.tabs.gallery_loader import extract_job_prefix
-        except ImportError:
-            # If can't import, return items as-is
-            return items
-
-        # Try to load metadata functions
-        try:
-            from comfyui.metadata import load_gallery_metadata, _lookup_file_metadata
-            metadata_available = True
-        except ImportError:
-            load_gallery_metadata = None
-            _lookup_file_metadata = None
-            metadata_available = False
-
-        # Import hash function
-        try:
-            from comfyui.utils import compute_file_hash
-        except ImportError:
-            compute_file_hash = None
-
-        # Group items by directory for metadata loading
-        files_by_dir = {}
-        for item in items:
-            dir_path = os.path.dirname(item['path'])
-            if dir_path not in files_by_dir:
-                files_by_dir[dir_path] = []
-            files_by_dir[dir_path].append(item)
-
-        # Enrich each item
-        for dir_path, dir_items in files_by_dir.items():
-            # Load metadata for this directory if available
-            full_metadata = {}
-            if metadata_available and load_gallery_metadata:
-                try:
-                    full_metadata = load_gallery_metadata(dir_path)
-                    if not isinstance(full_metadata, dict):
-                        full_metadata = {}
-                except Exception as e:
-                    logger.debug(f"Could not load metadata for {dir_path}: {e}")
-                    full_metadata = {}
-
-            for item in dir_items:
-                filename = os.path.basename(item['path'])
-
-                # Skip hash computation during prewarm (runs on GUI thread).
-                # Hashes will be computed in the background scan worker instead.
-                content_hash = item.get('content_hash')
-
-                # Check if already enriched
-                if 'job_prefix' in item:
-                    continue
-
-                # Try metadata-based detection first
-                is_output = None
-                job_prefix = None
-                source_images = []
-                has_metadata = False
-
-                if full_metadata and _lookup_file_metadata:
-                    try:
-                        # Use allow_reverse_match=False for input/output detection
-                        # to avoid matching input files to output job metadata
-                        file_metadata = _lookup_file_metadata(
-                            full_metadata, filename,
-                            allow_reverse_match=False,
-                            content_hash=content_hash)
-                        if file_metadata and isinstance(file_metadata, dict) and 'is_output' in file_metadata:
-                            has_metadata = True
-                            is_output = file_metadata.get('is_output', True)
-                            job_prefix = file_metadata.get('job_prefix')
-                            source_images = file_metadata.get('source_images', [])
-                            if not isinstance(source_images, list):
-                                source_images = []
-                    except Exception as e:
-                        logger.debug(f"Could not lookup metadata for {filename}: {e}")
-
-                # Fall back to filename pattern detection
-                # Note: is_output=False with job_prefix=None is valid for input files
-                if is_output is None or (is_output and job_prefix is None):
-                    try:
-                        # Pass file_type so models/video/audio default to output correctly
-                        file_type = item.get('type', 'image')
-                        job_prefix, is_output = extract_job_prefix(filename, file_type)
-                    except Exception as e:
-                        logger.debug(f"Could not extract job prefix from {filename}: {e}")
-                        job_prefix = None
-                        # Models/video/audio default to output, images to input
-                        file_type = item.get('type', 'image')
-                        is_output = file_type in ('model', 'video', 'audio')
-
-                    # Double-check: if pattern says output but file is a known source image,
-                    # override to mark as input (handles files with misleading names like _001)
-                    if is_output and item.get('type', 'image') == 'image':
-                        try:
-                            from comfyui.metadata import is_known_input_file
-                            output_dir = os.path.dirname(item.get('path', ''))
-                            if output_dir and is_known_input_file(output_dir, filename):
-                                is_output = False
-                                logger.debug(f"[Refresh] {filename} -> INPUT (known source image)")
-                        except ImportError:
-                            pass
-
-                # Add enriched fields
-                item['workflow'] = ''
-                item['job_prefix'] = job_prefix
-                item['is_input'] = not is_output
-                item['source_images'] = source_images
-                item['has_metadata'] = has_metadata
-
-        # Bundle _view/_export pairs to match full scan behavior
-        items = self._bundle_view_export_pairs(items)
-
-        return items
-
-    def _bundle_view_export_pairs(self, items):
-        """Bundle _view and _export file pairs to match full scan behavior.
-
-        This ensures prewarm items have the same structure as items from
-        GalleryLoader.scan_directory(), preventing "new item" detection on refresh.
-        """
-        if not items:
-            return items
-
-        # Group items by directory
-        items_by_dir = {}
-        for item in items:
-            dir_path = os.path.dirname(item['path'])
-            if dir_path not in items_by_dir:
-                items_by_dir[dir_path] = {}
-            filename = os.path.basename(item['path'])
-            items_by_dir[dir_path][filename] = item
-
-        result = []
-        for dir_path, items_dict in items_by_dir.items():
-            bundled_files = set()
-
-            for filename in list(items_dict.keys()):
-                if filename in bundled_files:
-                    continue
-
-                base_name = None
-                view_file = None
-                export_file = None
-
-                # Check if this is a _view or _export file
-                if '_view' in filename:
-                    parts = filename.rsplit('_view', 1)
-                    if len(parts) == 2:
-                        base_name = parts[0]
-                        ext_part = parts[1]
-                        view_file = filename
-                        export_candidate = f"{base_name}_export{ext_part}"
-                        if export_candidate in items_dict:
-                            export_file = export_candidate
-                elif '_export' in filename:
-                    parts = filename.rsplit('_export', 1)
-                    if len(parts) == 2:
-                        base_name = parts[0]
-                        ext_part = parts[1]
-                        export_file = filename
-                        view_candidate = f"{base_name}_view{ext_part}"
-                        if view_candidate in items_dict:
-                            view_file = view_candidate
-
-                # If we found a pair, create a bundled item
-                if base_name and view_file and export_file:
-                    bundled_files.add(view_file)
-                    bundled_files.add(export_file)
-
-                    view_item = items_dict[view_file]
-                    export_item = items_dict[export_file]
-
-                    result.append({
-                        'path': view_item['path'],
-                        'export_path': export_item['path'],
-                        'mtime': max(view_item['mtime'], export_item['mtime']),
-                        'type': view_item['type'],
-                        'name': view_item['name'],
-                        'workflow': view_item.get('workflow', ''),
-                        'job_prefix': view_item.get('job_prefix'),
-                        'is_input': view_item.get('is_input', False),
-                        'source_images': view_item.get('source_images', []),
-                        'has_metadata': view_item.get('has_metadata', False),
-                        'is_bundled': True
-                    })
-                else:
-                    if filename not in bundled_files:
-                        result.append(items_dict[filename])
-
-        return result
-
-    def _process_scan_results_sync(self, items):
-        """Process scan results synchronously (for prewarm cache)."""
-        # Store in cache
-        self.tab._cached_items = items
-
-        # Update known items for ALL items (not just filtered ones)
-        # This prevents filtered-out items from being detected as "new" on every refresh
-        # Paths are already normalized at scan source (os.path.normpath)
-        for item in items:
-            self.tab._known_items.add(item['path'])
-
-        # Apply current filter and sort
-        filtered_items = self.tab._filter_items(items)
-        sorted_items = self.tab._manager.sort_items(filtered_items, self.tab._sort_mode)
-
-        # Use display_items to properly create and display all widgets
-        self.tab._manager.display_items(sorted_items, self.tab._view_mode)
-
     # =========================================================================
     # FILE SYSTEM WATCHER
     # =========================================================================
@@ -511,14 +194,26 @@ class RefreshController(BaseGalleryManager):
                 self.tab.log(f"[Gallery] Error collecting watch directories: {e}")
             return dirs_to_watch
 
+        # Capture the generation so a stop_watcher() while the collection
+        # worker is in flight (user left the tab) cancels this setup —
+        # otherwise the late result re-armed the watcher and kept rescanning
+        # the share with the gallery hidden
+        generation = self._watcher_generation
+
         self._watcher_setup_worker = Worker(collect_directories)
-        self._watcher_setup_worker.signals.result.connect(self._on_watch_directories_collected)
+        self._watcher_setup_worker.signals.result.connect(
+            lambda dirs, g=generation: self._on_watch_directories_collected(dirs, g)
+        )
         self._watcher_setup_worker.signals.error.connect(self._on_watcher_setup_error)
         QThreadPool.globalInstance().start(self._watcher_setup_worker)
 
-    def _on_watch_directories_collected(self, dirs_to_watch):
+    def _on_watch_directories_collected(self, dirs_to_watch, generation=None):
         """Set up watcher with collected directories."""
         self._watcher_setup_in_progress = False
+
+        if generation is not None and generation != self._watcher_generation:
+            self.tab.log("[Gallery] Watcher setup cancelled (tab deactivated)")
+            return
 
         if not dirs_to_watch:
             return
@@ -550,6 +245,9 @@ class RefreshController(BaseGalleryManager):
 
     def stop_watcher(self):
         """Stop the file system watcher."""
+        # Bump the generation token so any in-flight directory-collection
+        # worker result is discarded instead of resurrecting the watcher
+        self._watcher_generation = getattr(self, '_watcher_generation', 0) + 1
         if self._watcher:
             self._watcher.removePaths(self._watcher.directories())
             self._watcher = None

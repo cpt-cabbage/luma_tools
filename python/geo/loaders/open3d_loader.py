@@ -8,13 +8,32 @@ Best for simple mesh formats like OBJ, STL, PLY.
 import os
 from typing import Set
 
-import numpy as np
+# numpy is optional (mirrors base.py) — a broken venv must not make the
+# whole geo.loaders import graph blow up.
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData
-from core.import_utils import safe_import
 
-o3d, OPEN3D_AVAILABLE = safe_import("open3d")
+# open3d is imported lazily on first availability check — it alone accounts
+# for most of the ~11.5 s that eager 3D-library imports cost at
+# `import geo.loaders` time.
+o3d = None
+OPEN3D_AVAILABLE = False
+_open3d_checked = False
+
+
+def _ensure_open3d() -> bool:
+    """Import open3d on first use and report availability."""
+    global o3d, OPEN3D_AVAILABLE, _open3d_checked
+    if not _open3d_checked:
+        from core.import_utils import safe_import
+        o3d, OPEN3D_AVAILABLE = safe_import("open3d")
+        _open3d_checked = True
+    return OPEN3D_AVAILABLE and np is not None
 
 
 class Open3DModelLoader(BaseModelLoader):
@@ -30,7 +49,7 @@ class Open3DModelLoader(BaseModelLoader):
 
     @property
     def is_available(self) -> bool:
-        return OPEN3D_AVAILABLE
+        return _ensure_open3d()
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Open3D."""

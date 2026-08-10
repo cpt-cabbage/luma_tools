@@ -11,7 +11,12 @@ from typing import Set, List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-import numpy as np
+# numpy is optional (mirrors base.py) — a broken venv must not make the
+# whole geo.loaders import graph blow up.
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 from .base import BaseModelLoader
 from geo.loader import (
@@ -50,7 +55,7 @@ class AssimpModelLoader(BaseModelLoader):
 
     @property
     def is_available(self) -> bool:
-        return ASSIMP_AVAILABLE
+        return ASSIMP_AVAILABLE and np is not None
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Assimp."""

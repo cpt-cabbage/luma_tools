@@ -262,8 +262,17 @@ class TestRecordExecution:
             record = json.load(f)
         assert record["workflow_preset"] == "My Workflow"
 
-    def test_no_network_path(self, tmp_path):
-        """Should return empty string when no network path available."""
+    def test_no_network_path(self, tmp_path, monkeypatch):
+        """Should return empty string when no network path is available.
+
+        IMPORTANT: network_path=None makes record_execution auto-resolve the
+        REAL production network path from global_settings.json — an earlier
+        version of this test actually wrote records into production. The
+        resolver must be patched out to test graceful degradation.
+        """
+        import comfyui.analytics as analytics_mod
+        monkeypatch.setattr(analytics_mod, "_get_network_output_path", lambda: None)
+
         output_dir = str(tmp_path / "output")
         os.makedirs(output_dir, exist_ok=True)
 
@@ -277,11 +286,7 @@ class TestRecordExecution:
             frame_results=[],
             network_path=None,
         )
-        # Without a real network path, _get_network_output_path will fail
-        # We pass None explicitly to test this path
-        # But since _get_network_output_path won't find real settings, result is ""
-        # (This tests graceful degradation)
-        assert isinstance(result, str)
+        assert result == ""
 
 
 # =============================================================================
@@ -564,7 +569,12 @@ class TestAggregateNodeTiming:
         # Global should combine both
         assert result["global_node_types"]["SharedNode"]["count"] == 2
 
-    def test_no_network_path(self):
+    def test_no_network_path(self, monkeypatch):
+        """network_path=None must NOT fall through to the real production
+        share (an earlier version of this test overwrote the production
+        timing report) — patch the resolver and assert clean degradation."""
+        import comfyui.analytics as analytics_mod
+        monkeypatch.setattr(analytics_mod, "_get_network_output_path", lambda: None)
+
         result = aggregate_node_timing(network_path=None)
-        # Without a real network path, should return empty dict gracefully
-        assert isinstance(result, dict)
+        assert result == {}

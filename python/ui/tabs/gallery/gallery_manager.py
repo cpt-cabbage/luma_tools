@@ -147,7 +147,7 @@ class GalleryManager(BaseGalleryManager):
         # Grid mode - check for widget recycling opportunity
         if hasattr(self.tab, '_widget_cache') and self.tab._widget_cache:
             target_paths = set(item['path'] for item in items)
-            existing_paths = set(self.tab._widget_cache.keys())
+            existing_paths = set(self.tab.get_widget_cache_copy().keys())
 
             # Check if this is a filter change (subset/superset of existing)
             # or incremental addition
@@ -245,7 +245,7 @@ class GalleryManager(BaseGalleryManager):
 
         # Verify all target widgets exist and are valid
         for path in target_paths:
-            widget = self.tab._widget_cache.get(path)
+            widget = self.tab.get_cached_widget(path)
             if not widget or not isValid(widget):
                 return False
 
@@ -259,15 +259,15 @@ class GalleryManager(BaseGalleryManager):
             # Add only the target widgets in sorted order
             for item in items:
                 path = item['path']
-                widget = self.tab._widget_cache[path]
-                if isValid(widget):
+                widget = self.tab.get_cached_widget(path)
+                if widget and isValid(widget):
                     widget.setVisible(True)
                     self.tab._flow_layout.addWidget(widget)
 
             # Hide widgets that are filtered out (keep in cache for quick restoration)
             hidden_paths = existing_paths - target_paths
             for path in hidden_paths:
-                widget = self.tab._widget_cache.get(path)
+                widget = self.tab.get_cached_widget(path)
                 if widget and isValid(widget):
                     widget.setVisible(False)
 
@@ -400,21 +400,21 @@ class GalleryManager(BaseGalleryManager):
                 new_stacks.append(stack)
 
                 # Track items for this stack
-                self.tab._section_items[prefix] = [item['path'] for item in group_items]
+                self.tab.set_section_items(prefix, [item['path'] for item in group_items])
             else:
                 # Single item - show as regular thumbnail
                 item = group_items[0]
                 thumbnail = self._create_thumbnail_widget(item, container)
                 if thumbnail:
-                    self.tab._widget_cache[item['path']] = thumbnail
+                    self.tab.set_cached_widget(item['path'], thumbnail)
                     content_hash = item.get('content_hash')
                     if content_hash and hasattr(self.tab, '_hash_to_path'):
-                        self.tab._hash_to_path[content_hash] = item['path']
+                        self.tab.set_hash_path(content_hash, item['path'])
                     if content_hash and hasattr(self.tab, '_favorites_manager'):
                         self.tab._favorites_manager.register_hash(item['path'], content_hash)
                     self.tab._flow_layout.addWidget(thumbnail)
                     # Track in section_items so incremental sync can find this prefix
-                    self.tab._section_items[prefix] = [item['path']]
+                    self.tab.set_section_items(prefix, [item['path']])
 
         # Set favorites manager on all stacks after creation is complete
         # This avoids calling _apply_stack_colors twice per widget during init
@@ -477,7 +477,7 @@ class GalleryManager(BaseGalleryManager):
         # For single items in widget_cache, extract their prefixes from section_items
         existing_single_prefixes = set()
         if hasattr(self.tab, '_section_items'):
-            for prefix, paths in self.tab._section_items.items():
+            for prefix, paths in self.tab.get_section_items_copy().items():
                 if prefix not in existing_stack_prefixes and len(paths) == 1:
                     existing_single_prefixes.add(prefix)
 
@@ -491,7 +491,7 @@ class GalleryManager(BaseGalleryManager):
         # Check for stacks that need updating (existing stacks with changed items)
         stacks_to_update = []
         for prefix in existing_prefixes & new_prefixes:
-            old_paths = set(self.tab._section_items.get(prefix, []))
+            old_paths = set(self.tab.get_section_items(prefix))
             new_paths = set(item['path'] for item in new_groups[prefix])
             if new_paths != old_paths:
                 stacks_to_update.append(prefix)
@@ -526,14 +526,14 @@ class GalleryManager(BaseGalleryManager):
                         stack.deleteLater()
                 else:
                     # Single item - remove from widget cache
-                    paths = self.tab._section_items.get(prefix, [])
+                    paths = self.tab.get_section_items(prefix)
                     for path in paths:
-                        widget = self.tab._widget_cache.pop(path, None)
+                        widget = self.tab.remove_cached_widget(path)
                         if widget and isValid(widget):
                             self.tab._flow_layout.removeWidget(widget)
                             widget.deleteLater()
                 # Clean up section tracking
-                self.tab._section_items.pop(prefix, None)
+                self.tab.remove_section_items(prefix)
 
             # Get favorites manager and init new widgets list before updates
             favorites_manager = getattr(self.tab, '_favorites_manager', None)
@@ -572,10 +572,10 @@ class GalleryManager(BaseGalleryManager):
                     item = new_items[0]
                     thumbnail = self._create_thumbnail_widget(item, container)
                     if thumbnail:
-                        self.tab._widget_cache[item['path']] = thumbnail
+                        self.tab.set_cached_widget(item['path'], thumbnail)
                         content_hash = item.get('content_hash')
                         if content_hash and hasattr(self.tab, '_hash_to_path'):
-                            self.tab._hash_to_path[content_hash] = item['path']
+                            self.tab.set_hash_path(content_hash, item['path'])
                         if content_hash and hasattr(self.tab, '_favorites_manager'):
                             self.tab._favorites_manager.register_hash(item['path'], content_hash)
                         self.tab._flow_layout.addWidget(thumbnail)
@@ -583,9 +583,9 @@ class GalleryManager(BaseGalleryManager):
                 elif not was_stack and should_be_stack:
                     # Single → Stack: remove single thumbnail, create stack widget
                     had_transitions = True
-                    old_paths = self.tab._section_items.get(prefix, [])
+                    old_paths = self.tab.get_section_items(prefix)
                     for path in old_paths:
-                        widget = self.tab._widget_cache.pop(path, None)
+                        widget = self.tab.remove_cached_widget(path)
                         if widget and isValid(widget):
                             self.tab._flow_layout.removeWidget(widget)
                             widget.deleteLater()
@@ -606,28 +606,28 @@ class GalleryManager(BaseGalleryManager):
                     new_widgets.append(stack)
                 else:
                     # Single stays single but paths changed - replace thumbnail
-                    old_paths = self.tab._section_items.get(prefix, [])
+                    old_paths = self.tab.get_section_items(prefix)
                     new_path = new_items[0]['path']
                     for path in old_paths:
                         if path != new_path:
-                            widget = self.tab._widget_cache.pop(path, None)
+                            widget = self.tab.remove_cached_widget(path)
                             if widget and isValid(widget):
                                 self.tab._flow_layout.removeWidget(widget)
                                 widget.deleteLater()
-                    if new_path not in self.tab._widget_cache:
+                    if self.tab.get_cached_widget(new_path) is None:
                         thumbnail = self._create_thumbnail_widget(new_items[0], container)
                         if thumbnail:
-                            self.tab._widget_cache[new_path] = thumbnail
+                            self.tab.set_cached_widget(new_path, thumbnail)
                             content_hash = new_items[0].get('content_hash')
                             if content_hash and hasattr(self.tab, '_hash_to_path'):
-                                self.tab._hash_to_path[content_hash] = new_path
+                                self.tab.set_hash_path(content_hash, new_path)
                             if content_hash and hasattr(self.tab, '_favorites_manager'):
                                 self.tab._favorites_manager.register_hash(new_path, content_hash)
                             self.tab._flow_layout.addWidget(thumbnail)
                             new_widgets.append(thumbnail)
 
                 # Update section tracking for all cases
-                self.tab._section_items[prefix] = [item['path'] for item in new_items]
+                self.tab.set_section_items(prefix, [item['path'] for item in new_items])
 
             # Add new stacks/thumbnails for entirely new prefixes
             for prefix in added_prefixes:
@@ -655,21 +655,21 @@ class GalleryManager(BaseGalleryManager):
                     self.tab._flow_layout.addWidget(stack)
                     new_widgets.append(stack)
 
-                    self.tab._section_items[prefix] = [item['path'] for item in group_items]
+                    self.tab.set_section_items(prefix, [item['path'] for item in group_items])
                 else:
                     # Single item - show as regular thumbnail
                     item = group_items[0]
                     thumbnail = self._create_thumbnail_widget(item, container)
                     if thumbnail:
-                        self.tab._widget_cache[item['path']] = thumbnail
+                        self.tab.set_cached_widget(item['path'], thumbnail)
                         content_hash = item.get('content_hash')
                         if content_hash and hasattr(self.tab, '_hash_to_path'):
-                            self.tab._hash_to_path[content_hash] = item['path']
+                            self.tab.set_hash_path(content_hash, item['path'])
                         if content_hash and hasattr(self.tab, '_favorites_manager'):
                             self.tab._favorites_manager.register_hash(item['path'], content_hash)
                         self.tab._flow_layout.addWidget(thumbnail)
                         new_widgets.append(thumbnail)
-                        self.tab._section_items[prefix] = [item['path']]
+                        self.tab.set_section_items(prefix, [item['path']])
 
             changes = []
             if added_prefixes:
@@ -721,9 +721,9 @@ class GalleryManager(BaseGalleryManager):
                     target_index += 1
             else:
                 # Single item - find its widget in cache
-                paths = self.tab._section_items.get(prefix, [])
+                paths = self.tab.get_section_items(prefix)
                 for path in paths:
-                    widget = self.tab._widget_cache.get(path)
+                    widget = self.tab.get_cached_widget(path)
                     if widget and isValid(widget):
                         self.tab._flow_layout.removeWidget(widget)
                         self.tab._flow_layout.insertWidget(target_index, widget)
@@ -814,8 +814,14 @@ class GalleryManager(BaseGalleryManager):
             anim.setEasingCurve(QEasingCurve.OutCubic)
             self._new_item_animations.append(anim)
 
+            # Guard the deferred start: a display rebuild in the stagger window
+            # deletes the widget (and its opacity effect), and starting the
+            # animation then would call into a dead C++ object
             delay = idx * stagger
-            QTimer.singleShot(delay, anim.start)
+            gen = self._display_generation
+            QTimer.singleShot(delay, lambda a=anim, w=widget, g=gen: (
+                a.start() if g == self._display_generation and isValid(w) else None
+            ))
 
         # Cleanup after animations complete (always clean up to prevent memory leak)
         total_time = min(len(widgets), max_animated) * stagger + duration + 50
@@ -1015,10 +1021,10 @@ class GalleryManager(BaseGalleryManager):
                     continue
 
                 # Add to cache and insert at correct layout position
-                self.tab._widget_cache[path] = thumbnail
+                self.tab.set_cached_widget(path, thumbnail)
                 content_hash = item.get('content_hash')
                 if content_hash and hasattr(self.tab, '_hash_to_path'):
-                    self.tab._hash_to_path[content_hash] = path
+                    self.tab.set_hash_path(content_hash, path)
                 if content_hash and hasattr(self.tab, '_favorites_manager'):
                     self.tab._favorites_manager.register_hash(path, content_hash)
                 self.tab._flow_layout.insertWidget(target_index, thumbnail)
@@ -1033,8 +1039,9 @@ class GalleryManager(BaseGalleryManager):
             container.setUpdatesEnabled(True)
 
         # Animate newly added items with staggered fade-in
-        new_widgets = [self.tab._widget_cache[item['path']] for item in new_items
-                       if item['path'] in self.tab._widget_cache]
+        cache_snapshot = self.tab.get_widget_cache_copy()
+        new_widgets = [cache_snapshot[item['path']] for item in new_items
+                       if item['path'] in cache_snapshot]
         if new_widgets:
             self._animate_new_items(new_widgets)
 
@@ -1063,10 +1070,9 @@ class GalleryManager(BaseGalleryManager):
             ordered_widgets = []
             for item_dict in items:
                 path = item_dict['path']
-                if path in self.tab._widget_cache:
-                    widget = self.tab._widget_cache[path]
-                    if isValid(widget):
-                        ordered_widgets.append(widget)
+                widget = self.tab.get_cached_widget(path)
+                if widget and isValid(widget):
+                    ordered_widgets.append(widget)
 
             # Only proceed if we have all widgets
             if len(ordered_widgets) != len(items):
@@ -1180,10 +1186,10 @@ class GalleryManager(BaseGalleryManager):
             if thumbnail is None:
                 continue
 
-            self.tab._widget_cache[path] = thumbnail
+            self.tab.set_cached_widget(path, thumbnail)
             # Index by content hash for hash-based lookups
             if content_hash and hasattr(self.tab, '_hash_to_path'):
-                self.tab._hash_to_path[content_hash] = path
+                self.tab.set_hash_path(content_hash, path)
             # Register hash with favorites manager for auto-migration
             if content_hash and hasattr(self.tab, '_favorites_manager'):
                 self.tab._favorites_manager.register_hash(path, content_hash)
@@ -1435,8 +1441,8 @@ class GalleryManager(BaseGalleryManager):
         import os
         image_path = os.path.normpath(image_path)
 
-        if hasattr(self.tab, '_widget_cache'):
-            return self.tab._widget_cache.get(image_path)
+        if hasattr(self.tab, 'get_cached_widget'):
+            return self.tab.get_cached_widget(image_path)
 
     def find_widget_by_hash(self, content_hash: str):
         """Find a widget by its content hash.
@@ -1447,8 +1453,8 @@ class GalleryManager(BaseGalleryManager):
         Returns:
             The thumbnail widget if found, None otherwise
         """
-        if hasattr(self.tab, '_hash_to_path'):
-            path = self.tab._hash_to_path.get(content_hash)
+        if hasattr(self.tab, 'get_hash_path'):
+            path = self.tab.get_hash_path(content_hash)
             if path:
                 return self.find_widget_by_path(path)
         return None

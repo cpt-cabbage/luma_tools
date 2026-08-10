@@ -333,28 +333,36 @@ def _truncate_description(description: str, max_len: int = 100) -> str:
 
 
 def _notify_user_of_rejection(username: str, request: Dict[str, Any], admin_username: str, reason: str):
-    """Create a notification for the user about their rejected request."""
+    """Create a notification for the user about their rejected request.
+
+    Uses .get() throughout — legacy request records may lack category or
+    description, and a KeyError here made the (already saved) rejection
+    report failure to the caller.
+    """
     _append_user_notification(username, {
-        'request_id': request['id'],
-        'request_category': request['category'],
-        'request_description': _truncate_description(request['description']),
+        'request_id': request.get('id', ''),
+        'request_category': request.get('category', 'Unknown'),
+        'request_description': _truncate_description(request.get('description', '')),
         'action': 'rejected',
         'rejected_by': admin_username,
-        'rejected_at': request['rejected_at'],
+        'rejected_at': request.get('rejected_at', ''),
         'reason': reason,
         'read': False
     })
 
 
 def _notify_user_of_completion(username: str, request: Dict[str, Any], admin_username: str):
-    """Create a notification for the user about their completed request."""
+    """Create a notification for the user about their completed request.
+
+    Uses .get() throughout (see _notify_user_of_rejection).
+    """
     _append_user_notification(username, {
-        'request_id': request['id'],
-        'request_category': request['category'],
-        'request_description': _truncate_description(request['description']),
+        'request_id': request.get('id', ''),
+        'request_category': request.get('category', 'Unknown'),
+        'request_description': _truncate_description(request.get('description', '')),
         'action': 'completed',
         'completed_by': admin_username,
-        'completed_at': request['completed_at'],
+        'completed_at': request.get('completed_at', ''),
         'read': False
     })
 
@@ -425,7 +433,10 @@ def get_unread_feature_request_count(username: str) -> int:
     Uses user settings to track last read timestamp.
 
     Args:
-        username: Admin username
+        username: Admin username. NOTE: the last-read timestamp is stored in
+            the LOCAL user settings of whoever is running the app, so this
+            only returns a meaningful count for the current user — do not
+            pass another admin's name expecting their unread count.
 
     Returns:
         Count of unread requests

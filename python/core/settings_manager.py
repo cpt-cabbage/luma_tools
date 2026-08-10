@@ -551,8 +551,10 @@ def add_hdri_to_list(name: str, path: str):
         for hdri in hdri_list:
             if hdri.get("name") == name:
                 return  # Already exists
-        hdri_list.append({"name": name, "path": path})
-        settings["hdri_list"] = hdri_list
+        # Build a NEW list — appending mutated the list shared with the
+        # settings cache, so a failed save still left the entry visible
+        # in memory even though it was never persisted
+        settings["hdri_list"] = hdri_list + [{"name": name, "path": path}]
         save_global_settings(settings)
     logger.info(f"Added HDRI to global settings: {name}")
 

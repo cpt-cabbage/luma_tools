@@ -240,6 +240,13 @@ class OperationsManager(BaseGalleryManager):
 
         count = len(self.tab._selected_items)
 
+        # In-progress guard FIRST — it used to sit after the spinner/status
+        # update, so a second click showed "Publishing..." and started the
+        # spinner, then silently returned leaving the UI in a lying state
+        if getattr(self, '_publish_in_progress', False):
+            self.tab.show_status("A publish is already running", "warning")
+            return
+
         # Confirm publish
         if not confirm_action(
             "Publish to AYON",
@@ -273,9 +280,6 @@ class OperationsManager(BaseGalleryManager):
                     results.append({'path': path, 'success': False, 'error': str(e)})
 
             return results
-
-        if getattr(self, '_publish_in_progress', False):
-            return
 
         self._publish_in_progress = True
         self._publish_worker = Worker(publish_batch, selected_paths)

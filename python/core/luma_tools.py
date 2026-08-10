@@ -406,14 +406,12 @@ class ExpandingTabBar(QTabBar):
 class LumaShotTools(QtWidgets.QWidget):
     """Main application window."""
 
-    def __init__(self, parent=None, progress_callback=None, pending_job_recovery=None):
+    def __init__(self, parent=None, progress_callback=None):
         super(LumaShotTools, self).__init__()
 
         self._progress_callback = progress_callback or (lambda p, m: None)
-        self._pending_job_recovery = pending_job_recovery
 
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self._parent_widget = parent
 
         # Store tab instances
         self.tabs = {}
@@ -961,23 +959,39 @@ class LumaShotTools(QtWidgets.QWidget):
             logging.warning(f"Could not clear thumbnail cache: {e}")
 
     def _check_deployed_version(self):
-        """Periodically check if a new version has been deployed."""
+        """Periodically check if a new version has been deployed.
+
+        The version file lives on the network install root, so the read runs
+        in a worker — an SMB stall inside this QTimer slot froze the whole UI.
+        """
         # Don't check if we already know there's a new version
         if self._deployed_version_available:
             return
+        if getattr(self, '_version_check_in_flight', False):
+            return
 
-        try:
-            from core.config import _load_version
-            deployed_version = _load_version()
+        from core.config import _load_version
+        from ui_components import Worker
 
-            # Compare with the version we started with
-            if deployed_version != APP_VERSION and deployed_version != "unknown":
-                logging.info(f"New deployed version detected: v{deployed_version} (current: v{APP_VERSION})")
-                self._deployed_version_available = True
-                self._show_new_version_notification(deployed_version)
-        except Exception as e:
-            # Silently fail - don't spam the user with errors
-            logging.error(f"Version check failed: {e}")
+        self._version_check_in_flight = True
+        worker = Worker(_load_version)
+        worker.signals.result.connect(self._on_deployed_version_result)
+        worker.signals.error.connect(self._on_deployed_version_error)
+        self._version_check_worker = worker  # keep reference to prevent GC
+        QtCore.QThreadPool.globalInstance().start(worker)
+
+    def _on_deployed_version_result(self, deployed_version):
+        """Handle deployed-version read (GUI thread via worker signal)."""
+        self._version_check_in_flight = False
+        if deployed_version != APP_VERSION and deployed_version != "unknown":
+            logging.info(f"New deployed version detected: v{deployed_version} (current: v{APP_VERSION})")
+            self._deployed_version_available = True
+            self._show_new_version_notification(deployed_version)
+
+    def _on_deployed_version_error(self, error_msg, traceback_str=""):
+        """Handle deployed-version read failure (non-critical)."""
+        self._version_check_in_flight = False
+        logging.error(f"Version check failed: {error_msg}")
 
     def _show_new_version_notification(self, new_version: str):
         """Show notification that a new version is available via the Settings tab."""
@@ -1345,12 +1359,11 @@ class LumaShotTools(QtWidgets.QWidget):
         running = self._get_running_tasks()
         if running:
             from dialog_helpers import confirm_action
-            detail = "\n".join(f"  - {task}" for task in running)
             if not confirm_action(
                 "Tasks Still Running",
                 "There are tasks still running. Are you sure you want to exit?",
                 parent=self,
-                detail="\n".join(running),
+                detail="\n".join(f"  - {task}" for task in running),
             ):
                 event.ignore()
                 return
@@ -1409,10 +1422,11 @@ def main():
         except Exception as e:
             logging.debug(f"Could not cache tool paths: {e}")
 
-        # Check for running jobs to recover (show feedback in splash)
+        # Check for running jobs to recover (splash feedback only — the
+        # actual recovery is done independently by the ComfyUI tab's polling
+        # via find_user_running_jobs)
         splash.update_progress(15, "Loading", "Checking for jobs to recover...")
         app.processEvents()
-        pending_job_recovery = None
         try:
             from core.user_preferences import get_comfyui_running_jobs
             job_state = get_comfyui_running_jobs()
@@ -1421,12 +1435,9 @@ def main():
                 if mode == "iterate":
                     job_id = job_state.get("job_id", "")
                     splash.update_progress(17, "Loading", f"Found job to recover: {job_id[:8]}...")
-                    pending_job_recovery = {"mode": "iterate", "count": 1}
                 elif mode == "batch":
-                    job_ids = job_state.get("job_ids", [])
-                    count = len(job_ids)
+                    count = len(job_state.get("job_ids", []))
                     splash.update_progress(17, "Loading", f"Found {count} job(s) to recover...")
-                    pending_job_recovery = {"mode": "batch", "count": count}
                 app.processEvents()
                 logging.info(f"[Startup] Found {mode} mode jobs to recover")
         except Exception as e:
@@ -1446,10 +1457,7 @@ def main():
 
         global _main_window
         t_start = time.perf_counter()
-        window = LumaShotTools(
-            progress_callback=_splash_progress,
-            pending_job_recovery=pending_job_recovery,
-        )
+        window = LumaShotTools(progress_callback=_splash_progress)
         t_elapsed = time.perf_counter() - t_start
         logging.info(f"[Startup] Window creation total: {t_elapsed*1000:.0f}ms")
         _main_window = window  # Store reference for cross-widget access

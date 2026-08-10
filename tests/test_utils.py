@@ -305,6 +305,15 @@ class TestExtractRenderName:
 
         assert extract_render_name("render_name") == "render_name"
 
+    def test_dotted_version_preserved(self):
+        """Dotted version segments must survive (regression: split('.')[0]
+        truncated 'scene_v1.2.0001.exr' to 'scene_v1')."""
+        from core.utils import extract_render_name
+
+        assert extract_render_name("scene_v1.2.0001.exr") == "scene_v1.2"
+        assert extract_render_name("scene_v1.2.####.exr", strip_frame_padding=True) == "scene_v1.2"
+        assert extract_render_name("sh010_beauty.mp4") == "sh010_beauty"
+
 
 # Allow running tests directly
 if __name__ == "__main__":

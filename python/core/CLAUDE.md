@@ -7,7 +7,6 @@ Core utilities and infrastructure for Luma Tools.
 ### utils.py — Common Helpers
 - `ensure_directory(path)` - create directory if needed (prefer over `os.makedirs`)
 - `load_json(path, default)` / `save_json(path, data)` - with error handling and atomic writes
-- `remove_prefix(s, prefix)` / `remove_suffix(s, suffix)` - Python <3.9 compatible
 - `normalize_path(path)` - Windows backslash → forward slash for AYON/Deadline
 - `extract_render_name(filename, strip_frame_padding=False)` - extract render name from sequence filename
 

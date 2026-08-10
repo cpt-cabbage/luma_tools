@@ -17,11 +17,26 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Callable, Dict, Optional
 
-from core.utils import ensure_directory
+# Farm isolation: this module is copied to the flat _job_data dir as
+# `comfyui_metadata_file.py`, where the `core` package is not available.
+try:
+    from core.utils import ensure_directory
+except ImportError:
+    def ensure_directory(path):
+        if path and not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        return path
 
 logger = logging.getLogger(__name__)
+
+# Cross-process lockfile tuning. Writers on other machines (farm workers,
+# other workstations) coordinate through a `<path>.lock` sentinel created
+# with O_EXCL, which is atomic on SMB shares.
+_LOCKFILE_TIMEOUT_SECONDS = 5.0
+_LOCKFILE_STALE_SECONDS = 30.0
 
 
 class MetadataFile:
@@ -62,6 +77,10 @@ class MetadataFile:
         self._lock = threading.RLock()
         self._cache: Optional[Dict[str, Any]] = None
         self._cache_mtime: float = 0.0
+        # Cross-process lockfile state (guarded by self._lock; the depth
+        # counter makes the file lock reentrant within a thread)
+        self._flock_fd: Optional[int] = None
+        self._flock_depth: int = 0
 
     @property
     def path(self) -> str:
@@ -143,11 +162,72 @@ class MetadataFile:
             logger.error(f"[MetadataFile] Error loading {metadata_path}: {e}")
             return default
 
+    def _acquire_file_lock(self) -> None:
+        """Acquire the cross-process lockfile. Call with self._lock held.
+
+        Reentrant within a thread via a depth counter. On timeout or lockfile
+        creation failure, proceeds without the lock (availability over strict
+        consistency) after logging — a wedged lockfile must never stop saves.
+        """
+        if self._flock_depth > 0:
+            self._flock_depth += 1
+            return
+
+        lock_path = self.path + ".lock"
+        deadline = time.monotonic() + _LOCKFILE_TIMEOUT_SECONDS
+        fd = None
+        while True:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                # Break locks left behind by crashed processes
+                try:
+                    if time.time() - os.path.getmtime(lock_path) > _LOCKFILE_STALE_SECONDS:
+                        os.remove(lock_path)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        f"[MetadataFile] Timed out waiting for {lock_path}; "
+                        f"proceeding without cross-process lock"
+                    )
+                    break
+                time.sleep(0.05)
+            except OSError as e:
+                logger.debug(f"[MetadataFile] Could not create lockfile {lock_path}: {e}")
+                break
+
+        self._flock_fd = fd
+        self._flock_depth = 1
+
+    def _release_file_lock(self) -> None:
+        """Release the cross-process lockfile. Call with self._lock held."""
+        if self._flock_depth == 0:
+            return
+        self._flock_depth -= 1
+        if self._flock_depth > 0:
+            return
+        fd = self._flock_fd
+        self._flock_fd = None
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.remove(self.path + ".lock")
+            except OSError:
+                pass
+
     def save(self, data: Dict[str, Any], indent: int = 2) -> bool:
         """
         Save metadata to file with atomic write.
 
-        Thread-safe: Uses RLock and atomic file operations.
+        Thread-safe (RLock) and cross-process safe: writes go to a temp file
+        unique per process/thread, then os.replace() under a lockfile so
+        concurrent writers on other machines don't interleave.
 
         Args:
             data: Dict to save as JSON
@@ -157,39 +237,71 @@ class MetadataFile:
             True if saved successfully, False on error
         """
         metadata_path = self.path
+        # Unique per process AND thread so concurrent savers never share a temp file
+        temp_path = f"{metadata_path}.{os.getpid()}.{threading.get_ident()}.tmp"
 
-        try:
-            ensure_directory(self._directory)
-
-            # Atomic write: write to temp file, then rename
-            temp_path = metadata_path + ".tmp"
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=indent, default=str)
-
-            # Atomic rename (on same filesystem)
-            os.replace(temp_path, metadata_path)
-
-            # Clear cache to force re-read on next load
-            self.clear_cache()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"[MetadataFile] Error saving {metadata_path}: {e}")
-            # Clean up temp file if it exists
-            temp_path = metadata_path + ".tmp"
-            if os.path.exists(temp_path):
+        with self._lock:
+            try:
+                ensure_directory(self._directory)
+                self._acquire_file_lock()
                 try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-            return False
+                    with open(temp_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=indent, default=str)
+                    # Atomic rename (on same filesystem)
+                    os.replace(temp_path, metadata_path)
+                finally:
+                    self._release_file_lock()
+
+                # Clear cache to force re-read on next load
+                self.clear_cache()
+                return True
+
+            except Exception as e:
+                logger.error(f"[MetadataFile] Error saving {metadata_path}: {e}")
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                return False
+
+    def mutate(self, mutator: Callable[[Dict[str, Any]], None]) -> bool:
+        """
+        Atomically load, modify, and save the metadata file.
+
+        Holds both the in-process RLock and the cross-process lockfile across
+        the whole read-modify-write, so concurrent writers (other threads,
+        other processes, farm workers) can't lose each other's updates.
+
+        Args:
+            mutator: Callable that mutates the loaded dict in place
+
+        Returns:
+            True if saved successfully, False on error
+        """
+        with self._lock:
+            try:
+                ensure_directory(self._directory)
+            except Exception as e:
+                logger.error(f"[MetadataFile] Error creating {self._directory}: {e}")
+                return False
+            self._acquire_file_lock()
+            try:
+                data = self.load(use_cache=False)
+                mutator(data)
+                return self.save(data)
+            except Exception as e:
+                logger.error(f"[MetadataFile] Error mutating {self.path}: {e}")
+                return False
+            finally:
+                self._release_file_lock()
 
     def update(self, key: str, value: Any) -> bool:
         """
         Update a single key in the metadata file.
 
-        Convenience method that loads, updates, and saves atomically.
+        Convenience method that loads, updates, and saves atomically
+        (cross-process safe via mutate()).
 
         Args:
             key: Key to update
@@ -198,10 +310,9 @@ class MetadataFile:
         Returns:
             True if saved successfully, False on error
         """
-        with self._lock:
-            data = self.load()
+        def _set(data: Dict[str, Any]) -> None:
             data[key] = value
-            return self.save(data)
+        return self.mutate(_set)
 
     def get(self, key: str, default: Any = None) -> Any:
         """

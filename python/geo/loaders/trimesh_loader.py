@@ -11,13 +11,31 @@ from typing import Set
 
 logger = logging.getLogger(__name__)
 
-import numpy as np
+# numpy is optional (mirrors base.py) — a broken venv must not make the
+# whole geo.loaders import graph blow up.
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 from .base import BaseModelLoader
 from geo.loader import ModelData, MeshData, Material
-from core.import_utils import safe_import
 
-trimesh, TRIMESH_AVAILABLE = safe_import("trimesh")
+# trimesh is imported lazily on first availability check — eager imports of
+# all 3D libraries cost ~11.5 s at `import geo.loaders` time.
+trimesh = None
+TRIMESH_AVAILABLE = False
+_trimesh_checked = False
+
+
+def _ensure_trimesh() -> bool:
+    """Import trimesh on first use and report availability."""
+    global trimesh, TRIMESH_AVAILABLE, _trimesh_checked
+    if not _trimesh_checked:
+        from core.import_utils import safe_import
+        trimesh, TRIMESH_AVAILABLE = safe_import("trimesh")
+        _trimesh_checked = True
+    return TRIMESH_AVAILABLE and np is not None
 
 
 class TrimeshModelLoader(BaseModelLoader):
@@ -33,7 +51,7 @@ class TrimeshModelLoader(BaseModelLoader):
 
     @property
     def is_available(self) -> bool:
-        return TRIMESH_AVAILABLE
+        return _ensure_trimesh()
 
     def load(self, path: str) -> ModelData:
         """Load a 3D model using Trimesh."""

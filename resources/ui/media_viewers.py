@@ -1397,17 +1397,10 @@ class EmbeddedImageViewer(QWidget):
             sys.path.insert(0, python_dir)
 
         try:
-            from geo.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available, get_prewarm_viewer
+            from geo.threejs_viewer import ThreeJSViewerWidget, is_threejs_viewer_available
             if is_threejs_viewer_available():
-                # The prewarm viewer was initialized in main window layout before window.show()
-                # to warm up the Chromium GPU thread. We do NOT reparent it (causes rendering issues).
-                # Instead, create a fresh viewer - it won't flash because the GPU is already warm.
-                # Just consume the prewarm reference to mark it as used.
-                _ = get_prewarm_viewer()  # Consume prewarm (stays in main window, keeps GPU warm)
-
-                # Create fresh viewer - GPU thread is already initialized, no flash expected
                 self.glb_viewer = ThreeJSViewerWidget()
-                logger.info("Created Three.js 3D viewer (GPU pre-warmed)")
+                logger.info("Created Three.js 3D viewer")
                 self.glb_viewer.loadError.connect(self._on_3d_load_error)
                 self.glb_viewer.modelLoaded.connect(self._on_3d_model_loaded)
                 self.media_stack.addWidget(self.glb_viewer)
@@ -1676,6 +1669,29 @@ class EmbeddedImageViewer(QWidget):
 
     def _on_back(self):
         self.closed.emit()
+
+    def stop_playback(self):
+        """Stop any playing video/audio.
+
+        Called on hide/close — without this, backing out of the viewer (which
+        only hides the widget) left video decoding and audio playing forever.
+        """
+        try:
+            if getattr(self, '_has_video_player', False) and self.media_player:
+                self.media_player.stop()
+        except RuntimeError:
+            pass  # Underlying C++ object already deleted
+        try:
+            audio_player = getattr(self, '_current_audio_player', None)
+            if audio_player and getattr(audio_player, 'media_player', None):
+                audio_player.media_player.stop()
+        except RuntimeError:
+            pass
+
+    def hideEvent(self, event):
+        """Stop playback whenever the viewer is hidden (Back button or tab switch)."""
+        self.stop_playback()
+        super().hideEvent(event)
 
     def _on_fullscreen(self):
         if self.media_paths:
@@ -2682,6 +2698,19 @@ class FullscreenImageViewer(QWidget):
         super().mousePressEvent(event)
 
     def closeEvent(self, event):
+        # Stop playback so a closed (hidden but not yet destroyed) window
+        # doesn't keep video/audio running in the background.
+        try:
+            if getattr(self, '_has_video_player', False) and self.media_player:
+                self.media_player.stop()
+        except RuntimeError:
+            pass
+        try:
+            audio_player = getattr(self, '_current_audio_player', None)
+            if audio_player and getattr(audio_player, 'media_player', None):
+                audio_player.media_player.stop()
+        except RuntimeError:
+            pass
         self.closed.emit()
         super().closeEvent(event)
 

@@ -170,9 +170,14 @@ def get_cached_image_thumbnail(path):
             with open(cache_path, 'rb') as f:
                 data = f.read()
             if data:
-                # Promote to memory cache (thread-safe)
+                # Promote to memory cache with the same LRU eviction as
+                # cache_image_thumbnail — without it, browsing a large
+                # already-cached gallery grew this cache without bound
                 with _image_thumbnail_cache_lock:
                     _image_thumbnail_cache[path] = data
+                    _image_thumbnail_cache.move_to_end(path)
+                    while len(_image_thumbnail_cache) > _IMAGE_THUMBNAIL_CACHE_MAX_SIZE:
+                        _image_thumbnail_cache.popitem(last=False)
                 return data
         except (OSError, IOError):
             pass
@@ -1066,9 +1071,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_video_placeholder(self):
         """Create a video placeholder with play icon."""
         cache_key = "video_placeholder"
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key in BaseThumbnailWidget._placeholder_cache:
-                return BaseThumbnailWidget._placeholder_cache[cache_key]
+        cached = BaseThumbnailWidget._placeholder_cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1098,10 +1103,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "VIDEO")
         painter.end()
 
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key not in BaseThumbnailWidget._placeholder_cache:
-                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        BaseThumbnailWidget._placeholder_cache_put(cache_key, pixmap)
+        return pixmap
 
     # --- Audio placeholder ---
     def _load_audio_placeholder(self):
@@ -1136,9 +1139,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_audio_placeholder(self):
         """Create an audio placeholder with music note icon."""
         cache_key = "audio_placeholder"
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key in BaseThumbnailWidget._placeholder_cache:
-                return BaseThumbnailWidget._placeholder_cache[cache_key]
+        cached = BaseThumbnailWidget._placeholder_cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1159,10 +1162,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 95, self.THUMBNAIL_SIZE[0], 20, Qt.AlignCenter, "AUDIO")
         painter.end()
 
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key not in BaseThumbnailWidget._placeholder_cache:
-                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        BaseThumbnailWidget._placeholder_cache_put(cache_key, pixmap)
+        return pixmap
 
     def _on_thumbnail_error(self):
         if not isValid(self):
@@ -1180,9 +1181,9 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _create_3d_placeholder(self, text):
         """Create a 3D cube icon placeholder for model thumbnails."""
         cache_key = f"model_3d_cube_{text}"
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key in BaseThumbnailWidget._placeholder_cache:
-                return BaseThumbnailWidget._placeholder_cache[cache_key]
+        cached = BaseThumbnailWidget._placeholder_cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         pixmap = QPixmap(*self.THUMBNAIL_SIZE)
         pixmap.fill(QColor("#2a3040"))
@@ -1209,10 +1210,8 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawText(0, 100, self.THUMBNAIL_SIZE[0], 30, Qt.AlignCenter, text)
         painter.end()
 
-        with BaseThumbnailWidget._placeholder_cache_lock:
-            if cache_key not in BaseThumbnailWidget._placeholder_cache:
-                BaseThumbnailWidget._placeholder_cache[cache_key] = pixmap
-            return BaseThumbnailWidget._placeholder_cache[cache_key]
+        BaseThumbnailWidget._placeholder_cache_put(cache_key, pixmap)
+        return pixmap
 
     # --- Mouse events ---
     def mousePressEvent(self, event):

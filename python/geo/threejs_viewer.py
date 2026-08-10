@@ -52,20 +52,6 @@ class ShadingMode(Enum):
 
 
 # Global pre-warmed viewer instance (initialized during splash)
-_prewarm_viewer = None
-
-
-def get_prewarm_viewer():
-    """Get and consume the pre-warmed viewer instance (one-time use).
-
-    The prewarm viewer is set directly on the module global by
-    `gallery_prewarm.py` during application startup; there's no setter wrapper
-    because the assignment site is in the same trust boundary as this module.
-    """
-    global _prewarm_viewer
-    viewer = _prewarm_viewer
-    _prewarm_viewer = None
-    return viewer
 
 
 class ThreeJSBridge(QObject):

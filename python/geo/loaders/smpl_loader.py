@@ -8,10 +8,18 @@ These files contain motion capture data in SMPL format.
 import os
 from typing import Set
 
-import numpy as np
+# numpy is optional (mirrors base.py) — a broken venv must not make the
+# whole geo.loaders import graph blow up.
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 from .base import BaseModelLoader
-from geo.loader import ModelData, Bone, Skeleton, Animation
+from geo.loader import (
+    ModelData, Bone, Skeleton, Animation,
+    BoneAnimation, VectorKeyframe, QuaternionKeyframe,
+)
 
 
 class SMPLModelLoader(BaseModelLoader):
@@ -79,8 +87,7 @@ class SMPLModelLoader(BaseModelLoader):
 
     @property
     def is_available(self) -> bool:
-        # NumPy is always available
-        return True
+        return np is not None
 
     def load(self, path: str) -> ModelData:
         """Load SMPL skeleton data from HyMotion NPZ files."""
@@ -107,17 +114,25 @@ class SMPLModelLoader(BaseModelLoader):
 
             num_frames = len(poses)
 
+            # Frame rate: honour the NPZ metadata when present, else 30 FPS
+            fps = 30.0
+            for fps_key in ("mocap_framerate", "mocap_frame_rate", "fps", "framerate"):
+                if fps_key in data:
+                    try:
+                        fps = float(np.asarray(data[fps_key]).flatten()[0])
+                        break
+                    except (TypeError, ValueError, IndexError):
+                        continue
+
             # Build skeleton from SMPL joint hierarchy
             skeleton = self._build_skeleton()
             model.skeleton = skeleton
 
-            # Create animation from the data
+            # Create animation with actual per-bone keyframes. Previously the
+            # pose/translation data was validated and then discarded, so
+            # has_animations was True but playback showed a static bind pose.
             if num_frames > 1:
-                animation = Animation(
-                    name="SMPL Motion",
-                    duration=num_frames / 30.0,  # Assume 30 FPS
-                    ticks_per_second=30.0
-                )
+                animation = self._build_animation(poses, trans, Rh, fps)
                 model.animations.append(animation)
 
             # Calculate bounds from first frame translation
@@ -128,6 +143,76 @@ class SMPLModelLoader(BaseModelLoader):
                 model.bounds_max = root_pos + np.array([0.5, 1.7, 0.5], dtype=np.float32)
 
         return model
+
+    def _build_animation(self, poses, trans, Rh, fps: float) -> Animation:
+        """Build an Animation with per-bone keyframes from SMPL pose data.
+
+        Args:
+            poses: (num_frames, 22*3) axis-angle joint rotations
+            trans: (num_frames, 3) root translation
+            Rh: Optional (num_frames, 3) global root orientation — overrides
+                the pelvis rotation from `poses` when present
+            fps: Frames per second for keyframe timing
+        """
+        num_frames = len(poses)
+        animation = Animation(
+            name="SMPL Motion",
+            duration=num_frames / fps,
+            ticks_per_second=fps,
+        )
+
+        pose_array = np.asarray(poses, dtype=np.float64).reshape(num_frames, -1, 3)
+        num_joints = min(pose_array.shape[1], len(self.JOINT_NAMES))
+
+        trans_array = None
+        if trans is not None and len(trans) == num_frames:
+            trans_array = np.asarray(trans, dtype=np.float64)
+
+        rh_array = None
+        if Rh is not None and len(Rh) == num_frames:
+            rh_array = np.asarray(Rh, dtype=np.float64).reshape(num_frames, -1)[:, :3]
+
+        for joint_idx in range(num_joints):
+            bone_name = self.JOINT_NAMES[joint_idx]
+            bone_anim = BoneAnimation(bone_name=bone_name)
+
+            for frame in range(num_frames):
+                t = frame / fps
+                if joint_idx == 0 and rh_array is not None:
+                    axis_angle = rh_array[frame]
+                else:
+                    axis_angle = pose_array[frame, joint_idx]
+
+                bone_anim.rotation_keys.append(QuaternionKeyframe(
+                    time=t,
+                    value=self._axis_angle_to_quaternion(axis_angle),
+                ))
+
+                # Root bone also carries the body translation
+                if joint_idx == 0 and trans_array is not None:
+                    bone_anim.position_keys.append(VectorKeyframe(
+                        time=t,
+                        value=trans_array[frame].astype(np.float32),
+                    ))
+
+            animation.bone_animations[bone_name] = bone_anim
+
+        return animation
+
+    @staticmethod
+    def _axis_angle_to_quaternion(axis_angle) -> "np.ndarray":
+        """Convert an axis-angle rotation vector to a quaternion [x, y, z, w]."""
+        aa = np.asarray(axis_angle, dtype=np.float64)
+        angle = float(np.linalg.norm(aa))
+        if angle < 1e-8:
+            return np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        axis = aa / angle
+        half = angle / 2.0
+        sin_half = np.sin(half)
+        return np.array(
+            [axis[0] * sin_half, axis[1] * sin_half, axis[2] * sin_half, np.cos(half)],
+            dtype=np.float32,
+        )
 
     def _build_skeleton(self) -> Skeleton:
         """Build skeleton from SMPL joint hierarchy."""
