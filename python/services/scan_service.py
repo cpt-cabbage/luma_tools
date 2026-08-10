@@ -268,7 +268,9 @@ class DirectoryScanner:
                 self.state.working_dir = os.path.dirname(render_directory)
 
             try:
-                renderdir = sorted(next(os.walk(render_directory))[1])
+                # Numeric-aware sort so "latest" is v10, not v9, for unpadded names
+                from core.utils import version_sort_key
+                renderdir = sorted(next(os.walk(render_directory))[1], key=version_sort_key)
             except (StopIteration, OSError) as e:
                 logger.warning(f"Render directory not walkable: {render_directory}: {e}")
                 return found_render_files

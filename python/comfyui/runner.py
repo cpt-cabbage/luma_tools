@@ -393,10 +393,12 @@ def _fail_and_delete_deadline_job():
 
 
 # =============================================================================
-# MAIN
+# MAIN — decomposed into focused stages; each helper preserves the exact
+# logging, exit-code, and fallback behavior of the original monolithic main()
 # =============================================================================
 
-def main():
+def _parse_args():
+    """Build and parse the runner CLI arguments."""
     parser = argparse.ArgumentParser(description='Run ComfyUI workflow')
     parser.add_argument('--comfyui-path', required=True, help='Path to ComfyUI installation')
     parser.add_argument('--workflow', required=True, help='Path to workflow JSON file')
@@ -423,10 +425,18 @@ def main():
     parser.add_argument('--python-path', help='(deprecated, server manages ComfyUI process)')
     parser.add_argument('--lowvram', action='store_true', help='(deprecated, server manages VRAM)')
 
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    setup_logging(args.output_prefix, args.output_directory)
 
+def _load_workflows(args):
+    """Load the base workflow and seeds, and build the per-frame workflow list.
+
+    Exits the process on missing/invalid inputs (same as before the split).
+
+    Returns:
+        Tuple of (base_workflow, use_strict_prefix, workflows_to_run) where
+        workflows_to_run is a list of (frame_num, workflow) tuples.
+    """
     # Verify workflow exists
     if not os.path.exists(args.workflow):
         logger.error(f"Workflow file not found: {args.workflow}")
@@ -473,20 +483,23 @@ def main():
             workflow = modify_workflow_seed(workflow, seed, output_prefix)
         workflows_to_run.append((frame_num, workflow))
 
-    # Connect to persistent server
-    logger.info(f"Connecting to persistent server on port {args.port}...")
+    return base_workflow, use_strict_prefix, workflows_to_run
 
-    # Copy input images to ComfyUI's default input directory FIRST
-    # This must happen before restart to ensure files are present
-    # Some ComfyUI nodes ignore the server's configured input directory
-    # and always look in the hardcoded default location
-    images_to_upload = get_workflow_images(base_workflow)
+
+def _make_input_copier(args, images_to_upload):
+    """Return a callable that copies workflow input images into ComfyUI's
+    default input directory.
+
+    The direct copy must happen (and be repeatable after a server restart)
+    because some ComfyUI nodes ignore the server's configured input directory
+    and always look in the hardcoded default location.
+    """
     logger.debug(f"Found {len(images_to_upload) if images_to_upload else 0} images in workflow: {images_to_upload}")
     logger.debug(f"args.comfyui_path = {args.comfyui_path}")
     logger.debug(f"args.input_directory = {args.input_directory}")
     comfyui_input_dir = os.path.join(args.comfyui_path, "ComfyUI", "input")
 
-    def _copy_input_images(label="Copying"):
+    def copy_input_images(label="Copying"):
         """Copy input images from source dir to ComfyUI input dir."""
         if not images_to_upload or not os.path.isdir(comfyui_input_dir):
             if images_to_upload:
@@ -512,8 +525,15 @@ def main():
             except Exception as e:
                 logger.warning(f"Failed to copy {image_name}: {e}")
 
-    _copy_input_images("Copying")
+    return copy_input_images
 
+
+def _ensure_server_ready(args, copy_input_images):
+    """Handle --full-restart, then verify the server is reachable.
+
+    Applies the --server-not-found policy (fail / wait / fail_delete) and
+    exits the process when the server can't be reached.
+    """
     if args.full_restart:
         logger.info("\nFull restart requested")
         if signal_server_restart(args.port, lowvram=args.restart_lowvram):
@@ -521,7 +541,7 @@ def main():
                 logger.error("Server restart failed")
                 sys.exit(1)
             # Re-copy images after restart in case they were cleared
-            _copy_input_images("Re-copying")
+            copy_input_images("Re-copying")
         else:
             logger.warning("Could not signal server restart, continuing...")
 
@@ -541,16 +561,262 @@ def main():
 
     logger.info(f"Connected to server on port {args.port}")
 
-    # Also upload via HTTP API as backup method (skip when there's nothing to upload)
-    if images_to_upload:
-        logger.info(f"\nUploading {len(images_to_upload)} input image(s) to server via HTTP...")
-        for image_name in images_to_upload:
-            image_path = os.path.join(args.input_directory, image_name)
-            if os.path.exists(image_path):
-                if not upload_image_to_server(image_path, port=args.port):
-                    logger.warning(f"HTTP upload failed for {image_name} (but direct copy may have succeeded)")
-            else:
-                logger.warning(f"Image not found locally: {image_path}")
+
+def _upload_inputs_via_http(args, images_to_upload):
+    """Upload input images via the HTTP API as a backup to the direct copy."""
+    if not images_to_upload:
+        return
+    logger.info(f"\nUploading {len(images_to_upload)} input image(s) to server via HTTP...")
+    for image_name in images_to_upload:
+        image_path = os.path.join(args.input_directory, image_name)
+        if os.path.exists(image_path):
+            if not upload_image_to_server(image_path, port=args.port):
+                logger.warning(f"HTTP upload failed for {image_name} (but direct copy may have succeeded)")
+        else:
+            logger.warning(f"Image not found locally: {image_path}")
+
+
+def _resolve_metadata_helpers():
+    """Resolve metadata/hash helpers with farm-isolated fallbacks.
+
+    Returns:
+        Tuple of (add_per_file_metadata_or_None, compute_hash_or_None).
+    """
+    add_per_file_metadata = None
+    try:
+        from comfyui.metadata import add_per_file_metadata
+    except ImportError:
+        try:
+            from comfyui_metadata import add_per_file_metadata
+        except ImportError:
+            logger.warning(
+                "[Runner] add_per_file_metadata unavailable — "
+                "per-file metadata will not be stored for this job"
+            )
+
+    compute_hash = None
+    try:
+        from comfyui.utils import compute_file_hash as compute_hash
+    except ImportError:
+        try:
+            from comfyui_utils import compute_file_hash as compute_hash
+        except (ImportError, AttributeError):
+            pass  # Hashing not available on this farm worker
+
+    return add_per_file_metadata, compute_hash
+
+
+def _extract_workflow_seed(workflow):
+    """Extract the seed actually used from an API-format workflow, or None."""
+    try:
+        # Check common node input names across node types
+        for node_id, node_data in workflow.items():
+            if isinstance(node_data, dict):
+                inputs = node_data.get('inputs', {})
+                if 'seed' in inputs:
+                    return inputs['seed']
+                if 'noise_seed' in inputs:
+                    return inputs['noise_seed']
+    except Exception as e:
+        logger.debug(f"Could not extract seed from workflow: {e}")
+    return None
+
+
+def _store_per_file_metadata(args, moved, frame_num, actual_seed,
+                             execution_time_ms, node_execution_trace):
+    """Store per-file metadata (seed, hash, node trace) for each moved output."""
+    add_per_file_metadata, compute_hash = _resolve_metadata_helpers()
+    if not add_per_file_metadata or not moved:
+        return
+
+    for dest_path in moved:
+        try:
+            filename = os.path.basename(dest_path)
+            # Compute content hash for the output file
+            file_hash = None
+            if compute_hash:
+                try:
+                    file_hash = compute_hash(dest_path)
+                except Exception as e:
+                    logger.debug(f"Could not hash {dest_path}: {e}")
+            stored = add_per_file_metadata(
+                output_dir=args.output_directory,
+                filename=filename,
+                frame_index=frame_num,
+                actual_seed=actual_seed,
+                execution_time_ms=execution_time_ms,
+                node_execution_trace=node_execution_trace,
+                content_hash=file_hash,
+            )
+            if not stored:
+                logger.warning(
+                    f"Per-file metadata was NOT stored for {filename} "
+                    f"(seed/lineage traceability lost for this file)"
+                )
+        except Exception:
+            logger.warning(
+                f"Per-file metadata storage failed for {dest_path}",
+                exc_info=True,
+            )
+
+
+def _process_frame(args, frame_num, workflow, use_strict_prefix):
+    """Submit one workflow, wait for completion, and post-process outputs.
+
+    Returns:
+        A frame-result dict for analytics ({"frame_num", "success", ...}),
+        or None when the workflow could not even be submitted (counted as
+        failed by the caller, but excluded from analytics — same as the
+        pre-split behavior).
+    """
+    # Track timing for per-file metadata
+    frame_start_time = time.time()
+
+    # Generate client_id for WebSocket event routing — ComfyUI sends
+    # execution events (executing, executed) only to the client that
+    # submitted the prompt, so both submit and wait must share the same ID.
+    frame_client_id = str(uuid.uuid4())
+
+    prompt_id = submit_workflow(workflow, port=args.port, client_id=frame_client_id)
+    if not prompt_id:
+        logger.error(f"Failed to submit workflow for frame {frame_num}")
+        return None
+
+    def on_image_output(img, base_url, output_dir):
+        download_image_from_server(
+            img.get('filename', ''),
+            img.get('subfolder', ''),
+            img.get('type', 'output'),
+            server_url=base_url,
+            output_dir=output_dir
+        )
+
+    completion_result = wait_for_completion(
+        prompt_id, port=args.port, timeout=args.timeout,
+        output_dir=args.output_directory, on_image_output=on_image_output,
+        track_node_timing=True, client_id=frame_client_id,
+        workflow_dict=workflow
+    )
+
+    # Handle both dict result (with timing) and bool result (fallback)
+    if isinstance(completion_result, dict):
+        success = completion_result.get('success', False)
+        node_execution_trace = completion_result.get('node_timing', [])
+        total_duration_ms = completion_result.get('total_duration_ms')
+    else:
+        success = completion_result
+        node_execution_trace = []
+        total_duration_ms = None
+
+    if not success:
+        logger.error(f"Frame {frame_num} failed or timed out")
+        return {
+            "frame_num": frame_num,
+            "success": False,
+        }
+
+    # Calculate execution time
+    execution_time_ms = int((time.time() - frame_start_time) * 1000)
+    logger.info(f"Frame {frame_num} completed successfully in {execution_time_ms}ms")
+
+    # Get the actual seed used for this frame
+    actual_seed = _extract_workflow_seed(workflow)
+
+    moved = []
+    if args.comfyui_output_dir:
+        moved = move_output_files(
+            args.comfyui_output_dir,
+            args.output_directory,
+            args.output_prefix,
+            recent_minutes=30,
+            strict_prefix=use_strict_prefix
+        )
+        if moved:
+            logger.info(f"Moved {len(moved)} output file(s)")
+
+    # Use server-reported total_duration_ms if available, else our measured time
+    file_execution_time = total_duration_ms if total_duration_ms else execution_time_ms
+
+    _store_per_file_metadata(
+        args, moved, frame_num, actual_seed,
+        file_execution_time, node_execution_trace,
+    )
+
+    return {
+        "frame_num": frame_num,
+        "success": True,
+        "execution_time_ms": file_execution_time,
+        "node_timing": node_execution_trace or [],
+    }
+
+
+def _record_analytics(args, total_frames, successful, failed, frame_results):
+    """Record execution analytics and refresh the timing summary (non-fatal)."""
+    try:
+        try:
+            from comfyui.analytics import record_execution, aggregate_node_timing
+        except ImportError:
+            from comfyui_analytics import record_execution, aggregate_node_timing
+
+        record_execution(
+            output_directory=args.output_directory,
+            workflow_file=args.workflow,
+            output_prefix=args.output_prefix,
+            total_frames=total_frames,
+            successful=successful,
+            failed=failed,
+            frame_results=frame_results,
+        )
+        # Debounced: concurrent frames of the same job skip re-aggregating
+        # (each full aggregation re-reads every record over the network)
+        aggregate_node_timing(skip_if_fresh_seconds=600)
+    except ImportError:
+        logger.debug("Analytics module not available, skipping")
+    except Exception as e:
+        logger.warning(f"Analytics recording failed (non-fatal): {e}")
+
+
+def _establish_lineage(args):
+    """Auto-establish lineage relationships based on source images (non-fatal).
+
+    On the farm, comfyui modules are flat-copied as comfyui_<name>.py, so try
+    the package import first then fall back to the flat alias.
+    """
+    try:
+        try:
+            from comfyui.metadata import auto_establish_lineage_from_job_metadata
+        except ImportError:
+            from comfyui_metadata import auto_establish_lineage_from_job_metadata
+        lineage_count = auto_establish_lineage_from_job_metadata(args.output_directory)
+        if lineage_count > 0:
+            logger.info(f"Established {lineage_count} lineage relationship(s)")
+    except ImportError:
+        logger.debug("Lineage helper not available")
+    except Exception as e:
+        logger.warning(f"Could not establish lineage: {e}")
+
+
+def main():
+    args = _parse_args()
+
+    setup_logging(args.output_prefix, args.output_directory)
+
+    base_workflow, use_strict_prefix, workflows_to_run = _load_workflows(args)
+
+    # Connect to persistent server
+    logger.info(f"Connecting to persistent server on port {args.port}...")
+
+    # Copy input images to ComfyUI's default input directory FIRST — this
+    # must happen before any restart so the files are present when the
+    # workflow executes
+    images_to_upload = get_workflow_images(base_workflow)
+    copy_input_images = _make_input_copier(args, images_to_upload)
+    copy_input_images("Copying")
+
+    _ensure_server_ready(args, copy_input_images)
+
+    # Also upload via HTTP API as backup method
+    _upload_inputs_via_http(args, images_to_upload)
 
     # Cleanup handler. Always exits — the server itself stays alive in
     # persistent mode, but the runner process must terminate so Deadline can
@@ -578,199 +844,24 @@ def main():
             logger.info(f"Processing generation {i}/{total_frames} (frame {frame_num})")
             logger.info(f"{'='*60}")
 
-            # Track timing for per-file metadata
-            frame_start_time = time.time()
-
-            # Generate client_id for WebSocket event routing — ComfyUI sends
-            # execution events (executing, executed) only to the client that
-            # submitted the prompt, so both submit and wait must share the same ID.
-            frame_client_id = str(uuid.uuid4())
-
-            prompt_id = submit_workflow(workflow, port=args.port, client_id=frame_client_id)
-            if not prompt_id:
-                logger.error(f"Failed to submit workflow for frame {frame_num}")
+            result = _process_frame(args, frame_num, workflow, use_strict_prefix)
+            if result is None:
+                # Submission itself failed — counted as failed, no analytics entry
                 failed += 1
                 continue
 
-            download_dir = args.output_directory
-
-            def on_image_output(img, base_url, output_dir):
-                download_image_from_server(
-                    img.get('filename', ''),
-                    img.get('subfolder', ''),
-                    img.get('type', 'output'),
-                    server_url=base_url,
-                    output_dir=output_dir
-                )
-
-            completion_result = wait_for_completion(
-                prompt_id, port=args.port, timeout=args.timeout,
-                output_dir=download_dir, on_image_output=on_image_output,
-                track_node_timing=True, client_id=frame_client_id,
-                workflow_dict=workflow
-            )
-
-            # Handle both dict result (with timing) and bool result (fallback)
-            if isinstance(completion_result, dict):
-                success = completion_result.get('success', False)
-                node_execution_trace = completion_result.get('node_timing', [])
-                total_duration_ms = completion_result.get('total_duration_ms')
-            else:
-                success = completion_result
-                node_execution_trace = []
-                total_duration_ms = None
-
-            if success:
-                # Calculate execution time
-                frame_end_time = time.time()
-                execution_time_ms = int((frame_end_time - frame_start_time) * 1000)
-
-                logger.info(f"Frame {frame_num} completed successfully in {execution_time_ms}ms")
+            frame_results.append(result)
+            if result["success"]:
                 successful += 1
-
-                # Get the actual seed used for this frame
-                actual_seed = None
-                try:
-                    # Extract seed from workflow - check common node types
-                    for node_id, node_data in workflow.items():
-                        if isinstance(node_data, dict):
-                            inputs = node_data.get('inputs', {})
-                            if 'seed' in inputs:
-                                actual_seed = inputs['seed']
-                                break
-                            if 'noise_seed' in inputs:
-                                actual_seed = inputs['noise_seed']
-                                break
-                except Exception as e:
-                    logger.debug(f"Could not extract seed from workflow: {e}")
-
-                moved = []
-                if args.comfyui_output_dir:
-                    moved = move_output_files(
-                        args.comfyui_output_dir,
-                        args.output_directory,
-                        args.output_prefix,
-                        recent_minutes=30,
-                        strict_prefix=use_strict_prefix
-                    )
-                    if moved:
-                        logger.info(f"Moved {len(moved)} output file(s)")
-
-                # Store per-file metadata for each output file.
-                # Try the package import first, then the farm-isolated copy.
-                add_per_file_metadata = None
-                try:
-                    from comfyui.metadata import add_per_file_metadata
-                except ImportError:
-                    try:
-                        from comfyui_metadata import add_per_file_metadata
-                    except ImportError:
-                        logger.warning(
-                            "[Runner] add_per_file_metadata unavailable — "
-                            "per-file metadata will not be stored for this job"
-                        )
-
-                # Try to import file hashing (available with full package)
-                _compute_hash = None
-                try:
-                    from comfyui.utils import compute_file_hash as _compute_hash
-                except ImportError:
-                    try:
-                        from comfyui_utils import compute_file_hash as _compute_hash
-                    except (ImportError, AttributeError):
-                        pass  # Hashing not available on this farm worker
-
-                if add_per_file_metadata and moved:
-                    for dest_path in moved:
-                        try:
-                            filename = os.path.basename(dest_path)
-                            # Use server-reported total_duration_ms if available, else our measured time
-                            file_execution_time = total_duration_ms if total_duration_ms else execution_time_ms
-                            # Compute content hash for the output file
-                            file_hash = None
-                            if _compute_hash:
-                                try:
-                                    file_hash = _compute_hash(dest_path)
-                                except Exception as e:
-                                    logger.debug(f"Could not hash {dest_path}: {e}")
-                            stored = add_per_file_metadata(
-                                output_dir=args.output_directory,
-                                filename=filename,
-                                frame_index=frame_num,
-                                actual_seed=actual_seed,
-                                execution_time_ms=file_execution_time,
-                                node_execution_trace=node_execution_trace,
-                                content_hash=file_hash,
-                            )
-                            if not stored:
-                                logger.warning(
-                                    f"Per-file metadata was NOT stored for {filename} "
-                                    f"(seed/lineage traceability lost for this file)"
-                                )
-                        except Exception:
-                            logger.warning(
-                                f"Per-file metadata storage failed for {dest_path}",
-                                exc_info=True,
-                            )
-
-                # Collect frame result for analytics
-                frame_results.append({
-                    "frame_num": frame_num,
-                    "success": True,
-                    "execution_time_ms": total_duration_ms if total_duration_ms else execution_time_ms,
-                    "node_timing": node_execution_trace or [],
-                })
             else:
-                logger.error(f"Frame {frame_num} failed or timed out")
                 failed += 1
-                frame_results.append({
-                    "frame_num": frame_num,
-                    "success": False,
-                })
 
         logger.info(f"\n{'='*60}")
         logger.info(f"BATCH COMPLETE: {successful}/{total_frames} successful, {failed} failed")
         logger.info(f"{'='*60}")
 
-        # Record execution analytics
-        try:
-            try:
-                from comfyui.analytics import record_execution, aggregate_node_timing
-            except ImportError:
-                from comfyui_analytics import record_execution, aggregate_node_timing
-
-            record_execution(
-                output_directory=args.output_directory,
-                workflow_file=args.workflow,
-                output_prefix=args.output_prefix,
-                total_frames=total_frames,
-                successful=successful,
-                failed=failed,
-                frame_results=frame_results,
-            )
-            # Debounced: concurrent frames of the same job skip re-aggregating
-            # (each full aggregation re-reads every record over the network)
-            aggregate_node_timing(skip_if_fresh_seconds=600)
-        except ImportError:
-            logger.debug("Analytics module not available, skipping")
-        except Exception as e:
-            logger.warning(f"Analytics recording failed (non-fatal): {e}")
-
-        # Auto-establish lineage relationships based on source images.
-        # On the farm, comfyui modules are flat-copied as comfyui_<name>.py,
-        # so try the package import first then fall back to the flat alias.
-        try:
-            try:
-                from comfyui.metadata import auto_establish_lineage_from_job_metadata
-            except ImportError:
-                from comfyui_metadata import auto_establish_lineage_from_job_metadata
-            lineage_count = auto_establish_lineage_from_job_metadata(args.output_directory)
-            if lineage_count > 0:
-                logger.info(f"Established {lineage_count} lineage relationship(s)")
-        except ImportError:
-            logger.debug("Lineage helper not available")
-        except Exception as e:
-            logger.warning(f"Could not establish lineage: {e}")
+        _record_analytics(args, total_frames, successful, failed, frame_results)
+        _establish_lineage(args)
 
         exit_code = 0 if failed == 0 else 1
         cleanup(exit_code=exit_code)
@@ -780,7 +871,6 @@ def main():
         # gets from a failed farm job, so never reduce this to str(e).
         logger.exception("Runner failed with unhandled error")
         cleanup(exit_code=1)
-
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')

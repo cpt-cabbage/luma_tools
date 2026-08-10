@@ -305,6 +305,21 @@ class TestExtractRenderName:
 
         assert extract_render_name("render_name") == "render_name"
 
+    def test_version_sort_key(self):
+        """Latest-version pickers must sort numerically: v10 after v9
+        (plain string sort put 'v9' after 'v10' for unpadded names)."""
+        from core.utils import version_sort_key
+
+        names = ["shot_v9", "shot_v10", "shot_v2", "no_version"]
+        assert sorted(names, key=version_sort_key) == [
+            "no_version", "shot_v2", "shot_v9", "shot_v10",
+        ]
+        # Zero-padded names keep their existing order
+        padded = ["shot_v003", "shot_v001", "shot_v010"]
+        assert sorted(padded, key=version_sort_key) == [
+            "shot_v001", "shot_v003", "shot_v010",
+        ]
+
     def test_dotted_version_preserved(self):
         """Dotted version segments must survive (regression: split('.')[0]
         truncated 'scene_v1.2.0001.exr' to 'scene_v1')."""

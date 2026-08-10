@@ -45,6 +45,21 @@ def get_trailing_number(s):
     return matches[-1] if matches else None
 
 
+def version_sort_key(name):
+    """Sort key that orders version-suffixed names numerically.
+
+    Plain string sort puts "v9" AFTER "v10", so latest-version pickers chose
+    the wrong folder for unpadded version names. Names without a number sort
+    first (never chosen as "latest" over a numbered version).
+
+    Example:
+        >>> sorted(["shot_v9", "shot_v10", "shot_v2"], key=version_sort_key)
+        ['shot_v2', 'shot_v9', 'shot_v10']
+    """
+    version = get_trailing_number(name)
+    return (int(version) if version is not None else -1, name)
+
+
 def truncate_at_suffix(string, suffix):
     """
     Truncate string at the end of the suffix, keeping everything up to and including it.

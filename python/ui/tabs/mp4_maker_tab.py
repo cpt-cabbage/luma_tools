@@ -94,6 +94,55 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.apply_ayon_checkbox_style(self.ui.MP4PublishToAyon)
         self.apply_ayon_checkbox_style(self.ui.MP4PublishOnFarm)
 
+        # Run initial scan to find the latest render version (independent of
+        # the Shot Cleaner tab — previously the path/version stayed empty
+        # until the user ran a Shot Cleaner rescan). Mirrors rePublish.
+        if self.app_state.has_shot_context() and not self.app_state.mp4_searchpath:
+            self._run_initial_scan()
+
+    def _run_initial_scan(self):
+        """Find the render directory and auto-select the latest version (async)."""
+        from services.file_operations import get_task_directory
+
+        task = self.app_state.task
+        try:
+            task_dir = get_task_directory(self.app_state.shotpath, task)
+        except ValueError as e:
+            logger.warning(f"MP4 Maker: could not derive task directory: {e}")
+            return
+
+        if not os.path.isdir(task_dir):
+            logger.warning(f"MP4 Maker: Task directory not found: {task_dir}")
+            return
+
+        def _on_scan_result(result):
+            if not result:
+                return
+            from core.utils import get_trailing_number
+
+            searchpath = os.path.join(result['render_directory'], result['latest_render'])
+            self.app_state.mp4_searchpath = searchpath
+            self.ui.MP4RenderPath.setText(searchpath)
+
+            # Block valueChanged while setting range/value to prevent premature scan
+            self.ui.MP4CurrentVer.blockSignals(True)
+            ver_str = get_trailing_number(result['latest_render'])
+            if ver_str is not None:
+                latest_ver = int(ver_str)
+                self.ui.MP4CurrentVer.setRange(0, latest_ver)
+                self.ui.MP4CurrentVer.setValue(latest_ver)
+            self.ui.MP4CurrentVer.blockSignals(False)
+
+            logger.info(f"MP4 Maker: Found render path: {searchpath}")
+
+            # Now trigger the scan with everything properly set up
+            self._on_scan_renders_clicked()
+
+        self.start_worker(
+            self._scan_render_directory_worker, task_dir, task,
+            on_result=_on_scan_result
+        )
+
     @property
     def _quality_index(self):
         return self._quality_manager.index

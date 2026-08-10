@@ -318,7 +318,7 @@ class RenderScanMixin(PublishSourceMixin):
         """
         from services.file_operations import fast_scandir, find_renders, find_hip_files
         from core.config import RENDERS_SUBPATH
-        from core.utils import truncate_at_suffix
+        from core.utils import truncate_at_suffix, version_sort_key
 
         try:
             dirs = fast_scandir(task_dir)
@@ -338,7 +338,8 @@ class RenderScanMixin(PublishSourceMixin):
             hip_file = sorted(hip_files)[0].rsplit("_", 1)[0]
 
         try:
-            render_dirs = sorted(next(os.walk(render_directory))[1])
+            # Numeric-aware sort so "latest" is v10, not v9, for unpadded names
+            render_dirs = sorted(next(os.walk(render_directory))[1], key=version_sort_key)
         except StopIteration:
             return None
 
