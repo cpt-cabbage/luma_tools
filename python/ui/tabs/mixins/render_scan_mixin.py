@@ -58,6 +58,74 @@ def invalidate_task_scan_cache():
 
 
 # ---------------------------------------------------------------------------
+# Task-directory resolution
+#
+# The AYON launch context names a task ("lookdev"), but that task does not
+# necessarily have a work directory for the shot — the renders may only ever
+# have existed under "lighting". Scanning the context task blindly leaves the
+# tab silently empty, so resolve against what is actually on disk.
+# ---------------------------------------------------------------------------
+# Order preferred when the launch-context task has no work directory
+TASK_PREFERENCE = ["lighting", "compositing", "fx"]
+
+
+def discover_task_options(shotpath: str) -> list:
+    """List task directories that exist under a shot's work root.
+
+    Returns [] when the work root is missing or unreadable, so callers can
+    fall back to whatever static list they used before.
+    """
+    if not shotpath:
+        return []
+    try:
+        from core.utils import truncate_at_suffix
+        work_root = truncate_at_suffix(shotpath, "work")
+        if not os.path.isdir(work_root):
+            return []
+        return sorted(
+            entry.name.lower()
+            for entry in os.scandir(work_root)
+            if entry.is_dir() and not entry.name.startswith((".", "_"))
+        )
+    except OSError as e:
+        logger.debug(f"Could not list task directories for {shotpath}: {e}")
+        return []
+
+
+def resolve_task_directory(shotpath: str, preferred_task: str):
+    """Pick the task whose work directory actually exists.
+
+    Prefers ``preferred_task`` (the launch context) and only falls back when it
+    has no directory, so normal launches are unaffected.
+
+    Returns (task, task_dir, available_tasks). ``task_dir`` may still not exist
+    when nothing could be discovered — callers should check and tell the user.
+    """
+    from services.file_operations import get_task_directory
+
+    preferred = (preferred_task or "").strip().lower()
+    available = discover_task_options(shotpath)
+
+    task = preferred
+    if preferred and preferred not in available and available:
+        task = next((t for t in TASK_PREFERENCE if t in available), available[0])
+        logger.info(
+            f"Task '{preferred}' has no work directory; using '{task}' "
+            f"(available: {', '.join(available)})"
+        )
+    elif not preferred:
+        task = next((t for t in TASK_PREFERENCE if t in available), None) or "lighting"
+
+    try:
+        task_dir = get_task_directory(shotpath, task)
+    except ValueError as e:
+        logger.warning(f"Could not derive task directory for '{task}': {e}")
+        return task, "", available
+
+    return task, task_dir, available
+
+
+# ---------------------------------------------------------------------------
 # Scan-generation helpers
 #
 # Guard against stale worker results populating a list after a newer scan has

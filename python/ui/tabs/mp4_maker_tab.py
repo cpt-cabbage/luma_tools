@@ -128,17 +128,26 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
     def _run_initial_scan(self):
         """Find the render directory and auto-select the latest version (async)."""
-        from services.file_operations import get_task_directory
+        from ui.tabs.mixins.render_scan_mixin import resolve_task_directory
 
-        task = self.app_state.task
-        try:
-            task_dir = get_task_directory(self.app_state.shotpath, task)
-        except ValueError as e:
-            logger.warning(f"MP4 Maker: could not derive task directory: {e}")
-            return
+        # Resolve against the work directories that exist: a shot launched as
+        # e.g. 'lookdev' may only have renders under 'lighting', and scanning
+        # the context task blindly left this tab silently empty.
+        task, task_dir, available = resolve_task_directory(
+            self.app_state.shotpath, self.app_state.task
+        )
 
-        if not os.path.isdir(task_dir):
+        if not task_dir or not os.path.isdir(task_dir):
             logger.warning(f"MP4 Maker: Task directory not found: {task_dir}")
+            if available:
+                self.show_status(
+                    f"No renders found for '{task}' — available tasks: {', '.join(available)}",
+                    "warning",
+                )
+            else:
+                self.show_status(
+                    "No work directory found for this shot", "warning"
+                )
             return
 
         def _on_scan_result(result):

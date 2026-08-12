@@ -63,36 +63,15 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     # Fallback task list, used only when the shot's work directory can't be read
     _DEFAULT_TASK_OPTIONS = ["lighting", "compositing", "fx"]
-    # Preference order when the launch-context task has no work directory
-    _TASK_PREFERENCE = ["lighting", "compositing", "fx"]
 
     def _discover_task_options(self):
-        """List the task directories that actually exist under the shot's work root.
+        """Task directories that actually exist under this shot's work root.
 
-        The launch-context task is not necessarily a task that has renders on
-        disk — a shot opened as 'lookdev' may only ever have had work done in
-        'lighting'. Offering the real directories means the dropdown always
-        reflects what can actually be published.
-
-        Returns [] when the work root is unreadable, so callers fall back to
-        the static option list.
+        Shared with Pass Builder and MP4 Maker, which resolve the same way —
+        the launch-context task is not necessarily one that has renders on disk.
         """
-        shotpath = self.app_state.shotpath
-        if not shotpath:
-            return []
-        try:
-            from core.utils import truncate_at_suffix
-            work_root = truncate_at_suffix(shotpath, "work")
-            if not os.path.isdir(work_root):
-                return []
-            return sorted(
-                entry.name.lower()
-                for entry in os.scandir(work_root)
-                if entry.is_dir() and not entry.name.startswith((".", "_"))
-            )
-        except OSError as e:
-            logger.debug(f"Republish: could not list task directories: {e}")
-            return []
+        from ui.tabs.mixins.render_scan_mixin import discover_task_options
+        return discover_task_options(self.app_state.shotpath)
 
     def initialize(self):
         """Initialize rePublish tab."""
@@ -154,8 +133,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
         if current_task and current_task in existing_tasks:
             initial_task = current_task
         elif existing_tasks:
+            from ui.tabs.mixins.render_scan_mixin import TASK_PREFERENCE
             initial_task = next(
-                (t for t in self._TASK_PREFERENCE if t in existing_tasks),
+                (t for t in TASK_PREFERENCE if t in existing_tasks),
                 existing_tasks[0],
             )
             if current_task:
