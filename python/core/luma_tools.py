@@ -1536,14 +1536,20 @@ def main():
         # Clean up QWebEngineView instances before exit to prevent Chromium
         # subprocess crash (access violation 0xC0000005) during Qt destructor chain
         def _cleanup_web_engines():
-            try:
-                from geo.threejs_viewer import ThreeJSViewerWidget
-                for widget in app.allWidgets():
-                    if isinstance(widget, ThreeJSViewerWidget):
-                        widget.cleanup()
-                app.processEvents()
-            except Exception as e:
-                logging.debug(f"WebEngine cleanup: {e}")
+            # Only touch QtWebEngine if it was actually loaded this session.
+            # Importing geo.threejs_viewer here pulls PySide6.QtWebEngineWidgets
+            # (and all of Chromium) into the process *after* the event loop has
+            # stopped, purely so it can be torn down again — which reliably
+            # faults during static destruction (0xC0000005).
+            if 'geo.threejs_viewer' in sys.modules:
+                try:
+                    ThreeJSViewerWidget = sys.modules['geo.threejs_viewer'].ThreeJSViewerWidget
+                    for widget in app.allWidgets():
+                        if isinstance(widget, ThreeJSViewerWidget):
+                            widget.cleanup()
+                    app.processEvents()
+                except Exception as e:
+                    logging.debug(f"WebEngine cleanup: {e}")
 
             # Clean up TeeWriters here since os._exit() skips atexit handlers
             try:
@@ -1559,12 +1565,21 @@ def main():
         exit_code = app.exec()
         logging.info(f"Application exiting with code {exit_code}")
 
-        # Try a normal Python exit. Historically this caused a 0xC0000005
-        # crash deep in the Chromium/QWebEngine destructor chain, which is
-        # why os._exit() was used. The aboutToQuit handler above now does an
-        # orderly QWebEngineView cleanup, so a clean exit should work and
-        # avoids the QThreadStorage warnings caused by os._exit() bypassing
-        # Qt's TLS cleanup.
+        # Normal interpreter exit: atexit handlers must run here. They flush
+        # the ComfyUI content-hash sidecar (comfyui/utils.py) and close the
+        # tee'd log writers; a hard os._exit() would silently drop both.
+        #
+        # Exiting normally used to fault with an access violation (0xC0000005)
+        # during Qt's teardown of the Gallery widget tree, because
+        # BoxSelectionEventFilter kept receiving events while the scroll area
+        # was being destroyed. That is fixed at the source now — the filter is
+        # detached in GalleryTab.cleanup() and guards its own validity — so the
+        # destructor chain runs cleanly and no hard exit is needed.
+        for stream in (sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__):
+            try:
+                stream.flush()
+            except Exception:
+                pass
         sys.exit(exit_code)
     except Exception as e:
         logging.error(f"FATAL ERROR in main: {e}")

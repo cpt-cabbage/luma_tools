@@ -287,15 +287,42 @@ class ThreeJSViewerWidget(QWidget):
             return
         self._cleaned_up = True
         try:
-            if hasattr(self, '_web_view') and self._web_view is not None:
-                self._web_view.setUrl(QUrl("about:blank"))
-                page = self._web_view.page()
-                if page:
-                    page.deleteLater()
-                self._web_view.deleteLater()
-                self._web_view = None
-        except RuntimeError:
-            pass  # Widget already deleted by Qt
+            if getattr(self, '_web_view', None) is None:
+                return
+
+            # Stop any in-flight load first. setUrl("about:blank") would start
+            # a *new* load instead of cancelling the current one, which is
+            # exactly the state QtWebEngine must not be destroyed in.
+            self._web_view.stop()
+
+            try:
+                self._web_view.loadFinished.disconnect(self._on_page_loaded)
+            except (RuntimeError, TypeError):
+                pass
+
+            page = self._web_view.page()
+            if page is not None:
+                # Detach the channel before the page dies: the QWebChannel is
+                # Python-owned and must not outlive the page holding it.
+                page.setWebChannel(None)
+            channel = getattr(self, '_channel', None)
+            if channel is not None:
+                try:
+                    channel.deregisterObject(self._bridge)
+                except (RuntimeError, TypeError, AttributeError):
+                    pass
+                self._channel = None
+
+            # The bridge must stop trying to script a view that is going away.
+            if getattr(self, '_bridge', None) is not None:
+                self._bridge.set_web_view(None)
+
+            if page is not None:
+                page.deleteLater()
+            self._web_view.deleteLater()
+            self._web_view = None
+        except (RuntimeError, AttributeError):
+            pass  # Widget already deleted by Qt, or never fully constructed
 
     def _load_viewer(self):
         """Load the Three.js viewer HTML."""

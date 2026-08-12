@@ -16,7 +16,7 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import QEventLoop, QTimer, QUrl
+from PySide6.QtCore import QEventLoop, QTimer
 
 from core.utils import ensure_directory
 
@@ -165,18 +165,29 @@ class ModelThumbnailService:
             return None
 
     def _cleanup_viewer(self, viewer):
-        """Clean up a viewer after use."""
-        if viewer:
-            try:
-                viewer.hide()
-                # Close the web view explicitly to terminate any pending operations
-                if hasattr(viewer, '_web_view') and viewer._web_view:
-                    viewer._web_view.setUrl(QUrl())  # Clear URL to stop any loading
-                    viewer._web_view.close()
-                viewer.close()
-                viewer.deleteLater()
-            except Exception as e:
-                logger.error(f"[ThumbnailService] Error cleaning up viewer: {e}")
+        """Clean up a viewer after use.
+
+        Uses ThreeJSViewerWidget.cleanup(), which stops the in-flight page load
+        and deletes the QWebEnginePage before the view — the order QtWebEngine
+        requires. The deferred deletes are then flushed explicitly: a plain
+        processEvents() does *not* deliver QEvent.DeferredDelete, so without
+        this the offscreen views would pile up until interpreter shutdown.
+        """
+        if not viewer:
+            return
+        try:
+            viewer.hide()
+            viewer.cleanup()
+            viewer.close()
+            viewer.deleteLater()
+        except Exception as e:
+            logger.error(f"[ThumbnailService] Error cleaning up viewer: {e}")
+
+        try:
+            from PySide6.QtCore import QCoreApplication, QEvent
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        except Exception as e:
+            logger.debug(f"[ThumbnailService] DeferredDelete flush skipped: {e}")
 
     def generate_thumbnail_sync(self, model_path: str) -> Optional[QPixmap]:
         """

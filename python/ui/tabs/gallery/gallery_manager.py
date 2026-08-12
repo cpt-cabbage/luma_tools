@@ -328,6 +328,12 @@ class GalleryManager(BaseGalleryManager):
         expanded_stack_id_to_restore = getattr(self.tab, '_expanded_stack_id', None)
 
         container.setUpdatesEnabled(False)
+        # Same guard as the batched grid path: every widget shown inside a
+        # QScrollArea(widgetResizable) makes Qt re-query the layout's
+        # heightForWidth, which is a full O(N) FlowLayout pass. Building N
+        # widgets with the layout live is therefore O(N^2). Disable it while
+        # the view is rebuilt and do one pass at the end.
+        self._set_batch_layout_enabled(False)
 
         # Clear existing widgets
         self._clear_stack_widgets()
@@ -423,7 +429,15 @@ class GalleryManager(BaseGalleryManager):
                 if isValid(stack):
                     stack.set_favorites_manager(favorites_manager)
 
-        container.setUpdatesEnabled(True)
+        # The widgets built above are only shown/polished once control returns
+        # to the event loop, and each one makes Qt re-query the layout's
+        # heightForWidth — a full O(N) FlowLayout pass, three per widget, i.e.
+        # O(N^2) for the rebuild (~120 s at 2500 ungrouped items). Keeping the
+        # layout disabled across that turn makes those queries no-ops; one real
+        # pass then positions everything. Painting resumes at the same time, so
+        # the container is never left blank for more than one event-loop turn.
+        gen = self._display_generation
+        QTimer.singleShot(0, lambda g=gen: self._finish_stacked_layout(g))
 
         # Restore expanded stack state if one was expanded before refresh
         if expanded_stack_id_to_restore and expanded_stack_id_to_restore in self._stack_widgets:
@@ -1114,6 +1128,48 @@ class GalleryManager(BaseGalleryManager):
         # Note: We don't reload thumbnails here - they're already loaded in the widgets
         logger.info(f"[Gallery] Fast reorder: {len(items)} items repositioned")
 
+    def _set_batch_layout_enabled(self, enabled):
+        """Enable/disable the flow layout while widgets are created in batches.
+
+        Batched creation returns to the event loop between batches (see the
+        QTimer.singleShot at the end of create_widget_batch). Every addWidget()
+        posts a LayoutRequest, so each batch triggered a full FlowLayout pass
+        over every widget created so far — O(N^2/batch_size) geometry work that
+        dominated population time on large galleries and produced nothing
+        visible (updates are disabled for the whole run anyway).
+
+        Disabling the layout makes it "act as if it did not exist" until the
+        final batch, at which point one relayout positions everything.
+        """
+        layout = getattr(self.tab, '_flow_layout', None)
+        if layout is None:
+            return
+        try:
+            layout.setEnabled(enabled)
+            if enabled:
+                layout.invalidate()
+                layout.activate()
+                self.tab.ui.galleryThumbnailContainer.updateGeometry()
+        except RuntimeError:
+            # Layout deleted mid-run (tab teardown) — nothing to restore
+            pass
+
+    def _finish_stacked_layout(self, generation):
+        """Re-enable layout + painting one turn after a stacked rebuild.
+
+        Scheduled by _display_stacked_items. Painting is always restored, even
+        if a newer display generation has taken over, so the gallery can never
+        be left permanently blank; the layout guard is only released when this
+        callback still owns the current generation.
+        """
+        try:
+            container = self.tab.ui.galleryThumbnailContainer
+            if generation == self._display_generation:
+                self._set_batch_layout_enabled(True)
+            container.setUpdatesEnabled(True)
+        except (RuntimeError, AttributeError):
+            pass  # tab torn down while the callback was pending
+
     def create_all_widgets(self):
         """Create thumbnail widgets in batches to avoid blocking the UI."""
         if not hasattr(self.tab, '_pending_items') or not self.tab._pending_items:
@@ -1130,6 +1186,8 @@ class GalleryManager(BaseGalleryManager):
         self.tab._widget_batch_size = 20  # Create 20 widgets per batch for faster loading
         self.tab._is_editable_cache = self.tab._is_own_gallery()
         self.tab._widget_create_generation = self._display_generation
+        # Suppress per-batch relayout for the duration of the run
+        self._set_batch_layout_enabled(False)
         self.create_widget_batch()
 
     def create_widget_batch(self):
@@ -1139,11 +1197,13 @@ class GalleryManager(BaseGalleryManager):
         # Abort if display was rebuilt since this batch was started
         create_gen = getattr(self.tab, '_widget_create_generation', -1)
         if create_gen != self._display_generation:
+            self._set_batch_layout_enabled(True)
             container.setUpdatesEnabled(True)
             return
 
         if not hasattr(self.tab, '_pending_items') or self.tab._widget_create_index >= len(self.tab._pending_items):
-            # All widgets created - re-enable updates and trigger layout
+            # All widgets created - re-enable layout + updates and trigger layout
+            self._set_batch_layout_enabled(True)
             container.setUpdatesEnabled(True)
 
             # Trigger initial lazy load after layout settles (guarded by generation)

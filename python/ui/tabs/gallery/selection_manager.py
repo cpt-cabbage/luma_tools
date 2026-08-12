@@ -10,11 +10,37 @@ Handles multi-select functionality including:
 - Keyboard shortcuts (Ctrl+A, Escape)
 """
 
+import logging
+
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtWidgets import QRubberBand
 
 from .base_manager import BaseGalleryManager
+
+logger = logging.getLogger(__name__)
+
+try:
+    from shiboken6 import isValid as _shiboken_is_valid
+except ImportError:  # pragma: no cover - shiboken always ships with PySide6
+    def _shiboken_is_valid(obj):
+        return obj is not None
+
+
+def _widgets_alive(tab) -> bool:
+    """True when the gallery widgets this filter touches still exist in C++.
+
+    Python references outlive the underlying Qt objects during teardown, so
+    ``hasattr``/``is not None`` are not enough — only shiboken knows.
+    """
+    ui = getattr(tab, "ui", None)
+    if ui is None or not _shiboken_is_valid(ui):
+        return False
+    for name in ("galleryScrollArea", "galleryThumbnailContainer"):
+        widget = getattr(ui, name, None)
+        if widget is None or not _shiboken_is_valid(widget):
+            return False
+    return True
 
 
 class BoxSelectionEventFilter(QtCore.QObject):
@@ -25,11 +51,34 @@ class BoxSelectionEventFilter(QtCore.QObject):
         self.selection_manager = selection_manager
         self._mouse_moved = False
 
+    # Only these event types drive rubber-band selection. Everything else
+    # returns immediately — see the teardown note below.
+    _HANDLED_EVENT_TYPES = frozenset({
+        QtCore.QEvent.MouseButtonPress,
+        QtCore.QEvent.MouseMove,
+        QtCore.QEvent.MouseButtonRelease,
+    })
+
     def eventFilter(self, watched, event):
-        """Handle mouse events for rubber band selection."""
+        """Handle mouse events for rubber band selection.
+
+        This filter is installed on the scroll area's viewport, so Qt routes
+        EVERY event through it — including the ones delivered while the widget
+        tree is being destroyed. Touching ``tab.ui.galleryScrollArea`` at that
+        point dereferences a half-destroyed C++ object and faults the process
+        with an access violation (0xC0000005) on exit. Hence the two guards:
+        bail out on event types we don't handle before touching any widget,
+        and verify the underlying C++ objects are still alive.
+        """
         from PySide6.QtCore import QEvent
 
+        if event.type() not in self._HANDLED_EVENT_TYPES:
+            return False
+
         tab = self.selection_manager.tab
+        if not _widgets_alive(tab):
+            return False
+
         if watched == tab.ui.galleryScrollArea.viewport():
             if event.type() == QEvent.MouseButtonPress:
                 if event.button() == Qt.LeftButton:
@@ -117,6 +166,28 @@ class SelectionManager(BaseGalleryManager):
         # Create and install event filter
         self._box_filter = BoxSelectionEventFilter(self)
         self.tab.ui.galleryScrollArea.viewport().installEventFilter(self._box_filter)
+
+    def cleanup(self):
+        """Detach the viewport event filter before the widget tree is destroyed.
+
+        Leaving it installed means Qt keeps routing teardown-time events into
+        eventFilter() while the scroll area is being destroyed, which faults
+        the process on exit. eventFilter() guards against that too, but
+        removing the filter outright is the real fix — the guard is the
+        belt to this pair of braces.
+        """
+        box_filter = getattr(self, "_box_filter", None)
+        if box_filter is None:
+            return
+        try:
+            if _widgets_alive(self.tab):
+                viewport = self.tab.ui.galleryScrollArea.viewport()
+                if _shiboken_is_valid(viewport):
+                    viewport.removeEventFilter(box_filter)
+        except (RuntimeError, AttributeError) as e:
+            logger.debug(f"[Selection] Event filter already detached: {e}")
+        finally:
+            self._box_filter = None
 
     # NOTE: Keyboard shortcuts are installed as QShortcuts by
     # GalleryTab._install_shortcuts() (BaseTab is not a QWidget, so a

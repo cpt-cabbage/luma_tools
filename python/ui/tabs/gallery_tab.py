@@ -1408,4 +1408,13 @@ class GalleryTab(BaseTab):
             except Exception as e:
                 logger.debug(f"stop_network_polling failed: {e}")
 
+        # Detach the viewport event filter. Left installed, Qt keeps routing
+        # teardown-time events into it while the scroll area is being
+        # destroyed, which faults the process with an access violation on exit.
+        if hasattr(self, '_selection_manager') and self._selection_manager:
+            try:
+                self._selection_manager.cleanup()
+            except Exception as e:
+                logger.debug(f"selection manager cleanup failed: {e}")
+
         logger.debug("Gallery tab cleanup completed")

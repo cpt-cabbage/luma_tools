@@ -283,6 +283,24 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             cls._cached_liked_color = None
             cls._cached_stack_colors = None
 
+    # Shared placeholder pixmaps. BaseThumbnailWidget caches the *QImage* but
+    # still does QPixmap.fromImage() per call, so every thumbnail used to own a
+    # private 150x150 ARGB32 pixmap (~90 KB). A gallery of 1000 items spent
+    # ~90 MB on identical grey squares. QPixmap is implicitly shared and these
+    # are never painted on, so one instance per label text is enough.
+    _shared_placeholders = {}
+    _shared_placeholder_lock = threading.RLock()
+
+    def _placeholder(self, text):
+        """Return the shared placeholder pixmap for `text` (GUI thread only)."""
+        key = (text, self.THUMBNAIL_SIZE)
+        with ThumbnailWidget._shared_placeholder_lock:
+            pixmap = ThumbnailWidget._shared_placeholders.get(key)
+            if pixmap is None or pixmap.isNull():
+                pixmap = self._create_placeholder(text)
+                ThumbnailWidget._shared_placeholders[key] = pixmap
+            return pixmap
+
     def __init__(self, path, item_type='image', parent=None, output_dir=None,
                  editable=True, is_new=False, gallery_tab=None, has_metadata=False,
                  job_prefix=None, metadata_level=None):
@@ -364,7 +382,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         self.thumbnail_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.thumbnail_label.setContextMenuPolicy(Qt.NoContextMenu)
         self._apply_thumbnail_style()
-        self.thumbnail_label.setPixmap(self._create_placeholder("..."))
+        self.thumbnail_label.setPixmap(self._placeholder("..."))
         layout.addWidget(self.thumbnail_label)
 
         self.filename_label = QLabel(os.path.basename(self.path))
@@ -856,7 +874,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
     def _load_image_thumbnail(self):
         ext = os.path.splitext(self.path)[1].lower()
         if ext == '.exr':
-            self.thumbnail_label.setPixmap(self._create_placeholder("EXR"))
+            self.thumbnail_label.setPixmap(self._placeholder("EXR"))
             return
 
         # Check in-memory cache first (fast path for recycled widgets)
@@ -938,7 +956,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         if loaded_path is not None and loaded_path != getattr(self, "_current_load_path", loaded_path):
             return
         if image_data is None:
-            self.thumbnail_label.setPixmap(self._create_placeholder("?"))
+            self.thumbnail_label.setPixmap(self._placeholder("?"))
             return
 
         # Cache the thumbnail data for reuse
@@ -949,7 +967,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         if not pixmap.isNull():
             self.thumbnail_label.setPixmap(pixmap)
         else:
-            self.thumbnail_label.setPixmap(self._create_placeholder("?"))
+            self.thumbnail_label.setPixmap(self._placeholder("?"))
 
     # --- Model thumbnail loading ---
     def _load_model_thumbnail(self):
@@ -1208,7 +1226,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                 service.set_pending(self.path, False)
             except Exception:
                 pass
-        self.thumbnail_label.setPixmap(self._create_placeholder("!"))
+        self.thumbnail_label.setPixmap(self._placeholder("!"))
 
     def _create_3d_placeholder(self, text):
         """Create a 3D cube icon placeholder for model thumbnails."""
