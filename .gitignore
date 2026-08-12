@@ -10,3 +10,6 @@ venv/
 env/
 ENV/
 
+
+# Brainstorming / design session artifacts
+.superpowers/
