@@ -1272,9 +1272,8 @@ class GalleryManager(BaseGalleryManager):
             self.tab._thumbnail_load_pending = True
             return
 
-        if not hasattr(self.tab, '_widget_cache') or not self.tab._widget_cache:
-            return
-
+        # Emptiness is decided from the layout below (it also holds the stack
+        # widgets, which never enter the widget cache).
         scroll_area = self.tab.ui.galleryScrollArea
         viewport = scroll_area.viewport()
         viewport_rect = viewport.rect()
@@ -1300,29 +1299,77 @@ class GalleryManager(BaseGalleryManager):
         visible_left = max(0, visible_left - buffer)
         visible_right += buffer
 
-        # Collect widgets that need loading (not already loaded)
-        # Use thread-safe copy for iteration
+        # Walk the layout rather than the widget cache. The flow layout is
+        # row-major, so item y is non-decreasing along the item list: the first
+        # candidate can be found by binary search and the walk can stop as soon
+        # as it drops below the viewport. The old version copied the whole cache
+        # dict under a lock and measured every widget on every scroll tick —
+        # O(gallery) work per tick regardless of how much was on screen.
+        # Walking the layout also covers stack widgets, which the cache does not
+        # contain, so stacks scrolled into view now load like everything else.
+        layout = getattr(self.tab, '_flow_layout', None)
+        if layout is None:
+            return
+        count = layout.count()
+        if not count:
+            return
+
+        def _widget_at(index):
+            item = layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if widget is None or not isValid(widget):
+                return None
+            return widget
+
+        def _top_at(index):
+            widget = _widget_at(index)
+            return widget.geometry().top() if widget is not None else None
+
+        # Item top() is non-decreasing in list order (rows are laid out top to
+        # bottom), so binary-search the first item that starts below the top of
+        # the viewport. bottom() is NOT monotonic — a short thumbnail can sit in
+        # the same row as a tall stack — so the search uses top() and then backs
+        # up to the start of the preceding row, whose items may still intrude
+        # into the viewport.
+        lo, hi = 0, count
+        while lo < hi:
+            mid = (lo + hi) // 2
+            top = _top_at(mid)
+            if top is not None and top <= visible_top:
+                lo = mid + 1
+            else:
+                hi = mid
+
+        if lo > 0:
+            row_top = _top_at(lo - 1)
+            lo -= 1
+            while lo > 0 and _top_at(lo - 1) == row_top:
+                lo -= 1
+
         widgets_to_load = []
-        for widget in self.get_widget_cache_copy().values():
-            # Check widget validity (may have been deleted during refresh)
-            if not widget or not isValid(widget) or not hasattr(widget, 'load_thumbnail_if_needed'):
-                continue
-            if getattr(widget, '_thumbnail_loaded', False):
+        for index in range(lo, count):
+            widget = _widget_at(index)
+            if widget is None:
                 continue
 
             widget_rect = widget.geometry()
 
             # Widgets that haven't been laid out yet (zero geometry) are
             # assumed visible so they load immediately rather than staying blank
-            if widget_rect.width() == 0 and widget_rect.height() == 0:
-                widgets_to_load.append(widget)
-                continue
+            laid_out = widget_rect.width() != 0 or widget_rect.height() != 0
+            if laid_out:
+                if widget_rect.top() > visible_bottom:
+                    break  # everything further down the list is lower still
+                if (widget_rect.bottom() < visible_top or
+                        widget_rect.right() < visible_left or
+                        widget_rect.left() > visible_right):
+                    continue
 
-            if (widget_rect.bottom() >= visible_top and
-                widget_rect.top() <= visible_bottom and
-                widget_rect.right() >= visible_left and
-                widget_rect.left() <= visible_right):
-                widgets_to_load.append(widget)
+            if getattr(widget, '_thumbnail_loaded', False):
+                continue
+            if not hasattr(widget, 'load_thumbnail_if_needed'):
+                continue
+            widgets_to_load.append(widget)
 
         if not widgets_to_load:
             return

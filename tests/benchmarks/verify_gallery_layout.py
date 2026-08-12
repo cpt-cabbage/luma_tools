@@ -149,6 +149,77 @@ def main():
           len(tab.get_widget_cache_copy()) == len(items),
           f"({len(tab.get_widget_cache_copy())})")
 
+    # --- scrolling loads what is on screen and nothing else ---
+    sb = tab.ui.galleryScrollArea.verticalScrollBar()
+    sb.setValue(sb.maximum())
+    tab._on_scroll()
+    pump(app, 3.0)
+    ordered = [tab._flow_layout.itemAt(i).widget() for i in range(tab._flow_layout.count())]
+    bottom_loaded = sum(1 for w in ordered[-12:] if getattr(w, "_thumbnail_loaded", False))
+    top_loaded = sum(1 for w in ordered[:12] if getattr(w, "_thumbnail_loaded", False))
+    check("scrolling to the end loads the last row", bottom_loaded > 0,
+          f"({bottom_loaded}/12)")
+    check("still lazy overall",
+          sum(1 for w in ordered if getattr(w, "_thumbnail_loaded", False)) < len(ordered),
+          f"(top-of-list loaded: {top_loaded}/12)")
+
+    # --- stacked view loads stacks scrolled into view (walks the layout, and
+    #     stacks are not in the widget cache) ---
+    tab._manager.display_items(items, view_mode="stacked", incremental=False)
+    pump(app, 2.5)
+    stacks_ordered = [s for s in tab._manager._stack_widgets.values()]
+    sb.setValue(sb.maximum())
+    tab._on_scroll()
+    pump(app, 3.0)
+    stacks_loaded = sum(1 for s in stacks_ordered
+                        if getattr(s, "_thumbnail_loaded", False))
+    check("stacks load on scroll", stacks_loaded > 0,
+          f"({stacks_loaded}/{len(stacks_ordered)})")
+
+    # --- the binary-searched visible set must equal a brute-force scan ---
+    # Stacked view mixes tall stacks with short thumbnails in the same row,
+    # which is exactly where a naive monotonic assumption would drop items.
+    def brute_force_visible(top, bottom, left, right):
+        found = []
+        for i in range(tab._flow_layout.count()):
+            w = tab._flow_layout.itemAt(i).widget()
+            if w is None or getattr(w, "_thumbnail_loaded", False):
+                continue
+            if not hasattr(w, "load_thumbnail_if_needed"):
+                continue
+            g = w.geometry()
+            if g.width() == 0 and g.height() == 0:
+                found.append(w)
+                continue
+            if (g.bottom() >= top and g.top() <= bottom and
+                    g.right() >= left and g.left() <= right):
+                found.append(w)
+        return found
+
+    mismatched = 0
+    positions = [0, sb.maximum() // 5, sb.maximum() // 2,
+                 sb.maximum() * 4 // 5, sb.maximum()]
+    for pos in positions:
+        sb.setValue(pos)
+        pump(app, 0.2)
+        vp = tab.ui.galleryScrollArea.viewport().rect()
+        top = max(0, sb.value() - 300)
+        bottom = sb.value() + vp.height() + 300
+        hb = tab.ui.galleryScrollArea.horizontalScrollBar()
+        left = max(0, hb.value() - 300)
+        right = hb.value() + vp.width() + 300
+        expected = brute_force_visible(top, bottom, left, right)
+        tab._thumbnail_loading_in_progress = False
+        tab._pending_thumbnail_loads = []
+        tab._manager.load_visible_thumbnails()
+        got = list(tab._pending_thumbnail_loads)
+        if set(map(id, got)) != set(map(id, expected)):
+            mismatched += 1
+            print(f"      pos={pos}: got {len(got)} expected {len(expected)}")
+        pump(app, 0.6)
+    check("visible set matches brute force at 5 scroll positions",
+          mismatched == 0, f"({mismatched} mismatches)")
+
     win.close()
     pump(app, 0.3)
     shutil.rmtree(workdir, ignore_errors=True)

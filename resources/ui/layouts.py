@@ -22,6 +22,11 @@ class FlowLayout(QLayout):
         self._v_spacing = spacing
         self._animation_active = False
         self._pending_rect = None
+        # minimumSize() is an O(N) sweep that Qt calls several times per layout
+        # pass (sizeHint() delegates to it). Items here are fixed-size
+        # thumbnails, so the result only changes when the item list changes or
+        # Qt invalidates the layout — both of which clear this.
+        self._min_size_cache = None
 
     def __del__(self):
         # Check if _item_list exists (may not if initialization failed or GC order issues)
@@ -31,8 +36,13 @@ class FlowLayout(QLayout):
         while item:
             item = self.takeAt(0)
 
+    def invalidate(self):
+        self._min_size_cache = None
+        super().invalidate()
+
     def addItem(self, item):
         self._item_list.append(item)
+        self._min_size_cache = None
 
     def insertItem(self, index, item):
         """Insert a layout item at the specified index."""
@@ -41,6 +51,7 @@ class FlowLayout(QLayout):
         elif index > len(self._item_list):
             index = len(self._item_list)
         self._item_list.insert(index, item)
+        self._min_size_cache = None
 
     def insertWidget(self, index, widget):
         """Insert a widget at the specified index in the layout."""
@@ -78,6 +89,7 @@ class FlowLayout(QLayout):
 
     def takeAt(self, index):
         if 0 <= index < len(self._item_list):
+            self._min_size_cache = None
             return self._item_list.pop(index)
         return None
 
@@ -115,44 +127,69 @@ class FlowLayout(QLayout):
         return self.minimumSize()
 
     def minimumSize(self):
+        if self._min_size_cache is not None:
+            return self._min_size_cache
         size = QSize()
         for item in self._item_list:
             size = size.expandedTo(item.minimumSize())
         margins = self.contentsMargins()
         size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        self._min_size_cache = size
         return size
 
     def _do_layout(self, rect, test_only):
+        """Position (or measure) every item.
+
+        This is the layout hot path — a gallery rebuild runs it once per item
+        batch and every resize/heightForWidth query runs it again, so per-item
+        work here is multiplied by the item count. Spacing is resolved once up
+        front and each item's sizeHint is fetched once instead of three times
+        (that alone was ~48 M cross-language calls on a 2500-item gallery).
+        """
         left, top, right, bottom = self.getContentsMargins()
         effective_rect = rect.adjusted(+left, +top, -right, -bottom)
         x = effective_rect.x()
         y = effective_rect.y()
         line_height = 0
 
-        for item in self._item_list:
-            wid = item.widget()
-            space_x = self.horizontalSpacing()
-            if space_x == -1:
-                space_x = wid.style().layoutSpacing(
-                    QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal
-                )
-            space_y = self.verticalSpacing()
-            if space_y == -1:
-                space_y = wid.style().layoutSpacing(
-                    QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical
-                )
+        # Explicit spacing (the gallery always sets one) resolves to a constant;
+        # only the style-derived fallback has to be asked per widget.
+        space_x = self.horizontalSpacing()
+        space_y = self.verticalSpacing()
+        dynamic_x = space_x == -1
+        dynamic_y = space_y == -1
 
-            next_x = x + item.sizeHint().width() + space_x
-            if next_x - space_x > effective_rect.right() and line_height > 0:
-                x = effective_rect.x()
+        left_edge = effective_rect.x()
+        right_edge = effective_rect.right()
+
+        for item in self._item_list:
+            if dynamic_x or dynamic_y:
+                style = item.widget().style()
+                if dynamic_x:
+                    space_x = style.layoutSpacing(
+                        QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal
+                    )
+                if dynamic_y:
+                    space_y = style.layoutSpacing(
+                        QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical
+                    )
+
+            hint = item.sizeHint()
+            hint_width = hint.width()
+
+            next_x = x + hint_width + space_x
+            if next_x - space_x > right_edge and line_height > 0:
+                x = left_edge
                 y = y + line_height + space_y
-                next_x = x + item.sizeHint().width() + space_x
+                next_x = x + hint_width + space_x
                 line_height = 0
 
             if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+                item.setGeometry(QRect(QPoint(x, y), hint))
 
             x = next_x
-            line_height = max(line_height, item.sizeHint().height())
+            hint_height = hint.height()
+            if hint_height > line_height:
+                line_height = hint_height
 
         return y + line_height - rect.y() + bottom

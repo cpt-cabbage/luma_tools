@@ -535,24 +535,17 @@ def _lookup_file_metadata(
     # incorrectly matching files that belong to a more specific prefix
     # (e.g. "LumaRND_luma_tools_Screenshot 2025-06-06 083801")
     try:
-        best_match = None
-        best_prefix_len = -1
-
-        for key, value in metadata.items():
-            if not isinstance(key, str) or not key.startswith("_prefix_"):
-                continue
-            if not isinstance(value, dict):
-                continue
-
-            prefix = key[8:]  # Remove "_prefix_" prefix
-
-            # Check if basename starts with prefix (normal case for outputs)
-            if basename.startswith(prefix) and len(prefix) > best_prefix_len:
-                best_match = value
-                best_prefix_len = len(prefix)
-
-        if best_match is not None:
-            return best_match
+        # Longest-prefix-wins, done as direct lookups instead of a sweep over
+        # every metadata key. Scanning a directory calls this once (often twice)
+        # per file, so the old sweep made a scan O(files x metadata entries) —
+        # ~5 s for 2500 files whose names don't share a job prefix. Testing each
+        # prefix of the basename is O(len(basename)) dict hits and yields the
+        # same match: the longest key of the form "_prefix_<p>" where the
+        # basename starts with p.
+        for length in range(len(basename), -1, -1):
+            candidate = metadata.get(f"_prefix_{basename[:length]}")
+            if isinstance(candidate, dict):
+                return candidate
 
         # Reverse match: prefix ends with basename (for recreate settings only)
         # e.g., prefix="luma_tools_job_filename" matches basename="filename"
