@@ -44,11 +44,19 @@ class OperationsManager(BaseGalleryManager):
 
         count = len(self.tab._selected_items)
 
+        # Name the files being deleted — "12 item(s)" alone gave the user no way
+        # to notice they had the wrong selection before the files were gone.
+        names = sorted(os.path.basename(p) for p in self.tab._selected_items)
+        detail_lines = names[:10]
+        if len(names) > 10:
+            detail_lines.append(f"...and {len(names) - 10} more")
+
         if not confirm_action(
             "Delete Selected Items",
             f"Are you sure you want to delete {count} selected item(s)?\n\n"
             "This will permanently delete the files from disk.",
             parent=self.tab.main_window,
+            detail="\n".join(detail_lines),
         ):
             return
         self.tab.update_status_with_spinner(
@@ -295,7 +303,21 @@ class OperationsManager(BaseGalleryManager):
         """Handle publish batch error."""
         from dialog_helpers import show_error
         self._publish_in_progress = False
-        show_error("Publish Error", error_msg, parent=self.tab.main_window)
+
+        # Mirror the success path: the spinner used to keep spinning forever
+        # after a failed publish, so the UI claimed work was still running.
+        self.tab.update_status_with_spinner(
+            "Gallery: Publish failed",
+            StatusColors.ERROR,
+            start=False,
+        )
+        show_error(
+            "Publish Error",
+            "Could not publish to AYON. Check that the AYON server is reachable "
+            "and the folder/task still exists.",
+            parent=self.tab.main_window,
+            detail=error_msg,
+        )
 
     def _on_publish_complete(self, results):
         """Handle publish batch completion."""
@@ -304,7 +326,8 @@ class OperationsManager(BaseGalleryManager):
         self._publish_in_progress = False
 
         success_count = sum(1 for r in results if r['success'])
-        failed_items = [os.path.basename(r['path']) for r in results if not r['success']]
+        failed_paths = [r['path'] for r in results if not r['success']]
+        failed_items = [os.path.basename(p) for p in failed_paths]
 
         if success_count == len(results):
             # Stop spinner and show success
@@ -322,11 +345,31 @@ class OperationsManager(BaseGalleryManager):
                 StatusColors.WARNING,
                 start=False
             )
+            errors = {
+                os.path.basename(r['path']): r.get('error')
+                for r in results if not r['success'] and r.get('error')
+            }
+            detail_lines = [
+                f"{name}: {errors[name]}" if name in errors else name
+                for name in failed_items
+            ]
             show_warning(
                 "Partial Publish",
-                f"Published {success_count} of {len(results)} items.\n\nFailed:\n" + "\n".join(failed_items[:5]),
-                parent=self.tab.main_window
+                f"Published {success_count} of {len(results)} items.\n\n"
+                f"{len(failed_items)} item(s) failed and have been re-selected "
+                "in the gallery so you can retry them.",
+                parent=self.tab.main_window,
+                detail="\n".join(detail_lines),
             )
+
+            # Re-select the failures so "Publish to AYON" retries exactly those
+            try:
+                reselected = self.tab._selection_manager.select_paths(failed_paths)
+                self.tab.log(
+                    f"[Gallery] Re-selected {reselected} failed publish item(s) for retry"
+                )
+            except Exception as e:
+                self.tab.log(f"[Gallery] Could not re-select failed items: {e}")
 
     def copy_settings_to_comfyui(self, metadata: Dict[str, Any]):
         """

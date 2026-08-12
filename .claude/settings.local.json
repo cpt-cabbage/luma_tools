@@ -183,7 +183,8 @@
       "Bash(rm -rf resources/threejs)",
       "Bash(\"C:\\\\Users\\\\christophe.leyder\\\\.local\\\\bin\\\\codebase-memory-mcp.exe\" --help)",
       "Bash(git checkout *)",
-      "PowerShell(powershell -ExecutionPolicy Bypass -File 'C:\\\\Temp\\\\claude\\\\L--tools--studio-tools-AYON--dev-christophe-la-shot-tools-luma-tools\\\\7afa02fe-376d-4070-85d9-9cd478de95aa\\\\scratchpad\\\\run_check.ps1')"
+      "PowerShell(powershell -ExecutionPolicy Bypass -File 'C:\\\\Temp\\\\claude\\\\L--tools--studio-tools-AYON--dev-christophe-la-shot-tools-luma-tools\\\\7afa02fe-376d-4070-85d9-9cd478de95aa\\\\scratchpad\\\\run_check.ps1')",
+      "Artifact"
     ],
     "deny": [
       "Read(./python/venv/**)",

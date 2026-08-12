@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from core.settings_manager import (
     load_user_settings, save_user_settings,
     load_global_settings, save_global_settings,
-    safe_get_setting
+    update_global_settings, safe_get_setting
 )
 from core.utils import ensure_directory, normalize_path
 
@@ -268,10 +268,6 @@ def save_comfyui_workflow_preset(
                 "path": wf_path
             }
 
-    settings = load_global_settings()
-    if "comfyui_workflow_presets" not in settings:
-        settings["comfyui_workflow_presets"] = {}
-
     # Validate output_type
     if output_type not in OUTPUT_TYPES:
         output_type = "image"
@@ -290,8 +286,14 @@ def save_comfyui_workflow_preset(
     if is_multi and final_workflows:
         preset_data["workflows"] = final_workflows
 
-    settings["comfyui_workflow_presets"][name] = preset_data
-    save_global_settings(settings)
+    # Cross-process-safe: merge into a fresh read of the shared file so
+    # presets saved by other workstations since startup are not dropped.
+    def _apply(settings):
+        if "comfyui_workflow_presets" not in settings:
+            settings["comfyui_workflow_presets"] = {}
+        settings["comfyui_workflow_presets"][name] = preset_data
+        return settings
+    update_global_settings(_apply)
     if is_multi:
         logger.info(f"Saved ComfyUI multi-workflow preset: {name} with {len(final_workflows or {})} workflow(s)")
     else:
@@ -309,26 +311,18 @@ def update_comfyui_workflow_preset(name: str, copy_to_central: bool = True, **kw
     Returns:
         bool: True if update successful
     """
-    settings = load_global_settings()
-    presets = settings.get("comfyui_workflow_presets", {})
-    if name not in presets:
+    # Cheap existence pre-check (the mutator re-checks against fresh disk state)
+    if name not in load_global_settings().get("comfyui_workflow_presets", {}):
         return False
 
-    preset = presets[name]
-    # Handle legacy format
-    if isinstance(preset, str):
-        preset = {"path": preset, "description": "", "iteratable": False, "note": "",
-                  "full_restart": False, "node_overrides": {}, "is_multi": False,
-                  "output_type": "image"}
-
-    # Handle workflow_path with copy
+    # Preprocess file-copying OUTSIDE the settings lock (slow network I/O)
+    new_path = None
     if "workflow_path" in kwargs and kwargs["workflow_path"] is not None:
         new_path = kwargs["workflow_path"]
         if copy_to_central and new_path:
             copied_path = copy_workflow_to_central_directory(new_path)
             if copied_path:
                 new_path = copied_path
-        preset["path"] = new_path
         del kwargs["workflow_path"]  # Remove so we don't process it again below
 
     # Handle multi-workflow updates with copy
@@ -346,28 +340,51 @@ def update_comfyui_workflow_preset(name: str, copy_to_central: bool = True, **kw
             }
         kwargs["workflows"] = final_workflows
 
-    # Update remaining fields
-    for key in ["description", "iteratable", "note", "full_restart",
-                "node_overrides", "is_multi", "workflows", "output_type"]:
-        if key in kwargs and kwargs[key] is not None:
-            # Validate output_type
-            if key == "output_type" and kwargs[key] not in OUTPUT_TYPES:
-                continue
-            preset[key] = kwargs[key]
+    # Cross-process-safe: apply the update against a fresh read of the file
+    def _apply(settings):
+        presets = settings.get("comfyui_workflow_presets", {})
+        if name not in presets:
+            return None  # Deleted by another workstation meanwhile
 
-    presets[name] = preset
-    settings["comfyui_workflow_presets"] = presets
-    save_global_settings(settings)
+        preset = presets[name]
+        # Handle legacy format
+        if isinstance(preset, str):
+            preset = {"path": preset, "description": "", "iteratable": False, "note": "",
+                      "full_restart": False, "node_overrides": {}, "is_multi": False,
+                      "output_type": "image"}
+
+        if new_path is not None:
+            preset["path"] = new_path
+
+        # Update remaining fields
+        for key in ["description", "iteratable", "note", "full_restart",
+                    "node_overrides", "is_multi", "workflows", "output_type"]:
+            if key in kwargs and kwargs[key] is not None:
+                # Validate output_type
+                if key == "output_type" and kwargs[key] not in OUTPUT_TYPES:
+                    continue
+                preset[key] = kwargs[key]
+
+        presets[name] = preset
+        settings["comfyui_workflow_presets"] = presets
+        return settings
+
+    if update_global_settings(_apply) is None:
+        return False
     logger.info(f"Updated ComfyUI workflow preset: {name}")
     return True
 
 
 def delete_comfyui_workflow_preset(name: str):
-    """Delete a ComfyUI workflow preset from global settings."""
-    settings = load_global_settings()
-    if "comfyui_workflow_presets" in settings and name in settings["comfyui_workflow_presets"]:
-        del settings["comfyui_workflow_presets"][name]
-        save_global_settings(settings)
+    """Delete a ComfyUI workflow preset. Cross-process-safe read-modify-write."""
+    def _apply(settings):
+        presets = settings.get("comfyui_workflow_presets", {})
+        if name not in presets:
+            return None  # Nothing to delete — no write
+        del presets[name]
+        settings["comfyui_workflow_presets"] = presets
+        return settings
+    if update_global_settings(_apply) is not None:
         logger.info(f"Deleted ComfyUI workflow preset: {name}")
 
 

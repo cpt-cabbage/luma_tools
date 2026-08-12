@@ -268,6 +268,35 @@ class SelectionManager(BaseGalleryManager):
             widget.set_selected(True)
             # The selection state is tracked via widget callbacks
 
+    def select_paths(self, paths):
+        """Replace the current selection with the given item paths.
+
+        Used after a partial batch operation so the user can retry exactly the
+        items that failed without re-picking them by hand.
+
+        Args:
+            paths: Iterable of item paths to select.
+
+        Returns:
+            int: Number of paths that had a widget and were actually selected.
+        """
+        self.clear_selection(show_status=False)
+
+        selected = 0
+        for path in paths or []:
+            widget = self.get_cached_widget(path)
+            if widget is None and hasattr(self.tab, '_manager'):
+                try:
+                    widget = self.tab._manager.find_widget_by_path(path)
+                except Exception:
+                    widget = None
+            if widget is not None and hasattr(widget, 'set_selected'):
+                widget.set_selected(True)
+                selected += 1
+
+        self._update_toolbar()
+        return selected
+
     def clear_selection(self, show_status=True):
         """Clear all selected items.
 

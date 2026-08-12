@@ -2037,7 +2037,13 @@ class EmbeddedImageViewer(QWidget):
                 QTimer.singleShot(1500, self._update_info)
 
             except Exception as e:
-                show_warning("Delete Error", f"Failed to delete file:\n{str(e)}", self)
+                show_warning(
+                    "Delete Error",
+                    f"Could not delete {filename}. The file may be open in "
+                    "another viewer or you may lack permission to delete it.",
+                    self,
+                    detail=f"{image_path}\n\n{type(e).__name__}: {e}",
+                )
 
     def _show_context_menu(self, pos):
         if not self.media_paths:
@@ -2687,7 +2693,13 @@ class FullscreenImageViewer(QWidget):
                 QTimer.singleShot(1500, self._update_info)
 
             except Exception as e:
-                show_warning("Delete Error", f"Failed to delete file:\n{str(e)}", self)
+                show_warning(
+                    "Delete Error",
+                    f"Could not delete {filename}. The file may be open in "
+                    "another viewer or you may lack permission to delete it.",
+                    self,
+                    detail=f"{image_path}\n\n{type(e).__name__}: {e}",
+                )
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

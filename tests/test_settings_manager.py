@@ -177,29 +177,40 @@ class TestSetSetting:
     """Test set_setting with mocked file I/O."""
 
     def test_set_known_setting(self):
-        import core.settings_manager as sm
+        # Global-scope sets go through update_global_settings (cross-process
+        # safe read-modify-write); capture the mutator and verify its effect.
         clear_settings_cache()
-        mock_save = MagicMock()
-        with patch.object(sm._global_settings, "_load_fn", return_value={}), \
-             patch("core.settings_manager._save_settings_unlocked", mock_save):
+        mock_update = MagicMock()
+        with patch("core.settings_manager.update_global_settings", mock_update):
             set_setting("comfyui_path", "/new/path", verbose=False)
-            mock_save.assert_called_once()
-            saved = mock_save.call_args[0][1]  # (settings_type, settings)
-            assert saved["comfyui_path"] == "/new/path"
+            mock_update.assert_called_once()
+            mutator = mock_update.call_args[0][0]
+            result = mutator({})
+            assert result["comfyui_path"] == "/new/path"
 
     def test_raises_for_unknown_key(self):
         with pytest.raises(KeyError):
             set_setting("unknown_setting_xyz", "value")
 
     def test_validator_applied(self):
+        clear_settings_cache()
+        mock_update = MagicMock()
+        with patch("core.settings_manager.update_global_settings", mock_update):
+            set_setting("comfyui_mode", "INVALID", verbose=False)
+            mutator = mock_update.call_args[0][0]
+            result = mutator({})
+            assert result["comfyui_mode"] == "embedded"  # validator returned default
+
+    def test_user_scope_set_uses_save_unlocked(self):
         import core.settings_manager as sm
         clear_settings_cache()
         mock_save = MagicMock()
-        with patch.object(sm._global_settings, "_load_fn", return_value={}), \
+        with patch.object(sm._user_settings, "_load_fn", return_value={}), \
              patch("core.settings_manager._save_settings_unlocked", mock_save):
-            set_setting("comfyui_mode", "INVALID", verbose=False)
+            set_setting("show_tray_notifications", False, verbose=False)
+            mock_save.assert_called_once()
             saved = mock_save.call_args[0][1]  # (settings_type, settings)
-            assert saved["comfyui_mode"] == "embedded"  # validator returned default
+            assert saved["show_tray_notifications"] is False
 
 
 # ============================================================================

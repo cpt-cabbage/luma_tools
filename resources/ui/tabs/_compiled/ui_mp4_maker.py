@@ -111,6 +111,7 @@ class Ui_MP4MakerTab(object):
         self.mp4RendersLayout.setObjectName(u"mp4RendersLayout")
         self.MP4RendersList = QListWidget(self.mp4RendersGroupBox)
         self.MP4RendersList.setObjectName(u"MP4RendersList")
+        self.MP4RendersList.setAlternatingRowColors(True)
         self.MP4RendersList.setSelectionMode(QAbstractItemView.SingleSelection)
 
         self.mp4RendersLayout.addWidget(self.MP4RendersList)
@@ -132,6 +133,38 @@ class Ui_MP4MakerTab(object):
         self.mp4OptionsSpacer1 = QSpacerItem(20, 16, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
 
         self.mp4OptionsLayout.addItem(self.mp4OptionsSpacer1)
+
+        self.mp4RangeLayout = QHBoxLayout()
+        self.mp4RangeLayout.setObjectName(u"mp4RangeLayout")
+        self.mp4RangeLabel = QLabel(self.mp4OptionsGroupBox)
+        self.mp4RangeLabel.setObjectName(u"mp4RangeLabel")
+
+        self.mp4RangeLayout.addWidget(self.mp4RangeLabel)
+
+        self.MP4StartFrame = QSpinBox(self.mp4OptionsGroupBox)
+        self.MP4StartFrame.setObjectName(u"MP4StartFrame")
+        self.MP4StartFrame.setMinimumSize(QSize(70, 28))
+        self.MP4StartFrame.setAlignment(Qt.AlignCenter)
+        self.MP4StartFrame.setMinimum(-999999)
+        self.MP4StartFrame.setMaximum(999999)
+
+        self.mp4RangeLayout.addWidget(self.MP4StartFrame)
+
+        self.MP4EndFrame = QSpinBox(self.mp4OptionsGroupBox)
+        self.MP4EndFrame.setObjectName(u"MP4EndFrame")
+        self.MP4EndFrame.setMinimumSize(QSize(70, 28))
+        self.MP4EndFrame.setAlignment(Qt.AlignCenter)
+        self.MP4EndFrame.setMinimum(-999999)
+        self.MP4EndFrame.setMaximum(999999)
+
+        self.mp4RangeLayout.addWidget(self.MP4EndFrame)
+
+        self.mp4RangeSpacer = QSpacerItem(20, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.mp4RangeLayout.addItem(self.mp4RangeSpacer)
+
+
+        self.mp4OptionsLayout.addLayout(self.mp4RangeLayout)
 
         self.MP4BurnInTimecode = QCheckBox(self.mp4OptionsGroupBox)
         self.MP4BurnInTimecode.setObjectName(u"MP4BurnInTimecode")
@@ -200,6 +233,14 @@ class Ui_MP4MakerTab(object):
 
         self.mp4Layout.addLayout(self.mp4ContentLayout)
 
+        self.MP4StatusLabel = QLabel(MP4MakerTab)
+        self.MP4StatusLabel.setObjectName(u"MP4StatusLabel")
+        self.MP4StatusLabel.setWordWrap(True)
+        self.MP4StatusLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
+        self.MP4StatusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.mp4Layout.addWidget(self.MP4StatusLabel)
+
 
         self.retranslateUi(MP4MakerTab)
 
@@ -216,24 +257,40 @@ class Ui_MP4MakerTab(object):
         self.mp4VersionLabel.setText(QCoreApplication.translate("MP4MakerTab", u"Version:", None))
         self.MP4BrowseCustomPath.setText(QCoreApplication.translate("MP4MakerTab", u"Browse...", None))
 #if QT_CONFIG(tooltip)
-        self.MP4ScanRenders.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Rescan", None))
+        self.MP4ScanRenders.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Rescan version and find render files", None))
 #endif // QT_CONFIG(tooltip)
         self.MP4ScanRenders.setText(QCoreApplication.translate("MP4MakerTab", u"Rescan", None))
         self.MP4CustomPathLabel.setText(QCoreApplication.translate("MP4MakerTab", u"Custom path: None", None))
-        self.mp4RendersGroupBox.setTitle(QCoreApplication.translate("MP4MakerTab", u"Available Renders", None))
+        self.mp4RendersGroupBox.setTitle(QCoreApplication.translate("MP4MakerTab", u"Renders", None))
+#if QT_CONFIG(tooltip)
+        self.MP4RendersList.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Render sequences found in the current version - select the sequence to convert to MP4", None))
+#endif // QT_CONFIG(tooltip)
         self.mp4OptionsGroupBox.setTitle(QCoreApplication.translate("MP4MakerTab", u"MP4 Options", None))
         self.MP4QualityButton.setText(QCoreApplication.translate("MP4MakerTab", u"Quality: High (CRF 18)", None))
 #if QT_CONFIG(tooltip)
         self.MP4QualityButton.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Click to select output quality (lower CRF = higher quality)", None))
 #endif // QT_CONFIG(tooltip)
+        self.mp4RangeLabel.setText(QCoreApplication.translate("MP4MakerTab", u"Range:", None))
+#if QT_CONFIG(tooltip)
+        self.mp4RangeLabel.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Frame range to encode - defaults to the full range of the selected sequence", None))
+#endif // QT_CONFIG(tooltip)
+#if QT_CONFIG(tooltip)
+        self.MP4StartFrame.setToolTip(QCoreApplication.translate("MP4MakerTab", u"First frame to encode (clamped to the selected sequence)", None))
+#endif // QT_CONFIG(tooltip)
+#if QT_CONFIG(tooltip)
+        self.MP4EndFrame.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Last frame to encode (clamped to the selected sequence)", None))
+#endif // QT_CONFIG(tooltip)
         self.MP4BurnInTimecode.setText(QCoreApplication.translate("MP4MakerTab", u"Burn-in Timecode", None))
+#if QT_CONFIG(tooltip)
+        self.MP4BurnInTimecode.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Draw the frame number onto each frame of the MP4 (requires a system font)", None))
+#endif // QT_CONFIG(tooltip)
         self.MP4AddToGallery.setText(QCoreApplication.translate("MP4MakerTab", u"Add to Gallery", None))
 #if QT_CONFIG(tooltip)
         self.MP4AddToGallery.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Copy the generated MP4 to your gallery folder for easy browsing", None))
 #endif // QT_CONFIG(tooltip)
         self.MP4PublishToAyon.setText(QCoreApplication.translate("MP4MakerTab", u"Publish to AYON", None))
 #if QT_CONFIG(tooltip)
-        self.MP4PublishToAyon.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Publish the generated MP4 as a review file to AYON", None))
+        self.MP4PublishToAyon.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Publish the generated MP4 as a review file to AYON. The product name is derived automatically from the MP4 filename (review_<filename>).", None))
 #endif // QT_CONFIG(tooltip)
         self.MP4PublishOnFarm.setText(QCoreApplication.translate("MP4MakerTab", u"Publish on Farm", None))
 #if QT_CONFIG(tooltip)
@@ -244,9 +301,13 @@ class Ui_MP4MakerTab(object):
         self.MP4OutputPath.setText(QCoreApplication.translate("MP4MakerTab", u"No output location selected", None))
         self.MP4OutputPath.setStyleSheet(QCoreApplication.translate("MP4MakerTab", u"color: #888888; font-size: 9pt;", None))
 #if QT_CONFIG(tooltip)
-        self.MP4Generate.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Generate MP4 from selected render", None))
+        self.MP4Generate.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Generate MP4 from selected render (Ctrl+Return)", None))
 #endif // QT_CONFIG(tooltip)
         self.MP4Generate.setText(QCoreApplication.translate("MP4MakerTab", u"Generate MP4", None))
+#if QT_CONFIG(shortcut)
+        self.MP4Generate.setShortcut(QCoreApplication.translate("MP4MakerTab", u"Ctrl+Return", None))
+#endif // QT_CONFIG(shortcut)
+        self.MP4StatusLabel.setText("")
         pass
     # retranslateUi
 

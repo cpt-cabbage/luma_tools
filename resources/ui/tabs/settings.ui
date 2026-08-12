@@ -780,6 +780,57 @@
            </layout>
           </item>
           <item>
+           <layout class="QHBoxLayout" name="vramModeLayout">
+            <item>
+             <widget class="QLabel" name="vramModeLabel">
+              <property name="text">
+               <string>VRAM Mode:</string>
+              </property>
+              <property name="toolTip">
+               <string>ComfyUI GPU memory strategy. --lowvram, --normalvram and --highvram are mutually exclusive launch flags.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="ComfyUIVRAMMode">
+              <property name="toolTip">
+               <string>Auto: let ComfyUI decide. Low (--lowvram): least VRAM, slowest. Normal (--normalvram): default memory management. High (--highvram): keep models in VRAM, needs high-end GPUs (24GB+).</string>
+              </property>
+              <property name="minimumWidth">
+               <number>200</number>
+              </property>
+              <item>
+               <property name="text">
+                <string>Auto (ComfyUI decides)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Low VRAM (--lowvram)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Normal VRAM (--normalvram)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>High VRAM (--highvram)</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item>
+             <spacer name="vramModeSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
            <layout class="QHBoxLayout" name="performanceFlagsLayout">
             <item>
              <widget class="QCheckBox" name="ComfyUIFastMode">
@@ -788,36 +839,6 @@
               </property>
               <property name="toolTip">
                <string>Enable --fast with fp16 accumulation for faster execution. May slightly reduce quality for some models.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="ComfyUILowVRAM">
-              <property name="text">
-               <string>Low VRAM Mode (--lowvram)</string>
-              </property>
-              <property name="toolTip">
-               <string>Enable --lowvram flag for systems with limited GPU memory. Reduces VRAM usage at the cost of performance.</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="ComfyUIHighVRAM">
-              <property name="text">
-               <string>High VRAM Mode (--highvram)</string>
-              </property>
-              <property name="toolTip">
-               <string>Keep models loaded in VRAM between inferences. Best for persistent server mode with high-end GPUs (24GB+).</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="ComfyUINormalVRAM">
-              <property name="text">
-               <string>Normal VRAM Mode (--normalvram)</string>
-              </property>
-              <property name="toolTip">
-               <string>Use default ComfyUI memory management with smart model unloading.</string>
               </property>
              </widget>
             </item>
@@ -918,6 +939,9 @@
                 <property name="text">
                  <string>Add User</string>
                 </property>
+                <property name="toolTip">
+                 <string>Add a username to the admin list. Admins get full access to all tabs including Settings. Applies immediately for everyone.</string>
+                </property>
                </widget>
               </item>
               <item>
@@ -930,6 +954,9 @@
                 </property>
                 <property name="text">
                  <string>Remove User</string>
+                </property>
+                <property name="toolTip">
+                 <string>Remove the selected user from the admin list. They lose admin access after restarting Luma Tools. Applies immediately.</string>
                 </property>
                </widget>
               </item>

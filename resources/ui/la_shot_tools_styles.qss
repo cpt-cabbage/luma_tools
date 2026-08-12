@@ -749,3 +749,274 @@ BatchImageSelector QListWidget {
     border: 1px solid #3c414b;
     border-radius: 6px;
 }
+
+/* ============================================================================
+ * COMFYUI TAB
+ *
+ * Migrated verbatim from the per-widget styleSheet properties that used to
+ * live in resources/ui/tabs/comfyui.ui, so the tab is themed from the same
+ * place as every other tab. Selectors are ID-scoped to keep the exact
+ * precedence the inline stylesheets had over the generic rules above.
+ * ============================================================================ */
+
+/* --- Step cards ---------------------------------------------------------- */
+QFrame#comfyuiModelFrame,
+QFrame#comfyuiInputFrame,
+QFrame#comfyuiSettingsFrame,
+QFrame#comfyuiSubmitFrame,
+QFrame#comfyuiIterateFrame {
+    background-color: #282c34;
+    border: 1px solid #3c414b;
+    border-radius: 8px;
+}
+
+/* --- Step headers -------------------------------------------------------- */
+QLabel#modelStepTitle,
+QLabel#inputStepTitle,
+QLabel#settingsStepTitle,
+QLabel#submitStepTitle {
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* --- Model header row ---------------------------------------------------- */
+QLabel#selectedModelName {
+    color: #e0e0e0;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QLabel#selectedModelBadge {
+    background-color: rgba(74, 158, 255, 0.15);
+    color: #4a9eff;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+QLabel#selectedModelDesc {
+    color: #797e89;
+    font-size: 11px;
+}
+
+QPushButton#ComfyUIChoosePreset {
+    background-color: #2c313a;
+    border: 1px dashed #4a9eff;
+    border-radius: 6px;
+    color: #4a9eff;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 16px;
+    text-align: left;
+}
+
+QPushButton#ComfyUIChoosePreset:hover {
+    background-color: #333842;
+    border-style: solid;
+}
+
+/* Icon-only / compact header buttons */
+QPushButton#workflowSettingsBtn,
+QPushButton#advancedGearBtn {
+    background-color: transparent;
+    border: 1px solid #3c414b;
+    border-radius: 4px;
+    color: #c5cad3;
+}
+
+QPushButton#workflowSettingsBtn:hover,
+QPushButton#advancedGearBtn:hover {
+    border-color: #4a9eff;
+    color: #4a9eff;
+}
+
+QPushButton#editModelBtn {
+    background-color: transparent;
+    border: 1px solid #3c414b;
+    border-radius: 4px;
+    color: #c5cad3;
+    padding: 0 10px;
+    font-size: 11px;
+}
+
+QPushButton#editModelBtn:hover {
+    border-color: #4a9eff;
+    color: #4a9eff;
+}
+
+QPushButton#changeModelBtn {
+    background-color: #2c313a;
+    border: 1px solid #4a9eff;
+    border-radius: 4px;
+    color: #4a9eff;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+QPushButton#changeModelBtn:hover {
+    background-color: #333842;
+}
+
+/* --- Note / tip banner --------------------------------------------------- */
+QFrame#noteBanner {
+    background-color: rgba(74, 158, 255, 0.10);
+    border: 1px solid rgba(74, 158, 255, 0.35);
+    border-radius: 6px;
+}
+
+QLabel#noteText {
+    color: #c5cad3;
+    font-size: 11px;
+}
+
+/* --- Settings card ------------------------------------------------------- */
+QLabel#label_count_value {
+    color: #4a9eff;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+QLabel#ComfyUIEtaLabel {
+    color: #797e89;
+    font-size: 11px;
+}
+
+QPushButton#advancedToggleBtn {
+    background-color: transparent;
+    border: none;
+    color: #797e89;
+    font-size: 11px;
+    text-align: left;
+    padding: 2px 0px;
+}
+
+QPushButton#advancedToggleBtn:hover {
+    color: #4a9eff;
+}
+
+QFrame#advancedSeparator {
+    color: #3c414b;
+}
+
+QLabel#ComfyUINetworkPathDisplay {
+    color: #797e89;
+    font-style: italic;
+    font-size: 11px;
+}
+
+/* --- Submit card --------------------------------------------------------- */
+QPushButton#ComfyUISubmit {
+    background-color: #4a9eff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 8px 24px;
+}
+
+QPushButton#ComfyUISubmit:hover {
+    background-color: #5cadff;
+}
+
+QPushButton#ComfyUISubmit:pressed {
+    background-color: #3a8eef;
+}
+
+QPushButton#ComfyUISubmit:disabled {
+    background-color: #3c414b;
+    color: #797e89;
+}
+
+QPushButton#ComfyUICancelJobs {
+    background-color: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 8px 16px;
+}
+
+QPushButton#ComfyUICancelJobs:hover {
+    background-color: #f87171;
+}
+
+QPushButton#ComfyUICancelJobs:disabled {
+    background-color: #3c414b;
+    color: #797e89;
+}
+
+/* Seed dice + auto-randomize toggle on the submit bar (created in tab.py) */
+QToolButton#ComfyUISubmitBarDice,
+QToolButton#ComfyUIAutoRandomizeSeed {
+    background-color: transparent;
+    border: 1px solid #3c414b;
+    border-radius: 4px;
+    color: #c5cad3;
+    padding: 0px;
+}
+
+QToolButton#ComfyUISubmitBarDice:hover,
+QToolButton#ComfyUIAutoRandomizeSeed:hover {
+    border-color: #4a9eff;
+    color: #4a9eff;
+}
+
+QToolButton#ComfyUIAutoRandomizeSeed:checked {
+    background-color: rgba(74, 158, 255, 0.18);
+    border-color: #4a9eff;
+    color: #4a9eff;
+}
+
+/* --- Iterate / progress card --------------------------------------------- */
+QLabel#ComfyUIIterateTitle {
+    font-weight: bold;
+    font-size: 13px;
+    color: #e0e0e0;
+    border: none;
+}
+
+QLabel#ComfyUIIterateStatus {
+    color: #797e89;
+    border: none;
+}
+
+QProgressBar#ComfyUIIterateProgress {
+    background-color: #1a1d21;
+    border: none;
+    border-radius: 4px;
+    height: 8px;
+}
+
+QProgressBar#ComfyUIIterateProgress::chunk {
+    background-color: #4a9eff;
+    border-radius: 4px;
+}
+
+QLabel#ComfyUIIteratePreview {
+    background-color: #1a1d21;
+    border: 1px solid #3c414b;
+    border-radius: 6px;
+}
+
+QPushButton#ComfyUIUseAsInput {
+    background-color: #2c313a;
+    border: 1px solid #4a9eff;
+    border-radius: 6px;
+    color: #4a9eff;
+    padding: 8px 16px;
+    font-size: 12px;
+}
+
+QPushButton#ComfyUIUseAsInput:hover {
+    background-color: #333842;
+}
+
+QPushButton#ComfyUIUseAsInput:disabled {
+    border-color: #3c414b;
+    color: #797e89;
+}

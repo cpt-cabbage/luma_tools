@@ -16,8 +16,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QGroupBox, QHBoxLayout,
-    QPushButton, QSizePolicy, QSpacerItem, QTextEdit,
-    QVBoxLayout, QWidget)
+    QLineEdit, QPushButton, QSizePolicy, QSpacerItem,
+    QTextEdit, QVBoxLayout, QWidget)
 
 class Ui_LogsTab(object):
     def setupUi(self, LogsTab):
@@ -34,6 +34,13 @@ class Ui_LogsTab(object):
         self.logOutputLayout.setObjectName(u"logOutputLayout")
         self.logToolbarLayout = QHBoxLayout()
         self.logToolbarLayout.setObjectName(u"logToolbarLayout")
+        self.LogFilterEdit = QLineEdit(self.logOutputGroupBox)
+        self.LogFilterEdit.setObjectName(u"LogFilterEdit")
+        self.LogFilterEdit.setClearButtonEnabled(True)
+        self.LogFilterEdit.setMaximumSize(QSize(320, 16777215))
+
+        self.logToolbarLayout.addWidget(self.LogFilterEdit)
+
         self.VerboseLogsCheckbox = QCheckBox(self.logOutputGroupBox)
         self.VerboseLogsCheckbox.setObjectName(u"VerboseLogsCheckbox")
 
@@ -81,9 +88,13 @@ class Ui_LogsTab(object):
 
     def retranslateUi(self, LogsTab):
         self.logOutputGroupBox.setTitle(QCoreApplication.translate("LogsTab", u"Terminal Log Output", None))
-        self.VerboseLogsCheckbox.setText(QCoreApplication.translate("LogsTab", u"Show verbose logs", None))
+        self.LogFilterEdit.setPlaceholderText(QCoreApplication.translate("LogsTab", u"Filter\u2026 (case-insensitive)", None))
 #if QT_CONFIG(tooltip)
-        self.VerboseLogsCheckbox.setToolTip(QCoreApplication.translate("LogsTab", u"Show detailed debug messages (Detection, Poll Debug, Batch, etc.)", None))
+        self.LogFilterEdit.setToolTip(QCoreApplication.translate("LogsTab", u"Show only log lines containing this text (case-insensitive)", None))
+#endif // QT_CONFIG(tooltip)
+        self.VerboseLogsCheckbox.setText(QCoreApplication.translate("LogsTab", u"Show debug logs", None))
+#if QT_CONFIG(tooltip)
+        self.VerboseLogsCheckbox.setToolTip(QCoreApplication.translate("LogsTab", u"Show debug-level messages (Detection, Poll Debug, Batch, etc.) in this view. All messages are always written to the log file.", None))
 #endif // QT_CONFIG(tooltip)
         self.PauseLogButton.setText(QCoreApplication.translate("LogsTab", u"Pause", None))
 #if QT_CONFIG(tooltip)

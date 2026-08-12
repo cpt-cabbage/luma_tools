@@ -882,17 +882,44 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     @staticmethod
     def _load_image_data(image_path):
-        from PySide6.QtGui import QImage
-        from PySide6.QtCore import QBuffer, QIODevice
-        image = QImage(image_path)
+        """Decode a thumbnail-sized image (runs on a worker thread).
+
+        Uses QImageReader.setScaledSize() so the decoder downsamples while
+        reading. The previous QImage(path) + scale() decoded the full-size
+        image into memory first — for multi-megapixel gallery renders that is
+        the bulk of the scan cost and the peak memory use.
+        """
+        from PySide6.QtGui import QImage, QImageReader
+        from PySide6.QtCore import QBuffer, QIODevice, QSize
+
+        target_w, target_h = ThumbnailWidget.THUMBNAIL_SIZE
+        target = QSize(target_w, target_h)
+
+        # Orientation/format handling is left at Qt's defaults on purpose so the
+        # rendered thumbnail matches what QImage(path) produced before.
+        reader = QImageReader(image_path)
+
+        fit_size = None
+        source_size = reader.size()
+        if source_size.isValid() and source_size.width() > 0 and source_size.height() > 0:
+            fit_size = source_size.scaled(target, Qt.KeepAspectRatio)
+            if fit_size.width() > 0 and fit_size.height() > 0:
+                reader.setScaledSize(fit_size)
+
+        image = reader.read()
         if image.isNull():
-            return None
-        scaled = image.scaled(
-            ThumbnailWidget.THUMBNAIL_SIZE[0],
-            ThumbnailWidget.THUMBNAIL_SIZE[1],
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
+            # Some image plugins don't support scaled reads — fall back
+            image = QImage(image_path)
+            if image.isNull():
+                return None
+
+        if fit_size is not None and image.size() == fit_size:
+            scaled = image
+        else:
+            scaled = image.scaled(
+                target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
         try:
@@ -982,6 +1009,11 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             self.thumbnail_label.setPixmap(pixmap.scaled(
                 *self.THUMBNAIL_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
             ))
+        else:
+            # Generation failed (e.g. "Viewer failed to initialize") — keep a
+            # "3D" placeholder instead of an empty tile.
+            logger.warning(f"Model thumbnail generation returned nothing for: {self.path}")
+            self.thumbnail_label.setPixmap(self._create_3d_placeholder("3D"))
 
     # --- Video thumbnail loading ---
     def _load_video_thumbnail(self):
@@ -1349,16 +1381,13 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             # Like option (at the top for quick access)
             if self._favorites_manager:
                 is_liked = self._is_liked
-                like_action = menu.addAction("Unlike" if is_liked else "Like")
+                # "\t" is QMenu's shortcut-hint convention: the text after the
+                # tab is right-aligned in the menu like a real shortcut column.
+                like_action = menu.addAction("♥ Unlike\tL" if is_liked else "♡ Like\tL")
                 like_action.triggered.connect(self._toggle_like)
-                # Add heart icon visual
-                if is_liked:
-                    like_action.setText("♥ Unlike")
-                else:
-                    like_action.setText("♡ Like")
 
                 # Groups submenu
-                groups_menu = menu.addMenu("Add to Group")
+                groups_menu = menu.addMenu("Add to Group\tG")
                 groups = self._favorites_manager.get_groups()
                 item_group_ids = set(self._favorites_manager.get_item_groups(self.path))
 
@@ -1374,7 +1403,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
                 if groups:
                     groups_menu.addSeparator()
 
-                new_group_action = groups_menu.addAction("+ New Group...")
+                new_group_action = groups_menu.addAction("+ New Group...\tCtrl+G")
                 new_group_action.triggered.connect(self._create_new_group)
 
                 menu.addSeparator()
@@ -1466,14 +1495,14 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
         # Batch like/unlike
         if self._favorites_manager:
-            like_action = menu.addAction("♡ Like Selected")
+            like_action = menu.addAction("♡ Like Selected\tL")
             like_action.triggered.connect(lambda: self._batch_like(True))
 
-            unlike_action = menu.addAction("♥ Unlike Selected")
+            unlike_action = menu.addAction("♥ Unlike Selected\tL")
             unlike_action.triggered.connect(lambda: self._batch_like(False))
 
             # Groups submenu for batch operations
-            groups_menu = menu.addMenu("Add Selected to Group")
+            groups_menu = menu.addMenu("Add Selected to Group\tG")
             groups = self._favorites_manager.get_groups()
 
             for group in groups:
@@ -1485,13 +1514,20 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             if groups:
                 groups_menu.addSeparator()
 
-            new_group_action = groups_menu.addAction("+ New Group...")
+            new_group_action = groups_menu.addAction("+ New Group...\tCtrl+G")
             new_group_action.triggered.connect(self._create_new_group_for_batch)
 
             menu.addSeparator()
 
         view_action = menu.addAction("View Selected")
         view_action.triggered.connect(self._gallery_tab._on_view_selected)
+
+        # Compare is otherwise only reachable via the C shortcut
+        if count == 2 and hasattr(self._gallery_tab, '_operations_manager'):
+            compare_action = menu.addAction("Compare\tC")
+            compare_action.triggered.connect(
+                self._gallery_tab._operations_manager.compare_selected
+            )
 
         menu.addSeparator()
         from icons import get_ayon_icon
@@ -1506,7 +1542,11 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
             delete_action.setText("Delete Selected (view only)")
 
         menu.addSeparator()
-        clear_action = menu.addAction("Clear Selection")
+        select_all_action = menu.addAction("Select All\tCtrl+A")
+        select_all_action.triggered.connect(
+            self._gallery_tab._selection_manager.select_all
+        )
+        clear_action = menu.addAction("Clear Selection\tEsc")
         clear_action.triggered.connect(self._gallery_tab._clear_selection)
 
         menu.exec_(self.mapToGlobal(pos))

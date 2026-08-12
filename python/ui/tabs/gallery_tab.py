@@ -96,6 +96,10 @@ class GalleryTab(BaseTab):
         self._initial_scan_done = False
         self._new_items = set()
 
+        # Deep-link selection waiting for the next completed scan
+        # (path, requested_at_monotonic) or None
+        self._pending_selection = None
+
         # Cache for scanned items
         self._cached_items = None
         self._widget_cache = {}
@@ -188,6 +192,48 @@ class GalleryTab(BaseTab):
         for number in range(1, 10):
             add(str(number), lambda idx=number - 1: sm._add_to_group_by_index(idx))
             add(f"Shift+{number}", lambda idx=number - 1: sm._remove_from_group_by_index(idx))
+
+        self._setup_shortcuts_hint_button()
+
+    # Single source of truth for the shortcut hints shown in the UI.
+    # (label, key) — the key strings also feed the context-menu hints.
+    SHORTCUT_HINTS = [
+        ("Select all", "Ctrl+A"),
+        ("Clear selection", "Esc"),
+        ("Like / unlike", "L"),
+        ("Add to group", "G"),
+        ("New group", "Ctrl+G"),
+        ("Compare two items", "C"),
+        ("Add to group 1-9", "1…9"),
+        ("Remove from group 1-9", "Shift+1…9"),
+    ]
+
+    def _setup_shortcuts_hint_button(self):
+        """Give the ⌨ header button a tooltip listing every gallery shortcut."""
+        button = getattr(self.ui, "GalleryShortcutsButton", None)
+        if button is None:
+            logger.debug("[Gallery] GalleryShortcutsButton missing from UI — skipping hints")
+            return
+
+        lines = ["Gallery keyboard shortcuts:", ""]
+        width = max(len(label) for label, _ in self.SHORTCUT_HINTS)
+        lines += [f"{label.ljust(width)}   {key}" for label, key in self.SHORTCUT_HINTS]
+        lines += ["", "Shortcuts are disabled while the viewer is open."]
+
+        button.setToolTip("\n".join(lines))
+        # Clicking just surfaces the same list for discoverability
+        button.clicked.connect(self._show_shortcuts_hint)
+
+    def _show_shortcuts_hint(self):
+        """Show the shortcut list in a dialog (click on the ⌨ button)."""
+        from dialog_helpers import show_info
+
+        show_info(
+            "Gallery Shortcuts",
+            "Keyboard shortcuts available in the gallery.",
+            parent=self.main_window,
+            detail="\n".join(f"{key}\t{label}" for label, key in self.SHORTCUT_HINTS),
+        )
 
     def set_shortcuts_enabled(self, enabled: bool):
         """Enable/disable gallery shortcuts (disabled while the viewer is open)."""
@@ -483,6 +529,39 @@ class GalleryTab(BaseTab):
         # Mark initial scan done
         self._initial_scan_done = True
 
+        # Consume any pending deep-link selection now that widgets exist
+        self._consume_pending_selection()
+
+    # Give up on a pending deep-link selection after this many seconds
+    PENDING_SELECTION_TIMEOUT = 10.0
+
+    def _consume_pending_selection(self):
+        """Apply a deferred select-and-scroll request after a scan completes.
+
+        One-shot: the request is cleared whether it succeeds or times out, so a
+        stale path can never hijack a later scan.
+        """
+        pending = getattr(self, '_pending_selection', None)
+        if not pending:
+            return
+
+        import time
+        image_path, requested_at = pending
+        widget = self._manager.find_widget_by_path(image_path)
+
+        if widget:
+            self._pending_selection = None
+            self._selection_manager.clear_selection()
+            self._selection_manager.select_single(widget)
+            self._scroll_widget_into_view(widget)
+            logger.info(f"[Gallery] Deferred select completed: {image_path}")
+            return
+
+        if time.monotonic() - requested_at >= self.PENDING_SELECTION_TIMEOUT:
+            self._pending_selection = None
+            logger.info(f"[Gallery] Gave up locating item in gallery: {image_path}")
+            self.show_status_message("Item not found in gallery")
+
     def _on_scroll(self, value=None):
         """Handle scroll event - load visible thumbnails."""
         self._load_visible_thumbnails()
@@ -541,6 +620,10 @@ class GalleryTab(BaseTab):
     def _update_gallery_path(self, reset_tracking=True):
         """Update the gallery path to the network path for selected user."""
         self._current_path = self._get_network_user_path()
+
+        # The poll probe snapshot / lineage mtime belong to the old path
+        if hasattr(self, '_refresh_controller') and self._refresh_controller:
+            self._refresh_controller.reset_change_tracking()
 
         if reset_tracking:
             self._known_items.clear()
@@ -1030,6 +1113,10 @@ class GalleryTab(BaseTab):
             (pipeline_events.gallery_refresh_requested, self._on_refresh_requested),
             (pipeline_events.view_input_image, self._on_view_input_image),
         ]
+        if hasattr(pipeline_events, "settings_changed"):
+            self._event_bus_subscriptions.append(
+                (pipeline_events.settings_changed, self._on_settings_changed)
+            )
         for signal, slot in self._event_bus_subscriptions:
             signal.connect(slot)
 
@@ -1057,6 +1144,29 @@ class GalleryTab(BaseTab):
             if hasattr(self, '_widget_cache'):
                 self.clear_widget_cache()
         self._on_refresh(force=force)
+
+    def _on_settings_changed(self, changed_keys):
+        """React to settings that change where/how often the gallery scans.
+
+        Args:
+            changed_keys: List of setting keys that were modified.
+        """
+        try:
+            keys = set(changed_keys or [])
+        except TypeError:
+            return
+
+        if "gallery_poll_interval" in keys and hasattr(self, "_refresh_controller"):
+            self._refresh_controller.apply_poll_interval()
+
+        if "network_output_path" in keys:
+            logger.info("[Gallery] network_output_path changed — recomputing gallery path")
+            # Re-discover users for the new root, then repoint and rescan
+            if hasattr(self, "_ui_manager") and self._ui_manager:
+                self._ui_manager.populate_user_selector()
+            self.clear_widget_cache()
+            self._update_gallery_path(reset_tracking=True)
+            self._on_refresh(force=True)
 
     # =========================================================================
     # EVENT BUS HANDLERS (image viewer actions)
@@ -1205,13 +1315,15 @@ class GalleryTab(BaseTab):
             # Item not visible in current view - may need to change filters or load
             logger.info(f"[Gallery] Item not in current view: {image_path}")
 
+            # Register a pending selection consumed by _handle_scan_complete.
+            # A fixed 500ms timer used to fire long before a network scan
+            # finished, so the deep link silently failed on the share.
+            import time
+            self._pending_selection = (image_path, time.monotonic())
+
             # Try to clear filters and reload
             self._clear_all_filters()
             self._on_refresh(force=True)
-
-            # Try again after refresh (use a timer to let refresh complete)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(500, lambda: self._select_and_scroll_deferred(image_path))
             return
 
         # Clear current selection and select this item
@@ -1222,20 +1334,6 @@ class GalleryTab(BaseTab):
         self._scroll_widget_into_view(widget)
 
         logger.info(f"[Gallery] Selected and scrolled to: {image_path}")
-
-    def _select_and_scroll_deferred(self, image_path: str):
-        """Deferred select and scroll after refresh."""
-        import os
-        image_path = os.path.normpath(image_path)
-
-        widget = self._manager.find_widget_by_path(image_path)
-        if widget:
-            self._selection_manager.clear_selection()
-            self._selection_manager.select_single(widget)
-            self._scroll_widget_into_view(widget)
-            logger.info(f"[Gallery] Deferred select completed: {image_path}")
-        else:
-            self.show_status_message(f"Item not found in gallery")
 
     def _scroll_widget_into_view(self, widget):
         """Scroll the scroll area to bring a widget into view."""

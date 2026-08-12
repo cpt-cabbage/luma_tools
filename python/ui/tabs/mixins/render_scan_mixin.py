@@ -30,12 +30,69 @@ Usage:
 """
 import logging
 import os
+import threading
 from typing import List, Tuple, Callable, Optional, Any
 
 logger = logging.getLogger(__name__)
 
 from core.config import DEFAULT_VIDEOS_DIR, UIStyles
 from .publish_source_mixin import PublishSourceMixin
+
+
+# ---------------------------------------------------------------------------
+# Shared task-directory scan cache (G1)
+#
+# The initial task-directory scan (_scan_render_directory_worker) is identical
+# for Pass Builder, MP4 Maker and rePublish. The first tab to run it populates
+# this cache (from its worker thread); later tabs reuse the result instantly.
+# Invalidated when the user explicitly clicks a Rescan button.
+# ---------------------------------------------------------------------------
+_task_scan_cache: dict = {}
+_task_scan_cache_lock = threading.RLock()
+
+
+def invalidate_task_scan_cache():
+    """Clear the shared task-directory scan cache (called on explicit Rescan)."""
+    with _task_scan_cache_lock:
+        _task_scan_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Scan-generation helpers
+#
+# Guard against stale worker results populating a list after a newer scan has
+# started (e.g. rapid version spinbox changes). Implemented as module-level
+# functions so tabs that do not inherit RenderScanMixin (Pass Builder) can
+# reuse them.
+# ---------------------------------------------------------------------------
+def begin_scan_generation(obj) -> int:
+    """Increment and return obj's scan generation counter (main thread only)."""
+    obj._scan_generation = getattr(obj, '_scan_generation', 0) + 1
+    return obj._scan_generation
+
+
+def is_current_scan(obj, generation: int) -> bool:
+    """Return True if `generation` is still the newest scan for obj."""
+    return getattr(obj, '_scan_generation', 0) == generation
+
+
+def connect_debounced(signal, slot, ms: int = 350):
+    """Connect a signal to a slot through a single-shot restartable QTimer.
+
+    Rapid signal emissions (e.g. version spinbox changes) restart the timer,
+    so `slot` only fires `ms` after the last emission.
+
+    Returns the QTimer — the caller MUST store it on a long-lived object to
+    prevent garbage collection.
+    """
+    from PySide6.QtCore import QTimer
+
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.setInterval(ms)
+    timer.timeout.connect(slot)
+    signal.connect(lambda *_args: timer.start())
+    return timer
 
 
 class RenderScanMixin(PublishSourceMixin):
@@ -181,6 +238,32 @@ class RenderScanMixin(PublishSourceMixin):
             self.show_status(f"Custom: {os.path.basename(custom_dir)}", "info")
             self._on_scan_renders_clicked()
 
+    # ── Scan-generation / debounce / rescan helpers ─────────────────────
+
+    def _begin_scan_generation(self) -> int:
+        """Start a new scan generation, invalidating in-flight scan results."""
+        return begin_scan_generation(self)
+
+    def _is_current_scan(self, generation: int) -> bool:
+        """Return True if `generation` is still the newest scan."""
+        return is_current_scan(self, generation)
+
+    def _connect_debounced(self, signal, slot, ms: int = 350):
+        """Connect signal → slot through a ~ms single-shot debounce timer.
+
+        The timer is stored on self to prevent garbage collection.
+        """
+        timer = connect_debounced(signal, slot, ms)
+        if not hasattr(self, '_debounce_timers'):
+            self._debounce_timers = []
+        self._debounce_timers.append(timer)
+        return timer
+
+    def _on_rescan_clicked(self):
+        """Explicit Rescan button handler: invalidate shared cache, then scan."""
+        invalidate_task_scan_cache()
+        self._on_scan_renders_clicked()
+
     def _on_scan_renders_clicked(self):
         """
         Default scan implementation using _scan_renders_base().
@@ -189,6 +272,9 @@ class RenderScanMixin(PublishSourceMixin):
         if not hasattr(self, '_source_manager'):
             return  # Called before initialize() — ignore
         if self._source == "publish":
+            # Invalidate any in-flight filesystem scan so its stale results
+            # cannot land on top of the publish-mode list.
+            self._begin_scan_generation()
             self._on_publish_source_selected()
             return
         from core.utils import scan_exr_sequences
@@ -202,14 +288,17 @@ class RenderScanMixin(PublishSourceMixin):
         """
         Base render scanning implementation.
 
+        The path existence check and scan run on a worker thread (network
+        paths can stall for seconds); list population happens on the main
+        thread in the result handler. Stale results from superseded scans
+        are dropped via the scan-generation counter.
+
         Args:
             scan_func: Function that takes a path and returns list of render sequences
             status_prefix: Prefix for status messages (e.g., "MP4 Maker")
         """
+        from ui_components import StatusColors
         from core.utils import update_path_version
-
-        # Show scanning status
-        self.show_status(f"{status_prefix}: Scanning...", "info")
 
         # Get widgets
         render_list = self.get_widget(self._render_list_widget)
@@ -220,9 +309,16 @@ class RenderScanMixin(PublishSourceMixin):
         if not render_list:
             return
 
-        render_list.clear()
+        # Show scanning status with spinner
+        self.update_status_with_spinner(
+            f"{status_prefix}: Scanning..." if status_prefix else "Scanning...",
+            StatusColors.INFO
+        )
 
-        # Get and update search path
+        render_list.clear()
+        render_list.setEnabled(False)
+
+        # Get and update search path (UI reads stay on the main thread)
         searchpath = getattr(self.app_state, self._searchpath_attr, "")
         if render_path:
             searchpath = render_path.text() or searchpath
@@ -238,52 +334,71 @@ class RenderScanMixin(PublishSourceMixin):
         # Update source button text
         self._update_source_button_text()
 
-        # Determine search path based on source
-        renders = []
-
-        if self._source == "for_comp":
+        # Determine search path based on source (main thread)
+        source = self._source
+        if source == "for_comp":
             output_subdir = getattr(self.app_state, 'output_subdirectory', '')
             search_path = os.path.join(searchpath, output_subdir) if output_subdir else searchpath
-            logger.debug(f"{status_prefix}: Scanning {output_subdir or 'root'}: {search_path}")
-            if os.path.exists(search_path):
-                found = scan_func(search_path)
-                for render_seq in found:
-                    renders.append((output_subdir or "root", render_seq))
+            subdir_label = output_subdir or "root"
+        elif source == "raw":
+            search_path = searchpath
+            subdir_label = "raw"
+        elif source == "custom":
+            search_path = getattr(self.app_state, self._custom_path_attr, "")
+            subdir_label = "custom"
+        else:
+            search_path = ""
+            subdir_label = ""
 
-        elif self._source == "raw":
-            logger.debug(f"{status_prefix}: Scanning raw path: {searchpath}")
-            if os.path.exists(searchpath):
-                found = scan_func(searchpath)
-                for render_seq in found:
-                    renders.append(("raw", render_seq))
-
-        elif self._source == "custom":
-            custom_path = getattr(self.app_state, self._custom_path_attr, "")
-            logger.debug(f"{status_prefix}: Scanning custom path: {custom_path}")
-            if custom_path and os.path.exists(custom_path):
-                found = scan_func(custom_path)
-                for render_seq in found:
-                    renders.append(("custom", render_seq))
-
-        # Store renders
-        setattr(self.app_state, self._renders_attr, renders)
+        logger.debug(f"{status_prefix}: Scanning {subdir_label}: {search_path}")
 
         # Disable action button until selection
         if action_button:
             action_button.setEnabled(False)
 
-        # Populate list
-        logger.info(f"{status_prefix}: Found {len(renders)} sequence(s)")
-        if renders:
-            for subdir, render_seq in renders:
-                display_name = os.path.basename(str(render_seq))
-                render_list.addItem(display_name)
-            render_list.setEnabled(True)
-            self.show_status(f"Found {len(renders)} sequence(s)", "info")
-        else:
-            render_list.addItem("No Renders Found")
+        generation = self._begin_scan_generation()
+
+        def _scan_worker(path=search_path, label=subdir_label):
+            """Path check + scan in background thread (network paths can stall)."""
+            renders = []
+            if path and os.path.exists(path):
+                for render_seq in scan_func(path):
+                    renders.append((label, render_seq))
+            return renders
+
+        def _on_scan_result(renders):
+            if not self._is_current_scan(generation):
+                return  # A newer scan superseded this one — drop stale results
+            render_list.clear()
+            setattr(self.app_state, self._renders_attr, renders)
+            logger.info(f"{status_prefix}: Found {len(renders)} sequence(s)")
+            if renders:
+                for subdir, render_seq in renders:
+                    render_list.addItem(os.path.basename(str(render_seq)))
+                render_list.setEnabled(True)
+                self.update_status_with_spinner(
+                    f"Found {len(renders)} sequence(s)", StatusColors.INFO, start=False
+                )
+            else:
+                render_list.addItem("No Renders Found")
+                render_list.setEnabled(False)
+                self.update_status_with_spinner(
+                    "No sequences found", StatusColors.WARNING, start=False
+                )
+
+        def _on_scan_error(error_msg, traceback_str=""):
+            if not self._is_current_scan(generation):
+                return
+            logger.error(f"{status_prefix}: Scan error: {error_msg}")
+            setattr(self.app_state, self._renders_attr, [])
+            render_list.clear()
+            render_list.addItem("Scan error")
             render_list.setEnabled(False)
-            self.show_status("No sequences found", "warning")
+            self.update_status_with_spinner(
+                f"Scan error: {error_msg}", StatusColors.ERROR, start=False
+            )
+
+        self.start_worker(_scan_worker, on_result=_on_scan_result, on_error=_on_scan_error)
 
     def _get_selected_render(self) -> Optional[Tuple[str, Any]]:
         """
@@ -310,15 +425,27 @@ class RenderScanMixin(PublishSourceMixin):
         return scan_exr_sequences(staging_dir)
 
     @staticmethod
-    def _scan_render_directory_worker(task_dir, task):
+    def _scan_render_directory_worker(task_dir, task, use_cache=True):
         """Scan a task directory for the latest render version (worker thread).
 
-        Shared by Pass Builder and rePublish initial scans. Returns
+        Shared by Pass Builder, MP4 Maker and rePublish initial scans. Returns
         ``{'latest_render', 'render_directory'}`` or None if nothing found.
+
+        Results are cached in a shared module-level cache keyed by
+        ``(task_dir, task)`` — the first tab pays for the network scan, later
+        tabs reuse the result instantly. Pass ``use_cache=False`` (or click
+        Rescan, which clears the cache) to force a fresh scan.
         """
         from services.file_operations import fast_scandir, find_renders, find_hip_files
         from core.config import RENDERS_SUBPATH
         from core.utils import truncate_at_suffix, version_sort_key
+
+        cache_key = (os.path.normcase(os.path.normpath(task_dir)), (task or "").lower())
+        if use_cache:
+            with _task_scan_cache_lock:
+                if cache_key in _task_scan_cache:
+                    logger.debug(f"Render scan: cache hit for {cache_key}")
+                    return _task_scan_cache[cache_key]
 
         try:
             dirs = fast_scandir(task_dir)
@@ -360,10 +487,15 @@ class RenderScanMixin(PublishSourceMixin):
         if not latest_render:
             latest_render = render_dirs[-1]
 
-        return {
+        result = {
             "latest_render": latest_render,
             "render_directory": render_directory,
         }
+        # Cache only successful scans — a None result (empty/new task dir)
+        # should be retried by the next tab rather than pinned.
+        with _task_scan_cache_lock:
+            _task_scan_cache[cache_key] = result
+        return result
 
     def _get_selected_frame_range(self) -> Optional[Tuple[int, int]]:
         """

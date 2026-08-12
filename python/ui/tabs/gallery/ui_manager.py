@@ -544,18 +544,17 @@ class UIManager(BaseGalleryManager):
                 all_items = os.listdir(base_path)
                 logger.info(f"[Gallery] User discovery - found {len(all_items)} items in base path")
 
+                # No per-item logging here — this runs on every gallery load and
+                # wrote three DEBUG lines per directory entry into the shared
+                # network logs. The summary line below is the useful record.
                 import re
                 for name in all_items:
                     full_path = os.path.join(base_path, name)
-                    if os.path.isdir(full_path):
-                        # Skip hidden/system directories and validate username safety
-                        if not name.startswith('.') and not name.startswith('_') and re.match(r'^[\w.\-]+$', name):
-                            users.append(name)
-                            logger.debug(f"[Gallery] User discovery - added user: {name}")
-                        else:
-                            logger.debug(f"[Gallery] User discovery - skipped hidden/system dir: {name}")
-                    else:
-                        logger.debug(f"[Gallery] User discovery - skipped non-directory: {name}")
+                    if not os.path.isdir(full_path):
+                        continue
+                    # Skip hidden/system directories and validate username safety
+                    if not name.startswith('.') and not name.startswith('_') and re.match(r'^[\w.\-]+$', name):
+                        users.append(name)
             except Exception as e:
                 logger.error(f"[Gallery] Error discovering users: {e}")
         else:
@@ -577,11 +576,11 @@ class UIManager(BaseGalleryManager):
         self._update_user_button_visibility()
 
     def update_user_button_text(self):
-        """Update user selector button text."""
+        """Update user selector button text (app-wide 'Label: value' pattern)."""
         if self.tab._is_own_gallery():
-            self.tab.ui.GalleryUserButton.setText(f"{self.tab._selected_user} (You)")
+            self.tab.ui.GalleryUserButton.setText(f"User: {self.tab._selected_user} (You)")
         else:
-            self.tab.ui.GalleryUserButton.setText(self.tab._selected_user)
+            self.tab.ui.GalleryUserButton.setText(f"User: {self.tab._selected_user}")
 
     def _update_user_button_visibility(self):
         """Show/hide user button based on available users."""

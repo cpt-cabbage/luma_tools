@@ -11,6 +11,7 @@ Handles async loading operations for the gallery:
 import os
 import re
 import logging
+import threading
 
 from core.config import (
     GALLERY_IMAGE_EXTENSIONS as IMAGE_EXTENSIONS,
@@ -140,14 +141,24 @@ class GalleryLoader:
     This class is stateless and all methods are designed to run on worker threads.
     """
 
+    # Directories that have already had a content-hashing pass. Automatic poll
+    # rescans skip hashing for these (full SHA-256 reads over SMB every tick
+    # were the single most expensive part of a gallery poll); a user-initiated
+    # refresh always re-hashes.
+    _hashed_dirs = set()
+    _hash_state_lock = threading.RLock()
+
     @staticmethod
-    def scan_directory(output_dir, load_metadata=True, bundle_pairs=True):
+    def scan_directory(output_dir, load_metadata=True, bundle_pairs=True, allow_hashing=True):
         """Scan directory recursively for image and 3D model files (runs on worker thread).
 
         Args:
             output_dir: Directory to scan
             load_metadata: If True, load workflow metadata from JSON files (slower but complete)
             bundle_pairs: If True, detect and bundle _view/_export file pairs
+            allow_hashing: If True, compute content hashes for files whose metadata
+                could not be matched by filename. Pass False for automatic poll
+                rescans — a directory's first scan still hashes regardless.
 
         Returns:
             list: List of item dicts with keys: path, mtime, type, name, workflow
@@ -196,8 +207,8 @@ class GalleryLoader:
             try:
                 from comfyui.metadata import (
                     load_gallery_metadata, _lookup_file_metadata,
-                    get_workflow_preset_for_files, is_known_input_file,
-                    get_metadata_level,
+                    get_workflow_preset_for_files, collect_known_input_files,
+                    mark_input_files_batch, get_metadata_level_from_dict,
                 )
                 from comfyui.utils import compute_file_hash
             except ImportError as e:
@@ -205,8 +216,9 @@ class GalleryLoader:
                 load_gallery_metadata = None
                 get_workflow_preset_for_files = None
                 _lookup_file_metadata = None
-                is_known_input_file = None
-                get_metadata_level = None
+                collect_known_input_files = None
+                mark_input_files_batch = None
+                get_metadata_level_from_dict = None
                 compute_file_hash = None
 
             for dir_path, file_list in files_by_dir.items():
@@ -232,6 +244,28 @@ class GalleryLoader:
                         logger.debug(f"[GalleryLoader] Failed to load workflow presets for {dir_path}: {e}")
                         workflow_map = {}
 
+                # Known-input lookup tables, built ONCE per directory instead of
+                # linear-scanning the whole metadata dict per candidate file.
+                explicit_inputs = set()
+                source_name_to_job = {}
+                if full_metadata and collect_known_input_files:
+                    try:
+                        explicit_inputs, source_name_to_job = collect_known_input_files(full_metadata)
+                    except Exception as e:
+                        logger.debug(f"[GalleryLoader] Failed to collect input files for {dir_path}: {e}")
+
+                # Discovered-but-unmarked inputs are collected here and written
+                # in ONE locked metadata mutation after the loop (previously one
+                # network read-modify-write per discovery, mid-scan).
+                pending_input_marks = {}
+
+                # Content hashing is the expensive part of a scan on a network
+                # share. Only do it on user-initiated refreshes or the first
+                # time we see a directory.
+                with GalleryLoader._hash_state_lock:
+                    first_scan_of_dir = dir_path not in GalleryLoader._hashed_dirs
+                hash_enabled = bool(compute_file_hash) and (allow_hashing or first_scan_of_dir)
+
                 # Build items dict
                 items_dict = {}
                 for filename, full_path, mtime, file_type in file_list:
@@ -249,7 +283,7 @@ class GalleryLoader:
 
                     # Only compute hash if filename lookup missed and hash lookup is available
                     content_hash = None
-                    if file_metadata is None and full_metadata and _lookup_file_metadata and compute_file_hash:
+                    if file_metadata is None and full_metadata and _lookup_file_metadata and hash_enabled:
                         try:
                             content_hash = compute_file_hash(full_path)
                             file_metadata = _lookup_file_metadata(
@@ -286,17 +320,21 @@ class GalleryLoader:
                             job_prefix = None
                             is_output = file_type in ('model', 'video', 'audio')
 
-                        if is_output and file_type == 'image' and is_known_input_file:
-                            try:
-                                if is_known_input_file(output_dir, filename):
-                                    is_output = False
-                            except Exception:
-                                pass
+                        if is_output and file_type == 'image':
+                            if filename in explicit_inputs:
+                                is_output = False
+                            elif filename in source_name_to_job:
+                                # Known source file that was never marked —
+                                # queue the lazy migration for the batch write
+                                is_output = False
+                                pending_input_marks[filename] = source_name_to_job[filename]
 
-                    # Determine metadata completeness level
-                    if get_metadata_level:
+                    # Determine metadata completeness level (pure-dict — the
+                    # directory metadata is already loaded above; the old
+                    # get_metadata_level() call re-read the JSON per file)
+                    if get_metadata_level_from_dict and full_metadata:
                         try:
-                            metadata_level = get_metadata_level(dir_path, filename)
+                            metadata_level = get_metadata_level_from_dict(full_metadata, filename)
                         except Exception:
                             metadata_level = 'partial' if has_metadata else 'none'
                     else:
@@ -315,6 +353,18 @@ class GalleryLoader:
                         'metadata_level': metadata_level,  # 'full', 'partial', or 'none'
                         'content_hash': content_hash,  # SHA-256 hash for file identification
                     }
+
+                # Persist all newly-discovered input files in a single locked
+                # write now that the whole directory has been walked.
+                if pending_input_marks and mark_input_files_batch:
+                    try:
+                        mark_input_files_batch(dir_path, pending_input_marks)
+                    except Exception as e:
+                        logger.debug(f"[GalleryLoader] Failed to batch-mark input files in {dir_path}: {e}")
+
+                if hash_enabled:
+                    with GalleryLoader._hash_state_lock:
+                        GalleryLoader._hashed_dirs.add(dir_path)
 
                 # Detect and bundle _view/_export pairs if enabled
                 if bundle_pairs:

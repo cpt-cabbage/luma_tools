@@ -201,7 +201,14 @@ def publish_comfyui_asset_to_ayon(
         metadata_path = write_metadata_file(metadata, metadata_path)
 
         if not metadata_path:
-            show_error("Metadata Error", "Failed to write AYON metadata file.", parent_widget)
+            show_error(
+                "Metadata Error",
+                "Could not write the AYON metadata file next to the item. "
+                "The folder may be read-only, full, or temporarily unreachable "
+                "on the network — check that you can write to it and try again.",
+                parent_widget,
+                detail=f"Target: {os.path.join(render_dir, metadata_filename)}",
+            )
             return False
 
         # Publish
@@ -304,7 +311,13 @@ def publish_comfyui_asset_to_ayon(
                 progress_dialog.close()
                 error_msg = str(error_tuple[1]) if len(error_tuple) > 1 else "Unknown error"
                 logger.error(f"[AYON Publish] Error: {error_msg}")
-                show_error("Publish Error", f"Failed to publish to AYON:\n\n{error_msg}", parent_widget)
+                show_error(
+                    "Publish Error",
+                    "Could not publish to AYON. Check that the AYON server is "
+                    "reachable and the folder/task still exists.",
+                    parent_widget,
+                    detail=error_msg,
+                )
 
             # Create and start worker.
             # Anchor the worker on a module-level list (not just the dialog)
@@ -334,7 +347,13 @@ def publish_comfyui_asset_to_ayon(
 
     except Exception as e:
         logger.error(f"[AYON Publish] Failed to publish to AYON: {e}", exc_info=True)
-        show_error("Publish Error", f"Failed to publish to AYON:\n\n{str(e)}", parent_widget)
+        show_error(
+            "Publish Error",
+            "Could not publish to AYON. Check that the AYON server is reachable "
+            "and the folder/task still exists.",
+            parent_widget,
+            detail=f"{type(e).__name__}: {e}",
+        )
         return False
 
 

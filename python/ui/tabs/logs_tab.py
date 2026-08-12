@@ -5,9 +5,11 @@ Handles the terminal log output display and clear functionality.
 """
 import logging
 
+import os
+
 from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QClipboard
 from PySide6.QtWidgets import QMenu, QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from .base_tab import BaseTab, TabConfig
 from core.settings_manager import safe_get_setting, safe_set_setting
@@ -49,6 +51,10 @@ class LogsTab(BaseTab):
         self._paused_messages = []
         self._show_debug = False
         self._all_messages = deque(maxlen=5000)
+        self._filter_text = ""
+        # Debounce timer for the filter field — re-rendering 5000 buffered
+        # messages on every keystroke is visibly janky.
+        self._filter_timer = None
 
     def connect_signals(self):
         """Connect log tab signals."""
@@ -59,18 +65,50 @@ class LogsTab(BaseTab):
         # stateChanged fires for any checkbox state change
         self.ui.VerboseLogsCheckbox.stateChanged.connect(self._on_verbose_checkbox_state_changed)
 
+        if hasattr(self.ui, 'LogFilterEdit'):
+            self.ui.LogFilterEdit.textChanged.connect(self._on_filter_text_changed)
+
     def initialize(self):
         """Initialize the logs tab with saved settings."""
         self._show_debug = safe_get_setting("show_verbose_logs", False)
         self.ui.VerboseLogsCheckbox.blockSignals(True)
         self.ui.VerboseLogsCheckbox.setChecked(self._show_debug)
         self.ui.VerboseLogsCheckbox.blockSignals(False)
-        self.ui.VerboseLogsCheckbox.setText("Show debug")
+        # Label/tooltip live in logs.ui ("Show debug logs") — no runtime rename,
+        # which used to make the .ui text and the visible text disagree.
+
+        # Debounce timer must be parented to a live QObject so it isn't GC'd
+        self._filter_timer = QTimer(self.ui)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(250)
+        self._filter_timer.timeout.connect(self._apply_filter)
 
         # Use custom context menu to avoid Qt parenting bug in tab widgets
         # "QWidgetWindow must be a top level window" error
         self.ui.LogOutput.setContextMenuPolicy(Qt.CustomContextMenu)
         self.ui.LogOutput.customContextMenuRequested.connect(self._show_log_context_menu)
+
+    def _on_filter_text_changed(self, text: str):
+        """Queue a filtered re-render (debounced ~250ms)."""
+        self._filter_text = text.strip().lower()
+        if self._filter_timer is not None:
+            self._filter_timer.start()
+        else:
+            # connect_signals() runs eagerly at startup; initialize() (which
+            # creates the timer) is deferred until first activation.
+            self._apply_filter()
+
+    def _apply_filter(self):
+        """Re-render the buffer with the current text filter applied."""
+        self._rerender_log()
+
+    def _passes_filter(self, message: str) -> bool:
+        """Return True if the message should be visible in the log view."""
+        if not self._show_debug and self._is_debug_message(message):
+            return False
+        if self._filter_text and self._filter_text not in message.lower():
+            return False
+        return True
 
     def _on_verbose_checkbox_state_changed(self, state: int):
         """Handle debug logs checkbox state change (view filter only).
@@ -115,8 +153,80 @@ class LogsTab(BaseTab):
         clear_action = menu.addAction("Clear Log")
         clear_action.triggered.connect(self._on_clear_log_clicked)
 
+        menu.addSeparator()
+
+        # Log file actions — the on-disk log holds everything, including the
+        # debug lines this view filters out.
+        log_path = self._get_current_log_path()
+
+        open_action = menu.addAction("Open log file")
+        open_action.setEnabled(bool(log_path))
+        if log_path:
+            open_action.setToolTip(log_path)
+            open_action.triggered.connect(
+                lambda checked=False, p=log_path: self._open_log_file(p)
+            )
+
+        copy_path_action = menu.addAction("Copy log path")
+        copy_path_action.setEnabled(bool(log_path))
+        if log_path:
+            copy_path_action.setToolTip(log_path)
+            copy_path_action.triggered.connect(
+                lambda checked=False, p=log_path: self._copy_log_path(p)
+            )
+
         # Use popup() instead of exec_() to avoid blocking issues
         menu.popup(self.ui.LogOutput.mapToGlobal(position))
+
+    def _get_current_log_path(self):
+        """Resolve the path of this session's log file.
+
+        Prefers the LOG_FILE the entry module recorded at startup; falls back
+        to the newest luma_tools_*.log under the network users log dir (or the
+        local dir if the network share is unavailable).
+
+        The entry module is read out of sys.modules rather than imported:
+        core/luma_tools.py is the __main__ script, so `import core.luma_tools`
+        would execute it a second time and set up a second log file.
+        """
+        import sys
+
+        log_file = getattr(sys.modules.get("__main__"), "LOG_FILE", None)
+        if not log_file:
+            log_file = getattr(sys.modules.get("core.luma_tools"), "LOG_FILE", None)
+        if log_file and os.path.isfile(log_file):
+            return log_file
+
+        from core.logging_utils import get_network_log_dir, get_local_log_dir
+        for log_dir in (get_network_log_dir("users"), get_local_log_dir()):
+            if not log_dir or not os.path.isdir(log_dir):
+                continue
+            try:
+                candidates = [
+                    os.path.join(log_dir, f)
+                    for f in os.listdir(log_dir)
+                    if f.startswith("luma_tools_") and f.endswith(".log")
+                ]
+            except OSError as e:
+                logger.warning(f"Could not list log directory {log_dir}: {e}")
+                continue
+            if candidates:
+                return max(candidates, key=os.path.getmtime)
+        return None
+
+    def _open_log_file(self, path: str):
+        """Open the log file in the OS default handler."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            logger.warning(f"Could not open log file: {path}")
+            self.show_status("Could not open log file", "warning")
+
+    def _copy_log_path(self, path: str):
+        """Copy the log file path to the clipboard."""
+        QApplication.clipboard().setText(path)
+        self.show_status("Log path copied to clipboard", "success")
 
     def _copy_to_clipboard(self, text: str):
         """Copy text to clipboard."""
@@ -227,8 +337,8 @@ class LogsTab(BaseTab):
             # Always store in buffer for re-render on filter toggle
             self._all_messages.append(message)
 
-            # Filter debug messages from view if toggle is off
-            if not self._show_debug and self._is_debug_message(message):
+            # Apply the view filters (debug toggle + text filter)
+            if not self._passes_filter(message):
                 return
 
             if self._paused:
@@ -242,10 +352,11 @@ class LogsTab(BaseTab):
             pass  # Widget may not be fully initialized
 
     def _rerender_log(self):
-        """Re-render the entire log applying the current debug filter.
+        """Re-render the entire log applying the current view filters.
 
-        Called when the 'Show debug' checkbox is toggled so that previously
-        hidden messages appear (or visible debug messages disappear). With
+        Called when the 'Show debug logs' checkbox is toggled or the text
+        filter changes, so previously hidden messages appear (or visible
+        messages disappear). With
         5000 buffered messages, calling _append_colored_text in a tight loop
         triggers a layout reflow per message and visibly freezes the UI;
         wrapping the loop in setUpdatesEnabled(False) batches the redraws
@@ -256,7 +367,7 @@ class LogsTab(BaseTab):
         try:
             log.clear()
             for msg in self._all_messages:
-                if not self._show_debug and self._is_debug_message(msg):
+                if not self._passes_filter(msg):
                     continue
                 self._append_colored_text(msg)
         finally:

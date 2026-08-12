@@ -230,21 +230,20 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         Args:
             custom_color: Optional hex color to use as base. If None, uses default blue/grey.
         """
+        # NOTE: no per-call DEBUG logging here. This runs for every stack on
+        # every gallery scan and used to emit five lines per stack into the
+        # shared network log.
         try:
-            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors START custom_color={custom_color}")
             if not hasattr(self, '_stack_labels') or not self._stack_labels:
-                logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors no _stack_labels, returning")
                 return
 
             # Check widget validity before proceeding
             from shiboken6 import isValid
             if not isValid(self):
-                logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors widget invalid, returning")
                 return
 
             # Check if drop highlight is active
             drop_active = getattr(self, '_drop_highlight_active', False)
-            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors drop_active={drop_active}")
 
             # Derive colors from custom_color or use defaults
             if custom_color:
@@ -266,13 +265,11 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                 bg_color = ThumbnailColors.BG_DROP_TARGET
                 border_color = ThumbnailColors.BORDER_DROP_TARGET
 
-            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors applying to {len(self._stack_labels)} labels")
             # Apply to all stack labels
             stack_depth = len(self._stack_labels) - 1
             for idx, label in enumerate(self._stack_labels):
                 # Check label validity
                 if not isValid(label):
-                    logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors label {idx} invalid, skipping")
                     continue
                 # Labels are stored back-to-front, so index 0 is back card, last is top
                 i = stack_depth - idx  # Reverse to get depth from back
@@ -301,9 +298,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
 
             # Also update the styler for hover/selection states
             self._styler.group_color = custom_color
-            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors calling _apply_thumbnail_style")
             self._apply_thumbnail_style()
-            logger.debug(f"[StackedThumbnailWidget] _apply_stack_colors COMPLETE")
         except Exception as e:
             logger.error(f"[StackedThumbnailWidget] _apply_stack_colors error: {e}", exc_info=True)
 
@@ -651,12 +646,19 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             )
             self._on_thumbnail_loaded(scaled)
         else:
+            # Generation failed (e.g. the Three.js viewer could not initialize).
+            # Fall back to the "3D" placeholder rather than leaving a blank tile.
             logger.warning("Model thumbnail generation returned null for: %s", path)
+            self._show_model_placeholder()
 
     def _on_model_thumbnail_error(self, path, service, error_msg=""):
         """Handle model thumbnail generation error."""
+        from shiboken6 import isValid
+
         service.set_pending(path, False)
         logger.error("Model thumbnail error for %s: %s", path, error_msg)
+        if isValid(self):
+            self._show_model_placeholder()
 
     def _show_model_placeholder(self):
         """Show a 3D model placeholder with modern styling."""

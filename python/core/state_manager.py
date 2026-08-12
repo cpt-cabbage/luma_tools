@@ -304,6 +304,10 @@ class ApplicationState:
             self.user = os.environ.get("USERNAME", os.environ.get("USER", "unknown"))
             logger.info("=" * 50)
             logger.info("STANDALONE MODE - No shot context provided")
+            logger.info(
+                f"Reason: expected 6 positional args (jobname, shot, task, "
+                f"shotpath, user, output_subdirectory), received {max(len(args) - 1, 0)}: {args[1:]}"
+            )
             logger.info(f"user = {self.user}")
             logger.info("=" * 50)
 

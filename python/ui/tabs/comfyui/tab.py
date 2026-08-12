@@ -11,16 +11,15 @@ Cross-tab communication:
 
 import os
 import re
-import random
 import time
 import logging
 
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtWidgets import (
     QMenu, QInputDialog, QDialog, QVBoxLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
-    QSizePolicy, QFrame
+    QSizePolicy, QFrame, QToolButton
 )
 from PySide6.QtGui import QPixmap
 
@@ -29,7 +28,7 @@ from dialog_helpers import confirm_action
 from ui_components import StatusColors
 from .polling import PollingMixin
 from .ui_manager import ComfyUIWidgetManager
-from .state_manager import ComfyUIStateManager
+from .state_manager import ComfyUIStateManager, read_seed, write_seed, random_seed
 from .inline_model_grid import InlineModelGrid
 from .variant_selector import VariantSelector
 
@@ -49,7 +48,9 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Submit / generation
         self.ui.ComfyUISubmit.clicked.connect(self._on_submit_clicked)
         self.ui.ComfyUIGenerationCount.valueChanged.connect(self._on_generation_count_changed)
-        self.ui.ComfyUISeed.valueChanged.connect(self._on_seed_changed)
+        self.ui.ComfyUIGenerationCountSpin.valueChanged.connect(self._on_generation_count_spin_changed)
+        # Seed is a QLineEdit (64-bit seeds overflow a QSpinBox) — see state_manager.read_seed
+        self.ui.ComfyUISeed.textChanged.connect(self._on_seed_changed)
         self.ui.ComfyUIRandomizeSeed.clicked.connect(self._on_randomize_seed)
 
         # Name field toggle and input
@@ -98,6 +99,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
         self.ui.ComfyUIName.setValidator(name_validator)
 
+        # Seed field is digits-only (19 digits covers the full 64-bit range)
+        seed_validator = QRegularExpressionValidator(
+            QRegularExpression(r'\d{0,19}'), self.ui.ComfyUISeed
+        )
+        self.ui.ComfyUISeed.setValidator(seed_validator)
+
         # Initialize polling state from mixin
         self._init_polling_state()
 
@@ -136,11 +143,23 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Server status banner (prominent, in submit section)
         self._setup_server_status_banner()
 
-        # Auto-refresh server status every 30 seconds
+        # Persistent submit failure banner (stays until the next submit)
+        self._setup_submit_failure_banner()
+
+        # Dice + auto-randomize toggle on the submit bar
+        self._setup_submit_bar_seed_controls()
+
+        # Keep the generation-count spinbox and slider in sync
+        self._sync_generation_count_widgets()
+        self._update_eta_display()
+
+        # Auto-refresh server status every 30 seconds. initialize() is deferred
+        # until the tab is first activated, so starting here is correct; the
+        # timer is then paused/resumed by on_tab_deactivated/on_tab_activated.
         self._server_check_timer = QTimer(self.main_window)
         self._server_check_timer.timeout.connect(self._check_server_status)
-        self._server_check_timer.start(30000)
         self._heartbeat_pending = False
+        self._server_check_timer.start(30000)
 
         # Initial server status check (slight delay for startup)
         QTimer.singleShot(2000, self._check_server_status)
@@ -152,9 +171,23 @@ class ComfyUITab(PollingMixin, BaseTab):
     def on_tab_activated(self):
         """Called when tab becomes visible."""
         self._validate_inputs()
-        # Refresh server status when tab becomes visible
+        # Resume the heartbeat poll and refresh immediately
+        timer = getattr(self, '_server_check_timer', None)
+        if timer and not timer.isActive():
+            timer.start(30000)
         if hasattr(self, '_server_status_label'):
             self._check_server_status()
+
+    def on_tab_deactivated(self):
+        """Called when the tab is hidden — pause the 30s heartbeat poll.
+
+        The heartbeat read hits the network share; there's no reason to keep
+        paying for it while nobody is looking at the status banner.
+        """
+        timer = getattr(self, '_server_check_timer', None)
+        if timer and timer.isActive():
+            timer.stop()
+            logger.debug("[ComfyUI] Tab hidden — paused server heartbeat polling")
 
     # =========================================================================
     # SERVER STATUS (reads heartbeat file from network, written by server.py)
@@ -386,6 +419,74 @@ class ComfyUITab(PollingMixin, BaseTab):
             self._server_status_label.setToolTip(tip)
 
     # =========================================================================
+    # PERSISTENT SUBMIT FAILURE BANNER
+    # =========================================================================
+
+    def _setup_submit_failure_banner(self):
+        """Create the persistent banner used to surface submission failures.
+
+        The transient status bar message scrolls away within seconds, so a
+        failed submit could go completely unnoticed. This banner sits in the
+        submit card and stays until the next submit attempt.
+        """
+        banner = QFrame(self.ui.comfyuiSubmitFrame)
+        banner.setObjectName("comfyuiSubmitFailureBanner")
+        banner.setVisible(False)
+        banner.setStyleSheet(
+            "QFrame#comfyuiSubmitFailureBanner {"
+            "  background-color: rgba(239, 68, 68, 0.08);"
+            "  border: 1px solid rgba(239, 68, 68, 0.35);"
+            "  border-radius: 6px;"
+            "}"
+        )
+
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(8)
+
+        label = QLabel("")
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #ef4444; font-size: 11px; border: none;")
+        layout.addWidget(label, 1)
+
+        dismiss = QPushButton("Dismiss")
+        dismiss.setCursor(Qt.PointingHandCursor)
+        dismiss.setStyleSheet(
+            "QPushButton { background-color: transparent; border: 1px solid #3c414b;"
+            " border-radius: 4px; color: #c5cad3; padding: 2px 10px; font-size: 11px; }"
+            "QPushButton:hover { border-color: #ef4444; color: #ef4444; }"
+        )
+        dismiss.clicked.connect(self._clear_submit_failure)
+        layout.addWidget(dismiss, 0)
+
+        self._submit_failure_banner = banner
+        self._submit_failure_label = label
+
+        # Insert directly under the server status banner (index 2 = after the
+        # step header and the server banner), falling back to append.
+        submit_layout = self.ui.comfyuiSubmitLayout
+        try:
+            submit_layout.insertWidget(2, banner)
+        except (AttributeError, RuntimeError):
+            submit_layout.addWidget(banner)
+
+    def _show_submit_failure(self, message: str):
+        """Show a submission failure in the persistent banner."""
+        banner = getattr(self, '_submit_failure_banner', None)
+        label = getattr(self, '_submit_failure_label', None)
+        if not banner or not label:
+            return
+        label.setText(f"Submission failed: {message}")
+        label.setToolTip(message)
+        banner.setVisible(True)
+
+    def _clear_submit_failure(self):
+        """Hide the persistent submission failure banner."""
+        banner = getattr(self, '_submit_failure_banner', None)
+        if banner:
+            banner.setVisible(False)
+
+    # =========================================================================
     # NODE INFO CACHE
     # =========================================================================
 
@@ -501,6 +602,9 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Show note if present
         self._update_note_display()
+
+        # Refresh the estimated-time readout for the newly shown model
+        self._update_eta_display()
 
         # Input frame visibility depends on whether there are editable widgets
         has_widgets = len(self.widget_manager.dynamic_widgets) > 0
@@ -887,6 +991,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             self.app_state.comfyui_workflow_path = None
 
         self._update_note_display()
+        self._update_eta_display()
         self._validate_inputs()
         self._save_state()
 
@@ -913,32 +1018,155 @@ class ComfyUITab(PollingMixin, BaseTab):
     # GENERATION SETTINGS
     # =========================================================================
 
+    def _sync_generation_count_widgets(self):
+        """Push the slider's value into the spinbox without re-entering signals."""
+        value = self.ui.ComfyUIGenerationCount.value()
+        spin = self.ui.ComfyUIGenerationCountSpin
+        if spin.value() != value:
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+
     def _on_generation_count_changed(self, value):
-        """Handle generation count change."""
+        """Handle generation count change from the slider."""
         self.ui.label_count_value.setText(str(value))
+        self._sync_generation_count_widgets()
+        self._update_eta_display()
         self._validate_inputs()
         self._save_state()
 
-        # Show time estimate if available
-        if self.state_manager.current_preset_name:
-            from core.user_preferences import get_workflow_estimated_time_per_frame
-            from .polling import format_elapsed_time
-            per_frame = get_workflow_estimated_time_per_frame(self.state_manager.current_preset_name)
-            if per_frame:
-                total = per_frame * value
-                self.ui.label_count.setToolTip(
-                    f"Estimated time: ~{format_elapsed_time(total)}\n"
-                    f"({format_elapsed_time(per_frame)} per output)"
-                )
+    def _on_generation_count_spin_changed(self, value):
+        """Handle generation count change from the spinbox (drives the slider)."""
+        slider = self.ui.ComfyUIGenerationCount
+        if slider.value() != value:
+            # The slider's valueChanged handler does the rest of the work.
+            slider.setValue(value)
 
-    def _on_seed_changed(self, value):
+    def _get_time_estimate(self, count=None):
+        """Return (per_frame_seconds, total_seconds) for the current preset, or None.
+
+        Uses the recorded per-frame execution time for the selected workflow.
+        """
+        # May be called from a slider signal before initialize() has run.
+        state_manager = getattr(self, 'state_manager', None)
+        preset = state_manager.current_preset_name if state_manager else None
+        if not preset:
+            return None
+
+        from core.user_preferences import get_workflow_estimated_time_per_frame
+        per_frame = get_workflow_estimated_time_per_frame(preset)
+        if not per_frame:
+            return None
+
+        if count is None:
+            count = self.ui.ComfyUIGenerationCount.value()
+        return per_frame, per_frame * count
+
+    def _update_eta_display(self):
+        """Show the estimated time as visible text next to the count slider.
+
+        Previously this only lived in a tooltip, so the user had no way to see
+        that 100 generations means hours of farm time before submitting.
+        """
+        from .polling import format_elapsed_time
+
+        estimate = self._get_time_estimate()
+        label = self.ui.ComfyUIEtaLabel
+        if not estimate:
+            label.setText("")
+            label.setVisible(False)
+            self.ui.label_count.setToolTip(
+                "Number of images to generate. Each gets a different seed for variety."
+            )
+            return
+
+        per_frame, total = estimate
+        tooltip = (
+            f"Estimated time: ~{format_elapsed_time(total)}\n"
+            f"({format_elapsed_time(per_frame)} per output)"
+        )
+        label.setText(
+            f"Estimated time: ~{format_elapsed_time(total)} "
+            f"({format_elapsed_time(per_frame)} per output)"
+        )
+        label.setToolTip(tooltip)
+        label.setVisible(True)
+        self.ui.label_count.setToolTip(tooltip)
+
+    def _on_seed_changed(self, _value=None):
         """Handle seed value change."""
         self._save_state()
 
     def _on_randomize_seed(self):
         """Generate a new random seed."""
-        new_seed = random.randint(0, 2147483647)
-        self.ui.ComfyUISeed.setValue(new_seed)
+        write_seed(self.ui, random_seed())
+
+    # -------------------------------------------------------------------------
+    # Submit-bar seed controls (dice + auto-randomize toggle)
+    # -------------------------------------------------------------------------
+
+    def _setup_submit_bar_seed_controls(self):
+        """Add a dice button and auto-randomize toggle next to the submit button.
+
+        Randomizing the seed used to require opening the advanced-settings gear
+        dialog, which is the single most common per-submit tweak.
+        """
+        from core.settings_manager import safe_get_setting
+
+        try:
+            from icons import IconManager, DEFAULT_ICON_COLOR
+        except Exception:  # pragma: no cover - icons are optional
+            IconManager = None
+            DEFAULT_ICON_COLOR = None
+
+        dice = QToolButton(self.ui.comfyuiSubmitFrame)
+        dice.setObjectName("ComfyUISubmitBarDice")
+        dice.setFixedSize(42, 42)
+        dice.setCursor(Qt.PointingHandCursor)
+        dice.setToolTip("Randomize seed now")
+        if IconManager:
+            dice.setIcon(IconManager.get_icon("dice", DEFAULT_ICON_COLOR, 18))
+            dice.setIconSize(QSize(18, 18))
+        else:
+            # QToolButton is icon-only by default — show the glyph instead.
+            dice.setText("\U0001F3B2")
+            dice.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        dice.clicked.connect(self._on_randomize_seed)
+        self._submit_bar_dice = dice
+
+        auto = QToolButton(self.ui.comfyuiSubmitFrame)
+        auto.setObjectName("ComfyUIAutoRandomizeSeed")
+        auto.setCheckable(True)
+        auto.setFixedSize(42, 42)
+        auto.setCursor(Qt.PointingHandCursor)
+        auto.setText("AUTO")
+        auto.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        auto.setToolTip(
+            "Auto-randomize the seed on every submit.\n"
+            "When off, the seed stays fixed until you randomize it manually."
+        )
+        auto.setChecked(bool(safe_get_setting("comfyui_auto_randomize_seed", False)))
+        auto.toggled.connect(self._on_auto_randomize_toggled)
+        self._auto_randomize_btn = auto
+
+        layout = self.ui.submitButtonsLayout
+        layout.addWidget(dice)
+        layout.addWidget(auto)
+
+    def _on_auto_randomize_toggled(self, checked):
+        """Persist the auto-randomize-seed preference."""
+        from core.settings_manager import safe_set_setting
+
+        safe_set_setting("comfyui_auto_randomize_seed", bool(checked))
+        logger.info(f"[ComfyUI] Auto-randomize seed {'enabled' if checked else 'disabled'}")
+
+    def _is_auto_randomize_enabled(self) -> bool:
+        """True when a new seed should be rolled before each submit."""
+        btn = getattr(self, '_auto_randomize_btn', None)
+        if btn is not None:
+            return btn.isChecked()
+        from core.settings_manager import safe_get_setting
+        return bool(safe_get_setting("comfyui_auto_randomize_seed", False))
 
 
     # =========================================================================
@@ -1419,13 +1647,115 @@ class ComfyUITab(PollingMixin, BaseTab):
     # VALIDATION
     # =========================================================================
 
+    # Widget types that carry a file selection (BatchImageSelector-style)
+    _FILE_INPUT_WIDGET_TYPES = ('image', 'video')
+
     def _validate_inputs(self):
-        """Validate inputs and enable/disable submit button."""
+        """Validate inputs and enable/disable submit button.
+
+        Returns:
+            None when everything needed for a submit is present, otherwise a
+            user-facing string explaining what is missing. The submit button is
+            only hard-disabled for the two global blockers (no workflow, no
+            network path); per-widget problems are reported at submit time so a
+            late file selection can't leave the button stuck disabled.
+        """
         from core.settings_manager import safe_get_setting
 
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
         network_path_ok = bool(safe_get_setting("network_output_path", ""))
         self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
+
+        if not workflow_ok:
+            return "No workflow selected"
+        if not network_path_ok:
+            return "Network output path not configured in Settings"
+
+        return self._validate_dynamic_inputs()
+
+    def _validate_dynamic_inputs(self):
+        """Check the workflow's editable widgets for empty required inputs.
+
+        Deliberately conservative — a false block is worse than a wasted farm
+        job, so only two cases are flagged:
+
+        * A file selector (image/video) with zero files. The workflow's baked-in
+          default filename points at whatever was in the *authoring* machine's
+          ComfyUI input folder, so relying on it is how jobs end up failing on
+          the farm minutes after submit.
+        * A text/prompt field that is empty with no workflow default, and only
+          when it is the workflow's *sole* prompt input. Workflows routinely
+          ship optional secondary prompts (negative prompts, MMAudio-style
+          descriptions) that are legitimately left blank, so anything with more
+          than one prompt field is left alone.
+
+        Hidden (conditionally disabled) widgets are skipped entirely.
+
+        Returns:
+            A user-facing message, or None if nothing is blocking.
+        """
+        widget_manager = getattr(self, 'widget_manager', None)
+        if not widget_manager:
+            return None
+
+        checked = 0
+        problems = []
+        empty_text_inputs = []
+        text_input_count = 0
+
+        for key, container in widget_manager.dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if not node or not input_widget:
+                continue
+
+            # Skip widgets hidden by an @if_ condition toggle
+            try:
+                if container.isHidden():
+                    continue
+            except RuntimeError:
+                continue
+
+            label = node.display_name or node.title or f"node {node.node_id}"
+
+            if node.widget_type in self._FILE_INPUT_WIDGET_TYPES:
+                checked += 1
+                selected = getattr(input_widget, 'selected_files', None)
+                if selected is not None and len(selected) == 0:
+                    kind = "image" if node.widget_type == 'image' else "video"
+                    problems.append(f"'{label}' has no {kind} selected")
+
+            elif node.widget_type == 'text':
+                if not hasattr(input_widget, 'toPlainText'):
+                    continue
+                checked += 1
+                text_input_count += 1
+                if input_widget.toPlainText().strip():
+                    continue
+                # Empty is fine when the workflow itself supplies a default.
+                if not str(node.current_value or "").strip():
+                    empty_text_inputs.append(label)
+
+        # Only treat an empty prompt as blocking when it's the workflow's only one.
+        if text_input_count == 1 and empty_text_inputs:
+            problems.append(
+                f"'{empty_text_inputs[0]}' is empty and the workflow has no default prompt"
+            )
+
+        if not problems:
+            # Routine path runs on every slider tick — keep it at debug.
+            logger.debug(f"[ComfyUI] Validated {checked} input widget(s): all OK")
+            return None
+
+        logger.info(
+            f"[ComfyUI] Validated {checked} input widget(s); "
+            f"blocking problem(s): {problems}"
+        )
+
+        if len(problems) == 1:
+            return f"Cannot submit — {problems[0]}."
+        joined = "; ".join(problems)
+        return f"Cannot submit — {joined}."
 
     # =========================================================================
     # SUBMISSION
@@ -1443,6 +1773,15 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
         self.ui.ComfyUISubmit.setEnabled(False)
 
+        # Clear any failure left over from the previous attempt
+        self._clear_submit_failure()
+
+        # Roll a new seed before values are collected, so the submitted job and
+        # the saved state agree on which seed was used.
+        if self._is_auto_randomize_enabled():
+            self._on_randomize_seed()
+            logger.info(f"[ComfyUI] Auto-randomized seed to {read_seed(self.ui)}")
+
         # Immediately save state before submission (crash recovery)
         self._save_state()
 
@@ -1459,6 +1798,17 @@ class ComfyUITab(PollingMixin, BaseTab):
             self.show_status("Network output path not configured in Settings", "error")
             return
 
+        # Validate the workflow's own inputs before we pay for a farm round-trip.
+        # (Kept separate from _validate_inputs() so the double-submit guard above
+        # isn't undone by that method re-enabling the button.)
+        input_error = self._validate_dynamic_inputs()
+        if input_error:
+            self.ui.ComfyUISubmit.setEnabled(True)
+            self.show_status(input_error, "error")
+            self._show_submit_failure(input_error)
+            logger.warning(f"[ComfyUI] Submit blocked by input validation: {input_error}")
+            return
+
         network_output_dir = os.path.join(network_output_dir, self.app_state.user)
         logger.info(f"[ComfyUI] Using user subfolder: {network_output_dir}")
 
@@ -1466,12 +1816,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         generation_count = self.ui.ComfyUIGenerationCount.value()
 
         # Show time estimate if available
-        if self.state_manager.current_preset_name:
-            from core.user_preferences import get_workflow_estimated_time_per_frame
-            per_frame = get_workflow_estimated_time_per_frame(self.state_manager.current_preset_name)
-            if per_frame:
-                total_estimate = per_frame * generation_count
-                logger.info(f"[ComfyUI] Estimated time: ~{format_elapsed_time(total_estimate)} ({generation_count} frame(s))")
+        estimate = self._get_time_estimate(generation_count)
+        total_estimate = estimate[1] if estimate else None
+        if total_estimate:
+            logger.info(
+                f"[ComfyUI] Estimated time: ~{format_elapsed_time(total_estimate)} "
+                f"({generation_count} frame(s))"
+            )
 
         # Collect editable values using widget manager
         editable_values, selected_image_count = self.widget_manager.collect_editable_values()
@@ -1513,24 +1864,30 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Show status bar progress (no overlay so user can still interact)
         self.main_window.start_status_spinner()
 
+        # Non-modal submit summary: no confirmation dialog, but the user still
+        # gets told how many generations were queued and roughly how long the
+        # farm will be busy.
+        summary = f"Submitting {generation_count} generation(s)"
+        if total_estimate:
+            summary += f" \u2014 est. ~{format_elapsed_time(total_estimate)}"
+
         # Inform user about server status when submitting
         if hasattr(self, '_server_is_online') and self._server_is_online is False:
             behavior = self.ui.ServerBehaviorCombo.currentData()
             behavior_msgs = {
-                "wait": "ComfyUI: Server offline \u2014 job will wait for server to come online",
-                "fail_delete": "ComfyUI: Server offline \u2014 job will fail and be deleted",
+                "wait": "Server offline \u2014 job will wait for server to come online",
+                "fail_delete": "Server offline \u2014 job will fail and be deleted",
             }
-            msg = behavior_msgs.get(behavior, "ComfyUI: Server offline \u2014 job will fail immediately")
-            self.update_status_with_spinner(msg, StatusColors.WARNING, start=False)
-        else:
+            msg = behavior_msgs.get(behavior, "Server offline \u2014 job will fail immediately")
             self.update_status_with_spinner(
-                f"ComfyUI: Preparing {generation_count} generation(s)...",
-                StatusColors.INFO, start=False
+                f"ComfyUI: {summary} \u2014 {msg}", StatusColors.WARNING, start=False
             )
+        else:
+            self.update_status_with_spinner(f"ComfyUI: {summary}...", StatusColors.INFO, start=False)
         self.animate_button_click(self.ui.ComfyUISubmit)
 
-        # Get seed value
-        base_seed = self.ui.ComfyUISeed.value()
+        # Get seed value (QLineEdit \u2014 parsed safely, 64-bit capable)
+        base_seed = read_seed(self.ui)
 
         logger.info(f"[ComfyUI] Network output path: {network_output_dir}")
 
@@ -1615,6 +1972,8 @@ class ComfyUITab(PollingMixin, BaseTab):
                     f"ComfyUI failed: {error_msg}",
                     StatusColors.ERROR, start=False
                 )
+                # Transient status scrolls away — keep the failure on screen.
+                self._show_submit_failure(error_msg or "Unknown error")
         except Exception as e:
             import traceback
             logger.error(f"[ComfyUI] ERROR in on_result: {e}")
@@ -1630,6 +1989,8 @@ class ComfyUITab(PollingMixin, BaseTab):
             f"ComfyUI error: {error_msg}",
             StatusColors.ERROR, start=False
         )
+        # Transient status scrolls away — keep the failure on screen.
+        self._show_submit_failure(error_msg or "Unknown error")
         logger.error(f"ComfyUI submission error: {error_msg}")
         if traceback_str:
             logger.error(traceback_str)
@@ -1896,7 +2257,22 @@ class ComfyUITab(PollingMixin, BaseTab):
         pipeline_events.job_completed.connect(self._on_own_job_completed)
         pipeline_events.all_jobs_completed.connect(self._on_all_own_jobs_completed)
 
+        # React to Settings tab changes (network_output_path drives the path
+        # display and the submit gating, both of which were previously only
+        # refreshed once in initialize()).
+        pipeline_events.settings_changed.connect(self._on_settings_changed)
+
         logger.debug("ComfyUI tab subscribed to event bus")
+
+    def _on_settings_changed(self, changed_keys):
+        """Refresh path-dependent UI when relevant global settings change."""
+        keys = set(changed_keys or [])
+        if keys and "network_output_path" not in keys:
+            return
+
+        logger.info("[ComfyUI] network_output_path changed — refreshing path display")
+        self._update_network_path_display()
+        self._validate_inputs()
 
     def _on_use_images_from_gallery(self, paths: list):
         """Handle request to use gallery images as inputs."""

@@ -96,6 +96,7 @@ class Ui_PassBuilderTab(object):
         self.passesBoxLayout.setObjectName(u"passesBoxLayout")
         self.passesHint = QLabel(self.passesGroupBox)
         self.passesHint.setObjectName(u"passesHint")
+        self.passesHint.setWordWrap(True)
         self.passesHint.setAlignment(Qt.AlignCenter)
 
         self.passesBoxLayout.addWidget(self.passesHint)
@@ -155,6 +156,14 @@ class Ui_PassBuilderTab(object):
 
         self.passBuilderLayout.addLayout(self.mainContentLayout)
 
+        self.PassBuilderStatusLabel = QLabel(PassBuilderTab)
+        self.PassBuilderStatusLabel.setObjectName(u"PassBuilderStatusLabel")
+        self.PassBuilderStatusLabel.setWordWrap(True)
+        self.PassBuilderStatusLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
+        self.PassBuilderStatusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.passBuilderLayout.addWidget(self.PassBuilderStatusLabel)
+
 
         self.retranslateUi(PassBuilderTab)
 
@@ -169,12 +178,12 @@ class Ui_PassBuilderTab(object):
         self.ScanRenders.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Rescan version and find render files", None))
 #endif // QT_CONFIG(tooltip)
         self.ScanRenders.setText(QCoreApplication.translate("PassBuilderTab", u"Rescan", None))
-        self.rendersGroupBox.setTitle(QCoreApplication.translate("PassBuilderTab", u"Denoised Renders", None))
+        self.rendersGroupBox.setTitle(QCoreApplication.translate("PassBuilderTab", u"Renders", None))
 #if QT_CONFIG(tooltip)
         self.RendersList.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Renders found in the current version - select the sequence you want to update", None))
 #endif // QT_CONFIG(tooltip)
         self.passesGroupBox.setTitle(QCoreApplication.translate("PassBuilderTab", u"Available Passes", None))
-        self.passesHint.setText(QCoreApplication.translate("PassBuilderTab", u"Default passes not shown", None))
+        self.passesHint.setText(QCoreApplication.translate("PassBuilderTab", u"Defaults (Beauty, Alpha, ...) are always included - select extras here", None))
         self.passesHint.setStyleSheet(QCoreApplication.translate("PassBuilderTab", u"color: #888888; font-style: italic; font-size: 9pt;", None))
 #if QT_CONFIG(tooltip)
         self.Passes.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Select the passes you want in the file (multi-select enabled)", None))
@@ -190,12 +199,13 @@ class Ui_PassBuilderTab(object):
 #endif // QT_CONFIG(tooltip)
         self.PublishProductCombo.setPlaceholderText(QCoreApplication.translate("PassBuilderTab", u"Select or type product name", None))
 #if QT_CONFIG(tooltip)
-        self.BuildPasses.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Build render with selected passes (Ctrl+S)", None))
+        self.BuildPasses.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Build render with selected passes (Ctrl+Return)", None))
 #endif // QT_CONFIG(tooltip)
         self.BuildPasses.setText(QCoreApplication.translate("PassBuilderTab", u"Build", None))
 #if QT_CONFIG(shortcut)
-        self.BuildPasses.setShortcut(QCoreApplication.translate("PassBuilderTab", u"Ctrl+S", None))
+        self.BuildPasses.setShortcut(QCoreApplication.translate("PassBuilderTab", u"Ctrl+Return", None))
 #endif // QT_CONFIG(shortcut)
+        self.PassBuilderStatusLabel.setText("")
         pass
     # retranslateUi
 

@@ -52,8 +52,8 @@ def _get_network_output_path() -> Optional[str]:
                 network_path = settings.get('network_output_path', '')
                 if network_path and os.path.isdir(network_path):
                     return network_path
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Analytics disabled — could not resolve network path: {e}")
     return None
 
 

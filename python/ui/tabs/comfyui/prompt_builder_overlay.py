@@ -883,10 +883,10 @@ class PromptBuilderOverlay(QWidget):
     def _on_clear_all(self):
         """Clear all selections"""
         if not confirm_action(
-            self,
             "Clear All",
             "Clear all selections and weights?",
-            "This will reset the entire builder."
+            parent=self,
+            detail="This will reset the entire builder."
         ):
             return
 
@@ -918,21 +918,21 @@ class PromptBuilderOverlay(QWidget):
         from PySide6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         clipboard.setText(self.preview_edit.toPlainText())
-        show_info(self, "Copied", "Positive prompt copied to clipboard")
+        show_info("Copied", "Positive prompt copied to clipboard", parent=self)
 
     def _on_copy_negative(self):
         """Copy negative prompt to clipboard"""
         from PySide6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         clipboard.setText(self.negative_preview_edit.toPlainText())
-        show_info(self, "Copied", "Negative prompt copied to clipboard")
+        show_info("Copied", "Negative prompt copied to clipboard", parent=self)
 
     def _on_copy_json(self):
         """Copy JSON to clipboard"""
         from PySide6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         clipboard.setText(self.json_preview_edit.toPlainText())
-        show_info(self, "Copied", "JSON output copied to clipboard")
+        show_info("Copied", "JSON output copied to clipboard", parent=self)
 
     def _on_save_json(self):
         """Save JSON to file"""
@@ -983,9 +983,9 @@ class PromptBuilderOverlay(QWidget):
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(self.json_preview_edit.toPlainText())
-            show_info(self, "Saved", f"JSON saved to {file_path}")
+            show_info("Saved", f"JSON saved to {file_path}", parent=self)
         except Exception as e:
-            show_error(self, "Error", f"Failed to save JSON: {str(e)}")
+            show_error("Error", f"Failed to save JSON: {str(e)}", parent=self)
 
     def _refresh_preset_list(self):
         """Refresh the preset list from settings"""
@@ -1019,7 +1019,7 @@ class PromptBuilderOverlay(QWidget):
 
         safe_set_setting("prompt_builder_presets", presets)
         self._refresh_preset_list()
-        show_info(self, "Saved", f"Preset '{name}' saved successfully")
+        show_info("Saved", f"Preset '{name}' saved successfully", parent=self)
 
     def _on_preset_load(self, item):
         """Load a preset"""
@@ -1030,7 +1030,7 @@ class PromptBuilderOverlay(QWidget):
         presets = safe_get_setting("prompt_builder_presets", {})
 
         if name not in presets:
-            show_error(self, "Error", f"Preset '{name}' not found")
+            show_error("Error", f"Preset '{name}' not found", parent=self)
             return
 
         preset = presets[name]
@@ -1070,10 +1070,10 @@ class PromptBuilderOverlay(QWidget):
         name = item.text()
 
         if not confirm_action(
-            self,
             "Delete Preset",
             f"Delete preset '{name}'?",
-            "This cannot be undone."
+            parent=self,
+            detail="This cannot be undone."
         ):
             return
 

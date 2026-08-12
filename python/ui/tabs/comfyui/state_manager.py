@@ -15,6 +15,46 @@ logger = logging.getLogger(__name__)
 # Maximum number of history entries to keep
 MAX_HISTORY_SIZE = 50
 
+# ComfyUI seeds are 64-bit. The seed field is a QLineEdit (not a QSpinBox,
+# which clamps at 2^31-1), so every read has to parse text defensively.
+SEED_MAX = 2 ** 63 - 1
+
+
+def read_seed(ui) -> int:
+    """Read the seed widget as an int, falling back to 0 on anything unparsable."""
+    widget = ui.ComfyUISeed
+    # Tolerate an older compiled .ui where the seed was still a QSpinBox.
+    if hasattr(widget, "value"):
+        try:
+            return int(widget.value())
+        except (TypeError, ValueError):
+            return 0
+    try:
+        value = int((widget.text() or "").strip())
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(SEED_MAX, value))
+
+
+def write_seed(ui, value) -> None:
+    """Write an int seed into the seed widget, clamping to the valid range."""
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        seed = 0
+    seed = max(0, min(SEED_MAX, seed))
+
+    widget = ui.ComfyUISeed
+    if hasattr(widget, "setValue"):
+        widget.setValue(seed)
+    else:
+        widget.setText(str(seed))
+
+
+def random_seed() -> int:
+    """Generate a new random 64-bit seed."""
+    return random.randint(0, SEED_MAX)
+
 
 class ComfyUIStateManager:
     """Manages state persistence and restoration for ComfyUI tab."""
@@ -41,7 +81,7 @@ class ComfyUIStateManager:
             "workflow_preset": self.current_preset_name or "",
             "selected_workflow": self.current_selected_workflow or "",  # For multi-workflow models
             "generation_count": ui.ComfyUIGenerationCount.value(),
-            "seed": ui.ComfyUISeed.value(),
+            "seed": read_seed(ui),
             "custom_name": ui.ComfyUIName.text().strip(),
             "custom_name_enabled": ui.ComfyUINameToggle.isChecked(),
         }
@@ -85,8 +125,8 @@ class ComfyUIStateManager:
         ui.ComfyUIGenerationCount.setValue(gen_count)
 
         # Restore seed
-        seed = state.get("seed", random.randint(0, 2147483647))
-        ui.ComfyUISeed.setValue(seed)
+        seed = state.get("seed", random_seed())
+        write_seed(ui, seed)
 
         # Restore custom name toggle and text
         custom_name_enabled = state.get("custom_name_enabled", False)
@@ -134,7 +174,7 @@ class ComfyUIStateManager:
         # Restore seed
         base_seed = metadata.get("base_seed")
         if base_seed is not None:
-            ui.ComfyUISeed.setValue(base_seed)
+            write_seed(ui, base_seed)
 
         # Restore generation count
         gen_count = metadata.get("generation_count")
@@ -369,7 +409,7 @@ class ComfyUIStateManager:
         return save_session(
             workflow_preset=self.current_preset_name,
             editable_values=editable_values,
-            seed=ui.ComfyUISeed.value(),
+            seed=read_seed(ui),
             generation_count=ui.ComfyUIGenerationCount.value(),
             input_images=input_images,
             description=description
@@ -424,7 +464,7 @@ class ComfyUIStateManager:
         # Restore seed and generation count
         seed = session.get("seed")
         if seed is not None:
-            ui.ComfyUISeed.setValue(seed)
+            write_seed(ui, seed)
 
         gen_count = session.get("generation_count")
         if gen_count is not None:

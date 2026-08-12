@@ -604,6 +604,48 @@ def get_workflow_preset_for_files(output_dir: str, filenames: List[str]) -> Dict
     return results
 
 
+def collect_known_input_files(metadata: Dict[str, Any]) -> tuple:
+    """Collect all known input file basenames from an already-loaded metadata dict.
+
+    One pass over the metadata instead of a linear scan per candidate file.
+
+    Args:
+        metadata: Already-loaded gallery metadata dict
+
+    Returns:
+        tuple: (explicit_inputs, source_name_to_job) where:
+            - explicit_inputs: set of filenames that have an _input_ entry
+            - source_name_to_job: dict of filename -> job_prefix for files that
+              appear in any job's source_images/source_models but have no
+              explicit _input_ entry yet (candidates for lazy migration)
+    """
+    explicit_inputs = set()
+    source_name_to_job = {}
+
+    if not isinstance(metadata, dict):
+        return explicit_inputs, source_name_to_job
+
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            continue
+        if key.startswith("_input_"):
+            explicit_inputs.add(key[7:])  # Remove "_input_" prefix
+        elif key.startswith("_prefix_") and isinstance(value, dict):
+            job_prefix = value.get('job_prefix', key[8:])
+            for name in (value.get('source_images') or []):
+                if isinstance(name, str):
+                    source_name_to_job.setdefault(name, job_prefix)
+            for name in (value.get('source_models') or []):
+                if isinstance(name, str):
+                    source_name_to_job.setdefault(name, job_prefix)
+
+    # Files already marked explicitly need no migration
+    for name in explicit_inputs:
+        source_name_to_job.pop(name, None)
+
+    return explicit_inputs, source_name_to_job
+
+
 def is_known_input_file(output_dir: str, filename: str) -> bool:
     """Check if a file is known to be an input file (used as source in any job).
 
@@ -619,27 +661,52 @@ def is_known_input_file(output_dir: str, filename: str) -> bool:
     """
     metadata = load_gallery_metadata(output_dir)
 
-    # Check for explicit input entry first
-    input_key = f"_input_{filename}"
-    if input_key in metadata:
+    explicit_inputs, source_name_to_job = collect_known_input_files(metadata)
+
+    if filename in explicit_inputs:
         return True
 
-    # Check if file appears in any job's source lists
-    for key, value in metadata.items():
-        if not key.startswith("_prefix_"):
-            continue
-        if not isinstance(value, dict):
-            continue
-
-        source_images = value.get('source_images') or []
-        source_models = value.get('source_models') or []
-
-        if filename in source_images or filename in source_models:
-            # Mark it for future lookups (lazy migration)
-            mark_as_input_file(output_dir, filename, value.get('job_prefix', key[8:]))
-            return True
+    if filename in source_name_to_job:
+        # Mark it for future lookups (lazy migration)
+        mark_as_input_file(output_dir, filename, source_name_to_job[filename])
+        return True
 
     return False
+
+
+def mark_input_files_batch(output_dir: str, filename_to_job: Dict[str, Optional[str]]) -> bool:
+    """Mark multiple files as input files in a single locked metadata write.
+
+    Batch variant of mark_as_input_file() — use this when a directory scan
+    discovers several unmarked input files, so the (network) metadata file is
+    locked and written once instead of once per file.
+
+    Args:
+        output_dir: Directory containing the metadata file
+        filename_to_job: Mapping of filename -> job prefix that used it (or None)
+
+    Returns:
+        True if successfully marked (or nothing to mark)
+    """
+    if not filename_to_job:
+        return True
+
+    try:
+        def _apply(data):
+            for filename, used_by_job in filename_to_job.items():
+                input_key = f"_input_{filename}"
+                if input_key not in data:
+                    data[input_key] = {
+                        "is_output": False,
+                        "is_input": True,
+                        "used_by_job": used_by_job,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+
+        return mutate_gallery_metadata(output_dir, _apply)
+    except Exception as e:
+        logger.error(f"[Metadata] Error batch-marking input files: {e}")
+        return False
 
 
 def mark_as_input_file(output_dir: str, filename: str, used_by_job: str = None) -> bool:
@@ -854,6 +921,54 @@ def add_per_file_metadata(
         return False
 
 
+def get_per_file_metadata_from_dict(
+    metadata: Dict[str, Any], filename: str
+) -> Optional[Dict[str, Any]]:
+    """Get per-file metadata from an already-loaded metadata dict.
+
+    Pure-dict variant of get_per_file_metadata() — no disk/network I/O. Use
+    this inside loops that already hold the directory's metadata (e.g. the
+    gallery scan) so the JSON isn't re-stat'ed once per file.
+
+    Args:
+        metadata: Already-loaded gallery metadata dict
+        filename: The output filename
+
+    Returns:
+        Dict with per-file metadata, or None if not found
+    """
+    if not isinstance(metadata, dict) or not filename or not isinstance(filename, str):
+        return None
+    try:
+        basename = os.path.splitext(filename)[0]
+    except Exception:
+        return None
+    entry = metadata.get(f"_file_{basename}")
+    return entry if isinstance(entry, dict) else None
+
+
+def has_per_file_metadata_from_dict(metadata: Dict[str, Any], filename: str) -> bool:
+    """Pure-dict variant of has_per_file_metadata()."""
+    return get_per_file_metadata_from_dict(metadata, filename) is not None
+
+
+def get_metadata_level_from_dict(metadata: Dict[str, Any], filename: str) -> str:
+    """Determine metadata completeness from an already-loaded metadata dict.
+
+    Pure-dict variant of get_metadata_level(). Same semantics, zero I/O.
+
+    Returns:
+        'full' / 'partial' / 'none'
+    """
+    if get_per_file_metadata_from_dict(metadata, filename) is not None:
+        return "full"
+
+    if _lookup_file_metadata(metadata, filename, allow_reverse_match=True) is not None:
+        return "partial"
+
+    return "none"
+
+
 def get_per_file_metadata(output_dir: str, filename: str) -> Optional[Dict[str, Any]]:
     """Get per-file metadata for a specific output file.
 
@@ -866,9 +981,7 @@ def get_per_file_metadata(output_dir: str, filename: str) -> Optional[Dict[str, 
     """
     try:
         metadata = load_gallery_metadata(output_dir)
-        basename = os.path.splitext(filename)[0]
-        file_key = f"_file_{basename}"
-        return metadata.get(file_key)
+        return get_per_file_metadata_from_dict(metadata, filename)
     except Exception as e:
         logger.error(f"[Metadata] Error getting per-file metadata: {e}")
         return None
@@ -959,19 +1072,22 @@ def get_metadata_level(output_dir: str, filename: str) -> str:
         'full' - Per-file metadata exists
         'partial' - Only job-level metadata exists
         'none' - No metadata available
+
+    Note:
+        This loads the directory metadata. Callers that already hold the
+        loaded dict (e.g. the gallery scan loop) must use
+        get_metadata_level_from_dict() instead — otherwise every file costs
+        another network stat of the same JSON.
     """
-    # Check for per-file metadata first
-    if has_per_file_metadata(output_dir, filename):
-        return "full"
-
-    # Check for job-level metadata
-    if get_item_metadata(output_dir, filename) is not None:
-        return "partial"
-
-    return "none"
+    return get_metadata_level_from_dict(load_gallery_metadata(output_dir), filename)
 
 
-def establish_lineage(output_dir: str, child_filename: str, parent_filename: str) -> bool:
+def establish_lineage(
+    output_dir: str,
+    child_filename: str,
+    parent_filename: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
     """Establish a parent-child lineage relationship between two files.
 
     This is used when we know a file was generated from another (iteration),
@@ -981,13 +1097,23 @@ def establish_lineage(output_dir: str, child_filename: str, parent_filename: str
         output_dir: Directory containing both files
         child_filename: The output file (child)
         parent_filename: The input file used (parent)
+        metadata: Optional already-loaded metadata dict. When supplied, the
+            read-side lookups use it instead of re-loading the JSON, and any
+            entry this call creates is mirrored back into it so a caller
+            looping over many files stays consistent. Writes always go
+            through the locked mutate path regardless.
 
     Returns:
         bool: True if lineage was established
     """
+    use_dict = isinstance(metadata, dict)
+
     try:
         # Get parent's file_id (create one if needed)
-        parent_meta = get_per_file_metadata(output_dir, parent_filename)
+        if use_dict:
+            parent_meta = get_per_file_metadata_from_dict(metadata, parent_filename)
+        else:
+            parent_meta = get_per_file_metadata(output_dir, parent_filename)
         if parent_meta:
             parent_id = parent_meta.get('file_id')
         else:
@@ -995,13 +1121,19 @@ def establish_lineage(output_dir: str, child_filename: str, parent_filename: str
             import uuid
             parent_id = str(uuid.uuid4())
             add_per_file_metadata(output_dir, parent_filename, file_id=parent_id)
+            if use_dict:
+                parent_key = f"_file_{os.path.splitext(parent_filename)[0]}"
+                metadata[parent_key] = {"file_id": parent_id}
 
         if not parent_id:
             logger.warning(f"[Metadata] Could not get/create parent_id for {parent_filename}")
             return False
 
         # Get or create child's per-file metadata with parent_id
-        child_meta = get_per_file_metadata(output_dir, child_filename)
+        if use_dict:
+            child_meta = get_per_file_metadata_from_dict(metadata, child_filename)
+        else:
+            child_meta = get_per_file_metadata(output_dir, child_filename)
         if child_meta:
             # Update existing entry with parent_id (create it if it vanished
             # between the lookup above and the locked mutation below)
@@ -1015,10 +1147,21 @@ def establish_lineage(output_dir: str, child_filename: str, parent_filename: str
                 else:
                     metadata[file_key] = dict(child_meta, parent_id=parent_id)
 
-            return mutate_gallery_metadata(output_dir, _apply)
+            saved = mutate_gallery_metadata(output_dir, _apply)
+            if saved and use_dict:
+                metadata[file_key] = dict(child_meta, parent_id=parent_id)
+            return saved
         else:
             # Create new entry with parent_id
-            return add_per_file_metadata(output_dir, child_filename, parent_id=parent_id)
+            import uuid
+            child_id = str(uuid.uuid4())
+            saved = add_per_file_metadata(
+                output_dir, child_filename, file_id=child_id, parent_id=parent_id
+            )
+            if saved and use_dict:
+                child_key = f"_file_{os.path.splitext(child_filename)[0]}"
+                metadata[child_key] = {"file_id": child_id, "parent_id": parent_id}
+            return saved
 
     except Exception as e:
         logger.error(f"[Metadata] Error establishing lineage: {e}")
@@ -1075,13 +1218,15 @@ def auto_establish_lineage_from_job_metadata(output_dir: str) -> int:
             if ext not in COMFYUI_OUTPUT_EXTENSIONS:
                 continue
 
-            # Check if lineage already established
-            file_meta = get_per_file_metadata(output_dir, filename)
+            # Check if lineage already established (pure-dict lookup — the
+            # directory metadata was loaded once above, re-loading it per
+            # candidate file cost a network stat each time)
+            file_meta = get_per_file_metadata_from_dict(metadata, filename)
             if file_meta and file_meta.get('parent_id'):
                 continue  # Already has lineage
 
-            # Establish lineage
-            if establish_lineage(output_dir, filename, parent_filename):
+            # Establish lineage (metadata dict is kept in sync by the callee)
+            if establish_lineage(output_dir, filename, parent_filename, metadata=metadata):
                 established += 1
 
     return established

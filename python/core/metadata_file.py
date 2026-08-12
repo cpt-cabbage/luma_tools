@@ -13,11 +13,13 @@ Usage:
     metadata.save(data)  # Atomic write, clears cache
 """
 
+import copy
 import json
 import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from typing import Any, Callable, Dict, Optional
 
 # Farm isolation: this module is copied to the flat _job_data dir as
@@ -130,9 +132,12 @@ class MetadataFile:
                 # Check cache
                 if use_cache:
                     if self._cache is not None and self._cache_mtime == current_mtime:
-                        # Return a shallow copy so callers can mutate the result
-                        # without corrupting the in-memory cache.
-                        return dict(self._cache)
+                        # Deep copy: a shallow dict() shares the NESTED
+                        # containers with the cache, so a caller mutating
+                        # data["_prefix_x"]["source_images"] silently poisoned
+                        # the cache and could later be flushed to the shared
+                        # network file by an unrelated save().
+                        return copy.deepcopy(self._cache)
 
                 # Load from file (under lock to prevent TOCTOU race between
                 # mtime check and file read — another thread could modify the
@@ -148,9 +153,9 @@ class MetadataFile:
                     )
                     return default
 
-                # Update cache (store a copy so subsequent caller mutations
-                # don't reach back through the cache reference)
-                self._cache = dict(data)
+                # Update cache (store a deep copy so subsequent caller
+                # mutations of nested containers can't reach back into it)
+                self._cache = copy.deepcopy(data)
                 self._cache_mtime = current_mtime
 
                 return data
@@ -348,8 +353,11 @@ class MetadataFile:
 
 
 # Module-level cache for MetadataFile instances
-# Allows reusing the same MetadataFile object for repeated access to the same file
-_metadata_file_cache: Dict[str, MetadataFile] = {}
+# Allows reusing the same MetadataFile object for repeated access to the same file.
+# Bounded LRU: each entry holds a full cached copy of its directory's JSON, so an
+# unbounded dict grew with every directory browsed during a long gallery session.
+_METADATA_FILE_CACHE_MAX = 256
+_metadata_file_cache: "OrderedDict[str, MetadataFile]" = OrderedDict()
 _metadata_file_cache_lock = threading.RLock()
 
 
@@ -371,9 +379,16 @@ def get_metadata_file(directory: str, filename: str) -> MetadataFile:
     key = os.path.normpath(os.path.join(directory, filename))
 
     with _metadata_file_cache_lock:
-        if key not in _metadata_file_cache:
-            _metadata_file_cache[key] = MetadataFile(directory, filename)
-        return _metadata_file_cache[key]
+        instance = _metadata_file_cache.get(key)
+        if instance is None:
+            instance = MetadataFile(directory, filename)
+            _metadata_file_cache[key] = instance
+            # Evict least-recently-used entries beyond the cap
+            while len(_metadata_file_cache) > _METADATA_FILE_CACHE_MAX:
+                _metadata_file_cache.popitem(last=False)
+        else:
+            _metadata_file_cache.move_to_end(key)
+        return instance
 
 
 def clear_metadata_file_cache(directory: str = None, filename: str = None) -> None:

@@ -19,6 +19,63 @@ from ui_components import StatusColors
 logger = logging.getLogger(__name__)
 
 
+def _run_shot_cleanup(lookdev_dir, render_dirs, usd_dirs, do_hip, progress_callback=None):
+    """Delete the requested shot directories, reporting progress per directory.
+
+    Worker function — no Qt access. Each directory is deleted individually so
+    the progress bar advances as work actually completes (deleting the whole
+    list in one call left the bar frozen for the entire operation).
+
+    Returns:
+        dict: {"deleted_renders", "failed_renders", "deleted_usds",
+               "failed_usds", "hip_requested", "hip_deleted"}
+    """
+    from services.cleanup_service import (
+        cleanup_renders,
+        cleanup_usd,
+        cleanup_hip_backups,
+    )
+
+    total_steps = len(render_dirs) + len(usd_dirs) + (1 if do_hip else 0)
+    step = 0
+
+    def _tick(message):
+        nonlocal step
+        step += 1
+        if progress_callback:
+            progress_callback(int(step / max(total_steps, 1) * 100), message)
+
+    deleted_renders, failed_renders = [], []
+    for dir_name in render_dirs:
+        if cleanup_renders(lookdev_dir, [dir_name]):
+            deleted_renders.append(dir_name)
+        else:
+            failed_renders.append(dir_name)
+        _tick(f"Removed render: {dir_name}")
+
+    deleted_usds, failed_usds = [], []
+    for dir_name in usd_dirs:
+        if cleanup_usd(lookdev_dir, [dir_name]):
+            deleted_usds.append(dir_name)
+        else:
+            failed_usds.append(dir_name)
+        _tick(f"Removed USD: {dir_name}")
+
+    hip_deleted = False
+    if do_hip:
+        hip_deleted = cleanup_hip_backups(lookdev_dir)
+        _tick("Removed HIP backups")
+
+    return {
+        "deleted_renders": deleted_renders,
+        "failed_renders": failed_renders,
+        "deleted_usds": deleted_usds,
+        "failed_usds": failed_usds,
+        "hip_requested": do_hip,
+        "hip_deleted": hip_deleted,
+    }
+
+
 class CleanerTab(BaseTab):
     """Tab for cleaning up shot files and gallery outputs."""
 
@@ -55,6 +112,21 @@ class CleanerTab(BaseTab):
         self._updating_tree = False  # Flag to prevent recursive updates
         self._setup_gallery_tree()
         self._update_gallery_path_label()
+
+        # Note: the 'HipNumber' widget name is historical — the scanner
+        # (services/scan_service.py) emits label updates by widget name
+        # ('HipNumber' → "Amount of Hipfiles: N"), so renaming the widget in
+        # cleaner.ui would break that emit. The name stays until the scan
+        # service can be updated in the same change.
+
+        # Auto-run the shot scan on first activation so the tab shows real
+        # data instead of placeholder labels. Without a shot context there is
+        # nothing to scan — tell the user what the labels are waiting for.
+        if self.app_state.has_shot_context():
+            self.run_scanner()
+        else:
+            self.ui.FolderSize.setText("Press Rescan to analyze shot files")
+            self.ui.HipNumber.setText("Amount of Hipfiles: —")
 
     # =========================================================================
     # Shot Cleanup Methods (existing functionality)
@@ -150,6 +222,15 @@ class CleanerTab(BaseTab):
         self.ui.USDSClean.clear()
         self.ui.RendersClean.clear()
 
+        # Prevent concurrent scans (double-clicking Rescan used to spawn two
+        # scanner workers racing on the same UI lists). A true "Cancel"
+        # affordance is not possible here: DirectoryScanner.scan_all
+        # (services/scan_service.py) runs monolithic filesystem walks with no
+        # cancellation hooks, so the honest state is a disabled button for
+        # the duration of the scan.
+        self.ui.RescanCleanFiles.setEnabled(False)
+        self.ui.RescanCleanFiles.setText("Scanning…")
+
         # Show status bar progress
         self.update_status_with_spinner("Shot Cleaner: Scanning directories...", StatusColors.INFO)
 
@@ -169,11 +250,31 @@ class CleanerTab(BaseTab):
         if message:
             self.set_status(message)
 
+    def _set_rescan_idle(self):
+        """Restore the Rescan button to its idle state after a scan."""
+        self.ui.RescanCleanFiles.setEnabled(True)
+        self.ui.RescanCleanFiles.setText("Rescan")
+
     def _on_scan_result(self, result):
         """Handle scan completion."""
 
-        # Enable clean button
-        self.ui.CleanFiles.setEnabled(True)
+        self._set_rescan_idle()
+
+        # Enable the clean button only when the scan actually found something
+        # to clean (render/USD versions in the lists, or a HIP backup folder).
+        backup_exists = False
+        try:
+            lookdev = self.app_state.lookdev_dir
+            if lookdev:
+                backup_exists = os.path.isdir(os.path.join(lookdev, "backup"))
+        except Exception:
+            pass
+        has_items = (
+            self.ui.RendersClean.count() > 0
+            or self.ui.USDSClean.count() > 0
+            or backup_exists
+        )
+        self.ui.CleanFiles.setEnabled(has_items)
 
         # Select all items by default
         self._deselect_renders_in_comp(result.get("renders_in_comp", []))
@@ -192,6 +293,7 @@ class CleanerTab(BaseTab):
     def _on_scan_error(self, error_msg, traceback_str=""):
         """Handle scan error."""
 
+        self._set_rescan_idle()
         self.update_status_with_spinner(
             f"Shot Cleaner: Scan error - {error_msg}", StatusColors.ERROR, start=False
         )
@@ -217,20 +319,14 @@ class CleanerTab(BaseTab):
                     item.setSelected(False)
 
     def _on_clean_files_clicked(self):
-        """Handle cleanup button click."""
-        from dialog_helpers import confirm_action
-        from services.cleanup_service import (
-            cleanup_renders,
-            cleanup_usd,
-            cleanup_hip_backups,
-        )
+        """Size the pending deletion in a worker, then ask for confirmation."""
+        from services.cleanup_service import get_cleanup_summary
 
         self.animate_button_click(self.ui.CleanFiles)
 
         # Collect what to clean (on main thread, reading UI state)
         render_dirs = []
         usd_dirs = []
-        do_hip = False
 
         if self.ui.CleanRender.isChecked():
             render_dirs = [
@@ -243,61 +339,155 @@ class CleanerTab(BaseTab):
         do_hip = self.ui.HIPBackups.isChecked()
 
         if not render_dirs and not usd_dirs and not do_hip:
+            # Used to return silently, leaving the user to wonder why the
+            # button did nothing.
+            self.show_status(
+                "Nothing to clean - tick a category and select versions in the lists",
+                "warning",
+            )
             return
 
-        # Build confirmation summary
+        lookdev_dir = self.app_state.lookdev_dir
+        if not lookdev_dir:
+            self.show_status("No task directory resolved - press Rescan first", "warning")
+            return
+
+        # Sizing walks the whole version tree on a network share, so it runs in
+        # a worker; the confirmation dialog is shown once the real byte count
+        # is known (previously the dialog only quoted directory counts).
+        self._pending_cleanup_lookdev = lookdev_dir
+        self.ui.CleanFiles.setEnabled(False)
+        self.update_status_with_spinner(
+            "Shot Cleaner: Calculating deletion size...", StatusColors.INFO
+        )
+        self.start_worker(
+            get_cleanup_summary,
+            lookdev_dir,
+            render_dirs,
+            usd_dirs,
+            do_hip,
+            on_result=self._on_cleanup_size_ready,
+            on_error=self._on_cleanup_size_error,
+        )
+
+    def _on_cleanup_size_ready(self, summary):
+        """Confirm the deletion with real sizes, then run it (GUI thread)."""
+        from dialog_helpers import confirm_action
+
+        self.update_status_with_spinner(
+            "Shot Cleaner: Ready to clean", StatusColors.INFO, start=False
+        )
+        self.ui.CleanFiles.setEnabled(True)
+
+        render_dirs = summary["render_dirs"]
+        usd_dirs = summary["usd_dirs"]
+        do_hip = summary["backups"]
+        lookdev_dir = getattr(self, "_pending_cleanup_lookdev", "")
+
         summary_parts = []
+        detail_lines = []
         if render_dirs:
-            summary_parts.append(f"{len(render_dirs)} render director{'y' if len(render_dirs) == 1 else 'ies'}")
+            summary_parts.append(
+                f"{len(render_dirs)} render director{'y' if len(render_dirs) == 1 else 'ies'}"
+            )
+            detail_lines.append("Render directories:")
+            detail_lines.extend(f"  {name}" for name in render_dirs)
         if usd_dirs:
-            summary_parts.append(f"{len(usd_dirs)} USD director{'y' if len(usd_dirs) == 1 else 'ies'}")
+            summary_parts.append(
+                f"{len(usd_dirs)} USD director{'y' if len(usd_dirs) == 1 else 'ies'}"
+            )
+            detail_lines.append("USD directories:")
+            detail_lines.extend(f"  {name}" for name in usd_dirs)
         if do_hip:
             summary_parts.append("HIP backups folder")
+            detail_lines.append(f"HIP backups folder: {os.path.join(lookdev_dir, 'backup')}")
 
         if not confirm_action(
             "Confirm Shot Cleanup",
             f"Are you sure you want to delete {', '.join(summary_parts)}?\n\n"
+            f"This will free {ByteSize(summary['total_size'])} of disk space.\n\n"
             "This action cannot be undone.",
             parent=self.main_window,
+            detail="\n".join(detail_lines),
         ):
             return
 
-        lookdev_dir = self.app_state.lookdev_dir
-        self.show_status("Cleaning up files...", "warning")
+        self.ui.CleanFiles.setEnabled(False)
+        self.ui.progressBar.setValue(0)
+        self.update_status_with_spinner("Shot Cleaner: Cleaning up files...", StatusColors.INFO)
 
-        def _do_cleanup(progress_callback=None):
-            """Run file deletions in worker thread."""
-            if render_dirs:
-                for i, dir_name in enumerate(render_dirs):
-                    logger.info(f"Removing Renders: {os.path.join(lookdev_dir, 'img', 'renders', dir_name)}")
-                    if progress_callback:
-                        progress_callback(int((i + 1) / max(len(render_dirs), 1) * 50), f"Removing render: {dir_name}")
-                cleanup_renders(lookdev_dir, render_dirs)
+        self.start_worker(
+            _run_shot_cleanup,
+            lookdev_dir,
+            render_dirs,
+            usd_dirs,
+            do_hip,
+            on_result=self._on_cleanup_complete,
+            on_error=self._on_cleanup_error,
+            on_progress=self._on_cleanup_progress,
+        )
 
-            if usd_dirs:
-                for i, dir_name in enumerate(usd_dirs):
-                    logger.info(f"Removing USDs: {os.path.join(lookdev_dir, 'usd_files', dir_name)}")
-                    if progress_callback:
-                        progress_callback(50 + int((i + 1) / max(len(usd_dirs), 1) * 30), f"Removing USD: {dir_name}")
-                cleanup_usd(lookdev_dir, usd_dirs)
+    def _on_cleanup_size_error(self, error_msg, traceback_str=""):
+        """Handle failure while sizing the pending cleanup."""
+        self.ui.CleanFiles.setEnabled(True)
+        self.update_status_with_spinner(
+            f"Shot Cleaner: Could not calculate size - {error_msg}",
+            StatusColors.ERROR,
+            start=False,
+        )
+        logger.error(f"Cleanup size calculation failed: {error_msg}")
+        if traceback_str:
+            logger.error(traceback_str)
 
-            if do_hip:
-                logger.info(f"Removing Hip Backups Folder: {os.path.join(lookdev_dir, 'backup')}")
-                if progress_callback:
-                    progress_callback(90, "Removing HIP backups")
-                cleanup_hip_backups(lookdev_dir)
+    def _on_cleanup_progress(self, percent, message):
+        """Update the progress bar as each directory finishes deleting."""
+        self.ui.progressBar.setValue(int(percent))
+        if message:
+            self.set_status(message)
 
-            return True
+    def _on_cleanup_complete(self, result):
+        """Handle cleanup completion, reporting per-directory failures."""
+        from dialog_helpers import show_warning
 
-        def _on_complete(result):
-            self.show_status("Cleanup complete", "success")
-            self.run_scanner()
+        failures = list(result["failed_renders"]) + list(result["failed_usds"])
+        if result["hip_requested"] and not result["hip_deleted"]:
+            failures.append("HIP backups folder")
 
-        def _on_error(error_msg, traceback_str=""):
-            self.show_status(f"Cleanup error: {error_msg}", "error")
-            self.run_scanner()
+        deleted_count = len(result["deleted_renders"]) + len(result["deleted_usds"])
+        if result["hip_deleted"]:
+            deleted_count += 1
 
-        self.start_worker(_do_cleanup, on_result=_on_complete, on_error=_on_error)
+        if failures:
+            logger.warning(f"Shot cleanup finished with {len(failures)} failures")
+            show_warning(
+                "Partial Cleanup",
+                f"Deleted {deleted_count} item(s), but {len(failures)} could not be removed.\n"
+                "They may be in use or you may lack permission.",
+                self.main_window,
+                detail="\n".join(failures),
+            )
+            self.update_status_with_spinner(
+                f"Shot Cleaner: Cleanup finished with {len(failures)} failures",
+                StatusColors.WARNING,
+                start=False,
+            )
+        else:
+            self.update_status_with_spinner(
+                f"Shot Cleaner: Cleanup complete ({deleted_count} item(s) removed)",
+                StatusColors.SUCCESS,
+                start=False,
+            )
+        self.run_scanner()
+
+    def _on_cleanup_error(self, error_msg, traceback_str=""):
+        """Handle an unexpected cleanup failure."""
+        self.update_status_with_spinner(
+            f"Shot Cleaner: Cleanup error - {error_msg}", StatusColors.ERROR, start=False
+        )
+        logger.error(f"Cleanup error: {error_msg}")
+        if traceback_str:
+            logger.error(traceback_str)
+        self.run_scanner()
 
     # =========================================================================
     # Gallery Cleanup Methods (new functionality)
@@ -586,21 +776,41 @@ class CleanerTab(BaseTab):
 
     def _on_gallery_cleanup_complete(self, result):
         """Handle gallery cleanup completion."""
+        from dialog_helpers import show_warning
 
         deleted, freed, errors = result
         self.ui.GalleryCleanupButton.setEnabled(True)
         self.ui.galleryProgressBar.setValue(100)
 
         if errors:
+            # Reporting a flat "Cleanup complete" while files failed to delete
+            # hid real failures (locked files, permission errors) — surface them.
             logger.warning(f"Cleanup completed with {len(errors)} errors")
             for err in errors[:5]:
                 logger.warning(f"  - {err}")
-
-        self.update_status_with_spinner(
-            f"Cleanup complete: deleted {deleted} files, freed {ByteSize(freed)}",
-            StatusColors.SUCCESS,
-            start=False,
-        )
+            summary = (
+                f"Deleted {deleted} files ({ByteSize(freed)} freed), "
+                f"but {len(errors)} file(s) could not be deleted.\n"
+                "They may be open in another application or read-only."
+            )
+            show_warning(
+                "Partial Cleanup",
+                summary,
+                self.main_window,
+                detail="\n".join(str(e) for e in errors),
+            )
+            self.update_status_with_spinner(
+                f"Gallery cleanup finished with {len(errors)} errors "
+                f"(deleted {deleted} files, freed {ByteSize(freed)})",
+                StatusColors.WARNING,
+                start=False,
+            )
+        else:
+            self.update_status_with_spinner(
+                f"Cleanup complete: deleted {deleted} files, freed {ByteSize(freed)}",
+                StatusColors.SUCCESS,
+                start=False,
+            )
 
         # Rescan to update stats
         self._on_gallery_scan()

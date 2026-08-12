@@ -118,6 +118,7 @@ class Ui_RePublishTab(object):
         self.republishRendersListLayout.setObjectName(u"republishRendersListLayout")
         self.RePublishRendersList = QListWidget(self.republishRendersGroupBox)
         self.RePublishRendersList.setObjectName(u"RePublishRendersList")
+        self.RePublishRendersList.setAlternatingRowColors(True)
         self.RePublishRendersList.setSelectionMode(QAbstractItemView.SingleSelection)
 
         self.republishRendersListLayout.addWidget(self.RePublishRendersList)
@@ -205,7 +206,7 @@ class Ui_RePublishTab(object):
         self.RePublishVersionLabel.setText(QCoreApplication.translate("RePublishTab", u"Version:", None))
         self.RePublishBrowseCustomPath.setText(QCoreApplication.translate("RePublishTab", u"Browse...", None))
 #if QT_CONFIG(tooltip)
-        self.RePublishScanRenders.setToolTip(QCoreApplication.translate("RePublishTab", u"Rescan", None))
+        self.RePublishScanRenders.setToolTip(QCoreApplication.translate("RePublishTab", u"Rescan version and find render files", None))
 #endif // QT_CONFIG(tooltip)
         self.RePublishScanRenders.setText(QCoreApplication.translate("RePublishTab", u"Rescan", None))
         self.RePublishCustomPathLabel.setText(QCoreApplication.translate("RePublishTab", u"Custom path: None", None))
@@ -213,7 +214,10 @@ class Ui_RePublishTab(object):
 #if QT_CONFIG(tooltip)
         self.RePublishUseCurrentTask.setToolTip(QCoreApplication.translate("RePublishTab", u"When enabled, publishes to the current AYON task context instead of inferring from the custom path", None))
 #endif // QT_CONFIG(tooltip)
-        self.republishRendersGroupBox.setTitle(QCoreApplication.translate("RePublishTab", u"Available Renders", None))
+        self.republishRendersGroupBox.setTitle(QCoreApplication.translate("RePublishTab", u"Renders", None))
+#if QT_CONFIG(tooltip)
+        self.RePublishRendersList.setToolTip(QCoreApplication.translate("RePublishTab", u"Render sequences found in the current version - select the sequence to publish to AYON", None))
+#endif // QT_CONFIG(tooltip)
         self.republishOptionsGroupBox.setTitle(QCoreApplication.translate("RePublishTab", u"Publish Options", None))
         self.RePublishTaskButton.setText(QCoreApplication.translate("RePublishTab", u"Task: lighting", None))
 #if QT_CONFIG(tooltip)
@@ -226,7 +230,13 @@ class Ui_RePublishTab(object):
 #endif // QT_CONFIG(tooltip)
         self.RePublishProductName.setPlaceholderText(QCoreApplication.translate("RePublishTab", u"Select or type product name", None))
         self.RePublishStatusLabel.setText(QCoreApplication.translate("RePublishTab", u"Status: Ready", None))
+#if QT_CONFIG(tooltip)
+        self.RePublishPublish.setToolTip(QCoreApplication.translate("RePublishTab", u"Publish the selected render sequence to AYON (Ctrl+Return)", None))
+#endif // QT_CONFIG(tooltip)
         self.RePublishPublish.setText(QCoreApplication.translate("RePublishTab", u"Publish to AYON", None))
+#if QT_CONFIG(shortcut)
+        self.RePublishPublish.setShortcut(QCoreApplication.translate("RePublishTab", u"Ctrl+Return", None))
+#endif // QT_CONFIG(shortcut)
         pass
     # retranslateUi
 

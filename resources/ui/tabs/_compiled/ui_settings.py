@@ -435,27 +435,36 @@ class Ui_SettingsTab(object):
 
         self.globalSettingsLayout.addLayout(self.networkOutputLayout)
 
+        self.vramModeLayout = QHBoxLayout()
+        self.vramModeLayout.setObjectName(u"vramModeLayout")
+        self.vramModeLabel = QLabel(self.globalSettingsGroupBox)
+        self.vramModeLabel.setObjectName(u"vramModeLabel")
+
+        self.vramModeLayout.addWidget(self.vramModeLabel)
+
+        self.ComfyUIVRAMMode = QComboBox(self.globalSettingsGroupBox)
+        self.ComfyUIVRAMMode.addItem("")
+        self.ComfyUIVRAMMode.addItem("")
+        self.ComfyUIVRAMMode.addItem("")
+        self.ComfyUIVRAMMode.addItem("")
+        self.ComfyUIVRAMMode.setObjectName(u"ComfyUIVRAMMode")
+        self.ComfyUIVRAMMode.setMinimumWidth(200)
+
+        self.vramModeLayout.addWidget(self.ComfyUIVRAMMode)
+
+        self.vramModeSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.vramModeLayout.addItem(self.vramModeSpacer)
+
+
+        self.globalSettingsLayout.addLayout(self.vramModeLayout)
+
         self.performanceFlagsLayout = QHBoxLayout()
         self.performanceFlagsLayout.setObjectName(u"performanceFlagsLayout")
         self.ComfyUIFastMode = QCheckBox(self.globalSettingsGroupBox)
         self.ComfyUIFastMode.setObjectName(u"ComfyUIFastMode")
 
         self.performanceFlagsLayout.addWidget(self.ComfyUIFastMode)
-
-        self.ComfyUILowVRAM = QCheckBox(self.globalSettingsGroupBox)
-        self.ComfyUILowVRAM.setObjectName(u"ComfyUILowVRAM")
-
-        self.performanceFlagsLayout.addWidget(self.ComfyUILowVRAM)
-
-        self.ComfyUIHighVRAM = QCheckBox(self.globalSettingsGroupBox)
-        self.ComfyUIHighVRAM.setObjectName(u"ComfyUIHighVRAM")
-
-        self.performanceFlagsLayout.addWidget(self.ComfyUIHighVRAM)
-
-        self.ComfyUINormalVRAM = QCheckBox(self.globalSettingsGroupBox)
-        self.ComfyUINormalVRAM.setObjectName(u"ComfyUINormalVRAM")
-
-        self.performanceFlagsLayout.addWidget(self.ComfyUINormalVRAM)
 
         self.ComfyUIDisableSmartMemory = QCheckBox(self.globalSettingsGroupBox)
         self.ComfyUIDisableSmartMemory.setObjectName(u"ComfyUIDisableSmartMemory")
@@ -800,21 +809,21 @@ class Ui_SettingsTab(object):
 #if QT_CONFIG(tooltip)
         self.BrowseNetworkOutput.setToolTip(QCoreApplication.translate("SettingsTab", u"Browse for network output directory", None))
 #endif // QT_CONFIG(tooltip)
+        self.vramModeLabel.setText(QCoreApplication.translate("SettingsTab", u"VRAM Mode:", None))
+#if QT_CONFIG(tooltip)
+        self.vramModeLabel.setToolTip(QCoreApplication.translate("SettingsTab", u"ComfyUI GPU memory strategy. --lowvram, --normalvram and --highvram are mutually exclusive launch flags.", None))
+#endif // QT_CONFIG(tooltip)
+        self.ComfyUIVRAMMode.setItemText(0, QCoreApplication.translate("SettingsTab", u"Auto (ComfyUI decides)", None))
+        self.ComfyUIVRAMMode.setItemText(1, QCoreApplication.translate("SettingsTab", u"Low VRAM (--lowvram)", None))
+        self.ComfyUIVRAMMode.setItemText(2, QCoreApplication.translate("SettingsTab", u"Normal VRAM (--normalvram)", None))
+        self.ComfyUIVRAMMode.setItemText(3, QCoreApplication.translate("SettingsTab", u"High VRAM (--highvram)", None))
+
+#if QT_CONFIG(tooltip)
+        self.ComfyUIVRAMMode.setToolTip(QCoreApplication.translate("SettingsTab", u"Auto: let ComfyUI decide. Low (--lowvram): least VRAM, slowest. Normal (--normalvram): default memory management. High (--highvram): keep models in VRAM, needs high-end GPUs (24GB+).", None))
+#endif // QT_CONFIG(tooltip)
         self.ComfyUIFastMode.setText(QCoreApplication.translate("SettingsTab", u"Fast Mode (--fast fp16_accumulation)", None))
 #if QT_CONFIG(tooltip)
         self.ComfyUIFastMode.setToolTip(QCoreApplication.translate("SettingsTab", u"Enable --fast with fp16 accumulation for faster execution. May slightly reduce quality for some models.", None))
-#endif // QT_CONFIG(tooltip)
-        self.ComfyUILowVRAM.setText(QCoreApplication.translate("SettingsTab", u"Low VRAM Mode (--lowvram)", None))
-#if QT_CONFIG(tooltip)
-        self.ComfyUILowVRAM.setToolTip(QCoreApplication.translate("SettingsTab", u"Enable --lowvram flag for systems with limited GPU memory. Reduces VRAM usage at the cost of performance.", None))
-#endif // QT_CONFIG(tooltip)
-        self.ComfyUIHighVRAM.setText(QCoreApplication.translate("SettingsTab", u"High VRAM Mode (--highvram)", None))
-#if QT_CONFIG(tooltip)
-        self.ComfyUIHighVRAM.setToolTip(QCoreApplication.translate("SettingsTab", u"Keep models loaded in VRAM between inferences. Best for persistent server mode with high-end GPUs (24GB+).", None))
-#endif // QT_CONFIG(tooltip)
-        self.ComfyUINormalVRAM.setText(QCoreApplication.translate("SettingsTab", u"Normal VRAM Mode (--normalvram)", None))
-#if QT_CONFIG(tooltip)
-        self.ComfyUINormalVRAM.setToolTip(QCoreApplication.translate("SettingsTab", u"Use default ComfyUI memory management with smart model unloading.", None))
 #endif // QT_CONFIG(tooltip)
         self.ComfyUIDisableSmartMemory.setText(QCoreApplication.translate("SettingsTab", u"Disable Smart Memory (--disable-smart-memory)", None))
 #if QT_CONFIG(tooltip)
@@ -833,7 +842,13 @@ class Ui_SettingsTab(object):
         self.AdminUsersList.setToolTip(QCoreApplication.translate("SettingsTab", u"Users with full access to all tabs including Settings", None))
 #endif // QT_CONFIG(tooltip)
         self.AddAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Add User", None))
+#if QT_CONFIG(tooltip)
+        self.AddAdminUserButton.setToolTip(QCoreApplication.translate("SettingsTab", u"Add a username to the admin list. Admins get full access to all tabs including Settings. Applies immediately for everyone.", None))
+#endif // QT_CONFIG(tooltip)
         self.RemoveAdminUserButton.setText(QCoreApplication.translate("SettingsTab", u"Remove User", None))
+#if QT_CONFIG(tooltip)
+        self.RemoveAdminUserButton.setToolTip(QCoreApplication.translate("SettingsTab", u"Remove the selected user from the admin list. They lose admin access after restarting Luma Tools. Applies immediately.", None))
+#endif // QT_CONFIG(tooltip)
         self.categoriesGroupBox.setTitle(QCoreApplication.translate("SettingsTab", u"ComfyUI Preset Categories", None))
         self.categoriesInfoLabel.setText(QCoreApplication.translate("SettingsTab", u"Manage categories used to filter presets in the model picker.", None))
 #if QT_CONFIG(tooltip)

@@ -68,14 +68,22 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_python_path", "ComfyUIPythonEdit", _TEXT),
     ("network_output_path", "NetworkOutputEdit", _TEXT),
     ("comfyui_fast_mode", "ComfyUIFastMode", _CHECKBOX),
-    ("comfyui_lowvram", "ComfyUILowVRAM", _CHECKBOX),
-    ("comfyui_highvram", "ComfyUIHighVRAM", _CHECKBOX),
-    ("comfyui_normalvram", "ComfyUINormalVRAM", _CHECKBOX),
     ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
     ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]
+# NOTE: comfyui_lowvram / comfyui_normalvram / comfyui_highvram are NOT in the
+# map above. They used to be three independent checkboxes that could all be
+# ticked at once even though --lowvram/--normalvram/--highvram are mutually
+# exclusive ComfyUI launch flags. They are now driven by the single
+# ComfyUIVRAMMode combo (see _VRAM_MODE_KEYS) and still written as the same
+# three booleans for backward compatibility with server.py / runner.py.
+
+# Combo index -> setting key that must be True (index 0 = Auto, none true).
+# The order is also the precedence used when legacy settings have more than
+# one flag set: low > normal > high.
+_VRAM_MODE_KEYS = ("comfyui_lowvram", "comfyui_normalvram", "comfyui_highvram")
 
 
 class SettingsTab(BaseTab):
@@ -146,6 +154,16 @@ class SettingsTab(BaseTab):
         # Initialize optional UI attributes unconditionally
         self._version_badge = None
 
+        # Dirty-tracking state. _loading suppresses dirty marks while widgets
+        # are populated from disk (setChecked/setText fire the same signals a
+        # user edit does).
+        self._loading = True
+        self._user_dirty = False
+        self._global_dirty = False
+        self._is_active = False
+        self._save_button_texts = {}
+        self._prompting_unsaved = False
+
         # ComfyUI mode option manager
         self._comfyui_mode_manager = OptionButtonManager(
             button=self.ui.ComfyUIModeButton,
@@ -182,6 +200,157 @@ class SettingsTab(BaseTab):
         # Global settings group is admin-only
         if hasattr(self.ui, 'globalSettingsGroupBox'):
             self.ui.globalSettingsGroupBox.setVisible(self.app_state.is_admin)
+
+        # Wire dirty tracking last so the loads above don't mark the tab dirty
+        self._loading = False
+        self._connect_dirty_tracking()
+        self._update_save_button_states()
+
+    # =========================================================================
+    # Unsaved-changes tracking
+    # =========================================================================
+
+    def _connect_dirty_tracking(self):
+        """Wire widget-change signals for the map-driven settings to dirty flags.
+
+        Without this the Save buttons gave no hint that edits were pending, and
+        switching tabs silently discarded them.
+        """
+        signal_by_type = {
+            _CHECKBOX: "toggled",
+            _TEXT: "textChanged",
+            _SPINBOX: "valueChanged",
+            _COMBOBOX: "currentIndexChanged",
+        }
+
+        for settings_map, scope in (
+            (_USER_SETTINGS_MAP, "user"),
+            (_GLOBAL_SETTINGS_MAP, "global"),
+        ):
+            for entry in settings_map:
+                widget = getattr(self.ui, entry[1], None)
+                signal_name = signal_by_type.get(entry[2])
+                if widget is None or not signal_name:
+                    continue
+                signal = getattr(widget, signal_name, None)
+                if signal is None:
+                    continue
+                # Default arg captures the scope by value (loop closure bug)
+                signal.connect(lambda *_a, s=scope: self._mark_dirty(s))
+
+        # Non-map-driven widgets that still belong to a Save button
+        if hasattr(self.ui, 'DefaultPassesList'):
+            self.ui.DefaultPassesList.itemSelectionChanged.connect(
+                lambda: self._mark_dirty("user")
+            )
+        for widget_name in ("ComfyUIVRAMMode",):
+            widget = getattr(self.ui, widget_name, None)
+            if widget is not None:
+                widget.currentIndexChanged.connect(lambda *_a: self._mark_dirty("global"))
+        if hasattr(self.ui, 'GlobalSettingsPathEdit'):
+            self.ui.GlobalSettingsPathEdit.textChanged.connect(
+                lambda *_a: self._mark_dirty("global")
+            )
+
+    def _mark_dirty(self, scope: str):
+        """Flag pending unsaved edits for the given scope ('user' or 'global')."""
+        # connect_signals() runs eagerly at startup while initialize() (which
+        # creates the dirty-tracking state) is deferred to first activation.
+        if not self._initialized or getattr(self, "_loading", False):
+            return
+        # Editing a widget means this tab is on screen. The startup tab is
+        # initialized without an on_tab_activated() call, so seed the flag here
+        # too or its first switch-away would skip the unsaved prompt.
+        self._is_active = True
+        if scope == "user":
+            if self._user_dirty:
+                return
+            self._user_dirty = True
+        else:
+            if self._global_dirty:
+                return
+            self._global_dirty = True
+        self._update_save_button_states()
+
+    def _update_save_button_states(self):
+        """Append an asterisk to Save buttons that have pending changes."""
+        for button_name, dirty in (
+            ("SaveSettingsButton", self._user_dirty),
+            ("SaveGlobalSettings", self._global_dirty),
+        ):
+            button = getattr(self.ui, button_name, None)
+            if button is None:
+                continue
+            base_text, base_tip = self._save_button_texts.setdefault(
+                button_name, (button.text(), button.toolTip())
+            )
+            button.setText(f"{base_text} *" if dirty else base_text)
+            button.setToolTip(
+                f"{base_tip}\n\nYou have unsaved changes" if dirty else base_tip
+            )
+
+    def on_tab_activated(self):
+        """Track activation so deactivation can tell a real tab switch apart."""
+        self._is_active = True
+
+    def on_tab_deactivated(self):
+        """Offer to save pending edits when the user switches away.
+
+        on_tab_deactivated() is called for every non-current tab on each tab
+        change, so the _is_active guard keeps the prompt to the single switch
+        that actually leaves this tab.
+        """
+        if not getattr(self, "_is_active", False):
+            return
+        self._is_active = False
+
+        if not (self._user_dirty or self._global_dirty):
+            return
+        if self._prompting_unsaved:
+            return
+
+        pending = []
+        if self._user_dirty:
+            pending.append("user settings")
+        if self._global_dirty:
+            pending.append("global settings")
+
+        self._prompting_unsaved = True
+        try:
+            if confirm_action(
+                "Unsaved Settings",
+                f"You have unsaved changes to {' and '.join(pending)}.\n\nSave them now?",
+                self.main_window,
+                default_yes=True,
+            ):
+                if self._user_dirty:
+                    self._on_save_settings_clicked()
+                if self._global_dirty:
+                    self._on_save_global_settings()
+            else:
+                # Discarded — reload from disk so the UI matches what is stored
+                self._loading = True
+                try:
+                    if self._user_dirty:
+                        self._load_default_passes_ui()
+                        self._load_user_settings_ui()
+                    if self._global_dirty:
+                        self._load_global_settings_ui()
+                finally:
+                    self._loading = False
+                self._user_dirty = False
+                self._global_dirty = False
+                self._update_save_button_states()
+        finally:
+            self._prompting_unsaved = False
+
+    @staticmethod
+    def _emit_settings_changed(changed_keys):
+        """Notify other tabs that settings changed (no-op for an empty list)."""
+        if not changed_keys:
+            return
+        from core.event_bus import pipeline_events
+        pipeline_events.settings_changed.emit(list(changed_keys))
 
     def _setup_deadline_poll_interval_ui(self):
         """Create and add Deadline poll interval spinbox to global settings."""
@@ -364,9 +533,12 @@ class SettingsTab(BaseTab):
         full_changelog_btn.setToolTip("Show all version history")
 
         def show_full_changelog():
+            # Hide the button once the full changelog is on screen. Leaving a
+            # disabled button relabelled "Showing Full Changelog" read as a
+            # broken control rather than a status line.
             text_edit.setMarkdown(get_changelog())
-            full_changelog_btn.setEnabled(False)
-            full_changelog_btn.setText("Showing Full Changelog")
+            full_changelog_btn.setVisible(False)
+            dialog.setWindowTitle("Luma Tools - Version History (Full Changelog)")
 
         full_changelog_btn.clicked.connect(show_full_changelog)
         button_layout.addWidget(full_changelog_btn)
@@ -427,15 +599,14 @@ class SettingsTab(BaseTab):
                 if index >= 0:
                     widget.setCurrentIndex(index)
 
-    def _save_settings_from_map(self, settings_map):
-        """Save UI widget values to settings using a declarative mapping.
+    def _collect_settings_from_map(self, settings_map):
+        """Read UI widget values into a ``{setting_key: value}`` dict.
 
         Each entry in settings_map is a tuple:
             (setting_key, widget_name, widget_type[, load_converter, save_converter])
         Widgets that don't exist in the UI are silently skipped.
         """
-        from core.settings_manager import set_setting
-
+        values = {}
         for entry in settings_map:
             key, widget_name, widget_type = entry[0], entry[1], entry[2]
             save_converter = entry[4] if len(entry) > 4 else None
@@ -460,21 +631,86 @@ class SettingsTab(BaseTab):
 
             if save_converter:
                 value = save_converter(value)
-            set_setting(key, value)
+            values[key] = value
+        return values
+
+    def _save_settings_from_map(self, settings_map, extra_values=None):
+        """Save UI widget values with ONE file write per scope.
+
+        Previously this looped over set_setting(), and each call did a full
+        load-modify-save of the backing JSON — for the global map that meant
+        one sequential network write per setting.
+
+        Args:
+            settings_map: Declarative settings mapping (see _collect_settings_from_map)
+            extra_values: Optional extra ``{setting_key: value}`` written in the
+                same batch (e.g. the VRAM booleans derived from the combo)
+
+        Returns:
+            list[str]: The setting keys that were written
+        """
+        from core.settings_manager import set_settings
+
+        values = self._collect_settings_from_map(settings_map)
+        if extra_values:
+            values.update(extra_values)
+        if values:
+            set_settings(values)
+        return sorted(values.keys())
+
+    # =========================================================================
+    # ComfyUI VRAM mode (one combo -> three mutually exclusive boolean settings)
+    # =========================================================================
+
+    def _load_vram_mode_ui(self):
+        """Set the VRAM combo from the three legacy boolean settings."""
+        from core.settings_manager import safe_get_setting
+
+        combo = getattr(self.ui, 'ComfyUIVRAMMode', None)
+        if combo is None:
+            return
+
+        enabled = [key for key in _VRAM_MODE_KEYS if safe_get_setting(key, False)]
+        if len(enabled) > 1:
+            logger.warning(
+                "Multiple ComfyUI VRAM flags enabled (%s) — these are mutually "
+                "exclusive launch flags; using %s (priority low > normal > high)",
+                ", ".join(enabled), enabled[0],
+            )
+        index = _VRAM_MODE_KEYS.index(enabled[0]) + 1 if enabled else 0
+        combo.setCurrentIndex(index)
+
+    def _collect_vram_mode_values(self):
+        """Return the three boolean VRAM settings derived from the combo."""
+        combo = getattr(self.ui, 'ComfyUIVRAMMode', None)
+        if combo is None:
+            return {}
+        index = combo.currentIndex()
+        return {
+            key: (index == i + 1)
+            for i, key in enumerate(_VRAM_MODE_KEYS)
+        }
 
     def _load_user_settings_ui(self):
         """Load user settings into the UI."""
         self._load_settings_from_map(_USER_SETTINGS_MAP)
 
-    def _load_default_passes_ui(self):
-        """Load default passes into the settings UI."""
+    def _load_default_passes_ui(self, passes=None):
+        """Load default passes into the settings UI.
+
+        Args:
+            passes: Optional explicit pass list to preselect. When omitted the
+                user's stored default passes are used. Reset-to-defaults passes
+                the system defaults here so the change stays pending until the
+                user presses Save (same as Add/Remove Pass).
+        """
         from core.user_preferences import get_default_passes
         from core.config import REQUIRED_PASSES, DEFAULT_PASSES
 
         self.ui.DefaultPassesList.clear()
 
         # Get user's current default passes (or system defaults)
-        default_passes = get_default_passes()
+        default_passes = list(passes) if passes is not None else get_default_passes()
 
         # Populate the list with all available passes
         all_available_passes = list(set(REQUIRED_PASSES + DEFAULT_PASSES + default_passes))
@@ -513,6 +749,9 @@ class SettingsTab(BaseTab):
         # Load all mapped settings (paths, checkboxes, spinboxes with converters)
         self._load_settings_from_map(_GLOBAL_SETTINGS_MAP)
 
+        # VRAM mode is derived from three booleans, not map-driven
+        self._load_vram_mode_ui()
+
         self._update_comfyui_python_visibility()
 
     def _load_admin_users_ui(self):
@@ -533,6 +772,7 @@ class SettingsTab(BaseTab):
 
     def _on_comfyui_mode_changed(self, value):
         """Handle ComfyUI mode change."""
+        self._mark_dirty("global")
         self._update_comfyui_python_visibility()
 
     def _update_comfyui_python_visibility(self):
@@ -584,8 +824,9 @@ class SettingsTab(BaseTab):
 
             item = QtWidgets.QListWidgetItem(pass_name)
             item.setToolTip("Select to include this pass by default")
-            item.setSelected(True)
             self.ui.DefaultPassesList.addItem(item)
+            item.setSelected(True)
+            self._mark_dirty("user")
             logger.info(f"Added custom pass: {pass_name}")
 
     def _on_remove_pass_clicked(self):
@@ -605,16 +846,26 @@ class SettingsTab(BaseTab):
 
             row = self.ui.DefaultPassesList.row(item)
             self.ui.DefaultPassesList.takeItem(row)
+            self._mark_dirty("user")
             logger.info(f"Removed pass: {pass_name}")
 
     def _on_reset_passes_clicked(self):
-        """Reset default passes to system defaults."""
+        """Reset the default-passes list to system defaults (pending Save).
+
+        Add/Remove Pass only edit the list widget and rely on Save User
+        Settings to persist; Reset used to write straight to disk, so the two
+        halves of the same panel behaved differently.
+        """
         if confirm_action("Reset Default Passes", "Reset to default pass list?", self.main_window):
             from core.config import DEFAULT_PASSES
-            from core.user_preferences import set_default_passes
-            set_default_passes(DEFAULT_PASSES.copy())
-            logger.info("Reset to default passes")
-            self._load_default_passes_ui()
+            self._loading = True
+            try:
+                self._load_default_passes_ui(DEFAULT_PASSES.copy())
+            finally:
+                self._loading = False
+            self._mark_dirty("user")
+            self.show_status("Passes reset - press Save User Settings to apply", "info")
+            logger.info("Reset default passes list (pending save)")
 
     def _on_save_settings_clicked(self):
         """Save user settings."""
@@ -634,12 +885,17 @@ class SettingsTab(BaseTab):
         set_default_passes(selected_passes)
         logger.info(f"Saved default passes: {selected_passes}")
 
-        # Save all mapped user settings
-        self._save_settings_from_map(_USER_SETTINGS_MAP)
+        # Save all mapped user settings (one file write)
+        changed_keys = self._save_settings_from_map(_USER_SETTINGS_MAP)
+        changed_keys.append("default_passes")
 
         # Update status bar log visibility immediately
         if hasattr(self.ui, 'ShowStatusbarLog') and hasattr(self.main_window, 'update_statusbar_log_visibility'):
             self.main_window.update_statusbar_log_visibility(self.ui.ShowStatusbarLog.isChecked())
+
+        self._user_dirty = False
+        self._update_save_button_states()
+        self._emit_settings_changed(changed_keys)
 
         self.pulse_button(self.ui.SaveSettingsButton)
         self.show_status("User settings saved", "success")
@@ -726,7 +982,7 @@ class SettingsTab(BaseTab):
 
     def _on_save_global_settings(self):
         """Save all global settings."""
-        from core.settings_manager import set_global_settings_path, set_setting
+        from core.settings_manager import set_global_settings_path
 
         # Save global settings path (custom directory creation logic)
         new_global_path = self.ui.GlobalSettingsPathEdit.text().strip()
@@ -748,11 +1004,12 @@ class SettingsTab(BaseTab):
             set_global_settings_path(new_global_path)
             self.ui.globalSettingsCurrentPath.setText(f"Current: {new_global_path}")
 
-        # ComfyUI mode (via OptionButtonManager)
-        set_setting("comfyui_mode", self._comfyui_mode)
-
-        # Save all mapped global settings (paths, checkboxes, spinboxes with converters)
-        self._save_settings_from_map(_GLOBAL_SETTINGS_MAP)
+        # Save all mapped global settings plus the ComfyUI mode and the three
+        # VRAM booleans derived from the combo — one batched write, not one
+        # network round-trip per key.
+        extra = {"comfyui_mode": self._comfyui_mode}
+        extra.update(self._collect_vram_mode_values())
+        changed_keys = self._save_settings_from_map(_GLOBAL_SETTINGS_MAP, extra_values=extra)
 
         # Clear cached paths so logging and other modules pick up the new values
         try:
@@ -769,6 +1026,11 @@ class SettingsTab(BaseTab):
         except ImportError:
             pass
 
+        self._global_dirty = False
+        self._update_save_button_states()
+        self._emit_settings_changed(changed_keys)
+
+        self.pulse_button(self.ui.SaveGlobalSettings)
         self.show_status("Global settings saved", "success")
 
     def _on_add_admin_user(self):
@@ -783,6 +1045,8 @@ class SettingsTab(BaseTab):
             username = username.strip().lower()
             add_user_to_role(username, "admin")
             self._load_admin_users_ui()
+            self._emit_settings_changed(["admin_users"])
+            self.show_status(f"Added admin user: {username}", "success")
             logger.info(f"Added admin user: {username}")
 
     def _on_remove_admin_user(self):
@@ -792,6 +1056,7 @@ class SettingsTab(BaseTab):
         selected_items = self.ui.AdminUsersList.selectedItems()
         if not selected_items:
             logger.warning("No admin user selected for removal")
+            self.show_status("No admin user selected", "warning")
             return
 
         username = selected_items[0].text()
@@ -808,6 +1073,7 @@ class SettingsTab(BaseTab):
 
         remove_user_from_role(username, "admin")
         self._load_admin_users_ui()
+        self._emit_settings_changed(["admin_users"])
         self.show_status(f"Removed admin user: {username}", "success")
 
     def _load_feature_request_ui(self):
@@ -885,40 +1151,53 @@ class SettingsTab(BaseTab):
 
         layout.addWidget(description_edit)
 
+        # Inline validation message — validating after the dialog closed used
+        # to throw away everything the user typed.
+        from core.config import UIColors
+        validation_label = QLabel("Please enter a description before submitting.")
+        validation_label.setStyleSheet(f"color: {UIColors.WARNING};")
+        validation_label.setVisible(False)
+        layout.addWidget(validation_label)
+
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(dialog.accept)
+
+        def _try_accept():
+            if description_edit.toPlainText().strip():
+                validation_label.setVisible(False)
+                dialog.accept()
+            else:
+                validation_label.setVisible(True)
+                description_edit.setFocus()
+
+        button_box.accepted.connect(_try_accept)
         button_box.rejected.connect(dialog.reject)
+        description_edit.textChanged.connect(
+            lambda: validation_label.setVisible(False)
+        )
         layout.addWidget(button_box)
 
-        # Show dialog
-        if dialog.exec() == QDialog.Accepted:
+        # Reopen the same dialog on submit failure so the typed text survives
+        while dialog.exec() == QDialog.Accepted:
             category = category_combo.currentText()
             description = description_edit.toPlainText().strip()
 
-            if not description:
-                show_warning("Empty Description", "Please enter a description for your request.", self.main_window)
-                return
-
-            # Submit request
             username = self.app_state.user
-            success = append_feature_request(category, description, username)
-
-            if success:
+            if append_feature_request(category, description, username):
                 show_info(
                     "Request Submitted",
                     "Your feature request has been submitted successfully.\nAdmins will be notified.",
                     self.main_window
                 )
-
-                # Notify admins
                 self._notify_admins_of_new_request()
-            else:
-                show_error(
-                    "Submission Failed",
-                    "Failed to submit feature request. Please try again or contact an admin.",
-                    self.main_window
-                )
+                return
+
+            show_error(
+                "Submission Failed",
+                "Failed to submit feature request. Your text has been kept — "
+                "try again, or cancel and contact an admin.",
+                self.main_window
+            )
 
     def _notify_admins_of_new_request(self):
         """Notify all admins of new feature request via system tray."""
@@ -1008,6 +1287,8 @@ class SettingsTab(BaseTab):
         try:
             add_hdri_to_list(name, file_path)
             self._load_hdri_list_ui()
+            self._emit_settings_changed(["hdri_list"])
+            self.show_status(f"Added HDRI: {name}", "success")
             logger.info(f"Added HDRI: {name}")
         except Exception as e:
             show_warning("Error", f"Failed to add HDRI: {e}", self.main_window)
@@ -1022,6 +1303,7 @@ class SettingsTab(BaseTab):
         selected_items = self.ui.HdriListWidget.selectedItems()
         if not selected_items:
             logger.warning("No HDRI selected for removal")
+            self.show_status("No HDRI selected", "warning")
             return
 
         # Confirm deletion
@@ -1043,6 +1325,8 @@ class SettingsTab(BaseTab):
                     logger.info(f"Removed HDRI: {name}")
 
             self._load_hdri_list_ui()
+            self._emit_settings_changed(["hdri_list"])
+            self.show_status(f"Removed {len(hdri_names)} HDRI(s)", "success")
         except Exception as e:
             show_warning("Error", f"Failed to remove HDRI: {e}", self.main_window)
 
@@ -1089,6 +1373,7 @@ class SettingsTab(BaseTab):
         categories.append(name)
         set_setting("comfyui_preset_categories", categories)
         self._load_categories_ui()
+        self._emit_settings_changed(["comfyui_preset_categories"])
         self.show_status(f"Added category: {name}", "success")
         logger.info(f"Added ComfyUI category: {name}")
 
@@ -1102,6 +1387,7 @@ class SettingsTab(BaseTab):
         selected_items = self.ui.CategoriesList.selectedItems()
         if not selected_items:
             logger.warning("No category selected for removal")
+            self.show_status("No category selected", "warning")
             return
 
         name = selected_items[0].text()
@@ -1118,6 +1404,7 @@ class SettingsTab(BaseTab):
             categories.remove(name)
             set_setting("comfyui_preset_categories", categories)
             self._load_categories_ui()
+            self._emit_settings_changed(["comfyui_preset_categories"])
             self.show_status(f"Removed category: {name}", "success")
             logger.info(f"Removed ComfyUI category: {name}")
 
@@ -1154,6 +1441,7 @@ class SettingsTab(BaseTab):
 
         categories[idx], categories[new_idx] = categories[new_idx], categories[idx]
         set_setting("comfyui_preset_categories", categories)
+        self._emit_settings_changed(["comfyui_preset_categories"])
 
         # Reload and re-select
         self._load_categories_ui()

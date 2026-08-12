@@ -36,12 +36,18 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
     def connect_signals(self):
         """Connect rePublish tab signals."""
-        self.ui.RePublishScanRenders.clicked.connect(self._on_scan_renders_clicked)
-        self.ui.RePublishCurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
+        # Explicit Rescan invalidates the shared task-dir scan cache first
+        self.ui.RePublishScanRenders.clicked.connect(self._on_rescan_clicked)
+        # Debounce rapid version spinbox changes (~350ms) before rescanning
+        self._connect_debounced(
+            self.ui.RePublishCurrentVer.valueChanged, self._on_scan_renders_clicked
+        )
         # Source and task buttons are connected via OptionButtonManager in initialize()
         self.ui.RePublishBrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.RePublishRendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
         self.ui.RePublishPublish.clicked.connect(self._on_publish_clicked)
+        # Publish-on-farm state persistence
+        self.ui.RePublishUseFarm.stateChanged.connect(self._on_use_farm_changed)
 
     def _get_source_options(self):
         """Override: in standalone mode, only custom is available.
@@ -55,11 +61,19 @@ class RePublishTab(RenderScanMixin, BaseTab):
         """Override: standalone mode defaults to custom."""
         return "custom" if self.app_state.standalone_mode else "for_comp"
 
+    # Tasks always offered in the Task dropdown
+    _DEFAULT_TASK_OPTIONS = ["lighting", "compositing", "fx"]
+
     def initialize(self):
         """Initialize rePublish tab."""
         from option_button import OptionButtonManager
+        from core.settings_manager import safe_get_setting
 
         self.ui.RePublishPublish.setEnabled(False)
+        self._products_loading = False
+
+        # Restore the persisted "Publish on Farm" preference
+        self.ui.RePublishUseFarm.setChecked(safe_get_setting("republish_use_farm", False))
 
         # AYON branding for publish button and checkbox
         from icons import get_ayon_icon
@@ -90,15 +104,18 @@ class RePublishTab(RenderScanMixin, BaseTab):
         )
         self.ui.RePublishProductName.setMinimumWidth(200)
 
-        # Task button manager - republish-specific
+        # Task button manager - republish-specific.
+        # The launch context task is seeded into the options when it isn't one of
+        # the three defaults, so the current task is always selectable.
+        current_task = (self.app_state.task or "").strip()
+        task_values = list(self._DEFAULT_TASK_OPTIONS)
+        if current_task and current_task.lower() not in task_values:
+            task_values.append(current_task.lower())
+
         self._task_manager = OptionButtonManager(
             button=self.ui.RePublishTaskButton,
-            options=[
-                ("lighting", "lighting"),
-                ("compositing", "compositing"),
-                ("fx", "fx"),
-            ],
-            initial_value="lighting",
+            options=[(t, t) for t in task_values],
+            initial_value=current_task.lower() if current_task else "lighting",
             on_changed=lambda v: None,  # No special action on task change
             label_prefix="Task: ",
             parent_window=self.main_window
@@ -141,9 +158,8 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 self.ui.RePublishCurrentVer.setValue(latest_ver)
             self.ui.RePublishCurrentVer.blockSignals(False)
 
-            # Set default task to the current task from command line args
-            if self.app_state.task:
-                self._task_manager.set_value(self.app_state.task)
+            # Task is seeded from app_state.task in initialize(), so nothing to
+            # do here — the scan result must not override a user's choice.
 
             logger.info(f"Republish: Found render path: {searchpath}")
 
@@ -193,6 +209,12 @@ class RePublishTab(RenderScanMixin, BaseTab):
                     "When enabled, publishes to the current AYON task context instead of inferring from the custom path"
                 )
 
+    def _on_use_farm_changed(self, state):
+        """Persist the Publish on Farm checkbox state."""
+        from core.settings_manager import safe_set_setting
+        from PySide6.QtCore import Qt
+        safe_set_setting("republish_use_farm", state == Qt.Checked)
+
     def _on_scan_renders_clicked(self):
         """Override: republish has standalone mode check and custom display names."""
         if not hasattr(self, '_source_manager'):
@@ -200,6 +222,9 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         # Publish source is handled by PublishSourceMixin
         if self._source == "publish":
+            # Invalidate any in-flight filesystem scan so stale results cannot
+            # land on top of the publish-mode list.
+            self._begin_scan_generation()
             self._on_publish_source_selected()
             return
 
@@ -233,6 +258,7 @@ class RePublishTab(RenderScanMixin, BaseTab):
             search_path = self.app_state.republish_custom_path
 
         if not search_path or not os.path.exists(search_path):
+            self._begin_scan_generation()
             self.app_state.republish_renders = []
             if self.app_state.standalone_mode:
                 self.ui.RePublishStatusLabel.setText("Status: Please browse for a directory")
@@ -242,6 +268,10 @@ class RePublishTab(RenderScanMixin, BaseTab):
 
         # Find EXR sequences off the GUI thread — network paths can stall.
         self.ui.RePublishStatusLabel.setText("Status: Scanning...")
+
+        # Generation counter: rapid version changes can queue multiple scans;
+        # only the newest one is allowed to populate the list.
+        generation = self._begin_scan_generation()
 
         def _scan_worker(path=search_path):
             sequences = scan_exr_sequences(path)
@@ -258,6 +288,8 @@ class RePublishTab(RenderScanMixin, BaseTab):
             return renders, display_names
 
         def _on_scan_result(result):
+            if not self._is_current_scan(generation):
+                return  # A newer scan superseded this one — drop stale results
             renders, display_names = result
             self.ui.RePublishRendersList.clear()
             for name in display_names:
@@ -269,7 +301,11 @@ class RePublishTab(RenderScanMixin, BaseTab):
                 self.ui.RePublishRendersList.setCurrentRow(0)
 
         def _on_scan_error(error_msg, traceback_str=""):
+            if not self._is_current_scan(generation):
+                return
             logger.error(f"Error scanning renders for republish: {error_msg}")
+            self.ui.RePublishRendersList.clear()
+            self.app_state.republish_renders = []
             self.ui.RePublishStatusLabel.setText(f"Status: Scan error - {error_msg}")
             self.show_status(f"rePublish scan error: {error_msg}", "error")
 
@@ -297,25 +333,50 @@ class RePublishTab(RenderScanMixin, BaseTab):
             f"Frames: {self.app_state.republish_startframe}-{self.app_state.republish_endframe}"
         )
 
-        # Populate AYON products and auto-select matching product name
+        # Populate AYON products and auto-select matching product name.
+        # This disables the Publish button until the product list has landed —
+        # publishing mid-fetch would use a stale/blank product name.
         from core.utils import extract_render_name
         render_name = extract_render_name(seq.basename(), strip_frame_padding=True)
         self._populate_product_combo(render_name)
 
-        # Enable publish button
-        self.ui.RePublishPublish.setEnabled(True)
-        self.pulse_button(self.ui.RePublishPublish)
+        # Enable publish button (unless a product fetch is still in flight)
+        if not getattr(self, '_products_loading', False):
+            self.ui.RePublishPublish.setEnabled(True)
+            self.pulse_button(self.ui.RePublishPublish)
+
+    def _set_products_loading(self, loading: bool):
+        """Disable/relabel the Publish button while AYON products are fetched."""
+        self._products_loading = loading
+
+        # Never touch the button while a publish is running — it is the Cancel
+        # button at that point.
+        if getattr(self, '_is_publishing', False):
+            return
+
+        if loading:
+            self.ui.RePublishPublish.setEnabled(False)
+            self.ui.RePublishPublish.setText("Loading products...")
+        else:
+            self.ui.RePublishPublish.setText("Publish to AYON")
+            has_selection = self.app_state.republish_selected_render is not None
+            self.ui.RePublishPublish.setEnabled(has_selection)
+            if has_selection:
+                self.pulse_button(self.ui.RePublishPublish)
 
     def _populate_product_combo(self, default_name):
         """Populate the publish product combo box with existing AYON products.
 
         Queries AYON for all products in the current shot folder, then
-        auto-selects the product that matches the selected render.
+        auto-selects the product that matches the selected render. The Publish
+        button is disabled for the duration of the query.
         """
         combo = self.ui.RePublishProductName
 
         if not self.app_state.has_shot_context():
             return
+
+        self._set_products_loading(True)
 
         def _query_products():
             from ayon.service import (
@@ -345,8 +406,19 @@ class RePublishTab(RenderScanMixin, BaseTab):
                     combo.setCurrentIndex(idx)
                 else:
                     combo.setCurrentText(matched_name)
+            self._set_products_loading(False)
 
-        self.start_worker(_query_products, on_result=_on_products)
+        def _on_products_error(error_msg, traceback_str=""):
+            logger.error(f"Republish: Failed to fetch AYON products: {error_msg}")
+            self.ui.RePublishStatusLabel.setText(
+                f"Status: Could not load AYON products - {error_msg}"
+            )
+            # Re-enable publishing — the user can still type a product name
+            self._set_products_loading(False)
+
+        self.start_worker(
+            _query_products, on_result=_on_products, on_error=_on_products_error
+        )
 
     def _on_publish_clicked(self):
         """Handle publish to AYON button click, or cancel if already publishing."""

@@ -31,7 +31,7 @@
      <item>
       <widget class="QPushButton" name="GalleryUserButton">
        <property name="text">
-        <string>You</string>
+        <string>User: You</string>
        </property>
        <property name="toolTip">
         <string>Click to select user gallery to view</string>
@@ -45,6 +45,25 @@
        </property>
        <property name="toolTip">
         <string>Click to change sort field</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="GalleryShortcutsButton">
+       <property name="text">
+        <string>⌨</string>
+       </property>
+       <property name="toolTip">
+        <string>Keyboard shortcuts</string>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>34</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
        </property>
       </widget>
      </item>

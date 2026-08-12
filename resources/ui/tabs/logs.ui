@@ -35,12 +35,31 @@
       <item>
        <layout class="QHBoxLayout" name="logToolbarLayout">
         <item>
-         <widget class="QCheckBox" name="VerboseLogsCheckbox">
-          <property name="text">
-           <string>Show verbose logs</string>
+         <widget class="QLineEdit" name="LogFilterEdit">
+          <property name="placeholderText">
+           <string>Filter… (case-insensitive)</string>
           </property>
           <property name="toolTip">
-           <string>Show detailed debug messages (Detection, Poll Debug, Batch, etc.)</string>
+           <string>Show only log lines containing this text (case-insensitive)</string>
+          </property>
+          <property name="clearButtonEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>320</width>
+            <height>16777215</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="VerboseLogsCheckbox">
+          <property name="text">
+           <string>Show debug logs</string>
+          </property>
+          <property name="toolTip">
+           <string>Show debug-level messages (Detection, Poll Debug, Batch, etc.) in this view. All messages are always written to the log file.</string>
           </property>
          </widget>
         </item>

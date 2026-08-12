@@ -166,6 +166,13 @@ class TeeStream:
     Stream that writes to both the original stream and a logging function.
 
     Used by luma_tools.py for the main app. Buffers lines for clean logging.
+
+    Re-entrancy guard: when a logging handler fails (e.g. the network log
+    file becomes unreachable), logging's error handling writes to stderr —
+    which may be THIS stream. Feeding that back into log_func would recurse
+    (write -> logging -> handler error -> stderr write -> logging -> ...),
+    so writes that happen while we're already inside log_func on the same
+    thread go to the original stream only.
     """
 
     def __init__(self, original_stream, log_func):
@@ -173,23 +180,36 @@ class TeeStream:
         self.log_func = log_func
         self.buffer = ""
         self._lock = threading.RLock()
+        self._tls = threading.local()
 
     def write(self, text):
         with self._lock:
             if self.original:
                 self.original.write(text)
+            if getattr(self._tls, 'in_log_func', False):
+                return  # re-entrant write from logging's own error handling
             self.buffer += text
             while '\n' in self.buffer:
                 line, self.buffer = self.buffer.split('\n', 1)
                 if line.strip():
-                    self.log_func(line)
+                    self._tls.in_log_func = True
+                    try:
+                        self.log_func(line)
+                    finally:
+                        self._tls.in_log_func = False
 
     def flush(self):
         with self._lock:
             if self.original:
                 self.original.flush()
+            if getattr(self._tls, 'in_log_func', False):
+                return
             if self.buffer.strip():
-                self.log_func(self.buffer)
+                self._tls.in_log_func = True
+                try:
+                    self.log_func(self.buffer)
+                finally:
+                    self._tls.in_log_func = False
                 self.buffer = ""
 
 
@@ -238,6 +258,53 @@ class TeeWriter:
                     self.log_file.close()
                 except Exception:
                     pass
+
+
+# =============================================================================
+# RESILIENT FILE HANDLER
+# =============================================================================
+
+class ResilientFileHandler(logging.FileHandler):
+    """FileHandler that self-disables after repeated I/O failures.
+
+    Log files usually live on a network share; if the share drops, every
+    emit raises OSError and logging's default error handling prints a
+    multi-line traceback to stderr — which the app tees back into logging,
+    amplifying the failure. This handler counts consecutive emit failures,
+    disables itself after a threshold, and writes a single notice to the
+    real stderr instead.
+    """
+
+    MAX_CONSECUTIVE_FAILURES = 5
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._consecutive_failures = 0
+        self._disabled = False
+        self._emit_failed = False
+
+    def emit(self, record):
+        if self._disabled:
+            return
+        self._emit_failed = False
+        super().emit(record)
+        if not self._emit_failed:
+            self._consecutive_failures = 0
+
+    def handleError(self, record):
+        # Deliberately do NOT call super().handleError() — it prints a
+        # traceback to sys.stderr, which TeeStream feeds back into logging.
+        self._emit_failed = True
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES and not self._disabled:
+            self._disabled = True
+            try:
+                sys.__stderr__.write(
+                    f"[luma_tools] Log file unreachable ({self.baseFilename}); "
+                    f"file logging disabled for this session.\n"
+                )
+            except Exception:
+                pass
 
 
 # =============================================================================
@@ -296,6 +363,11 @@ def setup_file_logging(
 
     log_path = os.path.join(log_dir, log_filename)
 
+    # Never let logging's internal error handling print tracebacks to
+    # stderr — with the stderr tee active that feeds straight back into
+    # logging and amplifies (see ResilientFileHandler).
+    logging.raiseExceptions = False
+
     if tee_mode == "handlers":
         # Server-style: file + console handlers, no stdout redirect
         _setup_dual_handlers(log_path)
@@ -309,19 +381,12 @@ def setup_file_logging(
             logging.warning(
                 f"setup_file_logging called again — adding additional log file: {log_path}"
             )
-            file_handler = logging.FileHandler(log_path, encoding='utf-8')
-            file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s [%(levelname)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S',
-            ))
-            root_logger.addHandler(file_handler)
         else:
-            logging.basicConfig(
-                level=logging.DEBUG,
-                format='%(asctime)s [%(levelname)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S',
-                handlers=[logging.FileHandler(log_path, encoding='utf-8')],
-            )
+            root_logger.setLevel(logging.DEBUG)
+        # GUI app ("stream" mode): the log file is a synchronous SMB write,
+        # so route records through a queue and write on a background thread —
+        # a stalled network share must never freeze the thread that logs.
+        _attach_file_handler(log_path, root_logger, non_blocking=(tee_mode == "stream"))
 
         if redirect_stdout:
             # Clean up any existing tee writers before creating new ones
@@ -365,6 +430,31 @@ def setup_file_logging(
     return log_path
 
 
+def _attach_file_handler(log_path: str, root_logger, non_blocking: bool):
+    """Attach a resilient file handler, optionally decoupled via a queue.
+
+    non_blocking=True routes records through logging.handlers.QueueHandler /
+    QueueListener so the actual file write happens on a background thread —
+    the emitting thread (often the GUI thread) never blocks on network I/O.
+    """
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
+    file_handler = ResilientFileHandler(log_path, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    if non_blocking:
+        import queue as _queue
+        from logging.handlers import QueueHandler, QueueListener
+        log_queue = _queue.Queue(-1)
+        listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
+        listener.start()
+        atexit.register(listener.stop)
+        root_logger.addHandler(QueueHandler(log_queue))
+    else:
+        root_logger.addHandler(file_handler)
+
+
 def _setup_dual_handlers(log_path: str):
     """Set up logging with both file and console handlers (server style)."""
     root_logger = logging.getLogger()
@@ -375,7 +465,7 @@ def _setup_dual_handlers(log_path: str):
         root_logger.removeHandler(handler)
 
     # File handler - network-accessible log
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler = ResilientFileHandler(log_path, encoding='utf-8')
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
     root_logger.addHandler(file_handler)
@@ -409,7 +499,7 @@ def setup_polling_logger() -> Optional[str]:
 
     log_path = os.path.join(log_dir, log_filename)
 
-    handler = logging.FileHandler(log_path, encoding='utf-8')
+    handler = ResilientFileHandler(log_path, encoding='utf-8')
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter(
         '%(asctime)s [%(levelname)s] %(message)s',

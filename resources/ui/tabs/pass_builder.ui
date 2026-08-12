@@ -146,7 +146,10 @@
         <item>
          <widget class="QLabel" name="passesHint">
           <property name="text">
-           <string>Default passes not shown</string>
+           <string>Defaults (Beauty, Alpha, ...) are always included - select extras here</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
           </property>
           <property name="alignment">
            <set>Qt::AlignCenter</set>
@@ -270,13 +273,13 @@
            </size>
           </property>
           <property name="toolTip">
-           <string>Build render with selected passes (Ctrl+S)</string>
+           <string>Build render with selected passes (Ctrl+Return)</string>
           </property>
           <property name="text">
            <string>Build</string>
           </property>
           <property name="shortcut">
-           <string>Ctrl+S</string>
+           <string>Ctrl+Return</string>
           </property>
          </widget>
         </item>
@@ -284,6 +287,22 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="PassBuilderStatusLabel">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: #888888; font-size: 9pt;</string>
+     </property>
+     <property name="textInteractionFlags">
+      <set>Qt::TextSelectableByMouse</set>
+     </property>
+    </widget>
    </item>
   </layout>
  </widget>

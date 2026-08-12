@@ -1026,6 +1026,29 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
+    # --lowvram/--normalvram/--highvram are mutually exclusive ComfyUI launch
+    # flags, but they come from three independent booleans in global settings
+    # and older configs can have more than one set. Passing several makes
+    # ComfyUI's own arg parsing the arbiter — resolve it here instead, with a
+    # documented priority (low > normal > high) matching the Settings tab.
+    _vram_flags = [
+        name for name, enabled in (
+            ('lowvram', args.lowvram),
+            ('normalvram', args.normalvram),
+            ('highvram', args.highvram),
+        ) if enabled
+    ]
+    if len(_vram_flags) > 1:
+        winner = _vram_flags[0]
+        logger.warning(
+            f"Multiple VRAM flags set ({', '.join('--' + f for f in _vram_flags)}) — "
+            f"these are mutually exclusive; applying --{winner} "
+            "(priority: lowvram > normalvram > highvram)"
+        )
+        args.lowvram = winner == 'lowvram'
+        args.normalvram = winner == 'normalvram'
+        args.highvram = winner == 'highvram'
+
     extra_args = []
     if args.input_directory:
         extra_args.extend(['--input-directory', args.input_directory])

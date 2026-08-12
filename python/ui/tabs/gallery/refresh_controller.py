@@ -8,12 +8,44 @@ Handles gallery content refresh mechanisms:
 """
 
 import os
+import time
 import logging
 from PySide6.QtCore import QTimer, QThreadPool, QFileSystemWatcher
 
 from .base_manager import BaseGalleryManager
 
 logger = logging.getLogger(__name__)
+
+# A scan that has been "in progress" longer than this is assumed dead (lost
+# worker signal) — the flag is cleared so refreshes are not wedged forever.
+SCAN_WATCHDOG_SECONDS = 120
+
+DEFAULT_POLL_INTERVAL_SECONDS = 10
+
+
+def _probe_directory(path):
+    """Cheap change probe: top-level names + mtime + size.
+
+    Runs on the worker thread (never the GUI thread). Returns a comparable
+    snapshot tuple, or None when the directory could not be probed (in which
+    case the caller must fall back to a full scan).
+    """
+    entries = []
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    stat_result = entry.stat()
+                    entries.append((entry.name, stat_result.st_mtime, stat_result.st_size))
+                except OSError:
+                    # Entry vanished mid-probe — treat the directory as changed
+                    return None
+    except OSError as e:
+        logger.debug(f"[Gallery] Poll probe failed for {path}: {e}")
+        return None
+
+    entries.sort()
+    return tuple(entries)
 
 
 class RefreshController(BaseGalleryManager):
@@ -38,19 +70,90 @@ class RefreshController(BaseGalleryManager):
 
         # Polling for network paths
         self._poll_timer = None
-        self._poll_interval = 10000  # 10 seconds
+        self._poll_interval = self._read_poll_interval()
 
         # Scan state
         self._scan_in_progress = False
+        self._scan_started_at = None
 
-    def on_refresh(self, force=False, show_status=True):
+        # Cheap change-detection snapshot for automatic polls
+        self._probe_snapshot = None
+
+        # mtime of the gallery metadata file the last time lineage was
+        # auto-established (lineage only re-runs when this changes)
+        self._last_lineage_mtime = None
+
+    # =========================================================================
+    # POLL INTERVAL
+    # =========================================================================
+
+    @staticmethod
+    def _read_poll_interval():
+        """Poll interval in milliseconds, from the user setting."""
+        try:
+            from core.settings_manager import safe_get_setting
+            seconds = safe_get_setting("gallery_poll_interval", DEFAULT_POLL_INTERVAL_SECONDS)
+            seconds = int(seconds)
+        except Exception:
+            seconds = DEFAULT_POLL_INTERVAL_SECONDS
+        if seconds < 5:
+            seconds = 5
+        elif seconds > 300:
+            seconds = 300
+        return seconds * 1000
+
+    def apply_poll_interval(self):
+        """Re-read the poll interval setting and restart the timer if needed."""
+        new_interval = self._read_poll_interval()
+        if new_interval == self._poll_interval:
+            return
+        self._poll_interval = new_interval
+        if self._poll_timer and self._poll_timer.isActive():
+            self._poll_timer.start(self._poll_interval)
+            self.tab.log(
+                f"[Gallery] Poll interval changed to {self._poll_interval // 1000}s"
+            )
+
+    def _check_scan_watchdog(self):
+        """Clear a wedged _scan_in_progress flag.
+
+        A lost worker signal (crash in the result slot, thread pool hiccup)
+        used to leave the flag set forever, silently killing every subsequent
+        non-forced refresh for the lifetime of the app.
+
+        Returns:
+            bool: True if a stuck scan was cleared.
+        """
+        if not self._scan_in_progress:
+            return False
+        started = self._scan_started_at
+        if started is None:
+            return False
+        elapsed = time.monotonic() - started
+        if elapsed < SCAN_WATCHDOG_SECONDS:
+            return False
+
+        logger.warning(
+            f"[Gallery] Scan appears stuck ({elapsed:.0f}s) — clearing "
+            "in-progress flag and continuing"
+        )
+        self._scan_in_progress = False
+        self._scan_started_at = None
+        return True
+
+    def on_refresh(self, force=False, show_status=True, auto=False):
         """
         Handle refresh request.
 
         Args:
             force: If True, bypass scan-in-progress check
             show_status: If True, show status bar feedback (False for auto-refreshes)
+            auto: If True this is an automatic refresh (poll tick / watcher
+                notification). Automatic refreshes run a cheap change probe
+                first and skip content hashing; manual ones never do.
         """
+        self._check_scan_watchdog()
+
         if self._scan_in_progress and not force:
             self.tab.log("[Gallery] Refresh already in progress, skipping...")
             # Only show status message for user-initiated refreshes, not auto-refreshes
@@ -58,8 +161,9 @@ class RefreshController(BaseGalleryManager):
                 self.show_status("Refresh already in progress", "info")
             return
 
-        # Store show_status for use in _do_refresh
+        # Store flags for use in _do_refresh
         self._pending_show_status = show_status
+        self._pending_auto = auto
 
         # For non-forced refreshes, debounce multiple rapid requests
         if not force:
@@ -82,13 +186,16 @@ class RefreshController(BaseGalleryManager):
             return
 
         self._scan_in_progress = True
+        self._scan_started_at = time.monotonic()
 
         # Get show_status flag (default True for backward compatibility)
         show_status = getattr(self, '_pending_show_status', True)
         self._current_scan_show_status = show_status  # Store for completion handler
+        is_auto = bool(getattr(self, '_pending_auto', False))
 
-        # Clear cached items to force fresh scan
-        self.tab._cached_items = None
+        # NOTE: _cached_items is deliberately NOT cleared here. scan_directory()
+        # never consults it, and clearing it made redisplay a no-op (and lost
+        # the item list entirely) whenever a scan errored or was skipped.
 
         # Get current path
         current_path = self.tab._current_path
@@ -96,6 +203,7 @@ class RefreshController(BaseGalleryManager):
         if not current_path or not os.path.exists(current_path):
             self.tab.log(f"[Gallery] Path not found: {current_path}")
             self._scan_in_progress = False
+            self._scan_started_at = None
             return
 
         self.tab.log(f"[Gallery] Scanning: {current_path}")
@@ -106,43 +214,99 @@ class RefreshController(BaseGalleryManager):
                 "gallery_scan", "Gallery: Scanning files"
             )
 
+        previous_snapshot = self._probe_snapshot
+        previous_lineage_mtime = self._last_lineage_mtime
+
         # Scan in background thread
         def scan():
-            items = self.tab._loader.scan_directory(current_path)
+            result = {"items": None, "snapshot": None, "lineage_mtime": None}
 
-            # Auto-establish lineage relationships in the background
+            # Cheap pre-check for automatic refreshes: if nothing at the top
+            # level changed, skip the (recursive, metadata-loading) rescan.
+            if is_auto:
+                snapshot = _probe_directory(current_path)
+                result["snapshot"] = snapshot
+                if snapshot is not None and snapshot == previous_snapshot:
+                    result["skipped"] = True
+                    return result
+
+            result["items"] = self.tab._loader.scan_directory(
+                current_path, allow_hashing=not is_auto
+            )
+
+            # Auto-establish lineage relationships in the background. This walks
+            # the whole directory and writes metadata, so only run it when the
+            # metadata file actually changed (or on a manual refresh).
             try:
-                from comfyui.metadata import auto_establish_lineage_from_job_metadata
-                lineage_count = auto_establish_lineage_from_job_metadata(current_path)
-                if lineage_count > 0:
-                    logger.info(f"[Gallery] Established {lineage_count} lineage relationship(s)")
+                from comfyui.metadata import (
+                    auto_establish_lineage_from_job_metadata,
+                    GALLERY_METADATA_FILE,
+                )
+                try:
+                    metadata_mtime = os.path.getmtime(
+                        os.path.join(current_path, GALLERY_METADATA_FILE)
+                    )
+                except OSError:
+                    metadata_mtime = None
+
+                should_run = (not is_auto) or metadata_mtime != previous_lineage_mtime
+                if should_run:
+                    lineage_count = auto_establish_lineage_from_job_metadata(current_path)
+                    if lineage_count > 0:
+                        logger.info(f"[Gallery] Established {lineage_count} lineage relationship(s)")
+                    result["lineage_mtime"] = metadata_mtime
+                    result["lineage_ran"] = True
             except Exception as e:
                 logger.debug(f"[Gallery] Could not establish lineage: {e}")
 
-            return items
+            return result
 
         self._scan_worker = Worker(scan)
         self._scan_worker.signals.result.connect(self._on_scan_complete)
         self._scan_worker.signals.error.connect(self._on_scan_error)
         QThreadPool.globalInstance().start(self._scan_worker)
 
-    def _on_scan_complete(self, items):
-        """Handle scan completion."""
+    def _on_scan_complete(self, result):
+        """Handle scan completion (runs on the GUI thread)."""
         self._scan_in_progress = False
+        self._scan_started_at = None
+
+        if isinstance(result, dict):
+            items = result.get("items")
+            if result.get("snapshot") is not None:
+                self._probe_snapshot = result["snapshot"]
+            if result.get("lineage_ran"):
+                self._last_lineage_mtime = result.get("lineage_mtime")
+            skipped = bool(result.get("skipped"))
+        else:
+            # Defensive: older/plain list result
+            items = result
+            skipped = False
 
         # Show completion status only if we showed start status
         show_status = getattr(self, '_current_scan_show_status', True)
+
+        if skipped:
+            logger.debug("[Gallery] Poll probe unchanged — skipping rescan")
+            if show_status and self.tab.animator:
+                self.tab.animator.end_activity("gallery_scan", "Gallery: No changes")
+            return
+
         if show_status and self.tab.animator:
             count = len(items) if items else 0
             self.tab.animator.end_activity(
                 "gallery_scan", f"Gallery: Found {count} items"
             )
 
-        self.tab._handle_scan_complete(items)
+        self.tab._handle_scan_complete(items or [])
 
     def _on_scan_error(self, msg, tb):
         """Handle scan error."""
         self._scan_in_progress = False
+        self._scan_started_at = None
+        # A failed scan invalidates the probe snapshot — force a real rescan
+        # on the next tick rather than trusting a stale comparison.
+        self._probe_snapshot = None
         self.tab.log(f"[Gallery] Scan error: {msg}")
 
         # Hide loading overlay on error
@@ -237,11 +401,16 @@ class RefreshController(BaseGalleryManager):
         self._watcher_setup_in_progress = False
         self.tab.log(f"[Gallery] Watcher setup error: {msg}")
 
+    def reset_change_tracking(self):
+        """Forget probe/lineage state (call when the gallery path changes)."""
+        self._probe_snapshot = None
+        self._last_lineage_mtime = None
+
     def _on_directory_changed(self, path):
         """Handle file system change notification."""
         self.tab.log(f"[Gallery] Directory changed: {path}")
         # Debounced refresh (silent - no status bar feedback for auto-refresh)
-        self.on_refresh(show_status=False)
+        self.on_refresh(show_status=False, auto=True)
 
     def stop_watcher(self):
         """Stop the file system watcher."""
@@ -277,7 +446,7 @@ class RefreshController(BaseGalleryManager):
         """Handle polling timer tick."""
         # Only refresh if tab is visible (silent - no status bar feedback for auto-refresh)
         if self.tab.ui and self.tab.ui.isVisible():
-            self.on_refresh(show_status=False)
+            self.on_refresh(show_status=False, auto=True)
 
     def _is_network_path(self, path):
         """Check if a path is a network path (UNC or mapped drive pointing to network)."""

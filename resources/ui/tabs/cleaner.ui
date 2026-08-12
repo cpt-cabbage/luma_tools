@@ -58,14 +58,14 @@
            <item>
             <widget class="QLabel" name="FolderSize">
              <property name="text">
-              <string>Total Size: Calculating...</string>
+              <string>Total Size: —</string>
              </property>
             </widget>
            </item>
            <item>
             <widget class="QLabel" name="HipNumber">
              <property name="text">
-              <string>Total Files: 0</string>
+              <string>Amount of Hipfiles: —</string>
              </property>
             </widget>
            </item>
@@ -94,6 +94,9 @@
            </property>
            <property name="text">
             <string>Rescan</string>
+           </property>
+           <property name="toolTip">
+            <string>Scan the shot's task directory for render versions, USD versions, HIP backups and comp usage</string>
            </property>
           </widget>
          </item>
@@ -171,6 +174,9 @@
            <property name="text">
             <string>Clean Renders</string>
            </property>
+           <property name="toolTip">
+            <string>Delete the render version folders selected in the Renders list (under img/renders/). The latest render version and any versions referenced by the newest comp file are automatically deselected and kept.</string>
+           </property>
           </widget>
          </item>
          <item>
@@ -178,12 +184,18 @@
            <property name="text">
             <string>Clean USDs</string>
            </property>
+           <property name="toolTip">
+            <string>Delete the USD version folders selected in the USD Files list. The latest USD version is kept (it is never added to the list).</string>
+           </property>
           </widget>
          </item>
          <item>
           <widget class="QCheckBox" name="HIPBackups">
            <property name="text">
             <string>Clean Backups</string>
+           </property>
+           <property name="toolTip">
+            <string>Delete the entire Houdini auto-backup folder ('backup') for this task. Working HIP files themselves are never touched.</string>
            </property>
           </widget>
          </item>
@@ -209,6 +221,9 @@
          </item>
          <item>
           <widget class="QPushButton" name="CleanFiles">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
            <property name="minimumSize">
             <size>
              <width>150</width>
@@ -217,6 +232,9 @@
            </property>
            <property name="text">
             <string>Run Cleaner</string>
+           </property>
+           <property name="toolTip">
+            <string>Delete the checked categories after confirmation. Enabled once a scan has found something to clean.</string>
            </property>
           </widget>
          </item>

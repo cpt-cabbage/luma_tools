@@ -46,13 +46,6 @@ class Ui_ComfyUITab(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.comfyuiModelFrame.sizePolicy().hasHeightForWidth())
         self.comfyuiModelFrame.setSizePolicy(sizePolicy)
-        self.comfyuiModelFrame.setStyleSheet(u"\n"
-"            QFrame#comfyuiModelFrame {\n"
-"              background-color: #282c34;\n"
-"              border: 1px solid #3c414b;\n"
-"              border-radius: 8px;\n"
-"            }\n"
-"          ")
         self.comfyuiWorkflowLayout = QVBoxLayout(self.comfyuiModelFrame)
         self.comfyuiWorkflowLayout.setSpacing(8)
         self.comfyuiWorkflowLayout.setObjectName(u"comfyuiWorkflowLayout")
@@ -62,7 +55,6 @@ class Ui_ComfyUITab(object):
         self.modelHeaderLayout.setObjectName(u"modelHeaderLayout")
         self.modelStepTitle = QLabel(self.comfyuiModelFrame)
         self.modelStepTitle.setObjectName(u"modelStepTitle")
-        self.modelStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
 
         self.modelHeaderLayout.addWidget(self.modelStepTitle)
 
@@ -85,22 +77,6 @@ class Ui_ComfyUITab(object):
         sizePolicy1.setHeightForWidth(self.ComfyUIChoosePreset.sizePolicy().hasHeightForWidth())
         self.ComfyUIChoosePreset.setSizePolicy(sizePolicy1)
         self.ComfyUIChoosePreset.setMinimumSize(QSize(0, 38))
-        self.ComfyUIChoosePreset.setStyleSheet(u"\n"
-"                 QPushButton {\n"
-"                   background-color: #2c313a;\n"
-"                   border: 1px dashed #4a9eff;\n"
-"                   border-radius: 6px;\n"
-"                   color: #4a9eff;\n"
-"                   font-size: 13px;\n"
-"                   font-weight: 500;\n"
-"                   padding: 6px 16px;\n"
-"                   text-align: left;\n"
-"                 }\n"
-"                 QPushButton:hover {\n"
-"                   background-color: #333842;\n"
-"                   border-style: solid;\n"
-"                 }\n"
-"               ")
 
         self.comfyuiPresetButtonsLayout.addWidget(self.ComfyUIChoosePreset)
 
@@ -130,13 +106,11 @@ class Ui_ComfyUITab(object):
         self.selectedModelTitleRow.setObjectName(u"selectedModelTitleRow")
         self.selectedModelName = QLabel(self.selectedModelHeader)
         self.selectedModelName.setObjectName(u"selectedModelName")
-        self.selectedModelName.setStyleSheet(u"color: #e0e0e0; font-size: 14px; font-weight: bold;")
 
         self.selectedModelTitleRow.addWidget(self.selectedModelName)
 
         self.selectedModelBadge = QLabel(self.selectedModelHeader)
         self.selectedModelBadge.setObjectName(u"selectedModelBadge")
-        self.selectedModelBadge.setStyleSheet(u"background-color: rgba(74, 158, 255, 0.15); color: #4a9eff; border-radius: 3px; padding: 2px 8px; font-size: 10px; font-weight: bold;")
 
         self.selectedModelTitleRow.addWidget(self.selectedModelBadge)
 
@@ -151,7 +125,6 @@ class Ui_ComfyUITab(object):
         self.workflowSettingsBtn.setMaximumSize(QSize(28, 28))
         self.workflowSettingsBtn.setIconSize(QSize(16, 16))
         self.workflowSettingsBtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.workflowSettingsBtn.setStyleSheet(u"QPushButton { background-color: transparent; border: 1px solid #3c414b; border-radius: 4px; color: #c5cad3; } QPushButton:hover { border-color: #4a9eff; color: #4a9eff; }")
 
         self.selectedModelTitleRow.addWidget(self.workflowSettingsBtn)
 
@@ -160,7 +133,6 @@ class Ui_ComfyUITab(object):
         self.editModelBtn.setVisible(False)
         self.editModelBtn.setMinimumSize(QSize(0, 28))
         self.editModelBtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.editModelBtn.setStyleSheet(u"QPushButton { background-color: transparent; border: 1px solid #3c414b; border-radius: 4px; color: #c5cad3; padding: 0 10px; font-size: 11px; } QPushButton:hover { border-color: #4a9eff; color: #4a9eff; }")
 
         self.selectedModelTitleRow.addWidget(self.editModelBtn)
 
@@ -168,7 +140,6 @@ class Ui_ComfyUITab(object):
         self.changeModelBtn.setObjectName(u"changeModelBtn")
         self.changeModelBtn.setMinimumSize(QSize(0, 28))
         self.changeModelBtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.changeModelBtn.setStyleSheet(u"QPushButton { background-color: #2c313a; border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; padding: 0 12px; font-size: 11px; font-weight: 500; } QPushButton:hover { background-color: #333842; }")
 
         self.selectedModelTitleRow.addWidget(self.changeModelBtn)
 
@@ -178,7 +149,6 @@ class Ui_ComfyUITab(object):
         self.selectedModelDesc = QLabel(self.selectedModelHeader)
         self.selectedModelDesc.setObjectName(u"selectedModelDesc")
         self.selectedModelDesc.setWordWrap(True)
-        self.selectedModelDesc.setStyleSheet(u"color: #797e89; font-size: 11px;")
 
         self.selectedModelHeaderLayout.addWidget(self.selectedModelDesc)
 
@@ -206,13 +176,6 @@ class Ui_ComfyUITab(object):
 
         self.comfyuiInputFrame = QFrame(self.comfyuiScrollContent)
         self.comfyuiInputFrame.setObjectName(u"comfyuiInputFrame")
-        self.comfyuiInputFrame.setStyleSheet(u"\n"
-"            QFrame#comfyuiInputFrame {\n"
-"              background-color: #282c34;\n"
-"              border: 1px solid #3c414b;\n"
-"              border-radius: 8px;\n"
-"            }\n"
-"          ")
         sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         sizePolicy2.setHorizontalStretch(0)
         sizePolicy2.setVerticalStretch(3)
@@ -228,7 +191,6 @@ class Ui_ComfyUITab(object):
         self.inputHeaderLayout.setObjectName(u"inputHeaderLayout")
         self.inputStepTitle = QLabel(self.comfyuiInputFrame)
         self.inputStepTitle.setObjectName(u"inputStepTitle")
-        self.inputStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
 
         self.inputHeaderLayout.addWidget(self.inputStepTitle)
 
@@ -258,13 +220,6 @@ class Ui_ComfyUITab(object):
         self.noteBanner.setObjectName(u"noteBanner")
         self.noteBanner.setVisible(False)
         self.noteBanner.setFrameShape(QFrame.StyledPanel)
-        self.noteBanner.setStyleSheet(u"\n"
-"               QFrame#noteBanner {\n"
-"                 background-color: rgba(74, 158, 255, 0.10);\n"
-"                 border: 1px solid rgba(74, 158, 255, 0.35);\n"
-"                 border-radius: 6px;\n"
-"               }\n"
-"             ")
         self.noteBannerLayout = QHBoxLayout(self.noteBanner)
         self.noteBannerLayout.setSpacing(8)
         self.noteBannerLayout.setObjectName(u"noteBannerLayout")
@@ -272,7 +227,6 @@ class Ui_ComfyUITab(object):
         self.noteText = QLabel(self.noteBanner)
         self.noteText.setObjectName(u"noteText")
         self.noteText.setWordWrap(True)
-        self.noteText.setStyleSheet(u"color: #c5cad3; font-size: 11px;")
 
         self.noteBannerLayout.addWidget(self.noteText)
 
@@ -306,13 +260,6 @@ class Ui_ComfyUITab(object):
         sizePolicy5.setVerticalStretch(0)
         sizePolicy5.setHeightForWidth(self.comfyuiSettingsFrame.sizePolicy().hasHeightForWidth())
         self.comfyuiSettingsFrame.setSizePolicy(sizePolicy5)
-        self.comfyuiSettingsFrame.setStyleSheet(u"\n"
-"              QFrame#comfyuiSettingsFrame {\n"
-"                background-color: #282c34;\n"
-"                border: 1px solid #3c414b;\n"
-"                border-radius: 8px;\n"
-"              }\n"
-"            ")
         self.comfyuiSettingsLayout = QVBoxLayout(self.comfyuiSettingsFrame)
         self.comfyuiSettingsLayout.setSpacing(8)
         self.comfyuiSettingsLayout.setObjectName(u"comfyuiSettingsLayout")
@@ -322,7 +269,6 @@ class Ui_ComfyUITab(object):
         self.settingsHeaderLayout.setObjectName(u"settingsHeaderLayout")
         self.settingsStepTitle = QLabel(self.comfyuiSettingsFrame)
         self.settingsStepTitle.setObjectName(u"settingsStepTitle")
-        self.settingsStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
 
         self.settingsHeaderLayout.addWidget(self.settingsStepTitle)
 
@@ -336,7 +282,6 @@ class Ui_ComfyUITab(object):
         self.advancedGearBtn.setMaximumSize(QSize(26, 26))
         self.advancedGearBtn.setIconSize(QSize(16, 16))
         self.advancedGearBtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.advancedGearBtn.setStyleSheet(u"QPushButton { background-color: transparent; border: 1px solid #3c414b; border-radius: 4px; color: #c5cad3; } QPushButton:hover { border-color: #4a9eff; color: #4a9eff; }")
 
         self.settingsHeaderLayout.addWidget(self.advancedGearBtn)
 
@@ -365,33 +310,37 @@ class Ui_ComfyUITab(object):
 
         self.genCountLayout.addWidget(self.ComfyUIGenerationCount)
 
+        self.ComfyUIGenerationCountSpin = QSpinBox(self.comfyuiSettingsFrame)
+        self.ComfyUIGenerationCountSpin.setObjectName(u"ComfyUIGenerationCountSpin")
+        self.ComfyUIGenerationCountSpin.setMinimum(1)
+        self.ComfyUIGenerationCountSpin.setMaximum(100)
+        self.ComfyUIGenerationCountSpin.setValue(1)
+        self.ComfyUIGenerationCountSpin.setMinimumWidth(64)
+        self.ComfyUIGenerationCountSpin.setAlignment(Qt.AlignRight|Qt.AlignVCenter)
+
+        self.genCountLayout.addWidget(self.ComfyUIGenerationCountSpin)
+
         self.label_count_value = QLabel(self.comfyuiSettingsFrame)
         self.label_count_value.setObjectName(u"label_count_value")
+        self.label_count_value.setVisible(False)
         self.label_count_value.setMinimumWidth(30)
         self.label_count_value.setAlignment(Qt.AlignRight|Qt.AlignVCenter)
-        self.label_count_value.setStyleSheet(u"color: #4a9eff; font-weight: bold; font-size: 13px;")
 
         self.genCountLayout.addWidget(self.label_count_value)
 
 
         self.comfyuiSettingsLayout.addLayout(self.genCountLayout)
 
+        self.ComfyUIEtaLabel = QLabel(self.comfyuiSettingsFrame)
+        self.ComfyUIEtaLabel.setObjectName(u"ComfyUIEtaLabel")
+        self.ComfyUIEtaLabel.setVisible(False)
+        self.ComfyUIEtaLabel.setWordWrap(True)
+
+        self.comfyuiSettingsLayout.addWidget(self.ComfyUIEtaLabel)
+
         self.advancedToggleBtn = QPushButton(self.comfyuiSettingsFrame)
         self.advancedToggleBtn.setObjectName(u"advancedToggleBtn")
         self.advancedToggleBtn.setVisible(False)
-        self.advancedToggleBtn.setStyleSheet(u"\n"
-"                 QPushButton {\n"
-"                   background-color: transparent;\n"
-"                   border: none;\n"
-"                   color: #797e89;\n"
-"                   font-size: 11px;\n"
-"                   text-align: left;\n"
-"                   padding: 2px 0px;\n"
-"                 }\n"
-"                 QPushButton:hover {\n"
-"                   color: #4a9eff;\n"
-"                 }\n"
-"               ")
         self.advancedToggleBtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
         self.comfyuiSettingsLayout.addWidget(self.advancedToggleBtn)
@@ -406,7 +355,6 @@ class Ui_ComfyUITab(object):
         self.advancedSeparator = QFrame(self.advancedSettingsContainer)
         self.advancedSeparator.setObjectName(u"advancedSeparator")
         self.advancedSeparator.setFrameShape(QFrame.HLine)
-        self.advancedSeparator.setStyleSheet(u"color: #3c414b;")
 
         self.advancedSettingsLayout.addWidget(self.advancedSeparator)
 
@@ -419,12 +367,11 @@ class Ui_ComfyUITab(object):
 
         self.seedLayout.addWidget(self.label_seed)
 
-        self.ComfyUISeed = QSpinBox(self.advancedSettingsContainer)
+        self.ComfyUISeed = QLineEdit(self.advancedSettingsContainer)
         self.ComfyUISeed.setObjectName(u"ComfyUISeed")
         sizePolicy1.setHeightForWidth(self.ComfyUISeed.sizePolicy().hasHeightForWidth())
         self.ComfyUISeed.setSizePolicy(sizePolicy1)
-        self.ComfyUISeed.setMinimum(0)
-        self.ComfyUISeed.setMaximum(2147483647)
+        self.ComfyUISeed.setMaxLength(19)
 
         self.seedLayout.addWidget(self.ComfyUISeed)
 
@@ -504,7 +451,6 @@ class Ui_ComfyUITab(object):
         self.ComfyUINetworkPathDisplay.setObjectName(u"ComfyUINetworkPathDisplay")
         sizePolicy5.setHeightForWidth(self.ComfyUINetworkPathDisplay.sizePolicy().hasHeightForWidth())
         self.ComfyUINetworkPathDisplay.setSizePolicy(sizePolicy5)
-        self.ComfyUINetworkPathDisplay.setStyleSheet(u"color: #797e89; font-style: italic; font-size: 11px;")
 
         self.networkOutputDisplayLayout.addWidget(self.ComfyUINetworkPathDisplay)
 
@@ -521,13 +467,6 @@ class Ui_ComfyUITab(object):
         self.comfyuiSubmitFrame.setObjectName(u"comfyuiSubmitFrame")
         sizePolicy5.setHeightForWidth(self.comfyuiSubmitFrame.sizePolicy().hasHeightForWidth())
         self.comfyuiSubmitFrame.setSizePolicy(sizePolicy5)
-        self.comfyuiSubmitFrame.setStyleSheet(u"\n"
-"              QFrame#comfyuiSubmitFrame {\n"
-"                background-color: #282c34;\n"
-"                border: 1px solid #3c414b;\n"
-"                border-radius: 8px;\n"
-"              }\n"
-"            ")
         self.comfyuiSubmitLayout = QVBoxLayout(self.comfyuiSubmitFrame)
         self.comfyuiSubmitLayout.setSpacing(10)
         self.comfyuiSubmitLayout.setObjectName(u"comfyuiSubmitLayout")
@@ -537,7 +476,6 @@ class Ui_ComfyUITab(object):
         self.submitHeaderLayout.setObjectName(u"submitHeaderLayout")
         self.submitStepTitle = QLabel(self.comfyuiSubmitFrame)
         self.submitStepTitle.setObjectName(u"submitStepTitle")
-        self.submitStepTitle.setStyleSheet(u"color: #e0e0e0; font-size: 13px; font-weight: bold;")
 
         self.submitHeaderLayout.addWidget(self.submitStepTitle)
 
@@ -564,27 +502,6 @@ class Ui_ComfyUITab(object):
         self.ComfyUISubmit = QPushButton(self.comfyuiSubmitFrame)
         self.ComfyUISubmit.setObjectName(u"ComfyUISubmit")
         self.ComfyUISubmit.setMinimumSize(QSize(0, 42))
-        self.ComfyUISubmit.setStyleSheet(u"\n"
-"                   QPushButton {\n"
-"                     background-color: #4a9eff;\n"
-"                     color: white;\n"
-"                     border: none;\n"
-"                     border-radius: 6px;\n"
-"                     font-size: 13px;\n"
-"                     font-weight: bold;\n"
-"                     padding: 8px 24px;\n"
-"                   }\n"
-"                   QPushButton:hover {\n"
-"                     background-color: #5cadff;\n"
-"                   }\n"
-"                   QPushButton:pressed {\n"
-"                     background-color: #3a8eef;\n"
-"                   }\n"
-"                   QPushButton:disabled {\n"
-"                     background-color: #3c414b;\n"
-"                     color: #797e89;\n"
-"                   }\n"
-"                 ")
 
         self.submitButtonsLayout.addWidget(self.ComfyUISubmit)
 
@@ -592,24 +509,6 @@ class Ui_ComfyUITab(object):
         self.ComfyUICancelJobs.setObjectName(u"ComfyUICancelJobs")
         self.ComfyUICancelJobs.setMinimumSize(QSize(100, 42))
         self.ComfyUICancelJobs.setVisible(False)
-        self.ComfyUICancelJobs.setStyleSheet(u"\n"
-"                   QPushButton {\n"
-"                     background-color: #ef4444;\n"
-"                     color: white;\n"
-"                     border: none;\n"
-"                     border-radius: 6px;\n"
-"                     font-size: 12px;\n"
-"                     font-weight: bold;\n"
-"                     padding: 8px 16px;\n"
-"                   }\n"
-"                   QPushButton:hover {\n"
-"                     background-color: #f87171;\n"
-"                   }\n"
-"                   QPushButton:disabled {\n"
-"                     background-color: #3c414b;\n"
-"                     color: #797e89;\n"
-"                   }\n"
-"                 ")
 
         self.submitButtonsLayout.addWidget(self.ComfyUICancelJobs)
 
@@ -626,26 +525,17 @@ class Ui_ComfyUITab(object):
         self.comfyuiIterateFrame.setObjectName(u"comfyuiIterateFrame")
         self.comfyuiIterateFrame.setFrameShape(QFrame.StyledPanel)
         self.comfyuiIterateFrame.setVisible(False)
-        self.comfyuiIterateFrame.setStyleSheet(u"\n"
-"            QFrame {\n"
-"              background-color: #282c34;\n"
-"              border: 1px solid #3c414b;\n"
-"              border-radius: 8px;\n"
-"            }\n"
-"          ")
         self.iterateLayout = QVBoxLayout(self.comfyuiIterateFrame)
         self.iterateLayout.setSpacing(8)
         self.iterateLayout.setObjectName(u"iterateLayout")
         self.iterateLayout.setContentsMargins(16, 12, 16, 14)
         self.ComfyUIIterateTitle = QLabel(self.comfyuiIterateFrame)
         self.ComfyUIIterateTitle.setObjectName(u"ComfyUIIterateTitle")
-        self.ComfyUIIterateTitle.setStyleSheet(u"font-weight: bold; font-size: 13px; color: #e0e0e0; border: none;")
 
         self.iterateLayout.addWidget(self.ComfyUIIterateTitle)
 
         self.ComfyUIIterateStatus = QLabel(self.comfyuiIterateFrame)
         self.ComfyUIIterateStatus.setObjectName(u"ComfyUIIterateStatus")
-        self.ComfyUIIterateStatus.setStyleSheet(u"color: #797e89; border: none;")
 
         self.iterateLayout.addWidget(self.ComfyUIIterateStatus)
 
@@ -654,18 +544,6 @@ class Ui_ComfyUITab(object):
         self.ComfyUIIterateProgress.setMaximum(100)
         self.ComfyUIIterateProgress.setValue(0)
         self.ComfyUIIterateProgress.setTextVisible(False)
-        self.ComfyUIIterateProgress.setStyleSheet(u"\n"
-"               QProgressBar {\n"
-"                 background-color: #1a1d21;\n"
-"                 border: none;\n"
-"                 border-radius: 4px;\n"
-"                 height: 8px;\n"
-"               }\n"
-"               QProgressBar::chunk {\n"
-"                 background-color: #4a9eff;\n"
-"                 border-radius: 4px;\n"
-"               }\n"
-"             ")
 
         self.iterateLayout.addWidget(self.ComfyUIIterateProgress)
 
@@ -673,30 +551,12 @@ class Ui_ComfyUITab(object):
         self.ComfyUIIteratePreview.setObjectName(u"ComfyUIIteratePreview")
         self.ComfyUIIteratePreview.setMinimumSize(QSize(200, 200))
         self.ComfyUIIteratePreview.setAlignment(Qt.AlignCenter)
-        self.ComfyUIIteratePreview.setStyleSheet(u"background-color: #1a1d21; border: 1px solid #3c414b; border-radius: 6px;")
 
         self.iterateLayout.addWidget(self.ComfyUIIteratePreview)
 
         self.ComfyUIUseAsInput = QPushButton(self.comfyuiIterateFrame)
         self.ComfyUIUseAsInput.setObjectName(u"ComfyUIUseAsInput")
         self.ComfyUIUseAsInput.setEnabled(False)
-        self.ComfyUIUseAsInput.setStyleSheet(u"\n"
-"               QPushButton {\n"
-"                 background-color: #2c313a;\n"
-"                 border: 1px solid #4a9eff;\n"
-"                 border-radius: 6px;\n"
-"                 color: #4a9eff;\n"
-"                 padding: 8px 16px;\n"
-"                 font-size: 12px;\n"
-"               }\n"
-"               QPushButton:hover {\n"
-"                 background-color: #333842;\n"
-"               }\n"
-"               QPushButton:disabled {\n"
-"                 border-color: #3c414b;\n"
-"                 color: #797e89;\n"
-"               }\n"
-"             ")
 
         self.iterateLayout.addWidget(self.ComfyUIUseAsInput)
 
@@ -750,12 +610,18 @@ class Ui_ComfyUITab(object):
 #if QT_CONFIG(tooltip)
         self.label_count.setToolTip(QCoreApplication.translate("ComfyUITab", u"Number of images to generate. Each gets a different seed for variety.", None))
 #endif // QT_CONFIG(tooltip)
+#if QT_CONFIG(tooltip)
+        self.ComfyUIGenerationCountSpin.setToolTip(QCoreApplication.translate("ComfyUITab", u"Number of images to generate (kept in sync with the slider).", None))
+#endif // QT_CONFIG(tooltip)
         self.label_count_value.setText(QCoreApplication.translate("ComfyUITab", u"1", None))
+        self.ComfyUIEtaLabel.setText("")
         self.advancedToggleBtn.setText(QCoreApplication.translate("ComfyUITab", u"Advanced Settings...", None))
         self.label_seed.setText(QCoreApplication.translate("ComfyUITab", u"Seed:", None))
 #if QT_CONFIG(tooltip)
         self.label_seed.setToolTip(QCoreApplication.translate("ComfyUITab", u"Same seed + same settings = same result. Useful for recreating outputs.", None))
 #endif // QT_CONFIG(tooltip)
+        self.ComfyUISeed.setText(QCoreApplication.translate("ComfyUITab", u"0", None))
+        self.ComfyUISeed.setPlaceholderText(QCoreApplication.translate("ComfyUITab", u"0", None))
         self.ComfyUIRandomizeSeed.setText("")
 #if QT_CONFIG(tooltip)
         self.ComfyUIRandomizeSeed.setToolTip(QCoreApplication.translate("ComfyUITab", u"Generate a new random seed", None))

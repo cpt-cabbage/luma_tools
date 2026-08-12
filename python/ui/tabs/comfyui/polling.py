@@ -126,6 +126,9 @@ class PollingMixin:
         # Iterate mode state
         self._iterate_poll_timer = None
         self._iterate_poll_worker = None
+        self._iterate_poll_workers = []  # Keep refs alive until they report back
+        self._iterate_poll_in_flight = False  # Overlap guard (see _poll_iterate_job)
+        self._iterate_poll_started_at = 0.0  # Watchdog timestamp for the guard
         self._iterate_network_output_dir = ""
         self._iterate_poll_count = 0
         self._iterate_completed_tasks = 0
@@ -218,8 +221,19 @@ class PollingMixin:
 
         self._poll_iterate_job()
 
+    # Force-clear the in-flight guard after this many seconds even if the
+    # watchdog's interval-based bound would be longer (slow Deadline calls).
+    _ITERATE_POLL_WATCHDOG_MAX_S = 90
+
     def _poll_iterate_job(self):
-        """Poll the iterate job status."""
+        """Poll the iterate job status.
+
+        A single worker may outlive the poll interval when Deadline is slow.
+        Without a guard, every tick would spawn another worker and drop the
+        previous one's reference, so we track an in-flight flag (cleared in the
+        result/error handlers) plus a timestamp watchdog that force-clears it if
+        a worker silently never reports back.
+        """
         from ui_components import Worker
         from deadline.poller import poll_deadline_job_status
 
@@ -228,15 +242,52 @@ class PollingMixin:
             self._stop_iterate_polling()
             return
 
+        if getattr(self, '_iterate_poll_in_flight', False):
+            started = getattr(self, '_iterate_poll_started_at', 0.0)
+            interval_s = max(_get_poll_interval_ms(), 1000) / 1000.0
+            stuck_for = time.monotonic() - started if started else 0.0
+            if started and stuck_for > min(interval_s * 3, self._ITERATE_POLL_WATCHDOG_MAX_S):
+                logger.warning(
+                    f"[Iterate] Poll watchdog: previous poll still in flight after "
+                    f"{stuck_for:.1f}s — clearing guard."
+                )
+                self._iterate_poll_in_flight = False
+            else:
+                logger.debug("[Iterate] Skipping poll tick — previous poll still in flight")
+                return
+
+        self._iterate_poll_in_flight = True
+        self._iterate_poll_started_at = time.monotonic()
+
         output_dir = self._iterate_network_output_dir
-        # Store worker to prevent garbage collection
-        self._iterate_poll_worker = Worker(poll_deadline_job_status, job_id, output_dir)
-        self._iterate_poll_worker.signals.result.connect(self._on_iterate_poll_result)
-        self._iterate_poll_worker.signals.error.connect(lambda msg, tb: logger.warning(f"Poll error: {msg}"))
-        QThreadPool.globalInstance().start(self._iterate_poll_worker)
+        # Keep workers in a list (not a single slot) so a worker abandoned by the
+        # watchdog isn't garbage-collected mid-run. Pruned once they finish.
+        if getattr(self, '_iterate_poll_workers', None) is None:
+            self._iterate_poll_workers = []
+
+        worker = Worker(poll_deadline_job_status, job_id, output_dir)
+        worker.signals.result.connect(self._on_iterate_poll_result)
+        worker.signals.error.connect(self._on_iterate_poll_error)
+        self._iterate_poll_workers.append(worker)
+        self._iterate_poll_worker = worker  # Back-compat single-worker reference
+        QThreadPool.globalInstance().start(worker)
+
+    def _prune_iterate_poll_workers(self):
+        """Drop finished poll workers, always keeping the most recent one."""
+        workers = getattr(self, '_iterate_poll_workers', None)
+        if workers:
+            self._iterate_poll_workers = workers[-1:]
+
+    def _on_iterate_poll_error(self, error_msg, traceback_str=""):
+        """Handle a failed iterate poll worker (clears the in-flight guard)."""
+        self._iterate_poll_in_flight = False
+        self._prune_iterate_poll_workers()
+        logger.warning(f"Poll error: {error_msg}")
 
     def _on_iterate_poll_result(self, result):
         """Handle iterate poll result."""
+        self._iterate_poll_in_flight = False
+        self._prune_iterate_poll_workers()
         try:
             self._handle_iterate_poll_result(result)
         except Exception as e:
@@ -437,8 +488,11 @@ class PollingMixin:
             self._iterate_poll_timer.stop()
         self.main_window.stop_status_spinner()
         self._update_cancel_button_visibility()
-        # Clear worker reference to allow garbage collection
+        # Clear worker references to allow garbage collection and reset the guard
         self._iterate_poll_worker = None
+        self._iterate_poll_workers = []
+        self._iterate_poll_in_flight = False
+        self._iterate_poll_started_at = 0.0
         # Clear persisted job state since polling stopped
         self._clear_running_job_state()
 
@@ -1132,6 +1186,9 @@ class PollingMixin:
     # CANCEL JOBS
     # =========================================================================
 
+    # Cancelling more than this many jobs at once asks for confirmation first.
+    _CANCEL_CONFIRM_THRESHOLD = 3
+
     def _on_cancel_jobs_clicked(self):
         """Handle cancel jobs button click."""
         from ui_components import Worker
@@ -1151,13 +1208,17 @@ class PollingMixin:
             self.show_status("No running jobs to cancel", "warning")
             return
 
-        if not confirm_action(
-            "Cancel Jobs",
-            f"Are you sure you want to cancel {len(job_ids)} running job(s)?\n\n"
-            "This will complete all tasks immediately, triggering auto-deletion.",
-            self.main_window
-        ):
-            return
+        # Cancelling one or two jobs is cheap to redo, so don't make the user
+        # click through a dialog for it. Only confirm when a larger batch is at
+        # stake (matching the submit path, which never confirms).
+        if len(job_ids) > self._CANCEL_CONFIRM_THRESHOLD:
+            if not confirm_action(
+                "Cancel Jobs",
+                f"Are you sure you want to cancel {len(job_ids)} running job(s)?\n\n"
+                "This will complete all tasks immediately, triggering auto-deletion.",
+                self.main_window
+            ):
+                return
 
         logger.info(f"[Cancel] Cancelling {len(job_ids)} jobs...")
         self.ui.ComfyUICancelJobs.setEnabled(False)

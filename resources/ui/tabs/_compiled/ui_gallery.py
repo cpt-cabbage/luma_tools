@@ -40,6 +40,13 @@ class Ui_GalleryTab(object):
 
         self.galleryHeaderLayout.addWidget(self.GallerySortButton)
 
+        self.GalleryShortcutsButton = QPushButton(GalleryTab)
+        self.GalleryShortcutsButton.setObjectName(u"GalleryShortcutsButton")
+        self.GalleryShortcutsButton.setMaximumSize(QSize(34, 16777215))
+        self.GalleryShortcutsButton.setFlat(True)
+
+        self.galleryHeaderLayout.addWidget(self.GalleryShortcutsButton)
+
         self.galleryHeaderSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.galleryHeaderLayout.addItem(self.galleryHeaderSpacer)
@@ -107,13 +114,17 @@ class Ui_GalleryTab(object):
     # setupUi
 
     def retranslateUi(self, GalleryTab):
-        self.GalleryUserButton.setText(QCoreApplication.translate("GalleryTab", u"You", None))
+        self.GalleryUserButton.setText(QCoreApplication.translate("GalleryTab", u"User: You", None))
 #if QT_CONFIG(tooltip)
         self.GalleryUserButton.setToolTip(QCoreApplication.translate("GalleryTab", u"Click to select user gallery to view", None))
 #endif // QT_CONFIG(tooltip)
         self.GallerySortButton.setText(QCoreApplication.translate("GalleryTab", u"Date", None))
 #if QT_CONFIG(tooltip)
         self.GallerySortButton.setToolTip(QCoreApplication.translate("GalleryTab", u"Click to change sort field", None))
+#endif // QT_CONFIG(tooltip)
+        self.GalleryShortcutsButton.setText(QCoreApplication.translate("GalleryTab", u"\u2328", None))
+#if QT_CONFIG(tooltip)
+        self.GalleryShortcutsButton.setToolTip(QCoreApplication.translate("GalleryTab", u"Keyboard shortcuts", None))
 #endif // QT_CONFIG(tooltip)
         self.GalleryOpenExplorer.setText(QCoreApplication.translate("GalleryTab", u"Open in Explorer", None))
 #if QT_CONFIG(tooltip)

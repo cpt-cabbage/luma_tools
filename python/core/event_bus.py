@@ -98,6 +98,15 @@ class PipelineEventBus(QObject):
     gallery_refresh_requested = Signal(bool)
 
     # =========================================================================
+    # Settings Events
+    # =========================================================================
+
+    # Emitted after settings are saved so open tabs can pick up changes
+    # (e.g. network_output_path affects Gallery paths and ComfyUI displays)
+    # Args: changed_keys (list of str) - setting names that changed
+    settings_changed = Signal(list)
+
+    # =========================================================================
     # Viewer Events (for image viewers to request gallery actions)
     # =========================================================================
 

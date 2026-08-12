@@ -1218,11 +1218,16 @@ def copy_inputs_to_server(input_files: list, server_input_dir: str):
 # File Hashing
 # =============================================================================
 
-# Cache for file hashes: path -> (mtime, hash)
-# Uses ThreadSafeCache when available, plain dict with lock as fallback
+# In-memory cache for file hashes: path -> (mtime, hash)
+# Uses ThreadSafeCache when available, plain dict with lock as fallback.
+# Sized for whole galleries: at 256 entries a directory of a few hundred files
+# thrashed the cache and re-read every file's full content over SMB on every
+# poll tick.
+_HASH_CACHE_MAX = 4096
+
 try:
     from core.caching import ThreadSafeCache
-    _hash_cache = ThreadSafeCache(max_size=256)
+    _hash_cache = ThreadSafeCache(max_size=_HASH_CACHE_MAX)
     _HASH_CACHE_TYPE = "threadsafe"
 except ImportError:
     # Farm environment — use OrderedDict with lock for LRU-like eviction
@@ -1230,6 +1235,135 @@ except ImportError:
     _hash_cache = OrderedDict()
     _hash_cache_lock = threading.RLock()
     _HASH_CACHE_TYPE = "dict"
+
+
+# =============================================================================
+# Persistent (local) hash sidecar
+# =============================================================================
+# The in-memory cache dies with the process, so every app start re-read the
+# full content of every gallery file over the network. A small LOCAL sidecar
+# keyed by (mtime, size) survives restarts and never touches the share.
+
+_HASH_SIDECAR_MAX_ENTRIES = 20000
+_HASH_SIDECAR_FLUSH_EVERY = 50
+
+_sidecar_lock = threading.RLock()
+_sidecar_data = None          # dict: path -> [mtime, size, hash]
+_sidecar_dirty = 0            # unflushed insert count
+_sidecar_disabled = False     # set when the sidecar can't be used at all
+
+
+def _hash_sidecar_path() -> Optional[str]:
+    """Local path of the persistent hash sidecar (never on the network)."""
+    try:
+        return os.path.join(os.path.expanduser("~"), ".luma_tools", "hash_cache.json")
+    except Exception:
+        return None
+
+
+def _load_hash_sidecar() -> dict:
+    """Lazily load the persistent sidecar. Caller must hold _sidecar_lock."""
+    global _sidecar_data, _sidecar_disabled
+
+    if _sidecar_data is not None:
+        return _sidecar_data
+
+    _sidecar_data = {}
+    path = _hash_sidecar_path()
+    if not path or _sidecar_disabled:
+        return _sidecar_data
+
+    try:
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                _sidecar_data = {
+                    k: v for k, v in loaded.items()
+                    if isinstance(v, (list, tuple)) and len(v) == 3
+                }
+    except Exception as e:
+        logger.debug(f"[hash] Could not read hash sidecar: {e}")
+        _sidecar_data = {}
+
+    return _sidecar_data
+
+
+def _flush_hash_sidecar_locked() -> None:
+    """Write the sidecar to disk atomically. Caller must hold _sidecar_lock."""
+    global _sidecar_dirty, _sidecar_disabled
+
+    if _sidecar_data is None or _sidecar_disabled:
+        return
+
+    path = _hash_sidecar_path()
+    if not path:
+        return
+
+    try:
+        # core.utils.save_json does the atomic temp-file + replace dance and
+        # creates the parent directory. Lazily imported: utils.py also runs on
+        # farm workers where the `core` package does not exist.
+        from core.utils import save_json
+        save_json(path, _sidecar_data, pretty=False)
+        _sidecar_dirty = 0
+    except ImportError:
+        # Farm environment — no local sidecar there, stop trying.
+        _sidecar_disabled = True
+    except Exception as e:
+        logger.debug(f"[hash] Could not write hash sidecar: {e}")
+        _sidecar_dirty = 0
+
+
+def flush_hash_cache() -> None:
+    """Persist any pending hash sidecar entries (safe to call anytime)."""
+    with _sidecar_lock:
+        if _sidecar_dirty:
+            _flush_hash_sidecar_locked()
+
+
+def _sidecar_get(file_path: str, mtime: float, size: int) -> Optional[str]:
+    """Look up a hash in the persistent sidecar by (mtime, size)."""
+    with _sidecar_lock:
+        entry = _load_hash_sidecar().get(file_path)
+        if not entry:
+            return None
+        try:
+            cached_mtime, cached_size, cached_hash = entry
+        except (ValueError, TypeError):
+            return None
+        if cached_mtime == mtime and cached_size == size:
+            return cached_hash
+    return None
+
+
+def _sidecar_put(file_path: str, mtime: float, size: int, file_hash: str) -> None:
+    """Record a hash in the persistent sidecar (flushed in batches)."""
+    global _sidecar_dirty
+
+    with _sidecar_lock:
+        if _sidecar_disabled:
+            return
+        data = _load_hash_sidecar()
+        data[file_path] = [mtime, size, file_hash]
+
+        # Bound growth: drop oldest inserted entries (dicts keep insert order)
+        while len(data) > _HASH_SIDECAR_MAX_ENTRIES:
+            try:
+                data.pop(next(iter(data)))
+            except StopIteration:
+                break
+
+        _sidecar_dirty += 1
+        if _sidecar_dirty >= _HASH_SIDECAR_FLUSH_EVERY:
+            _flush_hash_sidecar_locked()
+
+
+try:
+    import atexit
+    atexit.register(flush_hash_cache)
+except Exception:  # pragma: no cover - atexit is always available in CPython
+    pass
 
 
 def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str]:
@@ -1251,7 +1385,9 @@ def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str
         return None
 
     try:
-        current_mtime = os.path.getmtime(file_path)
+        stat_result = os.stat(file_path)
+        current_mtime = stat_result.st_mtime
+        current_size = stat_result.st_size
     except OSError:
         return None
 
@@ -1274,6 +1410,19 @@ def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str
             if cached_mtime == current_mtime:
                 return cached_hash
 
+    # Second chance: the LOCAL persistent sidecar. Survives app restarts, so a
+    # cold start doesn't re-read every gallery file's full content over SMB.
+    if algorithm == "sha256":
+        sidecar_hash = _sidecar_get(file_path, current_mtime, current_size)
+        if sidecar_hash:
+            if _HASH_CACHE_TYPE == "threadsafe":
+                _hash_cache.set(cache_key, (current_mtime, sidecar_hash))
+            else:
+                with _hash_cache_lock:
+                    _hash_cache[cache_key] = (current_mtime, sidecar_hash)
+                    _hash_cache.move_to_end(cache_key)
+            return sidecar_hash
+
     # Compute hash
     try:
         h = hashlib.new(algorithm)
@@ -1294,8 +1443,11 @@ def compute_file_hash(file_path: str, algorithm: str = "sha256") -> Optional[str
     else:
         with _hash_cache_lock:
             # LRU eviction: remove oldest entries (first in OrderedDict)
-            while len(_hash_cache) >= 256:
+            while len(_hash_cache) >= _HASH_CACHE_MAX:
                 _hash_cache.popitem(last=False)
             _hash_cache[cache_key] = (current_mtime, file_hash)
+
+    if algorithm == "sha256":
+        _sidecar_put(file_path, current_mtime, current_size, file_hash)
 
     return file_hash

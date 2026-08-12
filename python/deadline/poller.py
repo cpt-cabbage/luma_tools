@@ -9,6 +9,7 @@ import os
 import re
 import time
 import logging
+import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -24,6 +25,63 @@ from deadline.parser import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Precompiled regexes
+#
+# extract_task_progress() runs on every poll tick for every in-flight job and
+# scans up to 256 KB of log text against ~25 patterns. Compiling them once at
+# import time keeps the hot path out of re's internal cache lookup entirely.
+# ---------------------------------------------------------------------------
+
+_RE_JOB_ID = re.compile(r'^[a-fA-F0-9]{24}$')
+
+# Patterns that indicate ComfyUI is loading models into GPU memory.
+_RE_MODEL_LOADING = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r'Loading\s+model',
+        r'Loading\s+checkpoint',
+        r'Loading\s+CLIP',
+        r'Loading\s+VAE',
+        r'Loading\s+ControlNet',
+        r'Loading\s+LoRA',
+        r'Loading\s+UNET',
+        r'model\s+loaded',
+        r'models\s+loaded',
+        r'Moving\s+model\s+to',
+        r'weights\s+loaded',
+        r'to_model.*loaded',
+        r'Trellis.*Loading',
+        r'Loading.*safetensors',
+        r'Loading.*ckpt',
+        r'CLIP/text encoder model load device',
+        r'VAE load device',
+        r'model_type\s+FLUX',
+        r'Requested to load',
+        r'Using.*Ops for text encoder',
+        r'model weight dtype',
+    )
+]
+
+# Runner format - "Progress: 42% (5/12) (15s)" or "Progress: 42% (5/12)"
+_RE_PROGRESS_RUNNER = re.compile(r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?')
+
+# tqdm format - " 12%|<bar chars>| 1/8 [00:03<00:24,  3.46s/it]"
+# Uses [^\|]* to match ANY characters between pipes (tqdm uses many unicode block chars)
+_RE_PROGRESS_TQDM = re.compile(r'\s*(\d+)%\|[^\|]*\|\s*(\d+)/(\d+)\s*\[')
+
+# Current node name - "Executing node 5: KSampler" / "Executing node 5, title: KSampler"
+_RE_NODE_NAME_BASE = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r'Executing node \d+[,:]?\s*(?:title:?\s*)?([^\n\r]+?)(?:\s*\(|$|\n)',
+        r'Running node:\s*([^\n\r]+)',
+    )
+]
+_RE_NODE_NAME_FULL = _RE_NODE_NAME_BASE + [
+    re.compile(r'\[ComfyUI\]\s*Executing:\s*([^\n\r]+)', re.IGNORECASE)
+]
+
+_RE_EXECUTION_STARTED = re.compile(r'Execution\s+started|Executing\s+node', re.IGNORECASE)
 
 
 def _parse_deadline_date(date_str: str) -> datetime:
@@ -54,7 +112,7 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
         Dict with status, progress, completed_tasks, total_tasks, error_message
     """
     # Validate job ID format (Deadline uses 24-character hex IDs)
-    if not job_id or not re.match(r'^[a-fA-F0-9]{24}$', job_id):
+    if not job_id or not _RE_JOB_ID.match(job_id):
         logger.error(f"Invalid Deadline job ID format: {job_id}")
         return {"status": "Unknown", "progress": 0}
 
@@ -115,7 +173,9 @@ def poll_deadline_job_status(job_id: str, output_dir: Optional[str] = None) -> D
                 # Extract the output prefix from the job name (e.g., "LUMA TOOLS - luma_tools_job_xyz" -> "luma_tools_job_xyz")
                 if job_name.startswith(DEADLINE_JOB_NAME_PREFIX):
                     output_prefix = job_name[len(DEADLINE_JOB_NAME_PREFIX):]
-                    log_content = get_runner_log_from_network(output_dir, output_prefix)
+                    log_content = get_runner_log_from_network(
+                        output_dir, output_prefix, job_id=job_id
+                    )
 
             # Fall back to Deadline task log if network log not available
             if not log_content:
@@ -179,16 +239,54 @@ def get_task_log(job_id: str, task_id: int) -> Optional[str]:
         return None
 
 
-def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]:
+# ---------------------------------------------------------------------------
+# Runner-log path cache
+#
+# The runner-log directory lives on the network share and holds every job's log
+# for every user. Globbing it on every poll tick (per job, every few seconds) is
+# a remote directory listing we only need once: the resolved path for a given
+# job never changes while that job runs. Cache it, drop the entry if the file
+# disappears (log rotated / job cleaned up) so the next call re-resolves.
+# ---------------------------------------------------------------------------
+_RUNNER_LOG_PATH_CACHE: Dict[str, str] = {}
+_RUNNER_LOG_PATH_CACHE_LOCK = threading.RLock()
+_RUNNER_LOG_PATH_CACHE_MAX = 200
+
+
+def _cache_runner_log_path(cache_key: str, path: str) -> None:
+    """Store a resolved runner-log path, evicting oldest entries when full."""
+    with _RUNNER_LOG_PATH_CACHE_LOCK:
+        if len(_RUNNER_LOG_PATH_CACHE) >= _RUNNER_LOG_PATH_CACHE_MAX:
+            # dicts preserve insertion order — drop the oldest quarter at once
+            # so we don't pay the eviction cost on every single insert.
+            for stale_key in list(_RUNNER_LOG_PATH_CACHE)[:_RUNNER_LOG_PATH_CACHE_MAX // 4]:
+                _RUNNER_LOG_PATH_CACHE.pop(stale_key, None)
+        _RUNNER_LOG_PATH_CACHE[cache_key] = path
+
+
+def clear_runner_log_path_cache() -> None:
+    """Drop all cached runner-log paths (used by tests and job cleanup)."""
+    with _RUNNER_LOG_PATH_CACHE_LOCK:
+        _RUNNER_LOG_PATH_CACHE.clear()
+
+
+def get_runner_log_from_network(
+    output_dir: str, job_name: str, job_id: Optional[str] = None
+) -> Optional[str]:
     """
     Get the ComfyUI runner log from the network log directory.
 
     The runner writes logs to <network_path>/_logs/runner/ with pattern:
     comfyui_runner_{job_name}_{timestamp}.log
 
+    The resolved log path is cached per job so repeated polls don't re-glob the
+    shared network log directory. A cached entry is discarded automatically if
+    the file no longer exists.
+
     Args:
         output_dir: Network output directory (used as fallback and to derive network path)
         job_name: Job name/output prefix
+        job_id: Optional Deadline job ID — used as the cache key when available
 
     Returns:
         Log file contents, or None if not found/readable
@@ -197,6 +295,17 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
     from core.logging_utils import get_network_log_dir
 
     try:
+        cache_key = job_id or f"{output_dir}|{job_name}"
+
+        with _RUNNER_LOG_PATH_CACHE_LOCK:
+            cached_path = _RUNNER_LOG_PATH_CACHE.get(cache_key)
+        if cached_path:
+            if os.path.isfile(cached_path):
+                return _read_log_tail(cached_path)
+            # File vanished (rotated/cleaned up) — invalidate and re-resolve.
+            with _RUNNER_LOG_PATH_CACHE_LOCK:
+                _RUNNER_LOG_PATH_CACHE.pop(cache_key, None)
+
         # Find the most recent log file matching the job name
         # Don't truncate - UUIDs can be longer than 50 chars
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
@@ -210,6 +319,7 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
 
             if log_files:
                 latest_log = max(log_files, key=os.path.getmtime)
+                _cache_runner_log_path(cache_key, latest_log)
                 return _read_log_tail(latest_log)
 
         # Fallback: search in output directory itself (legacy location)
@@ -219,6 +329,7 @@ def get_runner_log_from_network(output_dir: str, job_name: str) -> Optional[str]
 
             if log_files:
                 latest_log = max(log_files, key=os.path.getmtime)
+                _cache_runner_log_path(cache_key, latest_log)
                 return _read_log_tail(latest_log)
 
         return None
@@ -264,36 +375,10 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     if not log_content:
         return None
 
-    # Detect model loading patterns in ComfyUI logs
-    # These patterns appear when ComfyUI is loading models into GPU memory
-    model_loading_patterns = [
-        r'Loading\s+model',
-        r'Loading\s+checkpoint',
-        r'Loading\s+CLIP',
-        r'Loading\s+VAE',
-        r'Loading\s+ControlNet',
-        r'Loading\s+LoRA',
-        r'Loading\s+UNET',
-        r'model\s+loaded',
-        r'models\s+loaded',
-        r'Moving\s+model\s+to',
-        r'weights\s+loaded',
-        r'to_model.*loaded',
-        r'Trellis.*Loading',
-        r'Loading.*safetensors',
-        r'Loading.*ckpt',
-        r'CLIP/text encoder model load device',
-        r'VAE load device',
-        r'model_type\s+FLUX',
-        r'Requested to load',
-        r'Using.*Ops for text encoder',
-        r'model weight dtype',
-    ]
-
-    # Check for model loading indicators
+    # Check for model loading indicators (patterns precompiled at module level)
     is_loading_model = False
-    for pattern in model_loading_patterns:
-        if re.search(pattern, log_content, re.IGNORECASE):
+    for pattern in _RE_MODEL_LOADING:
+        if pattern.search(log_content):
             is_loading_model = True
             break
 
@@ -301,30 +386,18 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     if 'RESTART' in log_content.upper() or 'Server restart' in log_content:
         is_loading_model = True
 
-    # Pattern 1: Runner format - Progress: 42% (5/12) (15s) or Progress: 42% (5/12)
-    pattern_runner = r'Progress:\s*(\d+)%\s*\((\d+)/(\d+)\)(?:\s*\((\d+)s\))?'
-
-    # Pattern 2: tqdm format - " 12%|█▎        | 1/8 [00:03<00:24,  3.46s/it]"
-    # Uses [^\|]* to match ANY characters between pipes (tqdm uses many unicode block chars)
-    # Captures: percent, current, total
-    pattern_tqdm = r'\s*(\d+)%\|[^\|]*\|\s*(\d+)/(\d+)\s*\['
-
     # Search from end of log (most recent progress) - try runner format first
-    matches = list(re.finditer(pattern_runner, log_content))
+    matches = list(_RE_PROGRESS_RUNNER.finditer(log_content))
 
     # If no runner format matches, try tqdm format
     if not matches:
-        tqdm_matches = list(re.finditer(pattern_tqdm, log_content))
+        tqdm_matches = list(_RE_PROGRESS_TQDM.finditer(log_content))
         if tqdm_matches:
             last_tqdm = tqdm_matches[-1]
             # Try to extract node name for tqdm format as well
             current_node_name = None
-            node_name_patterns = [
-                r'Executing node \d+[,:]?\s*(?:title:?\s*)?([^\n\r]+?)(?:\s*\(|$|\n)',
-                r'Running node:\s*([^\n\r]+)',
-            ]
-            for pattern in node_name_patterns:
-                name_matches = list(re.finditer(pattern, log_content, re.IGNORECASE))
+            for pattern in _RE_NODE_NAME_BASE:
+                name_matches = list(pattern.finditer(log_content))
                 if name_matches:
                     current_node_name = name_matches[-1].group(1).strip().rstrip('.')
                     break
@@ -342,7 +415,7 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
         # No progress yet - check if execution has started
         # If we see "Execution started" or "Executing node" but no progress,
         # we're likely in the model loading phase
-        execution_started = bool(re.search(r'Execution\s+started|Executing\s+node', log_content, re.IGNORECASE))
+        execution_started = bool(_RE_EXECUTION_STARTED.search(log_content))
         if execution_started or is_loading_model:
             return {
                 'progress_pct': 0,
@@ -361,13 +434,8 @@ def extract_task_progress(log_content: str) -> Optional[Dict[str, Any]]:
     # Try to extract current node name from ComfyUI logs
     # Pattern: "Executing node 5: KSampler" or "Executing node 5, title: KSampler"
     current_node_name = None
-    node_name_patterns = [
-        r'Executing node \d+[,:]?\s*(?:title:?\s*)?([^\n\r]+?)(?:\s*\(|$|\n)',
-        r'Running node:\s*([^\n\r]+)',
-        r'\[ComfyUI\]\s*Executing:\s*([^\n\r]+)',
-    ]
-    for pattern in node_name_patterns:
-        name_matches = list(re.finditer(pattern, log_content, re.IGNORECASE))
+    for pattern in _RE_NODE_NAME_FULL:
+        name_matches = list(pattern.finditer(log_content))
         if name_matches:
             current_node_name = name_matches[-1].group(1).strip()
             # Clean up common suffixes

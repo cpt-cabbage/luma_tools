@@ -38,8 +38,12 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
     def connect_signals(self):
         """Connect MP4 maker tab signals."""
-        self.ui.MP4ScanRenders.clicked.connect(self._on_scan_renders_clicked)
-        self.ui.MP4CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
+        # Explicit Rescan invalidates the shared task-dir scan cache first
+        self.ui.MP4ScanRenders.clicked.connect(self._on_rescan_clicked)
+        # Debounce rapid version spinbox changes (~350ms) before rescanning
+        self._connect_debounced(
+            self.ui.MP4CurrentVer.valueChanged, self._on_scan_renders_clicked
+        )
         # Source and quality buttons connected in initialize() via managers
         self.ui.MP4BrowseCustomPath.clicked.connect(self._on_browse_custom_path)
         self.ui.MP4RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
@@ -47,9 +51,21 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         self.ui.MP4Generate.clicked.connect(self._on_generate_clicked)
         # Add to Gallery checkbox state persistence
         self.ui.MP4AddToGallery.stateChanged.connect(self._on_add_to_gallery_changed)
+        # Burn-in timecode state persistence
+        self.ui.MP4BurnInTimecode.stateChanged.connect(self._on_burn_in_changed)
         # Publish to AYON checkbox signals
         self.ui.MP4PublishToAyon.stateChanged.connect(self._on_publish_to_ayon_changed)
         self.ui.MP4PublishOnFarm.stateChanged.connect(self._on_publish_on_farm_changed)
+
+    def _set_persistent_status(self, message: str):
+        """Write a terminal (success/failure) message to the sticky status label.
+
+        Unlike the animated status bar, this label survives tab switches so the
+        user can still read the outcome of a long encode minutes later.
+        """
+        label = getattr(self.ui, 'MP4StatusLabel', None)
+        if label is not None:
+            label.setText(message or "")
 
     def initialize(self):
         """Initialize MP4 maker tab."""
@@ -58,13 +74,18 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         self.ui.MP4Generate.setEnabled(False)
 
+        # Last successful encode + publish args, so a failed AYON publish can be
+        # retried against the MP4 already on disk instead of re-encoding.
+        self._last_published_mp4 = ""
+        self._last_publish_use_farm = False
+
         # Source manager from mixin
         self._init_source_manager()
 
         # Publish source widgets (product/version combos)
         self._init_publish_widgets(self.ui.MP4CurrentVer)
 
-        # Quality option manager (indexed options) - MP4-specific
+        # Quality option manager (indexed options) - MP4-specific, persisted
         self._quality_manager = IndexedOptionButtonManager(
             button=self.ui.MP4QualityButton,
             options=[
@@ -72,8 +93,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 (1, "Medium Quality (CRF 23)", "Quality: Medium (CRF 23)"),
                 (2, "Low Quality (CRF 28)", "Quality: Low (CRF 28)"),
             ],
-            initial_index=0,
-            on_changed=lambda idx: None,  # No additional action needed
+            initial_index=safe_get_setting("mp4_maker_quality_index", 0),
+            on_changed=self._on_quality_changed,
             parent_window=self.main_window
         )
 
@@ -81,6 +102,11 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         # (registry default is True, fall through to it for first-run users)
         add_to_gallery = safe_get_setting("mp4_maker_add_to_gallery", True)
         self.ui.MP4AddToGallery.setChecked(add_to_gallery)
+
+        # Load burn-in timecode state from user settings
+        self.ui.MP4BurnInTimecode.setChecked(
+            safe_get_setting("mp4_maker_burn_in_timecode", False)
+        )
 
         # Load Publish to AYON checkbox states
         publish_to_ayon = safe_get_setting("mp4_maker_publish_to_ayon", False)
@@ -147,6 +173,54 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
     def _quality_index(self):
         return self._quality_manager.index
 
+    def _on_quality_changed(self, index):
+        """Persist the selected output quality."""
+        from core.settings_manager import safe_set_setting
+        safe_set_setting("mp4_maker_quality_index", index)
+
+    def _on_burn_in_changed(self, state):
+        """Persist the burn-in timecode checkbox state."""
+        from core.settings_manager import safe_set_setting
+        from PySide6.QtCore import Qt
+        safe_set_setting("mp4_maker_burn_in_timecode", state == Qt.Checked)
+
+    @staticmethod
+    def _default_output_directory() -> str:
+        """Directory used when auto-filling the output path.
+
+        Prefers the directory the user last saved an MP4 into (the "mp4_output"
+        browse context, shared with the Browse... dialog) and falls back to
+        ~/Videos.
+        """
+        from core.user_preferences import get_last_browse_directory
+
+        last_dir = get_last_browse_directory("mp4_output")
+        if last_dir and os.path.isdir(last_dir):
+            return last_dir
+        return DEFAULT_VIDEOS_DIR
+
+    def _sync_frame_range_widgets(self, start_frame: int, end_frame: int):
+        """Prefill and clamp the In/Out spinboxes to the sequence bounds."""
+        for widget in (self.ui.MP4StartFrame, self.ui.MP4EndFrame):
+            widget.blockSignals(True)
+            widget.setRange(start_frame, end_frame)
+        self.ui.MP4StartFrame.setValue(start_frame)
+        self.ui.MP4EndFrame.setValue(end_frame)
+        for widget in (self.ui.MP4StartFrame, self.ui.MP4EndFrame):
+            widget.blockSignals(False)
+
+    def _get_frame_range_override(self):
+        """Return the (start, end) range from the In/Out spinboxes.
+
+        Values are already clamped to the sequence bounds by the spinbox range;
+        this additionally guards against an inverted range.
+        """
+        start = self.ui.MP4StartFrame.value()
+        end = self.ui.MP4EndFrame.value()
+        if end < start:
+            start, end = end, start
+        return start, end
+
     def _on_render_selection_changed(self):
         """Update MP4 state when selected render changes."""
         from services.mp4_maker import get_output_filename
@@ -162,14 +236,20 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         logger.info(f"MP4 Maker: Selected render from '{subdir}' - frames {self.app_state.mp4_startframe} to {self.app_state.mp4_endframe}")
 
-        # Automatically set output path to user's Videos folder
+        # Prefill the In/Out override spinboxes from the sequence bounds
+        self._sync_frame_range_widgets(
+            self.app_state.mp4_startframe, self.app_state.mp4_endframe
+        )
+
+        # Automatically set output path — remembered MP4 folder, else ~/Videos
         framename = render_seq.frame(render_seq.start())
         filename = os.path.basename(framename)
         from core.utils import extract_render_name
         render_name = extract_render_name(filename)
         default_filename = get_output_filename(render_name, self.app_state.shot)
-        videos_folder = DEFAULT_VIDEOS_DIR
-        self.app_state.mp4_output_path = os.path.join(videos_folder, default_filename)
+        self.app_state.mp4_output_path = os.path.join(
+            self._default_output_directory(), default_filename
+        )
 
         # Update UI
         self.ui.MP4OutputPath.setText(self.app_state.mp4_output_path)
@@ -255,7 +335,10 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             )
 
         subdir, render_seq = selected
-        framename = render_seq.frame(self.app_state.mp4_startframe)
+
+        # Frame-range override from the In/Out spinboxes (clamped to sequence)
+        start_frame, end_frame = self._get_frame_range_override()
+        framename = render_seq.frame(start_frame)
 
         # Build input pattern for ffmpeg
         base_dir = os.path.dirname(framename)
@@ -291,6 +374,10 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         # Switch button to Cancel mode
         self.ui.MP4Generate.setText("Cancel")
+        self._set_persistent_status(
+            f"Encoding frames {start_frame}-{end_frame} to "
+            f"{os.path.basename(self.app_state.mp4_output_path)}..."
+        )
 
         def on_progress(progress, message):
             """Update UI with MP4 generation progress."""
@@ -309,9 +396,36 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             self.ui.MP4Generate.setText("Generate MP4")
             self.ui.MP4Generate.setEnabled(True)
 
-        def on_result(success):
-            """Called when MP4 generation completes."""
+        def _show_failure(detail: str):
+            """Report an encode failure in the status bar, label and a dialog."""
+            from dialog_helpers import show_error
+
+            output_name = os.path.basename(self.app_state.mp4_output_path)
+            summary = (
+                f"Could not encode {output_name} (frames {start_frame}-{end_frame}). "
+                "Check that the render sequence is complete and that the output "
+                "folder is writable, then try again."
+            )
+            self.update_status_with_spinner(
+                f"MP4 generation failed: {detail}" if detail else "MP4 generation failed",
+                StatusColors.ERROR,
+                start=False
+            )
+            self._set_persistent_status(f"MP4 generation failed. {summary}")
+            show_error("MP4 Generation Failed", summary, self.main_window, detail=detail or None)
+
+        def on_result(result):
+            """Called when MP4 generation completes.
+
+            ``generate_mp4`` returns ``(success, error_detail)``; a plain bool is
+            still accepted so the tab keeps working with either service version.
+            """
             _reset_button()
+            if isinstance(result, tuple):
+                success, error_detail = (list(result) + [""])[:2]
+            else:
+                success, error_detail = bool(result), ""
+
             if success:
                 if want_gallery:
                     self.update_status_with_spinner(
@@ -319,7 +433,11 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                         StatusColors.INFO,
                         start=True
                     )
-                    self._copy_to_gallery(input_pattern, publish_after=want_publish)
+                    self._copy_to_gallery(
+                        input_pattern,
+                        publish_after=want_publish,
+                        frame_range=(start_frame, end_frame),
+                    )
                 elif want_publish:
                     self.update_status_with_spinner(
                         "MP4 generated. Publishing to AYON...",
@@ -334,12 +452,13 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                         start=False
                     )
                     self.show_status("MP4 generation complete!", "success")
+                    self._set_persistent_status(
+                        f"MP4 generated: {self.app_state.mp4_output_path} "
+                        f"(frames {start_frame}-{end_frame})"
+                    )
             else:
-                self.update_status_with_spinner(
-                    "MP4 generation failed",
-                    StatusColors.ERROR,
-                    start=False
-                )
+                logger.error(f"MP4 generation failed: {error_detail}")
+                _show_failure(error_detail)
 
         def on_error(error_msg, traceback_str):
             """Called when MP4 generation fails or is cancelled."""
@@ -352,15 +471,15 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                     start=False
                 )
                 self.show_status("MP4 generation cancelled", "warning")
+                self._set_persistent_status(
+                    "MP4 generation cancelled - any partial file at "
+                    f"{self.app_state.mp4_output_path} is incomplete."
+                )
                 return
 
-            self.update_status_with_spinner(
-                f"MP4 generation failed: {error_msg}",
-                StatusColors.ERROR,
-                start=False
-            )
             logger.error(f"MP4 generation error: {error_msg}")
             logger.debug(traceback_str)
+            _show_failure(error_msg or traceback_str)
 
         # Use BaseTab helper for worker management
         try:
@@ -368,8 +487,8 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 generate_mp4,
                 input_pattern,
                 self.app_state.mp4_output_path,
-                self.app_state.mp4_startframe,
-                self.app_state.mp4_endframe,
+                start_frame,
+                end_frame,
                 worker_kwargs={
                     "quality_index": quality_index,
                     "burn_in_timecode": burn_in_timecode,
@@ -401,7 +520,11 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         elif not self.app_state.has_ayon_context():
             self.ui.MP4PublishToAyon.setToolTip("Publish requires AYON context (launch from AYON)")
         else:
-            self.ui.MP4PublishToAyon.setToolTip("Publish the generated MP4 as a review file to AYON")
+            self.ui.MP4PublishToAyon.setToolTip(
+                "Publish the generated MP4 as a review file to AYON. The product "
+                "name is derived automatically from the MP4 filename "
+                "(review_<filename>)."
+            )
 
         # Publish on Farm additionally requires Deadline
         farm_enabled = ayon_enabled and DEADLINE_AVAILABLE
@@ -425,14 +548,20 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         from PySide6.QtCore import Qt
         safe_set_setting("mp4_maker_publish_on_farm", state == Qt.Checked)
 
-    def _copy_to_gallery(self, source_path: str, publish_after: bool = False):
+    def _copy_to_gallery(self, source_path: str, publish_after: bool = False,
+                         frame_range=None):
         """Copy the generated MP4 to the gallery folder with metadata.
 
         Args:
             source_path: EXR input pattern used for gallery metadata.
             publish_after: If True, chain AYON publish after gallery copy completes.
+            frame_range: Optional (start, end) actually encoded. Defaults to the
+                full sequence range stored in app_state.
         """
         from services.mp4_maker import copy_mp4_to_gallery
+
+        if frame_range is None:
+            frame_range = (self.app_state.mp4_startframe, self.app_state.mp4_endframe)
 
         def on_gallery_result(result):
             """Handle gallery copy completion."""
@@ -459,6 +588,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                     start=False
                 )
                 self.show_status("MP4 generation complete! Added to gallery.", "success")
+                self._set_persistent_status(
+                    f"MP4 generated and added to gallery: {self.app_state.mp4_output_path}"
+                )
             else:
                 self.update_status_with_spinner(
                     f"MP4 generated (gallery copy failed: {path_or_error})",
@@ -466,6 +598,10 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                     start=False
                 )
                 self.show_status(f"MP4 generated but gallery copy failed: {path_or_error}", "warning")
+                self._set_persistent_status(
+                    f"MP4 generated at {self.app_state.mp4_output_path}, but the gallery "
+                    f"copy failed: {path_or_error}"
+                )
 
         def on_gallery_error(error_msg, traceback_str):
             """Handle gallery copy error."""
@@ -484,6 +620,10 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                     StatusColors.WARNING,
                     start=False
                 )
+                self._set_persistent_status(
+                    f"MP4 generated at {self.app_state.mp4_output_path}, but the gallery "
+                    f"copy errored: {error_msg}"
+                )
 
         # Run gallery copy on worker thread
         self.start_worker(
@@ -493,7 +633,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                 "user": self.app_state.user,
                 "shot": self.app_state.shot,
                 "source_path": source_path,
-                "frame_range": (self.app_state.mp4_startframe, self.app_state.mp4_endframe),
+                "frame_range": frame_range,
                 "quality_index": self._quality_index,
                 "burn_in_timecode": self.ui.MP4BurnInTimecode.isChecked(),
             },
@@ -501,11 +641,56 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             on_error=on_gallery_error
         )
 
-    def _publish_mp4_to_ayon(self):
-        """Publish the generated MP4 to AYON as a review file."""
+    def _publish_mp4_to_ayon(self, mp4_path=None, use_farm=None):
+        """Publish an already-encoded MP4 to AYON as a review file.
 
-        use_farm = self.ui.MP4PublishOnFarm.isChecked() and self.ui.MP4PublishOnFarm.isEnabled()
-        mp4_path = self.app_state.mp4_output_path
+        Args:
+            mp4_path: MP4 to publish. Defaults to the last generated output.
+            use_farm: Override for the farm checkbox (used by the retry flow so a
+                retry reuses the same settings as the failed attempt).
+        """
+        if use_farm is None:
+            use_farm = self.ui.MP4PublishOnFarm.isChecked() and self.ui.MP4PublishOnFarm.isEnabled()
+        if mp4_path is None:
+            mp4_path = self.app_state.mp4_output_path
+
+        # Remember the encode so a failed publish can be retried without
+        # re-encoding the whole sequence.
+        self._last_published_mp4 = mp4_path
+        self._last_publish_use_farm = use_farm
+
+        def _offer_retry(detail):
+            """Offer to retry the publish, reusing the MP4 already on disk."""
+            from dialog_helpers import confirm_action
+
+            if not os.path.isfile(mp4_path):
+                self._set_persistent_status(
+                    f"AYON publish failed: {detail}. The MP4 is no longer at {mp4_path}, "
+                    "so it must be generated again."
+                )
+                return
+
+            self._set_persistent_status(
+                f"AYON publish failed: {detail}. The MP4 is still at {mp4_path} - "
+                "publishing can be retried without re-encoding."
+            )
+            retry = confirm_action(
+                "AYON Publish Failed",
+                f"Publishing {os.path.basename(mp4_path)} to AYON failed.\n\n"
+                "The MP4 was encoded successfully and is still on disk. "
+                "Retry the publish using the existing file?",
+                self.main_window,
+                detail=str(detail),
+            )
+            if retry:
+                self.update_status_with_spinner(
+                    "Retrying AYON publish...", StatusColors.INFO, start=True
+                )
+                # Reuse the stored encode + publish args — no re-encode needed
+                self._publish_mp4_to_ayon(
+                    mp4_path=self._last_published_mp4,
+                    use_farm=self._last_publish_use_farm,
+                )
 
         def on_publish_result(result):
             """Handle AYON publish completion."""
@@ -518,6 +703,9 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                         start=False
                     )
                     self.show_status(f"MP4 published to AYON via Deadline farm", "success")
+                    self._set_persistent_status(
+                        f"MP4 published to AYON via Deadline farm (job {detail}): {mp4_path}"
+                    )
                 else:
                     self.update_status_with_spinner(
                         "MP4 published to AYON",
@@ -525,6 +713,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                         start=False
                     )
                     self.show_status("MP4 published to AYON successfully!", "success")
+                    self._set_persistent_status(f"MP4 published to AYON: {mp4_path}")
             else:
                 self.update_status_with_spinner(
                     f"AYON publish failed: {detail}",
@@ -532,6 +721,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
                     start=False
                 )
                 self.show_status(f"AYON publish failed: {detail}", "error")
+                _offer_retry(detail)
 
         def on_publish_error(error_msg, traceback_str):
             """Handle AYON publish error."""
@@ -542,6 +732,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
             )
             logger.error(f"AYON publish error: {error_msg}")
             logger.debug(traceback_str)
+            _offer_retry(error_msg)
 
         def on_publish_progress(progress, message):
             """Update UI with publish progress."""

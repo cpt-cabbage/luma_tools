@@ -5,7 +5,9 @@ Handles saving and loading user preferences and global settings.
 Uses a registry pattern to minimize boilerplate for simple settings.
 """
 
+import copy
 import os
+import time
 import logging
 import threading
 from dataclasses import dataclass
@@ -66,6 +68,22 @@ def _validate_deadline_poll_interval(v):
         return max(1, min(60, int(v)))
     except (ValueError, TypeError):
         return 5  # Default 5 seconds
+
+def _validate_build_type(v):
+    return _validate_enum(v, ("local", "farm"), "local")
+
+def _validate_quality_index(v):
+    try:
+        return max(0, min(10, int(v)))
+    except (ValueError, TypeError):
+        return 0
+
+def _validate_gallery_poll_interval(v):
+    """Validate Gallery network poll interval (5-300 seconds)."""
+    try:
+        return max(5, min(300, int(v)))
+    except (ValueError, TypeError):
+        return 10
 
 # Registry of all simple settings (get/set only, no complex logic)
 SETTINGS_REGISTRY: Dict[str, SettingDef] = {
@@ -142,10 +160,19 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "show_statusbar_log": SettingDef("show_statusbar_log", False, "user"),
     # Pass Builder settings
     "pass_builder_publish_to_ayon": SettingDef("pass_builder_publish_to_ayon", True, "user"),
+    "pass_builder_build_type": SettingDef("pass_builder_build_type", "local", "user", _validate_build_type),
     # MP4 Maker settings
     "mp4_maker_add_to_gallery": SettingDef("mp4_maker_add_to_gallery", True, "user"),
     "mp4_maker_publish_to_ayon": SettingDef("mp4_maker_publish_to_ayon", False, "user"),
     "mp4_maker_publish_on_farm": SettingDef("mp4_maker_publish_on_farm", False, "user"),
+    "mp4_maker_quality_index": SettingDef("mp4_maker_quality_index", 0, "user", _validate_quality_index),
+    "mp4_maker_burn_in_timecode": SettingDef("mp4_maker_burn_in_timecode", False, "user"),
+    # rePublish settings
+    "republish_use_farm": SettingDef("republish_use_farm", False, "user"),
+    # ComfyUI seed behavior
+    "comfyui_auto_randomize_seed": SettingDef("comfyui_auto_randomize_seed", False, "user"),
+    # Gallery network polling interval (seconds)
+    "gallery_poll_interval": SettingDef("gallery_poll_interval", 10, "user", _validate_gallery_poll_interval),
     # ComfyUI-Gallery integration settings
     "comfyui_completion_sound": SettingDef("comfyui_completion_sound", "none", "user"),  # none, subtle, system
     # ComfyUI Model Picker settings
@@ -173,14 +200,86 @@ _global_settings_cache: Optional[Dict[str, Any]] = None
 _global_settings_path_cache: Optional[str] = None
 _settings_cache_lock = threading.RLock()
 
+# Staleness tracking for the global settings cache. The global file is shared
+# studio-wide and written by multiple workstations, so the cache must notice
+# external changes: we re-stat the file's mtime at most every
+# _GLOBAL_CACHE_TTL seconds and reload when it changed.
+_GLOBAL_CACHE_TTL = 5.0
+_global_settings_mtime: Optional[float] = None
+_global_settings_last_check: float = 0.0
+
+# When a custom global-settings path is configured but unreachable (network
+# blip), fall back to the default path temporarily and retry the custom path
+# after this many seconds instead of caching the fallback for the session.
+_FALLBACK_PATH_RETRY_TTL = 30.0
+_global_settings_path_fallback_until: float = 0.0
+
+# Cross-process lockfile for global settings read-modify-write cycles.
+_GLOBAL_LOCK_TIMEOUT = 5.0      # max seconds to wait for the lock
+_GLOBAL_LOCK_STALE_AGE = 10.0   # break locks older than this (crashed writer)
+
+
+def _acquire_global_lockfile(settings_file: str) -> Optional[str]:
+    """Best-effort cross-process lock around global settings writes.
+
+    Returns the lock path when acquired, None when the lock could not be
+    obtained in time (callers proceed anyway — availability over strictness,
+    the atomic tmp+rename write still prevents torn files).
+    """
+    lock_path = settings_file + ".lock"
+    deadline = time.monotonic() + _GLOBAL_LOCK_TIMEOUT
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return lock_path
+        except FileExistsError:
+            # Break stale locks left by a crashed writer
+            try:
+                if time.time() - os.path.getmtime(lock_path) > _GLOBAL_LOCK_STALE_AGE:
+                    os.remove(lock_path)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                logger.warning("Timed out waiting for global settings lock; proceeding without it")
+                return None
+            time.sleep(0.05)
+        except OSError as e:
+            logger.warning(f"Could not create global settings lock: {e}")
+            return None
+
+
+def _release_global_lockfile(lock_path: Optional[str]):
+    if not lock_path:
+        return
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
+
+
+def _record_global_mtime(settings_file: str):
+    """Remember the on-disk mtime backing the current cache (lock held)."""
+    global _global_settings_mtime, _global_settings_last_check
+    try:
+        _global_settings_mtime = os.path.getmtime(settings_file)
+    except OSError:
+        _global_settings_mtime = None
+    _global_settings_last_check = time.monotonic()
+
 
 def clear_settings_cache():
     """Clear all settings caches. Call after saving settings."""
     global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
+    global _global_settings_mtime, _global_settings_last_check, _global_settings_path_fallback_until
     with _settings_cache_lock:
         _user_settings_cache = None
         _global_settings_cache = None
         _global_settings_path_cache = None
+        _global_settings_mtime = None
+        _global_settings_last_check = 0.0
+        _global_settings_path_fallback_until = 0.0
     from .logging_utils import clear_path_cache
     clear_path_cache()
 
@@ -193,10 +292,14 @@ def reload_settings():
     the lock internally for cache population.
     """
     global _user_settings_cache, _global_settings_cache, _global_settings_path_cache
+    global _global_settings_mtime, _global_settings_last_check, _global_settings_path_fallback_until
     with _settings_cache_lock:
         _user_settings_cache = None
         _global_settings_cache = None
         _global_settings_path_cache = None
+        _global_settings_mtime = None
+        _global_settings_last_check = 0.0
+        _global_settings_path_fallback_until = 0.0
     # Reload outside lock — load functions acquire the lock internally
     # and file I/O won't block other threads from reading cached values
     load_user_settings()
@@ -282,8 +385,14 @@ def save_user_settings(settings: Dict[str, Any]):
 
 
 def get_global_settings_path() -> str:
-    """Get the path to the global settings directory. Thread-safe via _settings_cache_lock."""
-    global _global_settings_path_cache
+    """Get the path to the global settings directory. Thread-safe via _settings_cache_lock.
+
+    When a custom path is configured but momentarily unreachable (network
+    blip), the default path is used temporarily WITHOUT being cached for the
+    session — the custom path is retried after _FALLBACK_PATH_RETRY_TTL so a
+    recovered share doesn't leave writes going to the wrong file.
+    """
+    global _global_settings_path_cache, _global_settings_path_fallback_until
     with _settings_cache_lock:
         if _global_settings_path_cache is not None:
             return _global_settings_path_cache
@@ -291,11 +400,25 @@ def get_global_settings_path() -> str:
         # Load inside lock to prevent TOCTOU race between cache check and load
         settings = load_user_settings()
         path = settings.get("global_settings_path")
-        if path and os.path.isdir(path):
+        if not path:
+            _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
+            return DEFAULT_GLOBAL_SETTINGS_PATH
+
+        now = time.monotonic()
+        if now < _global_settings_path_fallback_until:
+            # Custom path recently failed — serve fallback without re-probing
+            return DEFAULT_GLOBAL_SETTINGS_PATH
+
+        if os.path.isdir(path):
             _global_settings_path_cache = path
             return path
 
-        _global_settings_path_cache = DEFAULT_GLOBAL_SETTINGS_PATH
+        # Custom path configured but unreachable: temporary fallback, retry later
+        _global_settings_path_fallback_until = now + _FALLBACK_PATH_RETRY_TTL
+        logger.warning(
+            f"Configured global settings path unreachable ({path}); "
+            f"using default temporarily, will retry in {int(_FALLBACK_PATH_RETRY_TTL)}s"
+        )
         return DEFAULT_GLOBAL_SETTINGS_PATH
 
 
@@ -325,40 +448,119 @@ def _ensure_global_settings_dir():
         logger.info(f"Created global settings directory: {path}")
 
 
+def _global_default_settings() -> Dict[str, Any]:
+    return {
+        "comfyui_workflow_presets": {},
+        "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
+    }
+
+
 def load_global_settings() -> Dict[str, Any]:
-    """Load global settings from file. Thread-safe via _settings_cache_lock."""
+    """Load global settings from file. Thread-safe via _settings_cache_lock.
+
+    The cache is invalidated automatically when the on-disk file's mtime
+    changes (checked at most every _GLOBAL_CACHE_TTL seconds), so changes
+    made by other workstations — presets, admin roles, HDRIs — are picked up
+    without an app restart.
+    """
     from .utils import load_json
-    global _global_settings_cache
+    global _global_settings_cache, _global_settings_last_check
     with _settings_cache_lock:
         if _global_settings_cache is not None:
-            return _global_settings_cache.copy()
+            now = time.monotonic()
+            if now - _global_settings_last_check < _GLOBAL_CACHE_TTL:
+                return _global_settings_cache.copy()
+            # TTL expired — cheap freshness probe against the network file
+            settings_file = _get_global_settings_file()
+            try:
+                disk_mtime = os.path.getmtime(settings_file)
+            except OSError:
+                disk_mtime = None  # unreachable/missing: keep serving the cache
+            _global_settings_last_check = now
+            if disk_mtime is None or disk_mtime == _global_settings_mtime:
+                return _global_settings_cache.copy()
+            logger.info("Global settings changed on disk — reloading")
+            _global_settings_cache = None
 
-        default_settings = {
-            "comfyui_workflow_presets": {},
-            "admin_users": [],  # Admins: full access (all tabs including Settings) - set in global_settings.json
-        }
+        default_settings = _global_default_settings()
         settings_file = _get_global_settings_file()
 
         if not os.path.exists(settings_file):
             _global_settings_cache = default_settings
+            _record_global_mtime(settings_file)
             return default_settings.copy()
 
         settings = load_json(settings_file, default_settings)
         _global_settings_cache = settings
+        _record_global_mtime(settings_file)
         return settings.copy()
 
 
 def save_global_settings(settings: Dict[str, Any]):
-    """Save global settings to file using atomic write. Thread-safe via _settings_cache_lock."""
+    """Save global settings to file using atomic write. Thread-safe via _settings_cache_lock.
+
+    WARNING: this replaces the ENTIRE file with the caller's dict. For
+    read-modify-write updates (adding a preset, toggling one key) use
+    update_global_settings() instead — it re-reads the file from disk under a
+    cross-process lock so concurrent changes from other workstations are not
+    silently overwritten.
+    """
     from .utils import save_json
     global _global_settings_cache
     with _settings_cache_lock:
         _ensure_global_settings_dir()
         settings_file = _get_global_settings_file()
-        if save_json(settings_file, settings):
-            _global_settings_cache = settings.copy()
-        else:
-            logger.error("Failed to save global settings")
+        lock_path = _acquire_global_lockfile(settings_file)
+        try:
+            if save_json(settings_file, settings):
+                _global_settings_cache = settings.copy()
+                _record_global_mtime(settings_file)
+            else:
+                logger.error("Failed to save global settings")
+        finally:
+            _release_global_lockfile(lock_path)
+
+
+def update_global_settings(mutator: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """Cross-process-safe read-modify-write of the global settings file.
+
+    The mutator receives a freshly-loaded copy of the on-disk settings (NOT
+    the in-process cache, which may be stale relative to other workstations)
+    and must return the modified dict, or None to abort without writing.
+
+    The whole cycle runs under a cross-process lockfile so two workstations
+    saving presets/roles/HDRIs at the same time cannot silently drop each
+    other's changes.
+
+    Returns the saved dict, or None if the mutator aborted or the save failed.
+    """
+    from .utils import load_json, save_json
+    global _global_settings_cache
+    with _settings_cache_lock:
+        _ensure_global_settings_dir()
+        settings_file = _get_global_settings_file()
+        lock_path = _acquire_global_lockfile(settings_file)
+        try:
+            if os.path.exists(settings_file):
+                fresh = load_json(settings_file, _global_default_settings())
+            else:
+                fresh = _global_default_settings()
+
+            result = mutator(fresh)
+            if result is None:
+                # No change requested — still refresh the cache from disk
+                _global_settings_cache = fresh
+                _record_global_mtime(settings_file)
+                return None
+
+            if save_json(settings_file, result):
+                _global_settings_cache = result.copy()
+                _record_global_mtime(settings_file)
+                return result
+            logger.error("Failed to save global settings (update)")
+            return None
+        finally:
+            _release_global_lockfile(lock_path)
 
 
 # ============================================================================
@@ -377,6 +579,7 @@ def _save_settings_unlocked(settings_type: str, settings: Dict[str, Any]):
         settings_file = _get_global_settings_file()
         if save_json(settings_file, settings):
             _global_settings_cache = settings.copy()
+            _record_global_mtime(settings_file)
         else:
             logger.error("Failed to save global settings")
     else:
@@ -403,30 +606,43 @@ class SettingsAccessor:
     def get(self, key: str, default: Any = None) -> Any:
         """Get a settings value by key.
 
-        The underlying load functions return a shallow copy of the cache,
-        so callers get isolated values without needing deep copy here.
+        The load functions return only a SHALLOW copy of the cache, so a
+        container value (dict/list settings such as gallery_groups,
+        comfyui_tab_state, prompt_builder_presets) would still be the very
+        object held in the cache — a caller mutating it in place would
+        silently poison the cache and could have that unintended change
+        flushed to the shared network file by an unrelated save. Hand out a
+        deep copy for containers; scalars need no copy, so the common path
+        stays free.
         """
-        return self._load_fn().get(key, default)
+        value = self._load_fn().get(key, default)
+        if isinstance(value, (dict, list, set)):
+            return copy.deepcopy(value)
+        return value
 
     def set(self, key: str, value: Any, verbose: bool = True):
         """Set a settings value by key. Atomic load-modify-save under lock.
 
-        Uses _save_unlocked to avoid nested RLock acquisition which could cause
-        a lost-update when two threads set different keys concurrently.
+        Global scope goes through update_global_settings() so the value is
+        merged into a fresh read of the shared network file under a
+        cross-process lock — never written from a possibly-stale cache.
         """
-        with _settings_cache_lock:
-            # Read from live cache directly (not a copy) to avoid lost-update race
-            if self.settings_type == 'global':
-                cache = _global_settings_cache
-            else:
+        if self.settings_type == 'global':
+            def _apply(settings: Dict[str, Any]) -> Dict[str, Any]:
+                settings[key] = value
+                return settings
+            update_global_settings(_apply)
+        else:
+            with _settings_cache_lock:
+                # Read from live cache directly (not a copy) to avoid lost-update race
                 cache = _user_settings_cache
-            # If cache is empty, load it first (load_fn acquires lock, OK with RLock)
-            if cache is None:
-                cache = self._load_fn()
-            settings = dict(cache)  # shallow copy for save
-            settings[key] = value
-            # Save without re-acquiring the lock
-            _save_settings_unlocked(self.settings_type, settings)
+                # If cache is empty, load it first (load_fn acquires lock, OK with RLock)
+                if cache is None:
+                    cache = self._load_fn()
+                settings = dict(cache)  # shallow copy for save
+                settings[key] = value
+                # Save without re-acquiring the lock
+                _save_settings_unlocked(self.settings_type, settings)
         if verbose:
             logger.info(f"Set {key} to: {value}")
         # network_output_path has a sibling cache in core.logging_utils for
@@ -474,6 +690,55 @@ def set_setting(name: str, value: Any, verbose: bool = True):
         value = defn.validator(value)
     accessor = _global_settings if defn.scope == "global" else _user_settings
     accessor.set(defn.key, value, verbose=verbose)
+
+
+def set_settings(updates: Dict[str, Any], verbose: bool = False):
+    """Set multiple registered settings with ONE file write per scope.
+
+    Prefer this over calling set_setting() in a loop — each set_setting()
+    does a full load-modify-save of the backing JSON (a network file for
+    global scope), so N calls means N sequential network writes.
+
+    Args:
+        updates: {setting_name: value} — all names must be in SETTINGS_REGISTRY
+        verbose: log the changed keys
+
+    Raises:
+        KeyError: If any name is not in SETTINGS_REGISTRY (nothing is written)
+    """
+    by_scope: Dict[str, Dict[str, Any]] = {"global": {}, "user": {}}
+    for name, value in updates.items():
+        defn = SETTINGS_REGISTRY.get(name)
+        if not defn:
+            raise KeyError(f"Unknown setting: {name}")
+        if defn.validator:
+            value = defn.validator(value)
+        by_scope[defn.scope][defn.key] = value
+
+    if by_scope["user"]:
+        with _settings_cache_lock:
+            cache = _user_settings_cache
+            if cache is None:
+                cache = load_user_settings()
+            settings = dict(cache)
+            settings.update(by_scope["user"])
+            _save_settings_unlocked('user', settings)
+
+    if by_scope["global"]:
+        def _apply(settings: Dict[str, Any]) -> Dict[str, Any]:
+            settings.update(by_scope["global"])
+            return settings
+        update_global_settings(_apply)
+
+    if verbose:
+        logger.info(f"Set {len(updates)} settings: {sorted(updates.keys())}")
+
+    if "network_output_path" in by_scope["global"]:
+        try:
+            from core.logging_utils import clear_path_cache
+            clear_path_cache()
+        except Exception:
+            pass
 
 
 def safe_get_setting(name: str, default: Any = _SENTINEL) -> Any:
@@ -543,30 +808,29 @@ def get_hdri_list() -> List[Dict[str, str]]:
 
 
 def add_hdri_to_list(name: str, path: str):
-    """Add an HDRI to the global list. Atomic load-modify-save."""
-    with _settings_cache_lock:
-        settings = load_global_settings()
+    """Add an HDRI to the global list. Cross-process-safe read-modify-write."""
+    def _apply(settings):
         hdri_list = settings.get("hdri_list", [])
-        # Check for duplicates
         for hdri in hdri_list:
             if hdri.get("name") == name:
-                return  # Already exists
-        # Build a NEW list — appending mutated the list shared with the
-        # settings cache, so a failed save still left the entry visible
-        # in memory even though it was never persisted
+                return None  # Already exists — no write
         settings["hdri_list"] = hdri_list + [{"name": name, "path": path}]
-        save_global_settings(settings)
-    logger.info(f"Added HDRI to global settings: {name}")
+        return settings
+    if update_global_settings(_apply) is not None:
+        logger.info(f"Added HDRI to global settings: {name}")
 
 
 def remove_hdri_from_list(name: str):
-    """Remove an HDRI from the global list. Atomic load-modify-save."""
-    with _settings_cache_lock:
-        settings = load_global_settings()
+    """Remove an HDRI from the global list. Cross-process-safe read-modify-write."""
+    def _apply(settings):
         hdri_list = settings.get("hdri_list", [])
-        settings["hdri_list"] = [h for h in hdri_list if h.get("name") != name]
-        save_global_settings(settings)
-    logger.info(f"Removed HDRI from global settings: {name}")
+        filtered = [h for h in hdri_list if h.get("name") != name]
+        if len(filtered) == len(hdri_list):
+            return None  # Nothing to remove — no write
+        settings["hdri_list"] = filtered
+        return settings
+    if update_global_settings(_apply) is not None:
+        logger.info(f"Removed HDRI from global settings: {name}")
 
 
 # ============================================================================
@@ -634,28 +898,31 @@ def add_user_to_role(username: str, role: str):
         return
     username = username.lower()
     settings_key = _get_role_settings_key(role)
-    with _settings_cache_lock:
-        settings = load_global_settings()
-        if settings_key not in settings:
-            settings[settings_key] = []
-        existing_lower = [u.lower() for u in settings[settings_key]]
-        if username not in existing_lower:
-            settings[settings_key].append(username)
-            save_global_settings(settings)
+
+    def _apply(settings):
+        users = settings.get(settings_key, [])
+        if username in [u.lower() for u in users]:
+            return None  # Already present — no write
+        settings[settings_key] = users + [username]
+        return settings
+
+    update_global_settings(_apply)
     logger.info(f"Added {role} user: {username}")
     _refresh_role_cache()
 
 
 def remove_user_from_role(username: str, role: str):
-    """Remove a user from a role. Atomic load-modify-save."""
+    """Remove a user from a role. Cross-process-safe read-modify-write."""
     settings_key = _get_role_settings_key(role)
-    with _settings_cache_lock:
-        settings = load_global_settings()
-        if settings_key not in settings:
-            return
-        original_list = settings[settings_key]
-        settings[settings_key] = [u for u in original_list if u.lower() != username.lower()]
-        if len(settings[settings_key]) < len(original_list):
-            save_global_settings(settings)
+
+    def _apply(settings):
+        users = settings.get(settings_key, [])
+        filtered = [u for u in users if u.lower() != username.lower()]
+        if len(filtered) == len(users):
+            return None  # Not present — no write
+        settings[settings_key] = filtered
+        return settings
+
+    update_global_settings(_apply)
     logger.info(f"Removed {role} user: {username}")
     _refresh_role_cache()

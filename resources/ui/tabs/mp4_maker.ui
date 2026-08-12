@@ -117,7 +117,7 @@
            </size>
           </property>
           <property name="toolTip">
-           <string>Rescan</string>
+           <string>Rescan version and find render files</string>
           </property>
           <property name="text">
            <string>Rescan</string>
@@ -180,11 +180,17 @@
      <item>
       <widget class="QGroupBox" name="mp4RendersGroupBox">
        <property name="title">
-        <string>Available Renders</string>
+        <string>Renders</string>
        </property>
        <layout class="QVBoxLayout" name="mp4RendersLayout">
         <item>
          <widget class="QListWidget" name="MP4RendersList">
+          <property name="toolTip">
+           <string>Render sequences found in the current version - select the sequence to convert to MP4</string>
+          </property>
+          <property name="alternatingRowColors">
+           <bool>true</bool>
+          </property>
           <property name="selectionMode">
            <enum>QAbstractItemView::SingleSelection</enum>
           </property>
@@ -238,9 +244,83 @@
          </spacer>
         </item>
         <item>
+         <layout class="QHBoxLayout" name="mp4RangeLayout">
+          <item>
+           <widget class="QLabel" name="mp4RangeLabel">
+            <property name="text">
+             <string>Range:</string>
+            </property>
+            <property name="toolTip">
+             <string>Frame range to encode - defaults to the full range of the selected sequence</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSpinBox" name="MP4StartFrame">
+            <property name="minimumSize">
+             <size>
+              <width>70</width>
+              <height>28</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>First frame to encode (clamped to the selected sequence)</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+            <property name="minimum">
+             <number>-999999</number>
+            </property>
+            <property name="maximum">
+             <number>999999</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSpinBox" name="MP4EndFrame">
+            <property name="minimumSize">
+             <size>
+              <width>70</width>
+              <height>28</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>Last frame to encode (clamped to the selected sequence)</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+            <property name="minimum">
+             <number>-999999</number>
+            </property>
+            <property name="maximum">
+             <number>999999</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="mp4RangeSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
          <widget class="QCheckBox" name="MP4BurnInTimecode">
           <property name="text">
            <string>Burn-in Timecode</string>
+          </property>
+          <property name="toolTip">
+           <string>Draw the frame number onto each frame of the MP4 (requires a system font)</string>
           </property>
          </widget>
         </item>
@@ -263,7 +343,7 @@
            <string>Publish to AYON</string>
           </property>
           <property name="toolTip">
-           <string>Publish the generated MP4 as a review file to AYON</string>
+           <string>Publish the generated MP4 as a review file to AYON. The product name is derived automatically from the MP4 filename (review_&lt;filename&gt;).</string>
           </property>
           <property name="checked">
            <bool>false</bool>
@@ -364,10 +444,13 @@
            </size>
           </property>
           <property name="toolTip">
-           <string>Generate MP4 from selected render</string>
+           <string>Generate MP4 from selected render (Ctrl+Return)</string>
           </property>
           <property name="text">
            <string>Generate MP4</string>
+          </property>
+          <property name="shortcut">
+           <string>Ctrl+Return</string>
           </property>
          </widget>
         </item>
@@ -375,6 +458,22 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="MP4StatusLabel">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: #888888; font-size: 9pt;</string>
+     </property>
+     <property name="textInteractionFlags">
+      <set>Qt::TextSelectableByMouse</set>
+     </property>
+    </widget>
    </item>
   </layout>
  </widget>

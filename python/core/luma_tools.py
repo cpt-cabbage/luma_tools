@@ -29,13 +29,23 @@ LOG_FILE = setup_file_logging(
     tee_mode="stream"
 )
 
-# Cleanup old log files
+# Cleanup old log files — deferred to a background thread so a slow network
+# share never delays first paint (this used to list the network log dir
+# synchronously at import time, before the splash screen existed).
 import socket
 import getpass
-username = getpass.getuser()
-hostname = socket.gethostname()
-log_dir = get_network_log_dir("users") or get_local_log_dir()
-cleanup_old_logs(log_dir, f"luma_tools_{username}_{hostname}_", keep_count=5)
+import threading as _threading
+
+def _cleanup_old_logs_async():
+    try:
+        username = getpass.getuser()
+        hostname = socket.gethostname()
+        log_dir = get_network_log_dir("users") or get_local_log_dir()
+        cleanup_old_logs(log_dir, f"luma_tools_{username}_{hostname}_", keep_count=5)
+    except Exception as e:
+        logging.debug(f"Old-log cleanup skipped: {e}")
+
+_threading.Thread(target=_cleanup_old_logs_async, name="log-cleanup", daemon=True).start()
 
 logging.info(f"=== Luma Tools Starting ===")
 
@@ -1372,6 +1382,16 @@ class LumaShotTools(QtWidgets.QWidget):
 
         # Save current version as last opened
         set_last_opened_version(APP_VERSION)
+
+        # Let tabs release their resources (poll timers, file watchers,
+        # event-bus connections). Best-effort — shutdown must never hang.
+        for tab_key, tab_instance in self.tabs.items():
+            cleanup = getattr(tab_instance, 'cleanup', None)
+            if callable(cleanup):
+                try:
+                    cleanup()
+                except Exception as e:
+                    logging.debug(f"Tab '{tab_key}' cleanup failed: {e}")
 
         # Clean up system tray icon
         if hasattr(self, '_tray_icon') and self._tray_icon:

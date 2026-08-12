@@ -13,6 +13,12 @@ from PySide6 import QtWidgets
 from ui_components import StatusColors
 from .base_tab import BaseTab, TabConfig
 from .mixins.publish_source_mixin import PublishSourceMixin
+from .mixins.render_scan_mixin import (
+    connect_debounced,
+    begin_scan_generation,
+    is_current_scan,
+    invalidate_task_scan_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +31,31 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
     def connect_signals(self):
         """Connect pass builder tab signals."""
-        self.ui.ScanRenders.clicked.connect(self._on_scan_renders_clicked)
+        self.ui.ScanRenders.clicked.connect(self._on_rescan_clicked)
         self.ui.RendersList.itemSelectionChanged.connect(self._on_render_selection_changed)
-        self.ui.BuildPasses.pressed.connect(self._on_build_passes_clicked)
-        self.ui.CurrentVer.valueChanged.connect(self._on_scan_renders_clicked)
+        self.ui.BuildPasses.clicked.connect(self._on_build_passes_clicked)
+        # Debounce rapid version spinbox changes (~350ms) before rescanning
+        self._version_debounce_timer = connect_debounced(
+            self.ui.CurrentVer.valueChanged, self._on_scan_renders_clicked
+        )
+        # Live hint when the typed product name doesn't exist in AYON yet
+        self.ui.PublishProductCombo.editTextChanged.connect(self._on_product_text_changed)
         # Build type button connected in initialize() via manager
+
+    def _on_rescan_clicked(self):
+        """Explicit Rescan: invalidate the shared task-dir scan cache, then scan."""
+        invalidate_task_scan_cache()
+        self._on_scan_renders_clicked()
+
+    def _set_persistent_status(self, message: str):
+        """Write a terminal (success/failure) message to the sticky status label.
+
+        Unlike the animated status bar, this label survives tab switches so the
+        user can still read the outcome of a long build minutes later.
+        """
+        label = getattr(self.ui, 'PassBuilderStatusLabel', None)
+        if label is not None:
+            label.setText(message or "")
 
     # Widget names used by PublishSourceMixin for render list population
     _render_list_widget = "RendersList"
@@ -42,25 +68,29 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         from ui_components import InlineSpinner
         from option_button import OptionButtonManager
         from core.import_utils import safe_import
+        from core.settings_manager import safe_get_setting
 
         self.ui.BuildPasses.setEnabled(False)
         self._initial_scan_done = False
+        self._known_products = []          # AYON product names (for PB3 hint)
+        self._last_build_progress = ""     # Last progress message (for PB2 report)
+        self._version_resolve_cache = {}   # (version_id, task) → work render path
+        self._version_resolve_lock = threading.RLock()
 
         # Create inline spinner for pass detection (will be positioned in showEvent)
         self.passes_spinner = InlineSpinner(self.ui.passesGroupBox, size=20)
 
-        # Build type option manager
+        # Build type option manager (persisted across sessions)
         self._build_type_manager = OptionButtonManager(
             button=self.ui.BuildTypeButton,
             options=[("Local", "local"), ("Farm", "farm")],
-            initial_value="local",
-            on_changed=lambda val: None,  # No additional action needed
+            initial_value=safe_get_setting("pass_builder_build_type", "local"),
+            on_changed=self._on_build_type_changed,
             label_prefix="Location: ",
             parent_window=self.main_window
         )
 
         # "Publish to AYON" checkbox — on by default, controls whether build publishes
-        from core.settings_manager import safe_get_setting
         self._publish_to_ayon_cb = QtWidgets.QCheckBox("Publish to AYON")
         self.apply_ayon_checkbox_style(self._publish_to_ayon_cb)
         self._publish_to_ayon_cb.setToolTip("When enabled, built passes are published to AYON")
@@ -182,9 +212,36 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
     def _build_type(self):
         return self._build_type_manager.value
 
+    def _on_build_type_changed(self, value):
+        """Persist the Local/Farm build type selection."""
+        from core.settings_manager import safe_set_setting
+        safe_set_setting("pass_builder_build_type", value)
+
+    def _on_product_text_changed(self, text):
+        """Live hint (PB3): flag product names that don't exist in AYON yet."""
+        text = (text or "").strip()
+        known = getattr(self, '_known_products', [])
+        default_tooltip = "Select an existing AYON product or type a new name"
+
+        label = getattr(self.ui, 'PassBuilderStatusLabel', None)
+        if text and known and text not in known:
+            hint = f"New product '{text}' will be created in AYON"
+            self.ui.PublishProductCombo.setToolTip(hint)
+            if label is not None:
+                label.setText(hint)
+        else:
+            self.ui.PublishProductCombo.setToolTip(default_tooltip)
+            # Only clear the status label if it currently shows a product hint
+            if label is not None and label.text().startswith("New product '"):
+                label.setText("")
+
     def _on_pb_source_changed(self, value):
         """Handle source toggle between File and Publish modes."""
         is_publish = value == "publish"
+
+        # Invalidate any in-flight filesystem scan so stale results can't
+        # populate the list after the mode switch.
+        begin_scan_generation(self)
 
         # Toggle filesystem widgets
         self.ui.CurrentVer.setVisible(not is_publish)
@@ -322,8 +379,18 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self._current_publish_product_name = self._publish_product_combo.currentText()
         super()._on_publish_product_changed(index)
 
+    # How many of the newest versions get their filesystem paths resolved
+    # eagerly when the version list is fetched (PB4). Older versions are
+    # kept in the combo unresolved and resolve on-demand when selected.
+    _EAGER_VERSION_RESOLVE_COUNT = 5
+
     def _fetch_product_versions(self, product_id):
-        """Override: filter out versions without resolvable work renders."""
+        """Override: filter out versions without resolvable work renders.
+
+        Filesystem resolution is expensive on network shares, so only the
+        newest few versions are resolved (and filtered) eagerly; older
+        versions stay listed and resolve on-demand when selected.
+        """
         from ayon.service import get_product_version_list
 
         versions = get_product_version_list(self.app_state.jobname, product_id)
@@ -338,9 +405,13 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         if not task:
             return versions
 
+        # Versions are sorted newest-first by get_product_version_list
+        eager = versions[:self._EAGER_VERSION_RESOLVE_COUNT]
+        lazy = versions[self._EAGER_VERSION_RESOLVE_COUNT:]
+
         filtered = []
-        for v in versions:
-            work_path = self._resolve_work_render_path(v["id"], task)
+        for v in eager:
+            work_path = self._resolve_work_render_path_cached(v["id"], task)
             if work_path:
                 filtered.append(v)
             else:
@@ -349,11 +420,30 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                     "(no work renders found)"
                 )
 
+        # Older versions: keep unresolved — they resolve when selected
+        filtered.extend(lazy)
+
         logger.info(
-            f"Pass Builder: Showing {len(filtered)} of {len(versions)} "
-            "versions with renders"
+            f"Pass Builder: Showing {len(filtered)} of {len(versions)} versions "
+            f"({len(eager)} resolved eagerly, {len(lazy)} deferred)"
         )
         return filtered
+
+    def _resolve_work_render_path_cached(self, version_id, task):
+        """Thread-safe cached wrapper around _resolve_work_render_path."""
+        key = (version_id, task)
+        lock = getattr(self, '_version_resolve_lock', None)
+        if lock is None:
+            return self._resolve_work_render_path(version_id, task)
+
+        with lock:
+            if key in self._version_resolve_cache:
+                return self._version_resolve_cache[key]
+
+        work_path = self._resolve_work_render_path(version_id, task)
+        with lock:
+            self._version_resolve_cache[key] = work_path
+        return work_path
 
     def _resolve_work_render_path(self, version_id, task):
         """Resolve an AYON version to its work render directory.
@@ -394,8 +484,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
     def _resolve_and_scan_publish(self, version_id):
         """Override: resolve AYON publish back to the WORK directory with renders.
 
-        Versions are pre-filtered by _fetch_product_versions to only include those
-        with resolvable work renders, so this should always succeed.
+        The newest versions are pre-filtered by _fetch_product_versions to only
+        include those with resolvable work renders; older versions resolve
+        on-demand here and may legitimately fail if renders were cleaned up.
 
         The task is derived from the selected product name (render{Task}{Variant})
         so this works even when no task is selected in the AYON context.
@@ -412,10 +503,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 "Select a task or choose a render product."
             )
 
-        work_render_path = self._resolve_work_render_path(version_id, task)
+        work_render_path = self._resolve_work_render_path_cached(version_id, task)
         if not work_render_path:
             raise FileNotFoundError(
-                "Could not resolve work render directory for this version."
+                "Could not resolve work render directory for this version. "
+                "Older versions may no longer have renders on disk."
             )
 
         logger.info(f"Pass Builder: Resolved work render path: {work_render_path}")
@@ -568,6 +660,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         search_path = self.app_state.searchpath
 
+        # Generation counter: rapid version changes can queue multiple scans;
+        # only the newest one is allowed to populate the list.
+        generation = begin_scan_generation(self)
+
         def _scan_worker():
             """Filesystem scan in background thread."""
             from services.file_operations import find_renders_with_source, get_denoised_status
@@ -590,7 +686,12 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         def _on_scan_result(result):
             from core.utils import extract_render_name
+            if not is_current_scan(self, generation):
+                return  # A newer scan superseded this one — drop stale results
             renders, source_dir, used_fallback, denoised_status = result
+            # Clear before repopulating — guards against duplicate items if
+            # anything added entries while the worker was running.
+            self.ui.RendersList.clear()
             self.app_state.renders = renders
             self._denoised_status = denoised_status
 
@@ -620,7 +721,10 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 self.show_status("No renders found", "warning")
 
         def _on_scan_error(error_msg, traceback_str=""):
+            if not is_current_scan(self, generation):
+                return
             self.app_state.renders = []
+            self.ui.RendersList.clear()
             self.ui.RendersList.addItem("Scan error")
             self.ui.RendersList.setEnabled(False)
             self.show_status(f"Scan error: {error_msg}", "error")
@@ -791,6 +895,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         def _on_products(result):
             product_names, matched_name = result
+            # Known product names drive the "new product" live hint
+            self._known_products = list(product_names)
             combo.clear()
             for name in product_names:
                 combo.addItem(name)
@@ -869,6 +975,12 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
         # Switch button to Cancel mode
         self.ui.BuildPasses.setText("Cancel")
 
+        # Reset the partial-progress report used by the cancel/error handler
+        self._last_build_progress = ""
+        self._set_persistent_status(
+            f"Building passes ({build_type_display}, {denoise_label})..."
+        )
+
         def do_build(progress_callback=None):
             """Run the pass building operation."""
             return create_pass_builder().build_passes(
@@ -892,6 +1004,8 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
 
         def on_progress(percent, message):
             """Update status bar with build progress."""
+            # Remember the last step so a cancel/failure can report how far it got
+            self._last_build_progress = f"{message} ({percent}%)"
             self.update_status_with_spinner(
                 f"Pass Builder: {message} ({percent}%)",
                 StatusColors.INFO
@@ -903,6 +1017,17 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
             self.ui.BuildPasses.setText("Build")
             self.ui.BuildPasses.setEnabled(True)
 
+        def _partial_output_note():
+            """Explain what remains on disk after a cancelled/failed build."""
+            note = (
+                f"Frames built before the interruption remain in "
+                f"{self.app_state.searchpath or 'the render directory'} and will be "
+                "overwritten the next time you build this render."
+            )
+            if self._last_build_progress:
+                note = f"Stopped at: {self._last_build_progress}. {note}"
+            return note
+
         def on_result(result):
             """Called when build completes."""
             logger.info(f"Build completed: {result}")
@@ -913,6 +1038,11 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 start=False
             )
             self.show_status("Build completed successfully", "success")
+            self._set_persistent_status(
+                f"Build completed successfully ({build_type_display}, {denoise_label}) - "
+                f"{self.app_state.currentrender or 'render'} "
+                f"frames {self.app_state.startframe}-{self.app_state.endframe}."
+            )
 
         def on_error(error_msg, traceback_str=""):
             """Called when build fails or is cancelled."""
@@ -925,6 +1055,7 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                     start=False
                 )
                 self.show_status("Build cancelled", "warning")
+                self._set_persistent_status(f"Build cancelled. {_partial_output_note()}")
                 return
 
             logger.error(f"Build failed: {error_msg}")
@@ -934,6 +1065,9 @@ class PassBuilderTab(PublishSourceMixin, BaseTab):
                 start=False
             )
             self.show_status(f"Build failed: {error_msg}", "error")
+            self._set_persistent_status(
+                f"Build failed: {error_msg}. {_partial_output_note()}"
+            )
 
         # Use BaseTab helper for worker management
         try:
