@@ -259,14 +259,21 @@ def copy_resources() -> None:
         shutil.copy2(f, dst_resources / f.name)
     print("  Copied resources/*.png")
 
-    # Three.js viewer
+    # Three.js viewer — copy the whole tree, not just *.html. viewer.html
+    # imports three.js from the vendor/ subdirectory next to it; copying only
+    # the HTML leaves those imports dangling in production, and the viewer then
+    # fails silently (no 3D thumbnails, 10s timeout per model).
     src_threejs = SOURCE / "resources" / "threejs"
     dst_threejs = TARGET / "resources" / "threejs"
     if src_threejs.exists():
-        dst_threejs.mkdir(parents=True, exist_ok=True)
-        for f in src_threejs.glob("*.html"):
-            shutil.copy2(f, dst_threejs / f.name)
-        print("  Copied resources/threejs/")
+        if dst_threejs.exists():
+            shutil.rmtree(dst_threejs)
+        shutil.copytree(
+            src_threejs, dst_threejs,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        file_count = sum(1 for _ in dst_threejs.rglob("*") if _.is_file())
+        print(f"  Copied resources/threejs/ ({file_count} files incl. vendored three.js)")
 
 
 def copy_launcher() -> None:

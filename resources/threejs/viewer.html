@@ -65,12 +65,21 @@
         // Note: All other functions are directly assigned after Three.js module loads
     </script>
 
-    <!-- Import map for Three.js ES modules -->
+    <!-- Import map for Three.js ES modules.
+
+         These MUST stay local. This page is loaded from file:// with
+         LocalContentCanAccessRemoteUrls disabled (see geo/threejs_viewer.py),
+         so a CDN URL here can never be fetched: the module script silently
+         never executes, onViewerReady never fires, and every 3D thumbnail
+         times out after 10s. That is exactly what used to happen.
+
+         vendor/ holds three r0.170.0 (MIT, see vendor/LICENSE) and only the
+         addons this file imports, plus their transitive imports. -->
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+            "three": "./vendor/three.module.min.js",
+            "three/addons/": "./vendor/addons/"
         }
     }
     </script>
@@ -89,7 +98,6 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
         import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
         import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 
@@ -312,11 +320,15 @@
             let loader;
 
             if (extension === 'glb' || extension === 'gltf') {
+                // Draco support is deliberately not vendored: the decoder is
+                // ~1MB and no model in the studio uses KHR_draco_mesh_compression.
+                // A Draco-compressed file fails here with GLTFLoader's own
+                // "No DRACOLoader instance provided" error. To add it back:
+                // drop draco_decoder.wasm + draco_wasm_wrapper.js into
+                // vendor/addons/libs/draco/, re-import DRACOLoader above, and
+                // restore the three lines this comment replaced (with
+                // setDecoderPath('./vendor/addons/libs/draco/')).
                 loader = new GLTFLoader();
-                // Setup Draco decoder for compressed models
-                const dracoLoader = new DRACOLoader();
-                dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/');
-                loader.setDRACOLoader(dracoLoader);
             } else if (extension === 'fbx') {
                 loader = new FBXLoader();
             } else if (extension === 'obj') {
