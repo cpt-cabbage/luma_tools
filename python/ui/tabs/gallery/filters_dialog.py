@@ -45,13 +45,7 @@ class FiltersDialog(QWidget):
         # Main container with styling
         self.container = QFrame(self)
         self.container.setObjectName("FiltersDialogContainer")
-        self.container.setStyleSheet("""
-            #FiltersDialogContainer {
-                background-color: #2a2e36;
-                border: 1px solid #3c414b;
-                border-radius: 8px;
-            }
-        """)
+        self.container.setProperty("variant", "panel")
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -63,19 +57,19 @@ class FiltersDialog(QWidget):
 
         # Header
         header = QLabel("Filters")
-        header.setStyleSheet("color: #e0e0e0; font-weight: bold; font-size: 13px;")
+        header.setProperty("textRole", "title")
         container_layout.addWidget(header)
 
         # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3c414b;")
+        sep.setProperty("variant", "divider")
         sep.setFixedHeight(1)
         container_layout.addWidget(sep)
 
         # File Type section
         type_header = QLabel("File Types")
-        type_header.setStyleSheet("color: #888888; font-size: 11px; margin-top: 4px;")
+        type_header.setProperty("textRole", "micro")
         container_layout.addWidget(type_header)
 
         # Type checkboxes
@@ -90,28 +84,6 @@ class FiltersDialog(QWidget):
         for type_key, label in type_labels.items():
             checkbox = QCheckBox(label)
             checkbox.setChecked(self._type_filters.get(type_key, True))
-            checkbox.setStyleSheet("""
-                QCheckBox {
-                    color: #e0e0e0;
-                    font-size: 12px;
-                    spacing: 8px;
-                    padding: 4px 0;
-                }
-                QCheckBox::indicator {
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 3px;
-                    border: 1px solid #4a5160;
-                    background-color: #1e1e22;
-                }
-                QCheckBox::indicator:checked {
-                    background-color: #4a9eff;
-                    border-color: #4a9eff;
-                }
-                QCheckBox::indicator:hover {
-                    border-color: #4a9eff;
-                }
-            """)
             checkbox.toggled.connect(
                 lambda checked, k=type_key: self._on_type_filter_changed(k, checked)
             )
@@ -121,41 +93,19 @@ class FiltersDialog(QWidget):
         # Separator
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
-        sep2.setStyleSheet("background-color: #3c414b;")
+        sep2.setProperty("variant", "divider")
         sep2.setFixedHeight(1)
         container_layout.addWidget(sep2)
 
         # Other filters section
         other_header = QLabel("Display")
-        other_header.setStyleSheet("color: #888888; font-size: 11px; margin-top: 4px;")
+        other_header.setProperty("textRole", "micro")
         container_layout.addWidget(other_header)
 
         # Show Inputs checkbox
         self._show_inputs_checkbox = QCheckBox("Show Inputs")
         self._show_inputs_checkbox.setToolTip("Show/hide input source images")
         self._show_inputs_checkbox.setChecked(self._show_inputs)
-        self._show_inputs_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #e0e0e0;
-                font-size: 12px;
-                spacing: 8px;
-                padding: 4px 0;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                border: 1px solid #4a5160;
-                background-color: #1e1e22;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #4a9eff;
-                border-color: #4a9eff;
-            }
-            QCheckBox::indicator:hover {
-                border-color: #4a9eff;
-            }
-        """)
         self._show_inputs_checkbox.toggled.connect(self._on_show_inputs_changed)
         container_layout.addWidget(self._show_inputs_checkbox)
 

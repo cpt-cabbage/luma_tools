@@ -72,7 +72,6 @@ class UIManager(BaseGalleryManager):
         self._sort_direction_btn.setCursor(Qt.ArrowCursor)
         self._sort_direction_btn.setToolTip("Toggle sort direction")
         self._sort_direction_btn.clicked.connect(self._on_sort_direction_clicked)
-        self._sort_direction_btn.setStyleSheet("padding: 2px 0px;")
 
         # Move sort button into container, add direction toggle
         header_layout = self._find_header_layout()

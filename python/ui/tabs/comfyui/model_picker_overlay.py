@@ -31,19 +31,15 @@ from comfyui.ratings import (
     toggle_favorite, add_to_recents, refresh_all_thumbnails
 )
 
+from core.design_tokens import Color
+
 logger = logging.getLogger(__name__)
 
 # Styling constants
-OVERLAY_BACKDROP = "rgba(0, 0, 0, 0.85)"
-SIDEBAR_BG = "#1a1d21"
-CONTENT_BG = "#0f1114"
 CARD_BG = "#2c313a"
 CARD_BORDER = "#3c414b"
-CARD_BORDER_HOVER = "#4a9eff"
+CARD_BORDER_HOVER = Color.ACCENT
 STAR_GOLD = "#fbbf24"
-TEXT_PRIMARY = "#ffffff"
-TEXT_SECONDARY = "#888888"
-ACCENT = "#4a9eff"
 
 # Dimensions
 SIDEBAR_WIDTH = 220
@@ -61,7 +57,7 @@ class OverlayBackdrop(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"background-color: {OVERLAY_BACKDROP};")
+        self.setProperty("variant", "backdrop")
 
     def mousePressEvent(self, event):
         """Emit clicked signal when backdrop is clicked."""
@@ -119,12 +115,7 @@ class ModelPickerOverlay(QWidget):
         # Content container (centered card with padding)
         self._content = QFrame(self)
         self._content.setObjectName("OverlayContent")
-        self._content.setStyleSheet(f"""
-            QFrame#OverlayContent {{
-                background-color: {CONTENT_BG};
-                border-radius: 12px;
-            }}
-        """)
+        self._content.setProperty("variant", "panel")
 
         content_layout = QVBoxLayout(self._content)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -155,14 +146,7 @@ class ModelPickerOverlay(QWidget):
         """Set up the header bar with title, search, and close button."""
         header = QFrame()
         header.setFixedHeight(64)
-        header.setStyleSheet(f"""
-            QFrame {{
-                background-color: {SIDEBAR_BG};
-                border-bottom: 1px solid #2a2d32;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-            }}
-        """)
+        header.setProperty("variant", "subtle")
 
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(24, 0, 24, 0)
@@ -170,11 +154,7 @@ class ModelPickerOverlay(QWidget):
 
         # Title
         title = QLabel("Model Library")
-        title.setStyleSheet(f"""
-            color: {TEXT_PRIMARY};
-            font-size: 18px;
-            font-weight: bold;
-        """)
+        title.setProperty("textRole", "display")
         header_layout.addWidget(title)
 
         header_layout.addStretch()
@@ -182,20 +162,7 @@ class ModelPickerOverlay(QWidget):
         # Request a Model button
         request_btn = QPushButton("Request a Model")
         request_btn.setCursor(Qt.PointingHandCursor)
-        request_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {ACCENT};
-                border: 1px solid {ACCENT};
-                border-radius: 6px;
-                padding: 6px 14px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {ACCENT};
-                color: {TEXT_PRIMARY};
-            }}
-        """)
+        request_btn.setProperty("role", "ghost")
         request_btn.clicked.connect(self._on_request_model_clicked)
         header_layout.addWidget(request_btn)
 
@@ -204,39 +171,14 @@ class ModelPickerOverlay(QWidget):
         self._search_input.setPlaceholderText("Search models...")
         self._search_input.setClearButtonEnabled(True)
         self._search_input.setFixedWidth(300)
-        self._search_input.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: #2a2d32;
-                border: 1px solid #3c414b;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: {TEXT_PRIMARY};
-                font-size: 13px;
-            }}
-            QLineEdit:focus {{
-                border-color: {ACCENT};
-            }}
-        """)
         header_layout.addWidget(self._search_input)
 
         # Close button
         close_btn = QPushButton("×")
         close_btn.setFixedSize(36, 36)
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {TEXT_SECONDARY};
-                border: none;
-                border-radius: 18px;
-                font-size: 24px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #3c414b;
-                color: {TEXT_PRIMARY};
-            }}
-        """)
+        close_btn.setProperty("role", "ghost")
+        close_btn.setProperty("iconOnly", "true")
         close_btn.clicked.connect(self.hide_overlay)
         header_layout.addWidget(close_btn)
 
@@ -263,15 +205,6 @@ class ModelPickerOverlay(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: transparent;
-            }
-        """)
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)

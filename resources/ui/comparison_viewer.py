@@ -257,7 +257,7 @@ class GridCell(QWidget):
         self._label = label
         self._pixmap: Optional[QPixmap] = None
 
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
         self.setMinimumSize(100, 100)
 
     def set_image(self, path: str):
@@ -330,7 +330,7 @@ class ComparisonViewer(QWidget):
 
     def _setup_ui(self):
         """Setup the comparison viewer UI."""
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -338,7 +338,7 @@ class ComparisonViewer(QWidget):
 
         # Top control bar
         control_bar = QWidget()
-        control_bar.setStyleSheet("background-color: #252525;")
+        control_bar.setProperty("variant", "subtle")
         control_bar.setFixedHeight(40)
 
         control_layout = QHBoxLayout(control_bar)
@@ -346,7 +346,7 @@ class ComparisonViewer(QWidget):
 
         # Mode selector
         mode_label = QLabel("Mode:")
-        mode_label.setStyleSheet("color: #888;")
+        mode_label.setProperty("textRole", "help")
         control_layout.addWidget(mode_label)
 
         self._mode_combo = QComboBox()
@@ -360,7 +360,7 @@ class ComparisonViewer(QWidget):
 
         # Opacity slider (for onion skin mode)
         self._opacity_label = QLabel("Opacity:")
-        self._opacity_label.setStyleSheet("color: #888;")
+        self._opacity_label.setProperty("textRole", "help")
         control_layout.addWidget(self._opacity_label)
 
         self._opacity_slider = QSlider(Qt.Horizontal)
@@ -371,7 +371,7 @@ class ComparisonViewer(QWidget):
         control_layout.addWidget(self._opacity_slider)
 
         self._opacity_value = QLabel("50%")
-        self._opacity_value.setStyleSheet("color: #888;")
+        self._opacity_value.setProperty("textRole", "help")
         self._opacity_value.setFixedWidth(40)
         control_layout.addWidget(self._opacity_value)
 
@@ -379,29 +379,23 @@ class ComparisonViewer(QWidget):
 
         # Swap button
         swap_btn = QPushButton("Swap A/B")
-        swap_btn.setStyleSheet("""
-            QPushButton { background-color: #333; color: #888; border: 1px solid #444; padding: 5px 10px; }
-            QPushButton:hover { background-color: #444; color: #fff; }
-        """)
+        swap_btn.setProperty("role", "secondary")
+        swap_btn.setProperty("density", "sm")
         swap_btn.clicked.connect(self._swap_images)
         control_layout.addWidget(swap_btn)
 
         # Clear button
         clear_btn = QPushButton("Clear")
-        clear_btn.setStyleSheet("""
-            QPushButton { background-color: #333; color: #888; border: 1px solid #444; padding: 5px 10px; }
-            QPushButton:hover { background-color: #444; color: #fff; }
-        """)
+        clear_btn.setProperty("role", "secondary")
+        clear_btn.setProperty("density", "sm")
         clear_btn.clicked.connect(self._clear_images)
         control_layout.addWidget(clear_btn)
 
         # Close button
         close_btn = QPushButton("X")
         close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #888; border: none; font-size: 16px; }
-            QPushButton:hover { color: #fff; }
-        """)
+        close_btn.setProperty("role", "ghost")
+        close_btn.setProperty("iconOnly", "true")
         close_btn.clicked.connect(self.closed.emit)
         control_layout.addWidget(close_btn)
 
@@ -426,7 +420,7 @@ class ComparisonViewer(QWidget):
 
         # Image selection bar (shows which images are loaded)
         self._selection_bar = QWidget()
-        self._selection_bar.setStyleSheet("background-color: #252525;")
+        self._selection_bar.setProperty("variant", "subtle")
         self._selection_bar.setFixedHeight(35)
 
         selection_layout = QHBoxLayout(self._selection_bar)
@@ -435,7 +429,7 @@ class ComparisonViewer(QWidget):
         self._slot_labels = []
         for i, label in enumerate(["A", "B", "C", "D"]):
             slot = QLabel(f"[{label}] Empty")
-            slot.setStyleSheet("color: #666; font-size: 11px;")
+            slot.setProperty("textRole", "help")
             self._slot_labels.append(slot)
             selection_layout.addWidget(slot)
 
@@ -539,7 +533,8 @@ class ComparisonViewer(QWidget):
                 if len(name) > 20:
                     name = name[:17] + "..."
                 label.setText(f"[{labels[i]}] {name}")
-                label.setStyleSheet("color: #4a9eff; font-size: 11px;")
+                label.setProperty("textRole", "help")
+                label.setProperty("state", "info")
             else:
                 label.setText(f"[{labels[i]}] Empty")
-                label.setStyleSheet("color: #666; font-size: 11px;")
+                label.setProperty("textRole", "help")

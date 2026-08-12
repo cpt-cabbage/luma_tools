@@ -45,7 +45,7 @@ class EmptyStateWidget(QWidget):
         self._title_label = QLabel()
         self._title_label.setAlignment(Qt.AlignCenter)
         self._title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        self._title_label.setStyleSheet("color: #ffffff;")
+        self._title_label.setProperty("textRole", "title")
         layout.addWidget(self._title_label)
 
         # Description
@@ -53,19 +53,12 @@ class EmptyStateWidget(QWidget):
         self._desc_label.setAlignment(Qt.AlignCenter)
         self._desc_label.setWordWrap(True)
         self._desc_label.setMaximumWidth(400)
-        self._desc_label.setStyleSheet("color: #aaaaaa; line-height: 1.4;")
+        self._desc_label.setProperty("textRole", "help")
         layout.addWidget(self._desc_label)
 
         # Steps container
         self._steps_frame = QFrame()
-        self._steps_frame.setStyleSheet("""
-            QFrame {
-                background-color: rgba(74, 158, 255, 0.1);
-                border: 1px solid rgba(74, 158, 255, 0.3);
-                border-radius: 8px;
-                padding: 12px;
-            }
-        """)
+        self._steps_frame.setProperty("variant", "note")
         self._steps_layout = QVBoxLayout(self._steps_frame)
         self._steps_layout.setSpacing(8)
         layout.addWidget(self._steps_frame)
@@ -79,11 +72,7 @@ class EmptyStateWidget(QWidget):
         layout.addStretch()
 
         # Apply default styling
-        self.setStyleSheet("""
-            EmptyStateWidget, #EmptyStateWidget {
-                background-color: transparent;
-            }
-        """)
+        self.setProperty("variant", "transparent")
 
     def set_icon(self, icon_text: str):
         """Set the icon/emoji."""
@@ -106,20 +95,12 @@ class EmptyStateWidget(QWidget):
         number_label = QLabel(str(number))
         number_label.setFixedSize(24, 24)
         number_label.setAlignment(Qt.AlignCenter)
-        number_label.setStyleSheet("""
-            QLabel {
-                background-color: #4a9eff;
-                color: white;
-                border-radius: 12px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
+        number_label.setProperty("variant", "step")
         step_layout.addWidget(number_label)
 
         # Step text
         text_label = QLabel(text)
-        text_label.setStyleSheet("color: #cccccc;")
+        text_label.setProperty("textRole", "help")
         step_layout.addWidget(text_label, 1)
 
         self._steps_layout.addLayout(step_layout)
@@ -128,35 +109,9 @@ class EmptyStateWidget(QWidget):
         """Add an action button."""
         btn = QPushButton(text)
         if primary:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #4a9eff;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 24px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #5ba3ff;
-                }
-                QPushButton:pressed {
-                    background-color: #3d8ae6;
-                }
-            """)
+            btn.setProperty("role", "primary")
         else:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #4a9eff;
-                    border: 1px solid #4a9eff;
-                    border-radius: 4px;
-                    padding: 8px 24px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(74, 158, 255, 0.1);
-                }
-            """)
+            btn.setProperty("role", "ghost")
         btn.clicked.connect(callback)
         self._button_layout.addWidget(btn)
         return btn
@@ -286,56 +241,30 @@ class SessionResumeBanner(QWidget):
         text_layout.setSpacing(2)
 
         title_label = QLabel("Resume Previous Session")
-        title_label.setStyleSheet("color: #ffffff; font-weight: bold;")
+        title_label.setProperty("textRole", "title")
         text_layout.addWidget(title_label)
 
         desc_label = QLabel(description)
-        desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+        desc_label.setProperty("textRole", "help")
         text_layout.addWidget(desc_label)
 
         layout.addLayout(text_layout, 1)
 
         # Resume button
         resume_btn = QPushButton("Resume")
-        resume_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4a9eff;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #5ba3ff;
-            }
-        """)
+        resume_btn.setProperty("role", "primary")
+        resume_btn.setProperty("density", "sm")
         resume_btn.clicked.connect(lambda: self.resume_clicked.emit(self._session_index))
         layout.addWidget(resume_btn)
 
         # Dismiss button
         dismiss_btn = QPushButton("✕")
         dismiss_btn.setFixedSize(24, 24)
-        dismiss_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #888888;
-                border: none;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                color: #ffffff;
-            }
-        """)
+        dismiss_btn.setProperty("role", "ghost")
+        dismiss_btn.setProperty("iconOnly", "true")
         dismiss_btn.clicked.connect(self.dismiss_clicked.emit)
         layout.addWidget(dismiss_btn)
 
         # Frame styling
-        self.setStyleSheet("""
-            SessionResumeBanner {
-                background-color: rgba(74, 158, 255, 0.1);
-                border: 1px solid rgba(74, 158, 255, 0.3);
-                border-radius: 6px;
-            }
-        """)
+        self.setProperty("variant", "note")
         self.setObjectName("SessionResumeBanner")

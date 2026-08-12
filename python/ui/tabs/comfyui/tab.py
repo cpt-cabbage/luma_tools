@@ -32,7 +32,7 @@ from .state_manager import ComfyUIStateManager, read_seed, write_seed, random_se
 from .inline_model_grid import InlineModelGrid
 from .variant_selector import VariantSelector
 
-from core.design_tokens import set_role
+from core.design_tokens import Color, set_role
 
 logger = logging.getLogger(__name__)
 
@@ -601,10 +601,10 @@ class ComfyUITab(PollingMixin, BaseTab):
             "audio": "AUDIO", "other": "OTHER",
         }
         type_colors = {
-            "image": ("#4a9eff", "rgba(74, 158, 255, 0.15)"),
+            "image": (Color.ACCENT, Color.ACCENT_SUBTLE),
             "video": ("#a855f7", "rgba(168, 85, 247, 0.15)"),
-            "3d": ("#10b981", "rgba(16, 185, 129, 0.15)"),
-            "audio": ("#f59e0b", "rgba(245, 158, 11, 0.15)"),
+            "3d": (Color.SUCCESS, "rgba(16, 185, 129, 0.15)"),
+            "audio": (Color.WARNING, "rgba(245, 158, 11, 0.15)"),
             "other": ("#797e89", "rgba(121, 126, 137, 0.15)"),
         }
         fg, bg = type_colors.get(output_type, type_colors["image"])

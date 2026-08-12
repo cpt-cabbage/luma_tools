@@ -12,6 +12,8 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush, QPen
 
+from core.design_tokens import Color
+
 logger = logging.getLogger(__name__)
 
 
@@ -975,7 +977,7 @@ class UIAnimations:
         self.progress_animation.setDuration(duration)
         self.progress_animation.start()
 
-    def update_status_animated(self, message, color="#4a9eff", priority=None, use_queue=True):
+    def update_status_animated(self, message, color=Color.ACCENT, priority=None, use_queue=True):
         """
         Update status label with fade animation.
 

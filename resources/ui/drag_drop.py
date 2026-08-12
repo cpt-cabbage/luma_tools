@@ -24,6 +24,8 @@ from PySide6.QtCore import Qt, QMimeData, QPoint
 from PySide6.QtGui import QDrag, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import QApplication, QWidget
 
+from core.design_tokens import Color, set_role
+
 logger = logging.getLogger(__name__)
 
 
@@ -466,7 +468,7 @@ def _create_placeholder_pixmap(category: str, size: int) -> QPixmap:
         'unknown': '📄',
     }
 
-    painter.setPen(QColor("#4a9eff"))
+    painter.setPen(QColor(Color.ACCENT))
     font = painter.font()
     font.setPointSize(24)
     painter.setFont(font)
@@ -839,9 +841,6 @@ class DropEnabledLineEdit:
     def _show_highlight(self, show: bool):
         """Show or hide drop highlight."""
         if show:
-            self._line_edit.setStyleSheet(
-                self._original_style +
-                "border: 2px solid #4a9eff; background-color: rgba(74, 158, 255, 0.15);"
-            )
+            set_role(self._line_edit, state="drop")
         else:
-            self._line_edit.setStyleSheet(self._original_style)
+            set_role(self._line_edit, state=None)

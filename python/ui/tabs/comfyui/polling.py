@@ -12,6 +12,8 @@ from PySide6.QtCore import QTimer, QThreadPool, Qt
 from dialog_helpers import confirm_action
 from ui_components import StatusColors
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 from core.import_utils import get_event_bus
@@ -367,7 +369,7 @@ class PollingMixin:
         elif status == "Failed":
             self._stop_iterate_polling()
             self.ui.ComfyUIIterateStatus.setText(f"Job failed: {error_message}")
-            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+            set_role(self.ui.ComfyUIIterateStatus, state="error")
             self.animator.update_status_animated(
                 f"ComfyUI Failed: {error_message}",
                 StatusColors.ERROR
@@ -394,7 +396,7 @@ class PollingMixin:
                 logger.warning(f"[Iterate Poll] Job was active but disappeared with no output, treating as lost")
                 self._stop_iterate_polling()
                 self.ui.ComfyUIIterateStatus.setText(f"Job lost: {error_message}")
-                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+                set_role(self.ui.ComfyUIIterateStatus, state="error")
                 self.animator.update_status_animated(
                     "ComfyUI: Job disappeared from Deadline",
                     StatusColors.ERROR
@@ -403,7 +405,7 @@ class PollingMixin:
                 # Never saw the job active, still in grace period for registration
                 logger.debug(f"[Iterate Poll] Job not found on poll #{self._iterate_poll_count}, likely still registering")
                 self.ui.ComfyUIIterateStatus.setText("Waiting for Deadline to register job...")
-                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
+                set_role(self.ui.ComfyUIIterateStatus, state="info")
                 self.animator.update_status_animated(
                     "ComfyUI: Waiting for job to appear in Deadline...",
                     StatusColors.INFO
@@ -412,7 +414,7 @@ class PollingMixin:
                 logger.warning(f"[Iterate Poll] Job not found after {self._iterate_poll_count} polls, treating as lost")
                 self._stop_iterate_polling()
                 self.ui.ComfyUIIterateStatus.setText(f"Job lost: {error_message}")
-                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+                set_role(self.ui.ComfyUIIterateStatus, state="error")
                 self.animator.update_status_animated(
                     "ComfyUI: Job disappeared from Deadline",
                     StatusColors.ERROR
@@ -479,7 +481,7 @@ class PollingMixin:
                 main_status = f"ComfyUI: {status} ({progress}%)"
 
             self.ui.ComfyUIIterateStatus.setText(status_text)
-            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #4a9eff;")
+            set_role(self.ui.ComfyUIIterateStatus, state="info")
             self.animator.update_status_animated(main_status, StatusColors.INFO)
 
     def _stop_iterate_polling(self):
@@ -504,7 +506,7 @@ class PollingMixin:
             logger.error(f"ERROR in _on_iterate_job_completed: {e}", exc_info=True)
             if hasattr(self.ui, 'ComfyUIIterateStatus') and self.ui.ComfyUIIterateStatus:
                 self.ui.ComfyUIIterateStatus.setText(f"Error: {e}")
-                self.ui.ComfyUIIterateStatus.setStyleSheet("color: #ef4444;")
+                set_role(self.ui.ComfyUIIterateStatus, state="error")
 
     def _handle_iterate_job_completed(self):
         """Handle iterate job completion and record timing."""
@@ -526,7 +528,7 @@ class PollingMixin:
             logger.info(f"[Iterate] Recorded {format_elapsed_time(per_frame_time)} per frame for '{preset_name}'")
 
         self.ui.ComfyUIIterateStatus.setText("Completed! Looking for output...")
-        self.ui.ComfyUIIterateStatus.setStyleSheet("color: #10b981;")
+        set_role(self.ui.ComfyUIIterateStatus, state="success")
 
         self.animator.update_status_animated(
             f"ComfyUI Complete: {frames} job(s) in {elapsed_str}",
@@ -615,7 +617,7 @@ class PollingMixin:
         else:
             logger.warning("[Iterate] No output files found in either directory")
             self.ui.ComfyUIIterateStatus.setText("No output files found")
-            self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
+            set_role(self.ui.ComfyUIIterateStatus, state="warning")
             self.animator.update_status_animated(
                 "Deadline: Completed but no output files found",
                 StatusColors.WARNING
@@ -1247,7 +1249,7 @@ class PollingMixin:
         self.ui.ComfyUICancelJobs.setEnabled(True)
 
         self.ui.ComfyUIIterateStatus.setText("Cancelled")
-        self.ui.ComfyUIIterateStatus.setStyleSheet("color: #f59e0b;")
+        set_role(self.ui.ComfyUIIterateStatus, state="warning")
         self.ui.ComfyUIIterateProgress.setValue(0)
 
         if failed > 0:

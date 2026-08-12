@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame, QSizePolicy,
 )
 
+from core.design_tokens import Color, set_role
+
 logger = logging.getLogger(__name__)
 
 # Colors
@@ -23,11 +25,11 @@ VARIANT_BG = "#22252b"
 VARIANT_BG_HOVER = "#2a2e36"
 VARIANT_BG_SELECTED = "#1a2636"
 VARIANT_BORDER = "#3c414b"
-VARIANT_BORDER_HOVER = "#4a9eff"
-VARIANT_BORDER_SELECTED = "#4a9eff"
+VARIANT_BORDER_HOVER = Color.ACCENT
+VARIANT_BORDER_SELECTED = Color.ACCENT
 TEXT_PRIMARY = "#e0e0e0"
 TEXT_SECONDARY = "#999999"
-ACCENT = "#4a9eff"
+ACCENT = Color.ACCENT
 
 
 class _VariantCard(QFrame):
@@ -55,14 +57,13 @@ class _VariantCard(QFrame):
         # Name
         self._name_label = QLabel(name)
         self._name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self._name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
         layout.addWidget(self._name_label)
 
         # Description (optional)
         if description:
             desc = QLabel(description)
             desc.setFont(QFont("Segoe UI", 9))
-            desc.setStyleSheet(f"color: {TEXT_SECONDARY}; background: transparent;")
+            desc.setProperty("textRole", "help")
             desc.setWordWrap(True)
             desc.setMaximumHeight(32)
             layout.addWidget(desc)
@@ -80,12 +81,7 @@ class _VariantCard(QFrame):
         # Selection indicator
         indicator = f"border-left: 3px solid {ACCENT};" if self._is_selected else ""
 
-        self.setStyleSheet(
-            f"QFrame#VariantCard {{"
-            f"  background-color: {bg}; border: {bw}px solid {border};"
-            f"  border-radius: 6px; {indicator}"
-            f"}}"
-        )
+        set_role(self, variant="card", state=None)
 
     def set_selected(self, selected: bool):
         self._is_selected = selected
@@ -135,7 +131,7 @@ class VariantSelector(QWidget):
 
         # Label
         self._label = QLabel("Variant:")
-        self._label.setStyleSheet("color: #797e89; font-size: 12px; font-weight: bold;")
+        self._label.setProperty("textRole", "micro")
         layout.addWidget(self._label)
 
         # Cards row

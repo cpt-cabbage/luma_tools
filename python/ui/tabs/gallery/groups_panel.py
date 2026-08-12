@@ -7,7 +7,7 @@ Collapsible sidebar for filtering gallery by likes and groups.
 import logging
 from PySide6.QtCore import Qt, Signal
 
-from core.design_tokens import set_role
+from core.design_tokens import Color, set_role
 
 logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
@@ -607,7 +607,7 @@ class GroupsFilterPanel(QWidget):
         from PySide6.QtWidgets import QColorDialog
         from PySide6.QtGui import QColor
 
-        current_color = self._stack_colors.get(stack_id, "#4a9eff")
+        current_color = self._stack_colors.get(stack_id, Color.ACCENT)
         color = QColorDialog.getColor(QColor(current_color), self, f"Choose Color for {stack_id}")
         if color.isValid():
             self._stack_colors[stack_id] = color.name()

@@ -102,7 +102,7 @@ class SpinnerWidget(BaseSpinner):
 
         # Make background transparent
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet("background: transparent;")
+        self.setProperty("variant", "transparent")
 
         # Use LoadingStyles defaults
         self.secondary_color = LoadingStyles.SECONDARY_BG_COLOR
@@ -228,11 +228,7 @@ class LoadingOverlay(QFrame):
         # Use QFrame styling for reliable background
         self.setObjectName("LoadingOverlay")
         self.setFrameStyle(QFrame.NoFrame)
-        self.setStyleSheet("""
-            QFrame#LoadingOverlay {
-                background-color: rgba(30, 30, 30, 220);
-            }
-        """)
+        self.setProperty("variant", "backdrop")
 
         # Layout for spinner and message
         layout = QVBoxLayout(self)
@@ -251,14 +247,8 @@ class LoadingOverlay(QFrame):
 
         # Message label
         self._message = QLabel("Loading...")
-        self._message.setStyleSheet("""
-            QLabel {
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: 500;
-                background: transparent;
-            }
-        """)
+        self._message.setProperty("variant", "transparent")
+        self._message.setProperty("textRole", "title")
         self._message.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._message, alignment=Qt.AlignCenter)
 

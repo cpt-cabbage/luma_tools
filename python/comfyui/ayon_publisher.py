@@ -374,48 +374,6 @@ class ComfyUIPublishDialog(QDialog):
         self.setModal(True)
 
         # Apply dark theme
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e22;
-            }
-            QLabel {
-                color: #e0e0e0;
-                font-size: 12px;
-            }
-            QLineEdit, QComboBox {
-                background-color: #2c313a;
-                color: #e0e0e0;
-                border: 1px solid #3c414b;
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 12px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border-color: #4a9eff;
-            }
-            QCheckBox {
-                color: #e0e0e0;
-                font-size: 12px;
-            }
-            QPushButton {
-                background-color: #3c414b;
-                color: #e0e0e0;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #4a5160;
-            }
-            QPushButton#publishButton {
-                background-color: #10b981;
-                color: white;
-            }
-            QPushButton#publishButton:hover {
-                background-color: #14ce94;
-            }
-        """)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)

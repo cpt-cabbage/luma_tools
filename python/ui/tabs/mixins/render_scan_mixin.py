@@ -300,7 +300,7 @@ class RenderScanMixin(PublishSourceMixin):
             custom_label = self.get_widget(self._custom_path_label)
             if custom_label:
                 custom_label.setText(f"Custom path: {custom_dir}")
-                custom_label.setStyleSheet(UIStyles.LABEL_PATH)
+                custom_label.setProperty("variant", "path")
 
             logger.info(f"{self.tab_name}: Custom path set to: {custom_dir}")
             self.show_status(f"Custom: {os.path.basename(custom_dir)}", "info")

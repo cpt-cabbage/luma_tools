@@ -162,7 +162,7 @@ class StarRatingWidget(QWidget):
         self._count_label = None
         if show_count:
             self._count_label = QLabel("(0)")
-            self._count_label.setStyleSheet("color: #888; font-size: 11px; margin-left: 4px;")
+            self._count_label.setProperty("textRole", "help")
             layout.addWidget(self._count_label)
 
         layout.addStretch()

@@ -88,14 +88,6 @@ class RePublishTab(RenderScanMixin, BaseTab):
         from icons import get_ayon_icon
         from core.config import UIColors
         self.ui.RePublishPublish.setIcon(get_ayon_icon(18))
-        self.ui.RePublishPublish.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {UIColors.AYON_GREEN}; color: white;
-                border: none; border-radius: 4px; font-weight: bold; font-size: 12px;
-            }}
-            QPushButton:hover {{ background-color: {UIColors.AYON_GREEN_HOVER}; }}
-            QPushButton:disabled {{ background-color: #3c414b; color: #6b6f78; }}
-        """)
         self.apply_ayon_checkbox_style(self.ui.RePublishUseCurrentTask)
 
         # In standalone mode, show browse button immediately

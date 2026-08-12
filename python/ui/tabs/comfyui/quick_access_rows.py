@@ -15,12 +15,9 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame
 )
 
-logger = logging.getLogger(__name__)
+from core.design_tokens import set_role
 
-# Styling
-TEXT_PRIMARY = "#ffffff"
-TEXT_SECONDARY = "#888888"
-SECTION_HEADER = "#aaaaaa"
+logger = logging.getLogger(__name__)
 
 # Card dimensions (smaller for quick access)
 QUICK_CARD_WIDTH = 160

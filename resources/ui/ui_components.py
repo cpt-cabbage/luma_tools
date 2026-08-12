@@ -1123,7 +1123,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
         # Draw play triangle
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor("#ef4444")))
+        painter.setBrush(QBrush(QColor(Color.DANGER)))
         center_x, center_y = 75, 65
         size = 25
         from PySide6.QtGui import QPolygon
@@ -1136,7 +1136,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         painter.drawPolygon(triangle)
 
         # Draw "VIDEO" text
-        painter.setPen(QColor("#ef4444"))
+        painter.setPen(QColor(Color.DANGER))
         font = painter.font()
         font.setPointSize(10)
         font.setBold(True)
@@ -1230,7 +1230,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         pixmap.fill(QColor("#2a3040"))
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#4a9eff"), 2))
+        painter.setPen(QPen(QColor(Color.ACCENT), 2))
 
         # Draw 3D cube
         center_x, center_y = 75, 65
@@ -1935,7 +1935,7 @@ def load_stylesheet():
     "zoo" scenario that renders every control type for that check.
     """
     from core.config import CUSTOM_STYLE_PATH
-    from core.design_tokens import render_qss
+    from core.design_tokens import Color, render_qss
 
     custom_file = QFile(CUSTOM_STYLE_PATH)
     custom_file.open(QFile.ReadOnly | QFile.Text)

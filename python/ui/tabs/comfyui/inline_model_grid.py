@@ -29,7 +29,7 @@ from core.settings_manager import safe_get_setting, safe_set_setting
 from comfyui.presets_manager import get_comfyui_workflow_presets
 from comfyui.ratings import get_sorted_models, get_model_rating, get_predefined_tags
 
-from core.design_tokens import set_role
+from core.design_tokens import Color, set_role
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +44,10 @@ GRID_BG = "#1e2127"
 
 # Output type display
 OUTPUT_TYPE_CONFIG = {
-    "image": ("IMAGE", "#4a9eff", "rgba(74, 158, 255, 0.15)"),
+    "image": ("IMAGE", Color.ACCENT, Color.ACCENT_SUBTLE),
     "video": ("VIDEO", "#a855f7", "rgba(168, 85, 247, 0.15)"),
-    "3d": ("3D MODEL", "#10b981", "rgba(16, 185, 129, 0.15)"),
-    "audio": ("AUDIO", "#f59e0b", "rgba(245, 158, 11, 0.15)"),
+    "3d": ("3D MODEL", Color.SUCCESS, "rgba(16, 185, 129, 0.15)"),
+    "audio": ("AUDIO", Color.WARNING, "rgba(245, 158, 11, 0.15)"),
     "other": ("OTHER", "#797e89", "rgba(121, 126, 137, 0.15)"),
 }
 

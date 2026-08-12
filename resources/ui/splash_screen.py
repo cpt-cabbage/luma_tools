@@ -50,13 +50,13 @@ class SplashScreen(QWidget):
         # Logo container for proper centering
         logo_path = LoadingStyles.get_logo_path()
         logo_container = QWidget()
-        logo_container.setStyleSheet("background: transparent;")
+        logo_container.setProperty("variant", "transparent")
         logo_layout = QVBoxLayout(logo_container)
         logo_layout.setContentsMargins(0, 0, 0, 0)
         logo_layout.setAlignment(Qt.AlignCenter)
 
         self.logo_label = QLabel()
-        self.logo_label.setStyleSheet("background: transparent;")
+        self.logo_label.setProperty("variant", "transparent")
         # Set size to ensure logo is not cut off
         self.logo_label.setFixedSize(*LoadingStyles.LOGO_SIZE_SPLASH)
         if os.path.exists(logo_path):
@@ -76,7 +76,7 @@ class SplashScreen(QWidget):
         # Spinner
         self.spinner = SpinnerWidget()
         spinner_container = QWidget()
-        spinner_container.setStyleSheet("background: transparent;")
+        spinner_container.setProperty("variant", "transparent")
         spinner_layout = QVBoxLayout(spinner_container)
         spinner_layout.addWidget(self.spinner, alignment=Qt.AlignCenter)
         spinner_layout.setContentsMargins(0, 0, 0, 0)
@@ -85,13 +85,15 @@ class SplashScreen(QWidget):
         self.main_label = QLabel("Initializing...")
         self.main_label.setAlignment(Qt.AlignCenter)
         self.main_label.setFont(LoadingStyles.MAIN_TEXT_FONT)
-        self.main_label.setStyleSheet(f"color: {LoadingStyles.TEXT_PRIMARY_COLOR_STR}; background: transparent;")
+        self.main_label.setProperty("variant", "transparent")
+        self.main_label.setProperty("textRole", "display")
 
         # Sub status label
         self.sub_label = QLabel("Starting application...")
         self.sub_label.setAlignment(Qt.AlignCenter)
         self.sub_label.setFont(LoadingStyles.SUB_TEXT_FONT)
-        self.sub_label.setStyleSheet(f"color: {LoadingStyles.TEXT_TERTIARY_COLOR_STR}; background: transparent;")
+        self.sub_label.setProperty("variant", "transparent")
+        self.sub_label.setProperty("textRole", "help")
 
         # Progress bar
         self.progress_bar = QProgressBar()

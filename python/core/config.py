@@ -505,8 +505,8 @@ class UIStyles:
     DEPRECATED. Prefer the component contract: set a dynamic property and let
     the stylesheet do the work::
 
-        set_role(button, role="primary")     not  button.setStyleSheet(UIStyles.BUTTON_PRIMARY)
-        set_role(label, text="help")         not  label.setStyleSheet(UIStyles.LABEL_MUTED)
+        set_role(button, role="primary")     rather than the BUTTON_PRIMARY snippet
+        set_role(label, textRole="help")     rather than the LABEL_MUTED snippet
 
     These are retained only so existing call sites keep rendering correctly
     until they are migrated. Do not add new snippets here.

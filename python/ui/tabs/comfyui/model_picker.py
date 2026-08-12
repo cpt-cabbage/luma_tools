@@ -44,6 +44,8 @@ from comfyui.ratings import (
 
 from .model_card import ModelCard, MultiWorkflowCard, CARD_WIDTH, CARD_HEIGHT
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 # Sort options
@@ -72,34 +74,9 @@ class TagFilterChip(QPushButton):
     def _apply_style(self):
         """Apply style based on active state."""
         if self.isChecked():
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #4a9eff;
-                    color: white;
-                    border: none;
-                    border-radius: 12px;
-                    padding: 4px 12px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #3b8fe8;
-                }
-            """)
+            set_role(self, role="secondary", state="active")
         else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #3c3c3c;
-                    color: #aaa;
-                    border: none;
-                    border-radius: 12px;
-                    padding: 4px 12px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #4a4a4a;
-                    color: #fff;
-                }
-            """)
+            set_role(self, role="secondary", state=None)
 
     @property
     def tag(self) -> str:
@@ -162,18 +139,6 @@ class ModelPickerPanel(QWidget):
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search models...")
         self._search_input.setClearButtonEnabled(True)
-        self._search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #2a2a2a;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #e0e0e0;
-            }
-            QLineEdit:focus {
-                border-color: #4a9eff;
-            }
-        """)
         top_row.addWidget(self._search_input, 1)
 
         # Sort dropdown
@@ -185,23 +150,6 @@ class ModelPickerPanel(QWidget):
             if self._sort_combo.itemData(i) == self._sort_key:
                 self._sort_combo.setCurrentIndex(i)
                 break
-        self._sort_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #e0e0e0;
-                min-width: 140px;
-            }
-            QComboBox:hover {
-                border-color: #4a9eff;
-            }
-            QComboBox::drop-down {
-                border: none;
-                padding-right: 10px;
-            }
-        """)
         top_row.addWidget(self._sort_combo)
 
         content_layout.addLayout(top_row)
@@ -218,15 +166,6 @@ class ModelPickerPanel(QWidget):
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: transparent;
-            }
-        """)
 
         self._grid_container = QWidget()
         self._grid_layout = QGridLayout(self._grid_container)
@@ -242,20 +181,8 @@ class ModelPickerPanel(QWidget):
             bottom_row.addStretch()
 
             self._add_model_btn = QPushButton("+ Add Model")
-            self._add_model_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #10b981;
-                    border: 1px solid #10b981;
-                    border-radius: 4px;
-                    padding: 6px 16px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #10b981;
-                    color: white;
-                }
-            """)
+            self._add_model_btn.setProperty("role", "ghost")
+            self._add_model_btn.setProperty("state", "success")
             bottom_row.addWidget(self._add_model_btn)
 
             content_layout.addLayout(bottom_row)
@@ -425,7 +352,7 @@ class ModelPickerPanel(QWidget):
         if not models:
             # Show empty state
             empty_label = QLabel("No models found")
-            empty_label.setStyleSheet("color: #888; font-size: 12px; padding: 20px;")
+            empty_label.setProperty("textRole", "help")
             empty_label.setAlignment(Qt.AlignCenter)
             self._grid_layout.addWidget(empty_label, 0, 0)
             return

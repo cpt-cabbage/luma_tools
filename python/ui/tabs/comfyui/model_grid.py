@@ -106,14 +106,7 @@ class ModelGrid(QWidget):
 
         # Empty state widget
         self._empty_widget = QFrame()
-        self._empty_widget.setStyleSheet("""
-            QFrame {
-                background-color: #1a1d21;
-                border: 1px dashed #3c414b;
-                border-radius: 12px;
-                min-height: 200px;
-            }
-        """)
+        self._empty_widget.setProperty("variant", "empty")
 
         empty_layout = QVBoxLayout(self._empty_widget)
         empty_layout.setAlignment(Qt.AlignCenter)
@@ -121,17 +114,17 @@ class ModelGrid(QWidget):
 
         # Icon
         empty_icon = QLabel("🔍")
-        empty_icon.setStyleSheet("font-size: 32px;")
+        empty_icon.setProperty("textRole", "glyph")
         empty_icon.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(empty_icon)
 
         self._empty_title = QLabel("No models found")
-        self._empty_title.setStyleSheet("color: #888; font-size: 16px; font-weight: bold;")
+        self._empty_title.setProperty("textRole", "title")
         self._empty_title.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(self._empty_title)
 
         self._empty_hint = QLabel("Try adjusting your search or category filter")
-        self._empty_hint.setStyleSheet("color: #555; font-size: 12px;")
+        self._empty_hint.setProperty("textRole", "help")
         self._empty_hint.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(self._empty_hint)
 

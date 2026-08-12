@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QFont
 
+from core.design_tokens import Color
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,7 @@ def _get_file_type_extensions():
 
 # Tag chip color definitions
 TAG_COLORS = {
-    'comfyui': ('#1e3a5f', '#4a9eff', '#4a9eff'),      # Blue - bg, text, border
+    'comfyui': ('#1e3a5f', Color.ACCENT, Color.ACCENT),      # Blue - bg, text, border
     'input': ('#1e3f2e', '#10b981', '#10b981'),          # Green
     'mp4maker': ('#2e1e3f', '#a855f7', '#a855f7'),       # Purple
     'unknown': ('#2a2a2a', '#888888', '#555555'),         # Grey

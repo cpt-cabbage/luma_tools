@@ -920,20 +920,7 @@ class ComfyUIWidgetManager:
         group = QFrame()
         group.setFrameShape(QFrame.StyledPanel)
         group.setObjectName("settingsGroup")
-        group.setStyleSheet("""
-            QFrame#settingsGroup {
-                background-color: #2d2d2d;
-                border: 1px solid #444444;
-                border-radius: 4px;
-            }
-            QSpinBox, QDoubleSpinBox, QComboBox {
-                color: #cccccc;
-                background-color: #3a3a3a;
-                border: 1px solid #555555;
-                border-radius: 2px;
-                padding: 2px 4px;
-            }
-        """)
+        group.setProperty("variant", "subtle")
 
         group_layout = QVBoxLayout(group)
         group_layout.setContentsMargins(10, 8, 10, 8)
@@ -941,7 +928,7 @@ class ComfyUIWidgetManager:
 
         # Group title
         title = QLabel(group_name)
-        title.setStyleSheet("font-weight: bold; color: #aaaaaa; border: none;")
+        title.setProperty("textRole", "label")
         group_layout.addWidget(title)
 
         # Grid layout for settings (2 columns for compact display)
@@ -985,14 +972,13 @@ class ComfyUIWidgetManager:
         widget_info = get_widget_info(node.node_type, node.widget_name)
 
         container = QWidget()
-        container.setStyleSheet("border: none;")
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         # Label
         label = QLabel(f"{node.widget_name}:")
-        label.setStyleSheet("color: #888888; border: none;")
+        label.setProperty("textRole", "help")
         label.setMinimumWidth(80)
         layout.addWidget(label)
 

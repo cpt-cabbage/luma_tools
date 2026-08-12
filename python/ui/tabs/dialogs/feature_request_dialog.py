@@ -30,7 +30,6 @@ class CollapsibleSection(QWidget):
 
         # Header with toggle button
         self.toggle_button = QToolButton()
-        self.toggle_button.setStyleSheet("QToolButton { border: none; font-weight: bold; }")
         self.toggle_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.toggle_button.setArrowType(Qt.DownArrow)
         self.toggle_button.setText(title)
@@ -102,12 +101,12 @@ class FeatureRequestDialog(QDialog):
 
         # Info label with counts
         self.info_label = QLabel()
-        self.info_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        self.info_label.setProperty("textRole", "title")
         self.layout.addWidget(self.info_label)
 
         # Pending requests section (main area)
         pending_label = QLabel("Pending Requests")
-        pending_label.setStyleSheet("font-weight: bold; font-size: 12px; padding: 5px 0;")
+        pending_label.setProperty("textRole", "title")
         self.layout.addWidget(pending_label)
 
         self.pending_table = self._create_table()

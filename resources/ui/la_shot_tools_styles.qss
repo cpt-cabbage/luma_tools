@@ -94,6 +94,10 @@ QFrame[variant="card"]:hover {
     border-color: {{color.border_strong}};
 }
 
+QFrame[variant="card"][state="focused"] {
+    border: 1px solid {{color.border_focus}};
+}
+
 QFrame[variant="card"][state="selected"] {
     background-color: {{color.accent_subtle}};
     border: 1px solid {{color.accent}};
@@ -104,6 +108,17 @@ QFrame[variant="empty"] {
     background-color: {{color.sunken}};
     border: 1px dashed {{color.border_strong}};
     border-radius: {{radius.md}}px;
+}
+
+QFrame[variant="empty"][state="drop"] {
+    background-color: {{color.accent_subtle}};
+    border: 1px dashed {{color.accent}};
+}
+
+/* Full-bleed dimmer behind a modal overlay. */
+QWidget[variant="backdrop"] {
+    background-color: {{color.overlay_scrim}};
+    border: none;
 }
 
 /* Thumbnail well at the top of a card. */
@@ -573,6 +588,11 @@ QPlainTextEdit[state="error"] {
     background-color: {{color.danger_subtle}};
 }
 
+QLineEdit[state="drop"] {
+    border: 2px solid {{color.accent}};
+    background-color: {{color.accent_subtle}};
+}
+
 QLineEdit[state="warning"] {
     border: 1px solid {{color.warning}};
     background-color: {{color.warning_subtle}};
@@ -793,6 +813,11 @@ QCheckBox:disabled,
 QRadioButton:disabled {
     color: {{color.disabled_text}};
 }
+
+QCheckBox[state="ayon"]    { color: {{color.ayon}}; }
+QCheckBox[state="success"] { color: {{color.success}}; }
+QCheckBox[state="warning"] { color: {{color.warning}}; }
+QCheckBox[state="error"]   { color: {{color.danger}}; }
 
 QCheckBox::indicator,
 QRadioButton::indicator {
@@ -1185,6 +1210,7 @@ QLabel[textRole="micro"] {
 }
 
 QLabel[state="info"]    { color: {{color.accent}}; }
+QLabel[state="ayon"]    { color: {{color.ayon}}; }
 QLabel[state="success"] { color: {{color.success}}; }
 QLabel[state="warning"] { color: {{color.warning}}; }
 QLabel[state="error"]   { color: {{color.danger}}; }
@@ -1228,6 +1254,15 @@ QLabel[variant="cell"][state="b"] {
     background-color: {{color.success_subtle}};
     color: {{color.success}};
     border-left: 2px solid {{color.success}};
+}
+
+/* A numbered step marker in an empty-state walkthrough. */
+QLabel[variant="step"] {
+    background-color: {{color.accent}};
+    color: {{color.text_on_accent}};
+    border-radius: 12px;
+    font-size: {{font.label}}px;
+    font-weight: {{font.weight_semibold}};
 }
 
 /* A count pill next to a list row label. */
@@ -1387,18 +1422,20 @@ QSizeGrip {
  * =========================================================================== */
 
 /* --- utility buttons: Settings / Logs in the tab-bar corner -------------- */
+/* Settings / Logs in the tab-bar corner. Sized to the tab row so they sit
+   flush in it; the checked marker is a bottom rule to match tab selection. */
 QPushButton[utility="true"] {
     background-color: transparent;
     color: {{color.text_secondary}};
     border: none;
-    border-left: 2px solid transparent;
+    border-bottom: 2px solid transparent;
     border-radius: 0px;
     padding: 0px;
     margin: 0px;
-    min-height: 33px;
-    max-height: 33px;
-    min-width: 36px;
-    max-width: 36px;
+    min-height: {{size.tab_height}}px;
+    max-height: {{size.tab_height}}px;
+    min-width: 38px;
+    max-width: 38px;
 }
 
 QPushButton[utility="true"]:hover {
@@ -1407,9 +1444,9 @@ QPushButton[utility="true"]:hover {
 }
 
 QPushButton[utility="true"]:checked {
-    background-color: {{color.accent_subtle}};
+    background-color: {{color.panel}};
     color: {{color.accent}};
-    border-left: 2px solid {{color.accent}};
+    border-bottom: 2px solid {{color.accent}};
 }
 
 #UtilityButtonContainer {

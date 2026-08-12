@@ -19,15 +19,11 @@ from PySide6.QtWidgets import (
 
 from comfyui.ratings import get_predefined_tags
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 # Styling
-SIDEBAR_BG = "#1a1d21"
-SECTION_HEADER_COLOR = "#888888"
-TEXT_PRIMARY = "#ffffff"
-TEXT_SECONDARY = "#aaaaaa"
-ACCENT = "#4a9eff"
-DIVIDER_COLOR = "#2a2d32"
 
 # Sort options
 SORT_OPTIONS = [
@@ -49,12 +45,7 @@ class SidebarSection(QWidget):
 
         # Section header
         header = QLabel(title.upper())
-        header.setStyleSheet(f"""
-            color: {SECTION_HEADER_COLOR};
-            font-size: 10px;
-            font-weight: bold;
-            letter-spacing: 1px;
-        """)
+        header.setProperty("textRole", "micro")
         layout.addWidget(header)
 
         # Content container
@@ -76,26 +67,6 @@ class SidebarRadioButton(QRadioButton):
         super().__init__(text, parent)
         self._value = value
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(f"""
-            QRadioButton {{
-                color: {TEXT_SECONDARY};
-                font-size: 12px;
-                padding: 6px 8px;
-                border-radius: 4px;
-            }}
-            QRadioButton:hover {{
-                color: {TEXT_PRIMARY};
-                background-color: #2a2d32;
-            }}
-            QRadioButton:checked {{
-                color: {ACCENT};
-                background-color: rgba(74, 158, 255, 0.1);
-            }}
-            QRadioButton::indicator {{
-                width: 0px;
-                height: 0px;
-            }}
-        """)
 
     @property
     def value(self) -> str:
@@ -119,37 +90,9 @@ class SidebarButton(QPushButton):
     def _apply_style(self):
         """Apply style based on active state."""
         if self._is_active:
-            self.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: rgba(74, 158, 255, 0.15);
-                    color: {ACCENT};
-                    border: none;
-                    border-radius: 6px;
-                    padding: 10px 12px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    text-align: left;
-                }}
-                QPushButton:hover {{
-                    background-color: rgba(74, 158, 255, 0.2);
-                }}
-            """)
+            set_role(self, state="active")
         else:
-            self.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {TEXT_PRIMARY};
-                    border: none;
-                    border-radius: 6px;
-                    padding: 10px 12px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    text-align: left;
-                }}
-                QPushButton:hover {{
-                    background-color: #2a2d32;
-                }}
-            """)
+            set_role(self, state=None)
 
 
 class PickerSidebar(QWidget):
@@ -176,11 +119,7 @@ class PickerSidebar(QWidget):
 
     def _setup_ui(self):
         """Set up the sidebar UI."""
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {SIDEBAR_BG};
-            }}
-        """)
+        self.setProperty("variant", "subtle")
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
@@ -190,15 +129,6 @@ class PickerSidebar(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: transparent;
-            }
-        """)
 
         scroll_content = QWidget()
         content_layout = QVBoxLayout(scroll_content)
@@ -218,7 +148,7 @@ class PickerSidebar(QWidget):
         # Divider
         divider1 = QFrame()
         divider1.setFrameShape(QFrame.HLine)
-        divider1.setStyleSheet(f"background-color: {DIVIDER_COLOR}; max-height: 1px;")
+        divider1.setProperty("variant", "divider")
         content_layout.addWidget(divider1)
 
         # Categories section
@@ -239,7 +169,7 @@ class PickerSidebar(QWidget):
         # Divider
         divider2 = QFrame()
         divider2.setFrameShape(QFrame.HLine)
-        divider2.setStyleSheet(f"background-color: {DIVIDER_COLOR}; max-height: 1px;")
+        divider2.setProperty("variant", "divider")
         content_layout.addWidget(divider2)
 
         # Sort section
@@ -268,21 +198,8 @@ class PickerSidebar(QWidget):
         if self._is_admin:
             self._add_model_btn = QPushButton("+ Add Model")
             self._add_model_btn.setCursor(Qt.PointingHandCursor)
-            self._add_model_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: #10b981;
-                    border: 1px solid #10b981;
-                    border-radius: 6px;
-                    padding: 10px 16px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: #10b981;
-                    color: white;
-                }}
-            """)
+            self._add_model_btn.setProperty("role", "ghost")
+            self._add_model_btn.setProperty("state", "success")
             self._add_model_btn.clicked.connect(self._on_add_model_clicked)
             main_layout.addWidget(self._add_model_btn)
 

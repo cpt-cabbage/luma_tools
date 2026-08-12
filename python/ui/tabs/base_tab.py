@@ -292,18 +292,15 @@ class BaseTab(ABC):
 
             overlay = QWidget(self.ui)
             overlay.setObjectName("_deferred_loading_overlay")
-            overlay.setStyleSheet(
-                "background-color: rgba(24, 24, 24, 220); border-radius: 4px;"
-            )
+            overlay.setProperty("variant", "backdrop")
             overlay.setGeometry(self.ui.rect())
 
             layout = QVBoxLayout(overlay)
             layout.setAlignment(Qt.AlignCenter)
 
             label = QLabel(f"Loading {self.tab_name}...")
-            label.setStyleSheet(
-                "color: #cccccc; font-size: 14px; background: transparent;"
-            )
+            label.setProperty("variant", "transparent")
+            label.setProperty("textRole", "title")
             label.setAlignment(Qt.AlignCenter)
             layout.addWidget(label)
 
@@ -617,4 +614,4 @@ class BaseTab(ABC):
         from icons import get_ayon_icon
         from core.config import UIColors
         widget.setIcon(get_ayon_icon(icon_size))
-        widget.setStyleSheet(f"QCheckBox {{ color: {UIColors.AYON_GREEN}; }}")
+        widget.setProperty("state", "ayon")

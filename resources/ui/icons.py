@@ -9,6 +9,8 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage
 from PySide6.QtSvg import QSvgRenderer
 
+from core.design_tokens import Color
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,12 +20,12 @@ ICONS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icons")
 
 # Tab accent colors - monochromatic with blue accent
 TAB_COLORS = {
-    "pass_builder": "#4a9eff",  # Blue Accent (primary)
+    "pass_builder": Color.ACCENT,  # Blue Accent (primary)
     "mp4_maker": "#9fa5b0",     # Slate Gray
     "republish": "#9fa5b0",     # Slate Gray
     "shot_cleaner": "#9fa5b0",  # Slate Gray
     "logs": "#9fa5b0",          # Slate Gray
-    "comfyui": "#4a9eff",       # Blue Accent (AI feature)
+    "comfyui": Color.ACCENT,       # Blue Accent (AI feature)
     "gallery": "#9fa5b0",       # Slate Gray
     "settings": "#797e89",      # Dim Gray
 }
@@ -42,7 +44,7 @@ DEFAULT_ICON_COLOR = "#9fa5b0"
 
 # AYON brand color — canonical source is UIColors.AYON_GREEN in core.config
 # Kept here for icons.py internal use only (avoid circular import with core.config)
-AYON_GREEN = "#00cea5"
+AYON_GREEN = Color.AYON
 
 
 class IconManager:

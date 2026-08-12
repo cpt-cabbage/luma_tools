@@ -821,14 +821,6 @@ class GalleryTab(BaseTab):
         self._gallery_splitter.setHandleWidth(4)
         # Ensure splitter expands to fill available space like the scroll area did
         self._gallery_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._gallery_splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #3c414b;
-            }
-            QSplitter::handle:hover {
-                background-color: #4a9eff;
-            }
-        """)
 
         # Add groups panel on the left
         self._gallery_splitter.addWidget(self._groups_panel)

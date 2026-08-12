@@ -6,6 +6,8 @@ Contains simple widgets and helper functions used across the application.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.design_tokens import Color
+
 logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import (
@@ -366,17 +368,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         self.count_badge = QLabel(self.thumbnail_container)
         self.count_badge.setText(str(self._count))
         self.count_badge.setAlignment(Qt.AlignCenter)
-        self.count_badge.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 0.5);
-                color: rgba(91, 163, 255, 0.95);
-                border-radius: 10px;
-                font-size: 11px;
-                font-weight: bold;
-                padding: 2px 6px;
-                border: 2px solid rgba(91, 163, 255, 0.7);
-            }
-        """)
+        self.count_badge.setProperty("variant", "selectionBadge")
         # Size based on digit count
         badge_width = max(22, 10 + len(str(self._count)) * 8)
         self.count_badge.setFixedSize(badge_width, 20)
@@ -390,11 +382,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         display_name = self.stack_id if len(self.stack_id) <= 25 else self.stack_id[:22] + "..."
         self.filename_label = QLabel(display_name)
         self.filename_label.setAlignment(Qt.AlignCenter)
-        self.filename_label.setStyleSheet("""
-            color: #c0c0c0;
-            font-size: 10px;
-            padding: 2px 4px;
-        """)
+        self.filename_label.setProperty("textRole", "help")
         self.filename_label.setWordWrap(True)
         self.filename_label.setMaximumWidth(self.THUMBNAIL_SIZE[0] + 10)
         self.filename_label.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -673,7 +661,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         # Draw rounded rectangle background
         # Use dominant color if available, otherwise grey for models
         dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else None
-        if dominant and dominant != "#4a9eff":  # Not default blue
+        if dominant and dominant != Color.ACCENT:  # Not default blue
             # Derive dark background from dominant color
             hex_color = dominant.lstrip('#')
             r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
@@ -681,7 +669,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
             icon_color = dominant
         else:
             bg_color = "#2a3040"  # Grey for models
-            icon_color = "#4a9eff"
+            icon_color = Color.ACCENT
 
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.THUMBNAIL_SIZE[0], self.THUMBNAIL_SIZE[1], 8, 8)
@@ -773,7 +761,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         painter.fillPath(path, QBrush(QColor(bg_color)))
 
         # Draw play button icon (triangle)
-        icon_color = "#4a9eff"
+        icon_color = Color.ACCENT
         painter.setBrush(QColor(icon_color))
         painter.setPen(QColor(icon_color))
         center_x, center_y = 75, 65
@@ -854,7 +842,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         painter.fillPath(path, QBrush(QColor(bg_color)))
 
         # Draw music note icon
-        icon_color = "#4a9eff"
+        icon_color = Color.ACCENT
         painter.setPen(QPen(QColor(icon_color), 3))
         center_x, center_y = 75, 60
         # Stem
@@ -964,7 +952,7 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
                         if self._is_hovered:
                             effect.setBlurRadius(16)
                             # Use dominant color for shadow if available
-                            dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else "#4a9eff"
+                            dominant = self._get_dominant_color() if hasattr(self, '_get_dominant_color') else Color.ACCENT
                             hex_color = dominant.lstrip('#')
                             r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
                             effect.setColor(QColor(r, g, b, 60))
@@ -1748,10 +1736,10 @@ class StackedThumbnailWidget(DraggableMixin, DropTargetMixin, QWidget):
         if getattr(self, '_is_all_liked', False):
             from core.settings_manager import get_setting
             liked_color = get_setting("gallery_liked_color")
-            return liked_color or "#10b981"  # Default green
+            return liked_color or Color.SUCCESS  # Default green
 
         # Default blue
-        return "#4a9eff"
+        return Color.ACCENT
 
     def _get_background_colors(self, hex_color):
         """Convert a hex color to rgba background and border colors for the expanded background."""

@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 
 from .star_rating import CompactStarRating
 
+from core.design_tokens import Color, Radius, set_role
+
 logger = logging.getLogger(__name__)
 
 # Card dimensions
@@ -30,14 +32,15 @@ CARD_WIDTH = 200
 CARD_HEIGHT = 180
 THUMB_HEIGHT = 120
 
-# Colors
-CARD_BG = "#2a2a2a"
-CARD_BG_HOVER = "#323232"
-CARD_BORDER = "#3c414b"
-CARD_BORDER_HOVER = "#4a9eff"
-CARD_BORDER_SELECTED = "#10b981"
-TEXT_PRIMARY = "#e0e0e0"
-TEXT_SECONDARY = "#888888"
+# Card colours. These stay in Python rather than moving to the stylesheet
+# because the border is driven by a QPropertyAnimation (see _setup_effects),
+# and QSS cannot animate. They resolve from the design tokens so they still
+# cannot drift from the rest of the app.
+CARD_BG = Color.PANEL_ALT
+CARD_BG_HOVER = Color.HOVER
+CARD_BORDER = Color.BORDER
+CARD_BORDER_HOVER = Color.ACCENT
+CARD_BORDER_SELECTED = Color.SUCCESS
 
 
 class ThumbnailWidget(QLabel):
@@ -51,14 +54,7 @@ class ThumbnailWidget(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(CARD_WIDTH - 10, THUMB_HEIGHT)
         self.setMaximumHeight(THUMB_HEIGHT)
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: #1e1e1e;
-                border-radius: 4px;
-                color: #666;
-                font-size: 11px;
-            }}
-        """)
+        self.setProperty("variant", "thumb")
 
     def set_thumbnail(self, path: Optional[str]) -> None:
         """Set thumbnail from file path."""
@@ -153,7 +149,6 @@ class ModelCard(QFrame):
         display_name = self._get_display_name()
         self._name_label = QLabel(display_name)
         self._name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self._name_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         self._name_label.setWordWrap(False)
         self._name_label.setMaximumWidth(CARD_WIDTH - 10)
         # Elide long names
@@ -173,7 +168,7 @@ class ModelCard(QFrame):
         stats_row.addStretch()
 
         self._usage_label = QLabel("0 uses")
-        self._usage_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
+        self._usage_label.setProperty("textRole", "help")
         stats_row.addWidget(self._usage_label)
 
         layout.addLayout(stats_row)
@@ -448,15 +443,7 @@ class OverlayModelCard(QFrame):
         self._thumbnail = QLabel()
         self._thumbnail.setFixedHeight(thumb_height)
         self._thumbnail.setAlignment(Qt.AlignCenter)
-        self._thumbnail.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border-top-left-radius: 7px;
-                border-top-right-radius: 7px;
-                color: #555;
-                font-size: 11px;
-            }
-        """)
+        self._thumbnail.setProperty("variant", "thumb")
         thumb_path = self._rating_data.get("thumbnail_path")
         if thumb_path and os.path.exists(thumb_path):
             pixmap = QPixmap(thumb_path)
@@ -488,7 +475,6 @@ class OverlayModelCard(QFrame):
         display_name = self._get_display_name()
         self._name_label = QLabel(display_name)
         self._name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self._name_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         metrics = self._name_label.fontMetrics()
         elided = metrics.elidedText(display_name, Qt.ElideRight, OVERLAY_CARD_WIDTH - 20)
         self._name_label.setText(elided)
@@ -512,18 +498,8 @@ class OverlayModelCard(QFrame):
         self._fav_btn = QPushButton("★" if is_favorite else "☆")
         self._fav_btn.setFixedSize(20, 20)
         self._fav_btn.setCursor(Qt.PointingHandCursor)
-        self._fav_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {"#fbbf24" if is_favorite else "#555"};
-                border: none;
-                font-size: 14px;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                color: #fbbf24;
-            }}
-        """)
+        set_role(self._fav_btn, role="link",
+                 state="warning" if is_favorite else None)
         self._fav_btn.clicked.connect(self._on_favorite_clicked)
         stats_row.addWidget(self._fav_btn)
 
@@ -532,7 +508,7 @@ class OverlayModelCard(QFrame):
         # Usage count
         total_uses = self._rating_data.get("total_uses", 0)
         self._usage_label = QLabel(f"{total_uses} uses")
-        self._usage_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
+        self._usage_label.setProperty("textRole", "help")
         content_layout.addWidget(self._usage_label)
 
         layout.addWidget(content)

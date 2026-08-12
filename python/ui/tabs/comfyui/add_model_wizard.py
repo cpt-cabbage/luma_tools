@@ -57,7 +57,7 @@ class WorkflowPage(QWizardPage):
             "Select a ComfyUI workflow JSON file. The workflow should have\n"
             "editable nodes marked with '_editable' suffix in their titles."
         )
-        info.setStyleSheet("color: #888; font-size: 11px;")
+        info.setProperty("textRole", "help")
         layout.addWidget(info)
 
         layout.addStretch()
@@ -140,7 +140,7 @@ class DetailsPage(QWizardPage):
             "Use forward slashes (/) in the name to organize models into folders.\n"
             "Example: 'Upscaling/Flux 4x' creates a folder called 'Upscaling'."
         )
-        info.setStyleSheet("color: #888; font-size: 11px;")
+        info.setProperty("textRole", "help")
         layout.addWidget(info)
 
         layout.addStretch()
@@ -214,13 +214,7 @@ class TagsPage(QWizardPage):
 
         # Tags grid
         tags_frame = QFrame()
-        tags_frame.setStyleSheet("""
-            QFrame {
-                background-color: #2a2a2a;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-            }
-        """)
+        tags_frame.setProperty("variant", "subtle")
         tags_layout = QGridLayout(tags_frame)
         tags_layout.setContentsMargins(15, 15, 15, 15)
         tags_layout.setSpacing(10)
@@ -231,7 +225,6 @@ class TagsPage(QWizardPage):
         cols = 3
         for i, tag in enumerate(predefined):
             check = QCheckBox(tag)
-            check.setStyleSheet("color: #e0e0e0;")
             self._tag_checks[tag] = check
             tags_layout.addWidget(check, i // cols, i % cols)
 
@@ -242,7 +235,7 @@ class TagsPage(QWizardPage):
             "Tags help users find models by category.\n"
             "Select any that apply to this model."
         )
-        info.setStyleSheet("color: #888; font-size: 11px;")
+        info.setProperty("textRole", "help")
         layout.addWidget(info)
 
         layout.addStretch()

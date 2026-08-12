@@ -262,7 +262,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
 
         # Update UI
         self.ui.MP4OutputPath.setText(self.app_state.mp4_output_path)
-        self.ui.MP4OutputPath.setStyleSheet(UIStyles.LABEL_PATH)
+        self.ui.MP4OutputPath.setProperty("variant", "path")
 
         # Enable generate button
         self.ui.MP4Generate.setEnabled(True)
@@ -298,7 +298,7 @@ class MP4MakerTab(RenderScanMixin, BaseTab):
         if output_file:
             self.app_state.mp4_output_path = output_file
             self.ui.MP4OutputPath.setText(output_file)
-            self.ui.MP4OutputPath.setStyleSheet(UIStyles.LABEL_PATH)
+            self.ui.MP4OutputPath.setProperty("variant", "path")
 
             # Enable generate button if render is selected
             if self._get_selected_render():

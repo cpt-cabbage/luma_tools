@@ -666,7 +666,7 @@ class LumaShotTools(QtWidgets.QWidget):
         Hides these tabs from the movable tab bar and shows them as fixed
         QPushButtons via setCornerWidget so they can't be reordered.
         """
-        from PySide6.QtWidgets import QPushButton, QVBoxLayout
+        from PySide6.QtWidgets import QPushButton, QHBoxLayout
         from effects import ButtonNotificationBadge
 
         # Ordered list of utility tabs to show as buttons
@@ -677,7 +677,10 @@ class LumaShotTools(QtWidgets.QWidget):
 
         container = QtWidgets.QWidget()
         container.setObjectName("UtilityButtonContainer")
-        layout = QVBoxLayout(container)
+        # Horizontal: the tab bar is a single row, so stacking these vertically
+        # made the container taller than the bar and the lower button spilled
+        # over the content area.
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 6, 0)
         layout.setSpacing(0)
 
@@ -711,10 +714,10 @@ class LumaShotTools(QtWidgets.QWidget):
             self._utility_badges[restrict_key] = badge
 
         if self._utility_buttons:
-            # Size container height to actual button count (each button is 33px)
-            button_count = len(self._utility_buttons)
-            container_height = button_count * 33
-            container.setFixedHeight(container_height)
+            # Match the tab bar exactly so the corner widget sits flush in the
+            # row rather than defining its own height.
+            from core.design_tokens import Size
+            container.setFixedHeight(Size.TAB_HEIGHT)
             self.tab_widget.setCornerWidget(container, Qt.TopRightCorner)
 
     def _on_utility_button_clicked(self, restrict_key):

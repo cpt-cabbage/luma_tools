@@ -1505,7 +1505,7 @@ class GalleryManager(BaseGalleryManager):
             username = self.tab._selected_user
             self._empty_state_widget = QLabel(f"<b>{username}'s gallery is empty</b>")
             self._empty_state_widget.setAlignment(Qt.AlignCenter)
-            self._empty_state_widget.setStyleSheet("color: #888888; font-size: 14pt; padding: 50px;")
+            self._empty_state_widget.setProperty("textRole", "help")
         else:
             # Show full guidance for own gallery
             from empty_states import GalleryEmptyState

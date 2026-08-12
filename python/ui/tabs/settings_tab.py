@@ -445,11 +445,11 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'BundleLabel'):
             from core.config import get_ayon_bundle, UIColors
             self.ui.BundleLabel.setText(get_ayon_bundle())
-            self.ui.BundleLabel.setStyleSheet(f"color: {UIColors.AYON_GREEN};")
+            self.ui.BundleLabel.setProperty("state", "ayon")
         if hasattr(self.ui, 'label_bundle'):
             from icons import get_ayon_icon
             from core.config import UIColors
-            self.ui.label_bundle.setStyleSheet(f"color: {UIColors.AYON_GREEN};")
+            self.ui.label_bundle.setProperty("state", "ayon")
 
         # Load feature request UI
         self._load_feature_request_ui()
@@ -1188,7 +1188,7 @@ class SettingsTab(BaseTab):
         # to throw away everything the user typed.
         from core.config import UIColors
         validation_label = QLabel("Please enter a description before submitting.")
-        validation_label.setStyleSheet(f"color: {UIColors.WARNING};")
+        validation_label.setProperty("state", "warning")
         validation_label.setVisible(False)
         layout.addWidget(validation_label)
 

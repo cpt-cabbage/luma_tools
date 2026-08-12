@@ -230,7 +230,7 @@ class ThreeJSViewerWidget(QWidget):
 
         # Create web view - always start hidden
         self._web_view = QWebEngineView()
-        self._web_view.setStyleSheet("background: #1e1e1e;")
+        self._web_view.setProperty("variant", "canvas")
         self._web_view.hide()
         layout.addWidget(self._web_view)
 
@@ -600,7 +600,7 @@ class ThreeJSViewerDialog(QWidget):
 
         # Info bar with controls - overlays on content
         self._info_bar = QWidget(self)  # Child of self for overlay
-        self._info_bar.setStyleSheet("background-color: rgba(30, 30, 30, 200); border-top: 1px solid #444444;")
+        self._info_bar.setProperty("variant", "scrim")
         self._info_bar.setFixedHeight(35)
         info_layout = QHBoxLayout(self._info_bar)
         info_layout.setContentsMargins(10, 5, 10, 5)
@@ -608,16 +608,14 @@ class ThreeJSViewerDialog(QWidget):
 
         # Filename label
         filename_label = QLabel(os.path.basename(model_path))
-        filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        filename_label.setProperty("textRole", "value")
         info_layout.addWidget(filename_label)
 
         # Shading Mode dropdown
         self._shading_btn = QPushButton(self._current_shading_mode.title())
         self._shading_btn.setFixedHeight(25)
-        self._shading_btn.setStyleSheet("""
-            QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
-            QPushButton:hover { background-color: #5aa9ff; }
-        """)
+        self._shading_btn.setProperty("role", "primary")
+        self._shading_btn.setProperty("density", "sm")
         self._shading_btn.clicked.connect(self._show_shading_menu)
         info_layout.addWidget(self._shading_btn)
 
@@ -625,16 +623,14 @@ class ThreeJSViewerDialog(QWidget):
         label_map = {"headlight": "Headlight", "studio": "Studio", "hdri": "HDRI"}
         self._lighting_btn = QPushButton(label_map.get(self._current_lighting_mode, "Studio"))
         self._lighting_btn.setFixedHeight(25)
-        self._lighting_btn.setStyleSheet("""
-            QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
-            QPushButton:hover { background-color: #7c8596; }
-        """)
+        self._lighting_btn.setProperty("role", "secondary")
+        self._lighting_btn.setProperty("density", "sm")
         self._lighting_btn.clicked.connect(self._show_lighting_menu)
         info_layout.addWidget(self._lighting_btn)
 
         # Light strength label
         light_label = QLabel("Light:")
-        light_label.setStyleSheet("color: #888888; font-size: 11px;")
+        light_label.setProperty("textRole", "help")
         info_layout.addWidget(light_label)
 
         # Light strength slider
@@ -644,36 +640,20 @@ class ThreeJSViewerDialog(QWidget):
         self._light_slider.setValue(int(self._current_light_strength * 100))
         self._light_slider.setFixedWidth(100)
         self._light_slider.setFixedHeight(20)
-        self._light_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 4px;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #4a9eff;
-                width: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #5aa9ff;
-            }
-        """)
         self._light_slider.valueChanged.connect(self._on_light_strength_changed)
         info_layout.addWidget(self._light_slider)
 
         # Light strength value label
         self._light_value_label = QLabel(f"{self._current_light_strength:.1f}x")
         self._light_value_label.setFixedWidth(35)
-        self._light_value_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self._light_value_label.setProperty("textRole", "help")
         info_layout.addWidget(self._light_value_label)
 
         info_layout.addStretch()
 
         # Help text
         help_label = QLabel("Scroll: Zoom | Drag: Rotate | Shift+Drag: Pan")
-        help_label.setStyleSheet("color: #888888; font-size: 10px;")
+        help_label.setProperty("textRole", "help")
         info_layout.addWidget(help_label)
 
         self._info_bar.raise_()

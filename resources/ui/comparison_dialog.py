@@ -21,62 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 # Stylesheet for the comparison dialog
-COMPARISON_DIALOG_STYLESHEET = """
-    QDialog {
-        background-color: #1e1e22;
-    }
-    QLabel {
-        color: #e0e0e0;
-        font-size: 12px;
-    }
-    QLabel#titleLabel {
-        color: #4a9eff;
-        font-size: 14px;
-        font-weight: bold;
-    }
-    QLabel#filenameLabel {
-        color: #aaaaaa;
-        font-size: 11px;
-    }
-    QTableWidget {
-        background-color: #2c313a;
-        color: #e0e0e0;
-        border: 1px solid #3c414b;
-        border-radius: 4px;
-        gridline-color: #3c414b;
-        font-size: 11px;
-    }
-    QTableWidget::item {
-        padding: 4px 8px;
-    }
-    QTableWidget::item:selected {
-        background-color: #3a4a5f;
-    }
-    QHeaderView::section {
-        background-color: #2a2e36;
-        color: #e0e0e0;
-        padding: 6px;
-        border: none;
-        border-bottom: 1px solid #3c414b;
-        font-weight: bold;
-    }
-    QPushButton {
-        background-color: #3c414b;
-        color: #e0e0e0;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        font-size: 12px;
-    }
-    QPushButton:hover {
-        background-color: #4a5160;
-    }
-    QFrame#thumbnailFrame {
-        background-color: #2c313a;
-        border: 1px solid #3c414b;
-        border-radius: 4px;
-    }
-"""
 
 
 class ComparisonDialog(QDialog):
@@ -155,7 +99,6 @@ class ComparisonDialog(QDialog):
         self.setMinimumSize(800, 600)
         self.resize(900, 700)
         self.setModal(True)
-        self.setStyleSheet(COMPARISON_DIALOG_STYLESHEET)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
@@ -185,11 +128,11 @@ class ComparisonDialog(QDialog):
         legend_layout.addStretch()
 
         same_label = QLabel("  Same values")
-        same_label.setStyleSheet("color: #4ade80;")
+        same_label.setProperty("state", "success")
         legend_layout.addWidget(same_label)
 
         diff_label = QLabel("  Different values")
-        diff_label.setStyleSheet("color: #f87171;")
+        diff_label.setProperty("state", "error")
         legend_layout.addWidget(diff_label)
 
         legend_layout.addStretch()
@@ -231,14 +174,15 @@ class ComparisonDialog(QDialog):
         # Label (A or B)
         label = QLabel(label_text)
         label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet("font-weight: bold; color: #4a9eff;")
+        label.setProperty("textRole", "title")
+        label.setProperty("state", "info")
         layout.addWidget(label)
 
         # Thumbnail
         thumb_label = QLabel()
         thumb_label.setFixedSize(180, 120)
         thumb_label.setAlignment(Qt.AlignCenter)
-        thumb_label.setStyleSheet("background-color: #1a1a1a; border-radius: 4px;")
+        thumb_label.setProperty("variant", "thumb")
 
         # Load thumbnail
         if os.path.exists(item_path):

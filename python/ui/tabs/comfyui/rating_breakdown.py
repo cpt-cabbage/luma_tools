@@ -56,7 +56,7 @@ class RatingBreakdownWidget(QWidget):
             # Star label (e.g., "5 ★")
             star_label = QLabel(f"{stars} ★")
             star_label.setFixedWidth(35)
-            star_label.setStyleSheet("color: #fbbf24; font-size: 12px;")
+            star_label.setProperty("state", "warning")
             star_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             row.addWidget(star_label)
 
@@ -84,7 +84,7 @@ class RatingBreakdownWidget(QWidget):
             # Count label
             count_label = QLabel("0")
             count_label.setFixedWidth(30)
-            count_label.setStyleSheet("color: #888; font-size: 11px;")
+            count_label.setProperty("textRole", "help")
             count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             row.addWidget(count_label)
             self._count_labels[stars] = count_label

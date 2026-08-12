@@ -13,6 +13,7 @@ from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QPen, QFont, QDrag
 
 
 from core.config import VIDEO_EXTENSIONS
+from core.design_tokens import set_role
 
 
 # Global registry for tracking active drags between BatchImageSelector widgets
@@ -62,15 +63,7 @@ class BatchImageThumbnail(QLabel):
 
         self.setFixedSize(self.thumbnail_size, self.thumbnail_size)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("""
-            BatchImageThumbnail {
-                background-color: #2c313a;
-                border-radius: 4px;
-            }
-            BatchImageThumbnail:hover {
-                background-color: #3c414b;
-            }
-        """)
+        self.setProperty("variant", "subtle")
 
         # Enable drag
         self.setAcceptDrops(False)  # Will be handled by parent
@@ -296,27 +289,12 @@ class BatchImageSelector(QWidget):
 
         self.main_layout.addWidget(self.toolbar)
 
-        # Drop zone frame - store base style for drag highlight toggling
-        self._drop_frame_base_style = """
-            QFrame {
-                background-color: #2c313a;
-                border: 2px dashed #3c414b;
-                border-radius: 6px;
-            }
-            QFrame:hover {
-                border-color: #4a9eff;
-            }
-        """
-        self._drop_frame_highlight_style = """
-            QFrame {
-                background-color: rgba(74, 158, 255, 0.15);
-                border: 2px solid #4a9eff;
-                border-radius: 6px;
-            }
-        """
+        # Drop zone. The drag-over highlight is
+        # QFrame[variant="empty"][state="drop"] in the stylesheet, toggled
+        # through set_role rather than by swapping stylesheet strings.
         self.drop_frame = QFrame()
         self.drop_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Sunken)
-        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+        set_role(self.drop_frame, variant="empty", state=None)
         # Set size policy to expand vertically
         self.drop_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_frame.setAcceptDrops(True)
@@ -327,7 +305,7 @@ class BatchImageSelector(QWidget):
         _label_title = self._file_type_label.title()
         self.drop_label = QLabel(f"Drop {self._file_type_label} here or click 'Add {_label_title}...'\n(Drag thumbnails to reorder, double-click to remove)")
         self.drop_label.setAlignment(Qt.AlignCenter)
-        self.drop_label.setStyleSheet("color: #888888; font-size: 11px; border: none;")
+        self.drop_label.setProperty("textRole", "help")
         drop_layout.addWidget(self.drop_label)
 
         # Scroll area for grid
@@ -335,12 +313,6 @@ class BatchImageSelector(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-        """)
         self.scroll_area.hide()
 
         # Grid container for thumbnails
@@ -532,7 +504,7 @@ class BatchImageSelector(QWidget):
             # by checking if the drag source is from a different widget
             is_internal = self._dragged_widget is not None
             if not is_internal:
-                self.drop_frame.setStyleSheet(self._drop_frame_highlight_style)
+                set_role(self.drop_frame, variant="empty", state="drop")
 
     def dragMoveEvent(self, event):
         """Handle drag move - for internal reordering."""
@@ -543,7 +515,7 @@ class BatchImageSelector(QWidget):
 
     def dragLeaveEvent(self, event):
         """Handle drag leave - remove visual feedback."""
-        self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+        set_role(self.drop_frame, variant="empty", state=None)
         # Note: Don't clear _dragged_widget here - it might be leaving temporarily
         # (e.g., hovering over tab bar) and coming back
         event.accept()
@@ -555,7 +527,7 @@ class BatchImageSelector(QWidget):
         logger.debug(f"[BatchImageSelector] dropEvent START")
         try:
             # Restore base style
-            self.drop_frame.setStyleSheet(self._drop_frame_base_style)
+            set_role(self.drop_frame, variant="empty", state=None)
 
             # Check if it's an internal drag (reordering within this widget)
             if event.mimeData().hasText() and self._dragged_widget:

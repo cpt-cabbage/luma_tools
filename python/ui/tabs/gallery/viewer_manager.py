@@ -144,7 +144,7 @@ class ViewerManager(BaseGalleryManager):
         # Create a temporary loading widget if not exists
         if self._viewer_loading_widget is None:
             self._viewer_loading_widget = QWidget(self.tab.ui)
-            self._viewer_loading_widget.setStyleSheet("background-color: #1a1a1a;")
+            self._viewer_loading_widget.setProperty("variant", "canvas")
             layout = QVBoxLayout(self._viewer_loading_widget)
             layout.setAlignment(Qt.AlignCenter)
 
@@ -155,7 +155,7 @@ class ViewerManager(BaseGalleryManager):
 
             # Add label
             loading_label = QLabel("Loading viewer...")
-            loading_label.setStyleSheet("color: #888888; font-size: 14px;")
+            loading_label.setProperty("textRole", "help")
             loading_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(loading_label)
 

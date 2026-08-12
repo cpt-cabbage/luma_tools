@@ -14,7 +14,7 @@ from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
 from dialog_helpers import get_active_window, show_error, show_warning, confirm_action
-from core.design_tokens import set_role
+from core.design_tokens import Color, set_role
 
 # Import event bus for cross-tab communication
 try:
@@ -591,7 +591,7 @@ class WaveformWidget(QWidget):
         painter.drawLine(QPointF(0, center_y), QPointF(width, center_y))
 
         # Draw waveform
-        pen = QPen(QColor("#4a9eff"))
+        pen = QPen(QColor(Color.ACCENT))
         pen.setWidth(1)
         painter.setPen(pen)
 
@@ -606,7 +606,7 @@ class WaveformWidget(QWidget):
 
         # Draw playback cursor
         cursor_x = self.play_position * width
-        cursor_pen = QPen(QColor("#ef4444"))
+        cursor_pen = QPen(QColor(Color.DANGER))
         cursor_pen.setWidth(2)
         painter.setPen(cursor_pen)
         painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))

@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 )
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 # Bar dimensions
@@ -28,14 +30,6 @@ THUMB_WIDTH = 100
 THUMB_HEIGHT = 75
 
 # Colors
-BAR_BG = "#2a2a2a"
-BAR_BG_HOVER = "#323232"
-BAR_BORDER = "#3c414b"
-BAR_BORDER_HOVER = "#4a9eff"
-BAR_BORDER_SELECTED = "#10b981"
-TEXT_PRIMARY = "#e0e0e0"
-TEXT_SECONDARY = "#888888"
-TEXT_DESCRIPTION = "#aaaaaa"
 
 
 class ModelBar(QFrame):
@@ -95,14 +89,7 @@ class ModelBar(QFrame):
         self._thumbnail = QLabel()
         self._thumbnail.setFixedSize(THUMB_WIDTH, THUMB_HEIGHT)
         self._thumbnail.setAlignment(Qt.AlignCenter)
-        self._thumbnail.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border-radius: 4px;
-                color: #555;
-                font-size: 10px;
-            }
-        """)
+        self._thumbnail.setProperty("variant", "thumb")
         thumb_path = self._rating_data.get("thumbnail_path")
         if thumb_path and os.path.exists(thumb_path):
             pixmap = QPixmap(thumb_path)
@@ -129,7 +116,6 @@ class ModelBar(QFrame):
         display_name = self._get_display_name()
         self._name_label = QLabel(display_name)
         self._name_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        self._name_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         self._name_label.setWordWrap(False)
         self._name_label.setToolTip(self._model_name)
         content_layout.addWidget(self._name_label)
@@ -138,7 +124,7 @@ class ModelBar(QFrame):
         description = self._get_description()
         self._desc_label = QLabel(description if description else "No description available")
         self._desc_label.setFont(QFont("Segoe UI", 9))
-        self._desc_label.setStyleSheet(f"color: {TEXT_DESCRIPTION};")
+        self._desc_label.setProperty("textRole", "help")
         self._desc_label.setWordWrap(True)
         self._desc_label.setMaximumHeight(28)  # 2 lines max
         content_layout.addWidget(self._desc_label)
@@ -152,21 +138,12 @@ class ModelBar(QFrame):
         if tags:
             for tag in tags[:4]:  # Show max 4 tags
                 tag_chip = QLabel(tag)
-                tag_chip.setStyleSheet("""
-                    QLabel {
-                        background-color: #3c414b;
-                        color: #aaa;
-                        border: none;
-                        border-radius: 8px;
-                        padding: 2px 8px;
-                        font-size: 9px;
-                    }
-                """)
+                tag_chip.setProperty("variant", "count")
                 tags_row.addWidget(tag_chip)
 
             if len(tags) > 4:
                 more_label = QLabel(f"+{len(tags) - 4} more")
-                more_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
+                more_label.setProperty("textRole", "help")
                 tags_row.addWidget(more_label)
 
         tags_row.addStretch()
@@ -204,18 +181,8 @@ class ModelBar(QFrame):
         self._fav_btn = QPushButton("★" if is_favorite else "☆")
         self._fav_btn.setFixedSize(24, 24)
         self._fav_btn.setCursor(Qt.PointingHandCursor)
-        self._fav_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {"#fbbf24" if is_favorite else "#555"};
-                border: none;
-                font-size: 16px;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                color: #fbbf24;
-            }}
-        """)
+        set_role(self._fav_btn, role="link",
+                 state="warning" if is_favorite else None)
         self._fav_btn.clicked.connect(self._on_favorite_clicked)
         rating_row.addWidget(self._fav_btn)
 
@@ -224,7 +191,7 @@ class ModelBar(QFrame):
         # Usage count
         total_uses = self._rating_data.get("total_uses", 0)
         self._usage_label = QLabel(f"{total_uses} uses")
-        self._usage_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
+        self._usage_label.setProperty("textRole", "help")
         self._usage_label.setAlignment(Qt.AlignRight)
         stats_layout.addWidget(self._usage_label)
 
@@ -249,31 +216,18 @@ class ModelBar(QFrame):
         return self._preset_config.get("description", "").strip()
 
     def _apply_style(self):
-        """Apply current style based on state."""
-        if self._is_selected:
-            border_color = BAR_BORDER_SELECTED
-            border_width = 2
-            bg = BAR_BG_HOVER
-        elif self._is_focused:
-            border_color = BAR_BORDER_HOVER
-            border_width = 2
-            bg = BAR_BG_HOVER
-        elif self._is_hovered:
-            border_color = BAR_BORDER_HOVER
-            border_width = 1
-            bg = BAR_BG_HOVER
-        else:
-            border_color = BAR_BORDER
-            border_width = 1
-            bg = BAR_BG
+        """Apply current style based on state.
 
-        self.setStyleSheet(f"""
-            QFrame#ModelBar {{
-                background-color: {bg};
-                border: {border_width}px solid {border_color};
-                border-radius: 6px;
-            }}
-        """)
+        Hover is a QSS pseudo-state now, so only selection and keyboard focus
+        have to be pushed through as properties.
+        """
+        if self._is_selected:
+            state = "selected"
+        elif self._is_focused:
+            state = "focused"
+        else:
+            state = None
+        set_role(self, variant="card", state=state)
 
     def set_selected(self, selected: bool):
         """Set selection state."""
