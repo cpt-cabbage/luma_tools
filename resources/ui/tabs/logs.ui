@@ -78,6 +78,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="PauseLogButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>100</width>
@@ -97,6 +100,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="ClearLogButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>100</width>

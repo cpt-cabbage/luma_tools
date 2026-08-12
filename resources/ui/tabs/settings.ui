@@ -86,6 +86,9 @@
             </item>
             <item>
              <widget class="QPushButton" name="showVersionHistoryButton">
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Version History</string>
               </property>
@@ -102,6 +105,9 @@
             </item>
             <item>
              <widget class="QPushButton" name="submitFeatureRequestButton">
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Submit Request</string>
               </property>
@@ -118,6 +124,9 @@
             </item>
             <item>
              <widget class="QPushButton" name="viewFeatureRequestsButton">
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>View Requests</string>
               </property>
@@ -452,6 +461,9 @@
             </item>
             <item>
              <widget class="QPushButton" name="RegenerateThumbnailsButton">
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="minimumSize">
                <size>
                 <width>180</width>
@@ -504,6 +516,12 @@
              <layout class="QVBoxLayout" name="passesButtonsLayout">
               <item>
                <widget class="QPushButton" name="AddPassButton">
+                <property name="density" stdset="0">
+                 <string>sm</string>
+                </property>
+                <property name="role" stdset="0">
+                 <string>secondary</string>
+                </property>
                 <property name="minimumSize">
                  <size>
                   <width>120</width>
@@ -520,6 +538,12 @@
               </item>
               <item>
                <widget class="QPushButton" name="RemovePassButton">
+                <property name="density" stdset="0">
+                 <string>sm</string>
+                </property>
+                <property name="role" stdset="0">
+                 <string>secondary</string>
+                </property>
                 <property name="minimumSize">
                  <size>
                   <width>120</width>
@@ -536,6 +560,12 @@
               </item>
               <item>
                <widget class="QPushButton" name="ResetPassesButton">
+                <property name="density" stdset="0">
+                 <string>sm</string>
+                </property>
+                <property name="role" stdset="0">
+                 <string>secondary</string>
+                </property>
                 <property name="minimumSize">
                  <size>
                   <width>120</width>
@@ -569,6 +599,9 @@
           </item>
           <item>
            <widget class="QPushButton" name="SaveSettingsButton">
+            <property name="role" stdset="0">
+             <string>primary</string>
+            </property>
             <property name="minimumSize">
              <size>
               <width>0</width>
@@ -629,6 +662,12 @@
             </item>
             <item>
              <widget class="QPushButton" name="BrowseGlobalSettingsPath">
+              <property name="density" stdset="0">
+               <string>sm</string>
+              </property>
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Browse...</string>
               </property>
@@ -656,6 +695,9 @@
            <layout class="QHBoxLayout" name="comfyuiModeLayout">
             <item>
              <widget class="QPushButton" name="ComfyUIModeButton">
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>ComfyUI Mode: Embedded</string>
               </property>
@@ -694,6 +736,12 @@
             </item>
             <item>
              <widget class="QPushButton" name="BrowseComfyUIPath">
+              <property name="density" stdset="0">
+               <string>sm</string>
+              </property>
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Browse...</string>
               </property>
@@ -725,6 +773,12 @@
             </item>
             <item>
              <widget class="QPushButton" name="BrowseComfyUIPython">
+              <property name="density" stdset="0">
+               <string>sm</string>
+              </property>
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Browse...</string>
               </property>
@@ -769,6 +823,12 @@
             </item>
             <item>
              <widget class="QPushButton" name="BrowseNetworkOutput">
+              <property name="density" stdset="0">
+               <string>sm</string>
+              </property>
+              <property name="role" stdset="0">
+               <string>secondary</string>
+              </property>
               <property name="text">
                <string>Browse...</string>
               </property>
@@ -930,6 +990,12 @@
              <layout class="QVBoxLayout" name="adminUsersButtonsLayout">
               <item>
                <widget class="QPushButton" name="AddAdminUserButton">
+                <property name="density" stdset="0">
+                 <string>sm</string>
+                </property>
+                <property name="role" stdset="0">
+                 <string>secondary</string>
+                </property>
                 <property name="minimumSize">
                  <size>
                   <width>100</width>
@@ -946,6 +1012,12 @@
               </item>
               <item>
                <widget class="QPushButton" name="RemoveAdminUserButton">
+                <property name="density" stdset="0">
+                 <string>sm</string>
+                </property>
+                <property name="role" stdset="0">
+                 <string>secondary</string>
+                </property>
                 <property name="minimumSize">
                  <size>
                   <width>100</width>
@@ -1015,6 +1087,12 @@
                 <layout class="QVBoxLayout" name="categoriesButtonsLayout">
                  <item>
                   <widget class="QPushButton" name="AddCategoryButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Add</string>
                    </property>
@@ -1031,6 +1109,12 @@
                  </item>
                  <item>
                   <widget class="QPushButton" name="RemoveCategoryButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Remove</string>
                    </property>
@@ -1047,6 +1131,12 @@
                  </item>
                  <item>
                   <widget class="QPushButton" name="MoveCategoryUpButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Move Up</string>
                    </property>
@@ -1063,6 +1153,12 @@
                  </item>
                  <item>
                   <widget class="QPushButton" name="MoveCategoryDownButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Move Down</string>
                    </property>
@@ -1132,6 +1228,12 @@
                 <layout class="QVBoxLayout" name="hdriButtonsLayout">
                  <item>
                   <widget class="QPushButton" name="AddHdriButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Add HDRI...</string>
                    </property>
@@ -1148,6 +1250,12 @@
                  </item>
                  <item>
                   <widget class="QPushButton" name="RemoveHdriButton">
+                   <property name="density" stdset="0">
+                    <string>sm</string>
+                   </property>
+                   <property name="role" stdset="0">
+                    <string>secondary</string>
+                   </property>
                    <property name="text">
                     <string>Remove</string>
                    </property>
@@ -1184,6 +1292,9 @@
           </item>
           <item>
            <widget class="QPushButton" name="SaveGlobalSettings">
+            <property name="role" stdset="0">
+             <string>primary</string>
+            </property>
             <property name="minimumSize">
              <size>
               <width>0</width>

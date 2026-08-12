@@ -86,6 +86,9 @@
          </item>
          <item>
           <widget class="QPushButton" name="RescanCleanFiles">
+           <property name="role" stdset="0">
+            <string>secondary</string>
+           </property>
            <property name="minimumSize">
             <size>
              <width>120</width>
@@ -144,6 +147,12 @@
            <layout class="QVBoxLayout" name="usdsCleanLayout">
             <item>
              <widget class="QLabel" name="LatestUSD">
+              <property name="state" stdset="0">
+               <string>success</string>
+              </property>
+              <property name="textRole" stdset="0">
+               <string>label</string>
+              </property>
               <property name="text">
                <string>Latest: None</string>
               </property>
@@ -221,6 +230,9 @@
          </item>
          <item>
           <widget class="QPushButton" name="CleanFiles">
+           <property name="role" stdset="0">
+            <string>danger</string>
+           </property>
            <property name="enabled">
             <bool>false</bool>
            </property>
@@ -340,6 +352,9 @@
          </item>
          <item>
           <widget class="QPushButton" name="GalleryScanButton">
+           <property name="role" stdset="0">
+            <string>secondary</string>
+           </property>
            <property name="minimumSize">
             <size>
              <width>120</width>
@@ -454,6 +469,9 @@
          </item>
          <item>
           <widget class="QPushButton" name="GalleryCleanupButton">
+           <property name="role" stdset="0">
+            <string>danger</string>
+           </property>
            <property name="enabled">
             <bool>false</bool>
            </property>

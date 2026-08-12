@@ -14,6 +14,7 @@ from PySide6 import QtWidgets
 from PySide6.QtGui import QPixmap
 
 from dialog_helpers import get_active_window, show_error, show_warning, confirm_action
+from core.design_tokens import set_role
 
 # Import event bus for cross-tab communication
 try:
@@ -45,7 +46,7 @@ class ZoomableImageWidget(QtWidgets.QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.viewport().setCursor(Qt.ArrowCursor)
-        self.setStyleSheet("background: transparent;")
+        self.setProperty("variant", "transparent")
 
         self._scene = QtWidgets.QGraphicsScene(self)
         self.setScene(self._scene)
@@ -159,7 +160,7 @@ class VideoSinkWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         from PySide6.QtMultimedia import QVideoSink
-        self.setStyleSheet("background-color: #000000;")
+        self.setProperty("variant", "canvas")
         self._video_sink = QVideoSink(self)
         self._video_sink.videoFrameChanged.connect(self._on_frame_changed)
         self._current_image = None
@@ -250,12 +251,7 @@ class VideoControlBar(QWidget):
 
         self._setup_ui()
         self._connect_signals()
-        self.setStyleSheet("""
-            QWidget {
-                background-color: rgba(0, 0, 0, 180);
-                border-radius: 5px;
-            }
-        """)
+        self.setProperty("variant", "scrim")
 
     def _setup_ui(self):
         """Set up the control bar UI."""
@@ -273,32 +269,13 @@ class VideoControlBar(QWidget):
         self.play_button.setFocusPolicy(Qt.ClickFocus)
         # Ensure button gets all mouse events
         self.play_button.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.play_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4a9eff;
-                color: white;
-                border: none;
-                border-radius: 22px;
-                font-size: 22px;
-                font-weight: bold;
-                font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Arial Unicode MS", Arial, sans-serif;
-                padding: 0px;
-                margin: 0px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #5aa9ff;
-            }
-            QPushButton:pressed {
-                background-color: #3a8eef;
-            }
-        """)
+        self.play_button.setProperty("media", "play")
         self.play_button.clicked.connect(self._toggle_play)
         layout.addWidget(self.play_button)
 
         # Current time label
         self.time_label = QLabel("0:00")
-        self.time_label.setStyleSheet("color: white; font-size: 12px;")
+        self.time_label.setProperty("textRole", "value")
         self.time_label.setFixedWidth(45)
         layout.addWidget(self.time_label)
 
@@ -307,27 +284,6 @@ class VideoControlBar(QWidget):
         self.timeline_slider.setRange(0, self.SLIDER_PRECISION)
         self.timeline_slider.setValue(0)
         self.timeline_slider.setCursor(Qt.PointingHandCursor)
-        self.timeline_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #444444;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #4a9eff;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: white;
-                width: 16px;
-                height: 16px;
-                margin: -5px 0;
-                border-radius: 8px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #e0e0e0;
-            }
-        """)
         self.timeline_slider.sliderPressed.connect(self._on_seek_start)
         self.timeline_slider.sliderMoved.connect(self._on_seek_move)
         self.timeline_slider.sliderReleased.connect(self._on_seek_end)
@@ -335,7 +291,7 @@ class VideoControlBar(QWidget):
 
         # Duration label
         self.duration_label = QLabel("0:00")
-        self.duration_label.setStyleSheet("color: white; font-size: 12px;")
+        self.duration_label.setProperty("textRole", "value")
         self.duration_label.setFixedWidth(45)
         layout.addWidget(self.duration_label)
 
@@ -343,18 +299,7 @@ class VideoControlBar(QWidget):
         self.volume_button = QPushButton("\U0001f50a")
         self.volume_button.setFixedSize(34, 34)
         self.volume_button.setCursor(Qt.PointingHandCursor)
-        self.volume_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                border: none;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 17px;
-            }
-        """)
+        self.volume_button.setProperty("media", "icon")
         self.volume_button.clicked.connect(self._toggle_mute)
         layout.addWidget(self.volume_button)
 
@@ -364,24 +309,6 @@ class VideoControlBar(QWidget):
         self.volume_slider.setValue(100)
         self.volume_slider.setFixedWidth(80)
         self.volume_slider.setCursor(Qt.PointingHandCursor)
-        self.volume_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #444444;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #4a9eff;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: white;
-                width: 14px;
-                height: 14px;
-                margin: -4px 0;
-                border-radius: 7px;
-            }
-        """)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         layout.addWidget(self.volume_slider)
 
@@ -391,21 +318,7 @@ class VideoControlBar(QWidget):
         self.loop_button.setChecked(False)
         self.loop_button.setFixedSize(34, 34)
         self.loop_button.setCursor(Qt.PointingHandCursor)
-        self.loop_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #888888;
-                border: none;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 17px;
-            }
-            QPushButton:checked {
-                color: #4a9eff;
-            }
-        """)
+        self.loop_button.setProperty("media", "icon")
         layout.addWidget(self.loop_button)
 
     def _connect_signals(self):
@@ -652,7 +565,7 @@ class WaveformWidget(QWidget):
         self.waveform_data = None
         self.play_position = 0.0
         self._is_scrubbing = False
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
         self.setMinimumHeight(200)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -757,7 +670,7 @@ class AudioPlayerWidget(QWidget):
 
     def _setup_ui(self):
         """Set up the audio player UI."""
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -770,7 +683,7 @@ class AudioPlayerWidget(QWidget):
         # Status label (shown while loading)
         self.status_label = QLabel("Loading audio...")
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("color: #888888; font-size: 14px;")
+        self.status_label.setProperty("textRole", "help")
         self.status_label.setAttribute(Qt.WA_TranslucentBackground)
         self.status_label.setParent(self.waveform_widget)
 
@@ -1008,7 +921,7 @@ class EmbeddedImageViewer(QWidget):
 
     def _setup_ui(self):
         """Set up the embedded viewer UI."""
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
 
         # Enable mouse tracking to show video controls on mouse movement
         self.setMouseTracking(True)
@@ -1034,11 +947,7 @@ class EmbeddedImageViewer(QWidget):
 
         self.left_btn = QPushButton("<")
         self.left_btn.setFixedWidth(50)
-        self.left_btn.setStyleSheet("""
-            QPushButton { background-color: rgba(0, 0, 0, 0.3); color: white; border: none; font-size: 24px; }
-            QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
-            QPushButton:disabled { color: #333333; }
-        """)
+        self.left_btn.setProperty("media", "nav")
         self.left_btn.setCursor(Qt.PointingHandCursor)
         self.left_btn.clicked.connect(self._prev_media)
         content_layout.addWidget(self.left_btn)
@@ -1091,33 +1000,27 @@ class EmbeddedImageViewer(QWidget):
         # 4. Message Label
         self.message_label = QLabel()
         self.message_label.setAlignment(Qt.AlignCenter)
-        self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
+        self.message_label.setProperty("variant", "canvas")
+        self.message_label.setProperty("textRole", "help")
         self.media_stack.addWidget(self.message_label)
 
         self.right_btn = QPushButton(">")
         self.right_btn.setFixedWidth(50)
-        self.right_btn.setStyleSheet("""
-            QPushButton { background-color: rgba(0, 0, 0, 0.3); color: white; border: none; font-size: 24px; }
-            QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
-            QPushButton:disabled { color: #333333; }
-        """)
+        self.right_btn.setProperty("media", "nav")
         self.right_btn.setCursor(Qt.PointingHandCursor)
         self.right_btn.clicked.connect(self._next_media)
         content_layout.addWidget(self.right_btn)
 
         # Top bar - overlay widget (child of media_container, not in layout)
         self.top_bar = QWidget(self.media_container)
-        self.top_bar.setStyleSheet("background-color: transparent;")
+        self.top_bar.setProperty("variant", "transparent")
         self.top_bar.setFixedHeight(50)
 
         top_layout = QHBoxLayout(self.top_bar)
         top_layout.setContentsMargins(10, 10, 10, 10)
 
         self.back_btn = QPushButton("< Back to Gallery")
-        self.back_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #4a9eff; border: none; font-size: 12px; padding: 5px 10px; }
-            QPushButton:hover { color: #7ab8ff; }
-        """)
+        self.back_btn.setProperty("role", "link")
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.clicked.connect(self._on_back)
         top_layout.addWidget(self.back_btn)
@@ -1125,28 +1028,19 @@ class EmbeddedImageViewer(QWidget):
         top_layout.addStretch()
 
         self.counter_label = QLabel()
-        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        self.counter_label.setProperty("textRole", "help")
         top_layout.addWidget(self.counter_label)
 
         self.zoom_combo = QComboBox()
         self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
         self.zoom_combo.setCurrentText("Fit")
         self.zoom_combo.setFixedWidth(80)
-        self.zoom_combo.setStyleSheet("""
-            QComboBox { background-color: #2a2a2a; color: #cccccc; border: 1px solid #555555; border-radius: 3px; padding: 3px 8px; font-size: 11px; }
-            QComboBox:hover { border-color: #4a9eff; }
-            QComboBox::drop-down { border: none; width: 20px; }
-            QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #888888; margin-right: 5px; }
-            QComboBox QAbstractItemView { background-color: #2a2a2a; color: #cccccc; selection-background-color: #4a9eff; border: 1px solid #555555; }
-        """)
         self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
         top_layout.addWidget(self.zoom_combo)
 
         self.fullscreen_btn = QPushButton("Fullscreen")
-        self.fullscreen_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #888888; border: 1px solid #555555; border-radius: 3px; font-size: 11px; padding: 3px 10px; }
-            QPushButton:hover { color: #ffffff; border-color: #4a9eff; }
-        """)
+        self.fullscreen_btn.setProperty("role", "ghost")
+        self.fullscreen_btn.setProperty("density", "sm")
         self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
         self.fullscreen_btn.clicked.connect(self._on_fullscreen)
         top_layout.addWidget(self.fullscreen_btn)
@@ -1167,10 +1061,8 @@ class EmbeddedImageViewer(QWidget):
         # Shading Mode dropdown
         self.shading_btn = QPushButton("Textured")
         self.shading_btn.setFixedHeight(28)
-        self.shading_btn.setStyleSheet("""
-            QPushButton { background-color: #4a9eff; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
-            QPushButton:hover { background-color: #5aa9ff; }
-        """)
+        self.shading_btn.setProperty("role", "primary")
+        self.shading_btn.setProperty("density", "sm")
         self.shading_btn.clicked.connect(self._show_shading_menu)
         self.shading_btn.hide()
         top_layout.addWidget(self.shading_btn)
@@ -1178,17 +1070,15 @@ class EmbeddedImageViewer(QWidget):
         # Lighting Mode dropdown
         self.lighting_btn = QPushButton("Studio")
         self.lighting_btn.setFixedHeight(28)
-        self.lighting_btn.setStyleSheet("""
-            QPushButton { background-color: #6b7280; color: white; border: none; border-radius: 3px; padding: 0 10px; font-size: 11px; }
-            QPushButton:hover { background-color: #7c8596; }
-        """)
+        self.lighting_btn.setProperty("role", "secondary")
+        self.lighting_btn.setProperty("density", "sm")
         self.lighting_btn.clicked.connect(self._show_lighting_menu)
         self.lighting_btn.hide()
         top_layout.addWidget(self.lighting_btn)
 
         # Light strength label
         self.light_label = QLabel("Light:")
-        self.light_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.light_label.setProperty("textRole", "help")
         self.light_label.hide()
         top_layout.addWidget(self.light_label)
 
@@ -1199,22 +1089,6 @@ class EmbeddedImageViewer(QWidget):
         self.light_slider.setValue(100)  # 1.0x default
         self.light_slider.setFixedWidth(80)
         self.light_slider.setFixedHeight(20)
-        self.light_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 4px;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #4a9eff;
-                width: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #5aa9ff;
-            }
-        """)
         self.light_slider.valueChanged.connect(self._on_light_strength_changed)
         self.light_slider.hide()
         top_layout.addWidget(self.light_slider)
@@ -1222,7 +1096,7 @@ class EmbeddedImageViewer(QWidget):
         # Light strength value label
         self.light_value_label = QLabel("1.0x")
         self.light_value_label.setFixedWidth(35)
-        self.light_value_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.light_value_label.setProperty("textRole", "help")
         self.light_value_label.hide()
         top_layout.addWidget(self.light_value_label)
 
@@ -1231,11 +1105,8 @@ class EmbeddedImageViewer(QWidget):
         self.publish_to_ayon_btn = QPushButton("Publish to AYON")
         self.publish_to_ayon_btn.setIcon(get_ayon_icon(16))
         self.publish_to_ayon_btn.setFixedHeight(28)
-        self.publish_to_ayon_btn.setStyleSheet("""
-            QPushButton { background-color: #00cea5; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background-color: #00e6b8; }
-            QPushButton:disabled { background-color: #3c414b; color: #6b6f78; }
-        """)
+        self.publish_to_ayon_btn.setProperty("role", "ayon")
+        self.publish_to_ayon_btn.setProperty("density", "sm")
         self.publish_to_ayon_btn.clicked.connect(self._publish_to_ayon)
 
         try:
@@ -1258,24 +1129,22 @@ class EmbeddedImageViewer(QWidget):
         # Delete button
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setFixedHeight(28)
-        self.delete_btn.setStyleSheet("""
-            QPushButton { background-color: #dc2626; color: white; border: none; border-radius: 3px; padding: 0 12px; font-size: 11px; }
-            QPushButton:hover { background-color: #ef4444; }
-        """)
+        self.delete_btn.setProperty("role", "danger")
+        self.delete_btn.setProperty("density", "sm")
         self.delete_btn.setToolTip("Delete current file (Del)")
         self.delete_btn.clicked.connect(self._delete_current_media)
         top_layout.addWidget(self.delete_btn)
 
         # Bottom info bar - overlay widget (simplified, just shows filename)
         self.info_bar = QWidget(self.media_container)
-        self.info_bar.setStyleSheet("background-color: transparent;")
+        self.info_bar.setProperty("variant", "transparent")
         self.info_bar.setFixedHeight(40)
 
         info_layout = QHBoxLayout(self.info_bar)
         info_layout.setContentsMargins(10, 10, 10, 10)
 
         self.filename_label = QLabel()
-        self.filename_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        self.filename_label.setProperty("textRole", "value")
         info_layout.addWidget(self.filename_label)
 
         self._current_3d_path = None
@@ -1288,7 +1157,7 @@ class EmbeddedImageViewer(QWidget):
         info_layout.addStretch()
 
         help_label = QLabel("Navigate | Esc Back | Space Play/Pause | C Prompt | Del Delete")
-        help_label.setStyleSheet("color: #888888; font-size: 10px;")
+        help_label.setProperty("textRole", "help")
         info_layout.addWidget(help_label)
 
         # Position and raise overlay bars immediately
@@ -1981,33 +1850,10 @@ class EmbeddedImageViewer(QWidget):
         """Update like button appearance based on liked state."""
         if is_liked:
             self.like_btn.setText("♥")
-            self.like_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(239, 68, 68, 0.9);
-                    color: white;
-                    border: none;
-                    border-radius: 16px;
-                    font-size: 16px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(239, 68, 68, 1.0);
-                }
-            """)
+            set_role(self.like_btn, media="like", state="on")
         else:
             self.like_btn.setText("♡")
-            self.like_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(60, 60, 60, 0.8);
-                    color: rgba(255, 255, 255, 0.7);
-                    border: none;
-                    border-radius: 16px;
-                    font-size: 16px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(239, 68, 68, 0.7);
-                    color: white;
-                }
-            """)
+            set_role(self.like_btn, media="like", state="off")
 
     def _delete_current_media(self):
         """Delete the current image file after confirmation."""
@@ -2264,7 +2110,7 @@ class FullscreenImageViewer(QWidget):
         """Set up the fullscreen UI."""
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setProperty("variant", "canvas")
 
         # Enable mouse tracking to show video controls on mouse movement
         self.setMouseTracking(True)
@@ -2284,7 +2130,8 @@ class FullscreenImageViewer(QWidget):
 
         self.message_label = QLabel()
         self.message_label.setAlignment(Qt.AlignCenter)
-        self.message_label.setStyleSheet("background-color: #1a1a1a; color: #888888; font-size: 16px;")
+        self.message_label.setProperty("variant", "canvas")
+        self.message_label.setProperty("textRole", "help")
         self.media_stack.addWidget(self.message_label)
 
         # Video Player (uses VideoSinkWidget for software rendering
@@ -2317,38 +2164,31 @@ class FullscreenImageViewer(QWidget):
 
         # Info bar - overlays on content
         self.info_bar = QWidget(self)  # Child of self for overlay
-        self.info_bar.setStyleSheet("QWidget { background-color: transparent; }")
+        self.info_bar.setProperty("variant", "transparent")
         self.info_bar.setFixedHeight(60)
 
         info_layout = QHBoxLayout(self.info_bar)
         info_layout.setContentsMargins(20, 15, 20, 15)
 
         self.filename_label = QLabel()
-        self.filename_label.setStyleSheet("color: #ffffff; font-size: 14px;")
+        self.filename_label.setProperty("textRole", "value")
         info_layout.addWidget(self.filename_label)
 
         info_layout.addStretch()
 
         self.counter_label = QLabel()
-        self.counter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        self.counter_label.setProperty("textRole", "help")
         info_layout.addWidget(self.counter_label)
 
         self.zoom_combo = QComboBox()
         self.zoom_combo.addItems(ZoomableImageWidget.ZOOM_LEVELS)
         self.zoom_combo.setCurrentText("Fit")
         self.zoom_combo.setFixedWidth(80)
-        self.zoom_combo.setStyleSheet("""
-            QComboBox { background-color: #2a2a2a; color: #cccccc; border: 1px solid #555555; border-radius: 3px; padding: 3px 8px; font-size: 11px; }
-            QComboBox:hover { border-color: #4a9eff; }
-            QComboBox::drop-down { border: none; width: 20px; }
-            QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #888888; margin-right: 5px; }
-            QComboBox QAbstractItemView { background-color: #2a2a2a; color: #cccccc; selection-background-color: #4a9eff; border: 1px solid #555555; }
-        """)
         self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
         info_layout.addWidget(self.zoom_combo)
 
         self.help_label = QLabel("Navigate | Esc Close | Space Play/Info | C Prompt | Del Delete")
-        self.help_label.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
+        self.help_label.setProperty("textRole", "help")
         info_layout.addWidget(self.help_label)
 
         self.info_bar.raise_()
@@ -2358,18 +2198,12 @@ class FullscreenImageViewer(QWidget):
     def _create_nav_buttons(self):
         """Create navigation buttons on the sides."""
         self.left_btn = QPushButton("<", self)
-        self.left_btn.setStyleSheet("""
-            QPushButton { background-color: rgba(0, 0, 0, 0.3); color: white; border: none; font-size: 30px; padding: 20px; }
-            QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
-        """)
+        self.left_btn.setProperty("media", "nav")
         self.left_btn.setCursor(Qt.PointingHandCursor)
         self.left_btn.clicked.connect(self._prev_media)
 
         self.right_btn = QPushButton(">", self)
-        self.right_btn.setStyleSheet("""
-            QPushButton { background-color: rgba(0, 0, 0, 0.3); color: white; border: none; font-size: 30px; padding: 20px; }
-            QPushButton:hover { background-color: rgba(74, 158, 255, 0.5); }
-        """)
+        self.right_btn.setProperty("media", "nav")
         self.right_btn.setCursor(Qt.PointingHandCursor)
         self.right_btn.clicked.connect(self._next_media)
 

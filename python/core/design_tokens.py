@@ -34,6 +34,16 @@ class Color:
     SELECTED = "#232b36"       # selected row / checked item
     OVERLAY_SCRIM = "rgba(10, 11, 14, 0.72)"
 
+    # Media review surround. Deliberately darker and more neutral than the
+    # app chrome so it does not tint what is being reviewed. This is a design
+    # decision, not drift — image and video review needs a neutral ground.
+    CANVAS = "#0e0f12"
+    CANVAS_CHROME = "rgba(255, 255, 255, 0.08)"   # controls floating on canvas
+    CANVAS_CHROME_HOVER = "rgba(255, 255, 255, 0.16)"
+    SCRIM = "rgba(0, 0, 0, 0.55)"                 # control bar over media
+    SCRIM_SOFT = "rgba(0, 0, 0, 0.30)"            # nav arrows over media
+    SCRIM_ACCENT = "rgba(90, 169, 255, 0.45)"     # nav arrow hover
+
     # --- borders --------------------------------------------------------
     BORDER = "#272b33"         # separators, dividers
     BORDER_STRONG = "#333945"  # input borders where a border is needed
@@ -291,7 +301,7 @@ def set_role(widget, **props):
     Usage::
 
         set_role(self.ui.BuildButton, role="primary")
-        set_role(self.ui.StatusLabel, text="help", state="error")
+        set_role(self.ui.StatusLabel, textRole="help", state="error")
 
     Passing ``None`` clears a property.
     """

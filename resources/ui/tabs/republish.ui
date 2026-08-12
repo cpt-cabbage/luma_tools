@@ -34,6 +34,9 @@
      <layout class="QVBoxLayout" name="republishRenderPathLayout">
       <item>
        <widget class="QLabel" name="RePublishRenderPath">
+        <property name="variant" stdset="0">
+         <string>path</string>
+        </property>
         <property name="text">
          <string>No path selected</string>
         </property>
@@ -49,6 +52,9 @@
        <layout class="QHBoxLayout" name="republishVersionLayout">
         <item>
          <widget class="QPushButton" name="RePublishSourceButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>140</width>
@@ -94,6 +100,12 @@
         </item>
         <item>
          <widget class="QPushButton" name="RePublishBrowseCustomPath">
+          <property name="density" stdset="0">
+           <string>sm</string>
+          </property>
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>100</width>
@@ -110,6 +122,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="RePublishScanRenders">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>80</width>
@@ -143,6 +158,9 @@
        <layout class="QHBoxLayout" name="republishCustomPathLayout">
         <item>
          <widget class="QLabel" name="RePublishCustomPathLabel">
+          <property name="variant" stdset="0">
+           <string>path</string>
+          </property>
           <property name="text">
            <string>Custom path: None</string>
           </property>
@@ -235,6 +253,9 @@
        <layout class="QVBoxLayout" name="republishOptionsLayout">
         <item>
          <widget class="QPushButton" name="RePublishTaskButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="text">
            <string>Task: lighting</string>
           </property>
@@ -349,6 +370,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="RePublishPublish">
+          <property name="role" stdset="0">
+           <string>ayon</string>
+          </property>
           <property name="enabled">
            <bool>false</bool>
           </property>

@@ -553,13 +553,14 @@ class LumaShotTools(QtWidgets.QWidget):
 
         self.status_label = QtWidgets.QLabel("Ready")
         self.status_label.setObjectName("StatusLabel")
+        self.status_label.setProperty("textRole", "label")
         status_layout.addWidget(self.status_label, 0)
 
         status_layout.addStretch(1)
 
         self.last_log_label = QtWidgets.QLabel("")
         self.last_log_label.setObjectName("LastLogLabel")
-        self.last_log_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.last_log_label.setProperty("textRole", "help")
         status_layout.addWidget(self.last_log_label, 0)
 
         # Hide log label by default, show only if user setting is enabled

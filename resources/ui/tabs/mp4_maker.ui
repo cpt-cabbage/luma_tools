@@ -49,6 +49,9 @@
        <layout class="QHBoxLayout" name="mp4VersionLayout">
         <item>
          <widget class="QPushButton" name="MP4SourceButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>140</width>
@@ -94,6 +97,12 @@
         </item>
         <item>
          <widget class="QPushButton" name="MP4BrowseCustomPath">
+          <property name="density" stdset="0">
+           <string>sm</string>
+          </property>
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>100</width>
@@ -110,6 +119,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="MP4ScanRenders">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="minimumSize">
            <size>
             <width>80</width>
@@ -219,6 +231,9 @@
        <layout class="QVBoxLayout" name="mp4OptionsLayout">
         <item>
          <widget class="QPushButton" name="MP4QualityButton">
+          <property name="role" stdset="0">
+           <string>secondary</string>
+          </property>
           <property name="text">
            <string>Quality: High (CRF 18)</string>
           </property>
@@ -393,6 +408,12 @@
          <layout class="QHBoxLayout" name="mp4BrowseLayout">
           <item>
            <widget class="QPushButton" name="MP4BrowseOutput">
+            <property name="density" stdset="0">
+             <string>sm</string>
+            </property>
+            <property name="role" stdset="0">
+             <string>secondary</string>
+            </property>
             <property name="minimumSize">
              <size>
               <width>0</width>
@@ -434,6 +455,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="MP4Generate">
+          <property name="role" stdset="0">
+           <string>primary</string>
+          </property>
           <property name="enabled">
            <bool>false</bool>
           </property>

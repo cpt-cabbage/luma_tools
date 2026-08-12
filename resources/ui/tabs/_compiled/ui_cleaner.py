@@ -292,6 +292,7 @@ class Ui_CleanerTab(object):
     def retranslateUi(self, CleanerTab):
         self.FolderSize.setText(QCoreApplication.translate("CleanerTab", u"Total Size: \u2014", None))
         self.HipNumber.setText(QCoreApplication.translate("CleanerTab", u"Amount of Hipfiles: \u2014", None))
+        self.RescanCleanFiles.setProperty(u"role", QCoreApplication.translate("CleanerTab", u"secondary", None))
         self.RescanCleanFiles.setText(QCoreApplication.translate("CleanerTab", u"Rescan", None))
 #if QT_CONFIG(tooltip)
         self.RescanCleanFiles.setToolTip(QCoreApplication.translate("CleanerTab", u"Scan the shot's task directory for render versions, USD versions, HIP backups and comp usage", None))
@@ -299,6 +300,8 @@ class Ui_CleanerTab(object):
         self.rendersCleanGroupBox.setTitle(QCoreApplication.translate("CleanerTab", u"Renders", None))
         self.LatestRender.setText(QCoreApplication.translate("CleanerTab", u"Latest: None", None))
         self.usdsCleanGroupBox.setTitle(QCoreApplication.translate("CleanerTab", u"USD Files", None))
+        self.LatestUSD.setProperty(u"state", QCoreApplication.translate("CleanerTab", u"success", None))
+        self.LatestUSD.setProperty(u"textRole", QCoreApplication.translate("CleanerTab", u"label", None))
         self.LatestUSD.setText(QCoreApplication.translate("CleanerTab", u"Latest: None", None))
         self.CleanRender.setText(QCoreApplication.translate("CleanerTab", u"Clean Renders", None))
 #if QT_CONFIG(tooltip)
@@ -313,6 +316,7 @@ class Ui_CleanerTab(object):
         self.HIPBackups.setToolTip(QCoreApplication.translate("CleanerTab", u"Delete the entire Houdini auto-backup folder ('backup') for this task. Working HIP files themselves are never touched.", None))
 #endif // QT_CONFIG(tooltip)
         self.HIPBackupsLabel.setText("")
+        self.CleanFiles.setProperty(u"role", QCoreApplication.translate("CleanerTab", u"danger", None))
         self.CleanFiles.setText(QCoreApplication.translate("CleanerTab", u"Run Cleaner", None))
 #if QT_CONFIG(tooltip)
         self.CleanFiles.setToolTip(QCoreApplication.translate("CleanerTab", u"Delete the checked categories after confirmation. Enabled once a scan has found something to clean.", None))
@@ -321,6 +325,7 @@ class Ui_CleanerTab(object):
         self.GalleryPathLabel.setText(QCoreApplication.translate("CleanerTab", u"Gallery: Not configured", None))
         self.GalleryTotalSize.setText(QCoreApplication.translate("CleanerTab", u"Total Size: --", None))
         self.GalleryTotalFiles.setText(QCoreApplication.translate("CleanerTab", u"Total Files: --", None))
+        self.GalleryScanButton.setProperty(u"role", QCoreApplication.translate("CleanerTab", u"secondary", None))
         self.GalleryScanButton.setText(QCoreApplication.translate("CleanerTab", u"Scan Gallery", None))
         ___qtreewidgetitem = self.GalleryStatsTree.headerItem()
         ___qtreewidgetitem.setText(2, QCoreApplication.translate("CleanerTab", u"Size", None));
@@ -329,6 +334,7 @@ class Ui_CleanerTab(object):
         self.galleryAgeFilterLabel.setText(QCoreApplication.translate("CleanerTab", u"Older than:", None))
         self.GalleryAgeLabel.setText(QCoreApplication.translate("CleanerTab", u"All ages", None))
         self.GalleryPreviewSize.setText(QCoreApplication.translate("CleanerTab", u"Selected: -- files (--)", None))
+        self.GalleryCleanupButton.setProperty(u"role", QCoreApplication.translate("CleanerTab", u"danger", None))
         self.GalleryCleanupButton.setText(QCoreApplication.translate("CleanerTab", u"Delete Selected", None))
         self.cleanerTabWidget.setTabText(self.cleanerTabWidget.indexOf(self.galleryCleanupTab), QCoreApplication.translate("CleanerTab", u"Gallery Cleanup", None))
         pass
