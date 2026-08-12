@@ -441,6 +441,25 @@ QPushButton[role="link"]:disabled {
     color: {{color.disabled_text}};
 }
 
+/* --- ready ring ---------------------------------------------------------- */
+/* Draws attention to the action that is now available without overwriting the
+   fill, so an AYON button stays green and a destructive one stays red. */
+QPushButton[ready="true"] {
+    border: 2px solid {{color.accent}};
+}
+
+QPushButton[role="ayon"][ready="true"] {
+    border: 2px solid {{color.ayon_hover}};
+}
+
+QPushButton[role="danger"][ready="true"] {
+    border: 2px solid {{color.danger_hover}};
+}
+
+QPushButton[role="primary"][ready="true"] {
+    border: 2px solid {{color.text}};
+}
+
 /* --- menu affordance ----------------------------------------------------- */
 /* Buttons that open a menu (the OptionButtonManager pattern) get the same
    chevron as a combo box. Left unstyled, Qt paints a raw black triangle over

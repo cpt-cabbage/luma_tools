@@ -38,6 +38,7 @@ from thumbnail_base import BaseThumbnailWidget
 from media_viewers import ZoomableImageWidget, EmbeddedImageViewer, FullscreenImageViewer
 from small_widgets import StackedThumbnailWidget, show_popup_menu
 from drag_drop import DraggableMixin, DropTargetMixin, create_drag_pixmap
+from core.design_tokens import Color
 
 
 # ============================================================================
@@ -1935,7 +1936,7 @@ def load_stylesheet():
     "zoo" scenario that renders every control type for that check.
     """
     from core.config import CUSTOM_STYLE_PATH
-    from core.design_tokens import Color, render_qss
+    from core.design_tokens import render_qss
 
     custom_file = QFile(CUSTOM_STYLE_PATH)
     custom_file.open(QFile.ReadOnly | QFile.Text)

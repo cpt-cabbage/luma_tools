@@ -12,7 +12,7 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QBrush, QPen
 
-from core.design_tokens import Color
+from core.design_tokens import Color, set_role
 
 logger = logging.getLogger(__name__)
 
@@ -1043,22 +1043,20 @@ class UIAnimations:
 
     def pulse_button(self, button):
         """
-        Highlight a button as 'ready' with blue styling.
-        The styling persists until the button is clicked.
+        Mark a button as 'ready' — it draws an attention ring until clicked.
+
+        This used to repaint the background with a hardcoded accent blue,
+        which overwrote the button's role: an AYON publish button turned from
+        green to blue the moment it became ready, so the colour that carries
+        its meaning was exactly the colour the highlight destroyed. A ring
+        keyed off the role leaves the fill alone.
         """
         # Skip if already styled as ready
         if button in self._ready_buttons:
             return
 
-        # Store original style
-        original_style = button.styleSheet()
-        self._ready_buttons[button] = original_style
-
-        # Apply ready styling
-        button.setStyleSheet(
-            original_style +
-            "background-color: #5cadff; border: 2px solid #4a9eff;"
-        )
+        self._ready_buttons[button] = True
+        set_role(button, ready="true")
 
         # Connect to clicked signal to reset styling. Keep the slot callable
         # itself for the disconnect — disconnect(<connection handle>) raised
@@ -1075,9 +1073,9 @@ class UIAnimations:
         if button not in self._ready_buttons:
             return
 
-        # Restore original style
-        original_style = self._ready_buttons.pop(button)
-        button.setStyleSheet(original_style)
+        # Drop the ready ring; the role keeps painting the button.
+        self._ready_buttons.pop(button)
+        set_role(button, ready=None)
 
         # Disconnect the click handler (by slot, which PySide6 supports)
         slot = getattr(button, '_ready_slot', None)

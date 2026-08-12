@@ -28,6 +28,12 @@
    </property>
    <item>
     <widget class="QGroupBox" name="pathGroupBox">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
      <property name="title">
       <string>Render Path</string>
      </property>

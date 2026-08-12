@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 
-from core.design_tokens import set_role
+from core.design_tokens import Color, set_role
 
 logger = logging.getLogger(__name__)
 
