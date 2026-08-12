@@ -130,7 +130,18 @@ ROLES = {
     "ComfyUIIterateProgress":   {"variant": "slim"},
     "RePublishRenderPath":      {"variant": "path"},
     "RePublishCustomPathLabel": {"variant": "path"},
+    # Latest Render / Latest USD are a matched pair and must read the same.
+    "LatestRender":             {"textRole": "label", "state": "success"},
     "LatestUSD":                {"textRole": "label", "state": "success"},
+    "FolderSize":               {"textRole": "label"},
+    "HipNumber":                {"textRole": "label"},
+    "HIPBackupsLabel":          {"textRole": "label"},
+    "GalleryPathLabel":         {"variant": "path"},
+    "GalleryTotalSize":         {"textRole": "label"},
+    "GalleryTotalFiles":        {"textRole": "label"},
+    "galleryAgeFilterLabel":    {"textRole": "label"},
+    "GalleryAgeLabel":          {"textRole": "label"},
+    "GalleryPreviewSize":       {"textRole": "label"},
 
     # NOTE: StatusLabel and LastLogLabel are built in Python
     # (core/luma_tools.py), not in a .ui file, so their properties are set

@@ -249,27 +249,36 @@ QFrame[variant="panel"] QTabBar::tab:selected {
  * as a panel with a plain heading rather than a floating title chip.
  * =========================================================================== */
 
+/* The title sits INSIDE the panel. With the default margin origin it floats
+   above a detached box, which reads as a stray heading rather than a titled
+   panel. Border origin plus top padding puts it in the panel's own header
+   area, so the panel is one object. */
 QGroupBox {
     background-color: {{color.panel}};
     border: none;
     border-top: 1px solid {{color.hairline}};
     border-radius: {{radius.md}}px;
-    margin-top: {{space.xl}}px;
-    padding: {{space.lg}}px {{space.md}}px {{space.md}}px {{space.md}}px;
+    margin-top: 0px;
+    padding: 46px {{space.panel_padding}}px {{space.panel_padding}}px {{space.panel_padding}}px;
     font-size: {{font.title}}px;
     font-weight: {{font.weight_semibold}};
 }
 
 QGroupBox::title {
-    subcontrol-origin: margin;
+    subcontrol-origin: border;
     subcontrol-position: top left;
-    left: {{space.md}}px;
-    top: {{space.xxs}}px;
+    left: {{space.panel_padding}}px;
+    top: {{space.lg}}px;
     padding: 0px;
     background-color: transparent;
     color: {{color.text}};
     font-size: {{font.title}}px;
     font-weight: {{font.weight_semibold}};
+}
+
+/* A group box with no title should not reserve header space. */
+QGroupBox[flat="true"] {
+    padding-top: {{space.panel_padding}}px;
 }
 
 

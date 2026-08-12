@@ -57,6 +57,9 @@
           <layout class="QVBoxLayout" name="statsLayout">
            <item>
             <widget class="QLabel" name="FolderSize">
+             <property name="textRole" stdset="0">
+              <string>label</string>
+             </property>
              <property name="text">
               <string>Total Size: —</string>
              </property>
@@ -64,6 +67,9 @@
            </item>
            <item>
             <widget class="QLabel" name="HipNumber">
+             <property name="textRole" stdset="0">
+              <string>label</string>
+             </property>
              <property name="text">
               <string>Amount of Hipfiles: —</string>
              </property>
@@ -118,6 +124,12 @@
            <layout class="QVBoxLayout" name="rendersCleanLayout">
             <item>
              <widget class="QLabel" name="LatestRender">
+              <property name="state" stdset="0">
+               <string>success</string>
+              </property>
+              <property name="textRole" stdset="0">
+               <string>label</string>
+              </property>
               <property name="text">
                <string>Latest: None</string>
               </property>
@@ -210,6 +222,9 @@
          </item>
          <item>
           <widget class="QLabel" name="HIPBackupsLabel">
+           <property name="textRole" stdset="0">
+            <string>label</string>
+           </property>
            <property name="text">
             <string></string>
            </property>
@@ -299,6 +314,9 @@
           <layout class="QVBoxLayout" name="galleryStatsLayout">
            <item>
             <widget class="QLabel" name="GalleryPathLabel">
+             <property name="variant" stdset="0">
+              <string>path</string>
+             </property>
              <property name="text">
               <string>Gallery: Not configured</string>
              </property>
@@ -308,6 +326,9 @@
             <layout class="QHBoxLayout" name="galleryTotalsLayout">
              <item>
               <widget class="QLabel" name="GalleryTotalSize">
+               <property name="textRole" stdset="0">
+                <string>label</string>
+               </property>
                <property name="text">
                 <string>Total Size: --</string>
                </property>
@@ -315,6 +336,9 @@
              </item>
              <item>
               <widget class="QLabel" name="GalleryTotalFiles">
+               <property name="textRole" stdset="0">
+                <string>label</string>
+               </property>
                <property name="text">
                 <string>Total Files: --</string>
                </property>
@@ -403,6 +427,9 @@
         <layout class="QHBoxLayout" name="galleryAgeLayout">
          <item>
           <widget class="QLabel" name="galleryAgeFilterLabel">
+           <property name="textRole" stdset="0">
+            <string>label</string>
+           </property>
            <property name="text">
             <string>Older than:</string>
            </property>
@@ -432,6 +459,9 @@
          </item>
          <item>
           <widget class="QLabel" name="GalleryAgeLabel">
+           <property name="textRole" stdset="0">
+            <string>label</string>
+           </property>
            <property name="minimumSize">
             <size>
              <width>100</width>
@@ -449,6 +479,9 @@
         <layout class="QHBoxLayout" name="galleryActionLayout">
          <item>
           <widget class="QLabel" name="GalleryPreviewSize">
+           <property name="textRole" stdset="0">
+            <string>label</string>
+           </property>
            <property name="text">
             <string>Selected: -- files (--)</string>
            </property>

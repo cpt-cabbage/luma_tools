@@ -351,10 +351,13 @@ class ExpandingTabBar(QTabBar):
             logging.error(f"ExpandingTabBar._on_drag_hover_timeout error: {e}", exc_info=True)
 
     def tabSizeHint(self, index):
-        """Calculate tab size to fill the tab bar width evenly.
+        """Size each tab to its own content; hidden tabs collapse to zero.
 
-        Hidden tabs get zero width.  Visible tabs share the remaining space
-        after subtracting the corner widget.
+        Tabs used to be stretched to divide the full bar width between them.
+        Qt draws a tab's icon hard against its left edge and centres the
+        label, so a ~300px-wide tab left the icon stranded far from the text
+        it belonged to — and the icons read as belonging to the *next* tab
+        along. Natural width keeps icon and label together.
         """
         default_size = super().tabSizeHint(index)
         tab_widget = self.parentWidget()
@@ -363,31 +366,7 @@ class ExpandingTabBar(QTabBar):
         if tab_widget and hasattr(tab_widget, 'isTabVisible') and not tab_widget.isTabVisible(index):
             return QtCore.QSize(0, default_size.height())
 
-        # Count only visible tabs
-        visible_count = 0
-        for i in range(self.count()):
-            if not tab_widget or not hasattr(tab_widget, 'isTabVisible') or tab_widget.isTabVisible(i):
-                visible_count += 1
-        if visible_count <= 0:
-            return default_size
-
-        # Use the parent (QTabWidget) width, subtract corner widget
-        if tab_widget:
-            corner = tab_widget.cornerWidget(Qt.TopRightCorner)
-            corner_width = 0
-            if corner and corner.isVisible():
-                corner_width = corner.width() or corner.sizeHint().width()
-            available_width = tab_widget.width() - corner_width
-        else:
-            available_width = self.width()
-
-        if available_width < 200:
-            return default_size
-
-        tab_width = available_width // visible_count
-        tab_width = max(80, tab_width)
-
-        return QtCore.QSize(tab_width, default_size.height())
+        return default_size
 
     def paintEvent(self, event):
         """Paint normally, then paint over hidden tabs to erase ghost indicators."""
