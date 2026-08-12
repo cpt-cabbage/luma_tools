@@ -292,6 +292,30 @@ class SettingsTab(BaseTab):
     def on_tab_activated(self):
         """Track activation so deactivation can tell a real tab switch apart."""
         self._is_active = True
+        self._populate_shot_summary()
+
+    def _populate_shot_summary(self):
+        """Fill the shot summary labels (Comp/Render/USD/HIP) on this tab.
+
+        The scan that produces them belongs to the Cleaner tab, so these
+        labels used to stay on their "Not Found" placeholders until the user
+        happened to visit Cleaner. Ask for the scan here instead; it runs at
+        most once per session and reports into these labels via the main
+        window's shared widget namespace.
+        """
+        if not self.app_state.has_shot_context():
+            return
+        main = getattr(self, 'main_window', None)
+        get_tab = getattr(main, 'get_tab', None)
+        if not callable(get_tab):
+            return
+        cleaner = get_tab('cleaner')
+        ensure_scanned = getattr(cleaner, 'ensure_scanned', None)
+        if callable(ensure_scanned):
+            try:
+                ensure_scanned()
+            except Exception as e:
+                logger.debug(f"Could not start shot scan for the summary: {e}")
 
     def on_tab_deactivated(self):
         """Offer to save pending edits when the user switches away.

@@ -128,6 +128,24 @@ class CleanerTab(BaseTab):
             self.ui.FolderSize.setText("Press Rescan to analyze shot files")
             self.ui.HipNumber.setText("Amount of Hipfiles: —")
 
+    def ensure_scanned(self):
+        """Run the shot scan once if it hasn't run yet.
+
+        The scan fills the shot summary shown on the Settings tab as well as
+        this tab's lists, so Settings can ask for it without the user having
+        to visit Cleaner first. Safe to call repeatedly: it no-ops while a
+        scan is running and after one has completed.
+        """
+        if not self.app_state.has_shot_context():
+            return
+        if getattr(self, '_scan_completed', False) or getattr(self, '_scan_running', False):
+            return
+        self._ensure_initialized()
+        # initialize() kicks off the first scan itself; only start one here if
+        # it didn't (already-initialized tab that has never scanned).
+        if not getattr(self, '_scan_completed', False) and not getattr(self, '_scan_running', False):
+            self.run_scanner()
+
     # =========================================================================
     # Shot Cleanup Methods (existing functionality)
     # =========================================================================
@@ -247,6 +265,7 @@ class CleanerTab(BaseTab):
         # the duration of the scan.
         self.ui.RescanCleanFiles.setEnabled(False)
         self.ui.RescanCleanFiles.setText("Scanning…")
+        self._scan_running = True
 
         # Show status bar progress
         self.update_status_with_spinner("Shot Cleaner: Scanning directories...", StatusColors.INFO)
@@ -269,6 +288,7 @@ class CleanerTab(BaseTab):
 
     def _set_rescan_idle(self):
         """Restore the Rescan button to its idle state after a scan."""
+        self._scan_running = False
         self.ui.RescanCleanFiles.setEnabled(True)
         self.ui.RescanCleanFiles.setText("Rescan")
 
@@ -276,6 +296,7 @@ class CleanerTab(BaseTab):
         """Handle scan completion."""
 
         self._set_rescan_idle()
+        self._scan_completed = True
 
         # Enable the clean button only when the scan actually found something
         # to clean (render/USD versions in the lists, or a HIP backup folder).
@@ -323,17 +344,37 @@ class CleanerTab(BaseTab):
             self._scan_on_complete()
 
     def _deselect_renders_in_comp(self, renders_in_comp):
-        """Deselect renders that are in use by comp files."""
+        """Deselect renders that are in use by comp files.
+
+        Matching is exact by default. read_comp_file also yields path
+        fragments that are not render names — notably the bare task name
+        ("lighting") — and a substring match on that deselects every render
+        for the task, leaving nothing selectable to clean. A substring match
+        is still tried for entries that carry a version token, so a slightly
+        different spelling of a real render name still protects it.
+        """
+        import re
+
         self.ui.RendersClean.selectAll()
         self.ui.USDSClean.selectAll()
 
-        if renders_in_comp:
-            for render_name in renders_in_comp:
-                matching_items = self.ui.RendersClean.findItems(
-                    render_name, Qt.MatchContains
-                )
-                for item in matching_items:
-                    item.setSelected(False)
+        if not renders_in_comp:
+            return
+
+        protected = 0
+        for render_name in renders_in_comp:
+            name = (render_name or "").strip()
+            if not name:
+                continue
+            matching_items = self.ui.RendersClean.findItems(name, Qt.MatchExactly)
+            if not matching_items and re.search(r"_v\d+", name):
+                matching_items = self.ui.RendersClean.findItems(name, Qt.MatchContains)
+            for item in matching_items:
+                item.setSelected(False)
+                protected += 1
+
+        if protected:
+            logger.info(f"Cleaner: {protected} render(s) in use by the latest comp were deselected")
 
     def _on_clean_files_clicked(self):
         """Size the pending deletion in a worker, then ask for confirmation."""
