@@ -68,7 +68,11 @@ class UIManager(BaseGalleryManager):
         initial_arrow = "▲" if self._sort_ascending else "▼"
         self._sort_direction_btn = QPushButton(initial_arrow)
         self._sort_direction_btn.setObjectName("sortDirectionButton")
-        self._sort_direction_btn.setFixedWidth(24)  # Narrow but same height as other buttons
+        # The arrow is text, not an icon, so the button needs the icon-only
+        # treatment: the default button padding is 16px a side, which is wider
+        # than the button itself and squeezed the glyph out of view entirely.
+        self._sort_direction_btn.setProperty("iconOnly", "true")
+        self._sort_direction_btn.setFixedWidth(32)
         self._sort_direction_btn.setCursor(Qt.ArrowCursor)
         self._sort_direction_btn.setToolTip("Toggle sort direction")
         self._sort_direction_btn.clicked.connect(self._on_sort_direction_clicked)

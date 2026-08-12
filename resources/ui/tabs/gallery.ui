@@ -55,31 +55,6 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="GalleryShortcutsButton">
-       <property name="iconOnly" stdset="0">
-        <string>true</string>
-       </property>
-       <property name="role" stdset="0">
-        <string>ghost</string>
-       </property>
-       <property name="text">
-        <string>⌨</string>
-       </property>
-       <property name="toolTip">
-        <string>Keyboard shortcuts</string>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>34</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
       <spacer name="galleryHeaderSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>

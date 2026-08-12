@@ -193,47 +193,9 @@ class GalleryTab(BaseTab):
             add(str(number), lambda idx=number - 1: sm._add_to_group_by_index(idx))
             add(f"Shift+{number}", lambda idx=number - 1: sm._remove_from_group_by_index(idx))
 
-        self._setup_shortcuts_hint_button()
-
-    # Single source of truth for the shortcut hints shown in the UI.
-    # (label, key) — the key strings also feed the context-menu hints.
-    SHORTCUT_HINTS = [
-        ("Select all", "Ctrl+A"),
-        ("Clear selection", "Esc"),
-        ("Like / unlike", "L"),
-        ("Add to group", "G"),
-        ("New group", "Ctrl+G"),
-        ("Compare two items", "C"),
-        ("Add to group 1-9", "1…9"),
-        ("Remove from group 1-9", "Shift+1…9"),
-    ]
-
-    def _setup_shortcuts_hint_button(self):
-        """Give the ⌨ header button a tooltip listing every gallery shortcut."""
-        button = getattr(self.ui, "GalleryShortcutsButton", None)
-        if button is None:
-            logger.debug("[Gallery] GalleryShortcutsButton missing from UI — skipping hints")
-            return
-
-        lines = ["Gallery keyboard shortcuts:", ""]
-        width = max(len(label) for label, _ in self.SHORTCUT_HINTS)
-        lines += [f"{label.ljust(width)}   {key}" for label, key in self.SHORTCUT_HINTS]
-        lines += ["", "Shortcuts are disabled while the viewer is open."]
-
-        button.setToolTip("\n".join(lines))
-        # Clicking just surfaces the same list for discoverability
-        button.clicked.connect(self._show_shortcuts_hint)
-
-    def _show_shortcuts_hint(self):
-        """Show the shortcut list in a dialog (click on the ⌨ button)."""
-        from dialog_helpers import show_info
-
-        show_info(
-            "Gallery Shortcuts",
-            "Keyboard shortcuts available in the gallery.",
-            parent=self.main_window,
-            detail="\n".join(f"{key}\t{label}" for label, key in self.SHORTCUT_HINTS),
-        )
+    # The ⌨ header button and its hint list were removed. The shortcuts
+    # themselves are registered above and are unaffected; SHORTCUT_HINTS was
+    # read only by the button's tooltip and dialog, so it went with them.
 
     def set_shortcuts_enabled(self, enabled: bool):
         """Enable/disable gallery shortcuts (disabled while the viewer is open)."""

@@ -51,7 +51,6 @@ ROLES = {
     # ---- gallery ----------------------------------------------------
     "GalleryUserButton":        {"role": "secondary"},
     "GallerySortButton":        {"role": "secondary"},
-    "GalleryShortcutsButton":   {"role": "ghost", "iconOnly": "true"},
     "GalleryOpenExplorer":      {"role": "secondary"},
     "GalleryRefresh":           {"role": "secondary"},
 
