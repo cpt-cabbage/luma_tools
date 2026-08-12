@@ -317,6 +317,46 @@ Per `CLAUDE.md` multi-file discipline — data/config, then logic, then wiring, 
 
 ---
 
+## 8a. Outcome and the L5 deferral
+
+L0–L4, L6 and L7 landed. **L5 (the Renders merge) is deferred to its own
+session** by user decision on 2026-08-12.
+
+Reason: mapping the three tabs showed they share only the scan shell. Pass
+Builder carries a whole second source mode (AYON product fetch, work-render
+path resolution from version IDs, product filtering, pass detection); rePublish
+carries task discovery and a farm/local publish worker; MP4 Maker carries
+quality, frame-range override, burn-in, gallery copy and a *separate* AYON
+publish path for the MP4. The merge is ~2,000 lines across exactly the three
+behaviours §2 says must not change — and it cannot be verified without
+submitting real Deadline jobs and AYON publishes, which is not something to do
+unprompted. The screenshot harness proves the UI renders; it cannot prove a
+publish lands.
+
+Because the three tabs remain, L4 unified their layout rather than skipping it.
+
+**When resumed**, stage it: MP4 Maker first (simplest), then rePublish, then
+Pass Builder (the AYON-source mode makes it the hairiest). One commit per
+stage, each with a targeted manual test list, so a regression is attributable
+to one tab's worth of change and revertible on its own.
+
+### Measured result
+
+| | Before | After |
+|---|---|---|
+| Inline `setStyleSheet` calls | 400 | 26 (all deliberate) |
+| `styleSheet` properties in `.ui` | 18 | 0 |
+| `!important` declarations | 84 | 0 |
+| Distinct hex literals | 121 | 88 |
+| Uses of the old accent `#4a9eff` | 89 | 3 |
+| Palettes in the codebase | 5 disagreeing | 1 |
+| Settings | one 5-screen scroll | 5 navigable sections + filter |
+| Tests | 823 pass | 823 pass |
+
+The 26 remaining inline calls are per-instance colours (gallery group tints,
+model type badges, thumbnail selection borders), `QPropertyAnimation` targets
+(QSS cannot animate), caller-chosen sizes, and `apply_stylesheet` itself.
+
 ## 9. Risks and mitigations
 
 | Risk | Mitigation |

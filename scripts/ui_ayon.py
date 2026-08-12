@@ -80,7 +80,12 @@ def current_tab():
 
 
 def extra_windows():
-    """Visible top-level widgets that are not the main window."""
+    """Visible top-level widgets that are not the main window or a tooltip.
+
+    A tooltip is itself a visible top-level widget, so without the filter a
+    thumbnail's tooltip gets grabbed instead of the tab behind it — which is
+    exactly how a 1924x1175 tab capture silently became a 3KB tooltip.
+    """
     mw = main_window()
     out = []
     for w in QtWidgets.QApplication.topLevelWidgets():
@@ -88,6 +93,11 @@ def extra_windows():
             if w is mw or not w.isVisible():
                 continue
             if w.width() < 80 or w.height() < 40:
+                continue
+            wtype = w.windowFlags() & QtCore.Qt.WindowType_Mask
+            if wtype in (QtCore.Qt.ToolTip, QtCore.Qt.SplashScreen):
+                continue
+            if w.inherits("QTipLabel"):
                 continue
             out.append(w)
         except RuntimeError:      # C++ side already deleted
