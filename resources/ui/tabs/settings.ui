@@ -76,11 +76,11 @@
             </item>
             <item>
              <widget class="QLabel" name="versionValueLabel">
+              <property name="textRole" stdset="0">
+               <string>value</string>
+              </property>
               <property name="text">
                <string>0.1</string>
-              </property>
-              <property name="styleSheet">
-               <string>font-weight: bold;</string>
               </property>
              </widget>
             </item>
@@ -155,11 +155,14 @@
           </item>
           <item>
            <widget class="QLabel" name="newVersionLabel">
+            <property name="state" stdset="0">
+             <string>warning</string>
+            </property>
+            <property name="variant" stdset="0">
+             <string>note</string>
+            </property>
             <property name="text">
              <string></string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #f59e0b; font-weight: bold; padding: 8px; background-color: rgba(217, 119, 6, 0.15); border-radius: 4px;</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>
@@ -275,17 +278,14 @@
          <property name="toolTip">
           <string>Personal settings stored locally - these only affect your machine</string>
          </property>
-         <property name="styleSheet">
-          <string>QGroupBox#userSettingsGroupBox { border: 2px solid #3a7ca5; }</string>
-         </property>
          <layout class="QVBoxLayout" name="userSettingsLayout">
           <item>
            <widget class="QLabel" name="userSettingsLabel">
+            <property name="textRole" stdset="0">
+             <string>help</string>
+            </property>
             <property name="text">
              <string>These settings are stored locally and only affect your machine.</string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #888888; font-style: italic;</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>
@@ -320,11 +320,11 @@
           </item>
           <item>
            <widget class="QLabel" name="integrationSectionLabel">
+            <property name="textRole" stdset="0">
+             <string>micro</string>
+            </property>
             <property name="text">
              <string>ComfyUI + Gallery Integration:</string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #4a9eff; font-weight: bold; margin-top: 8px;</string>
             </property>
            </widget>
           </item>
@@ -386,11 +386,11 @@
           </item>
           <item>
            <widget class="QLabel" name="viewerSettingsSectionLabel">
+            <property name="textRole" stdset="0">
+             <string>micro</string>
+            </property>
             <property name="text">
              <string>Viewer Settings:</string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #4a9eff; font-weight: bold; margin-top: 8px;</string>
             </property>
            </widget>
           </item>
@@ -627,9 +627,6 @@
          <property name="toolTip">
           <string>Configure shared settings that apply to all users - requires admin access to modify</string>
          </property>
-         <property name="styleSheet">
-          <string>QGroupBox { border: 2px solid #d97706; }</string>
-         </property>
          <layout class="QVBoxLayout" name="globalSettingsLayout">
           <item>
            <widget class="QLabel" name="globalSettingsLabel">
@@ -680,11 +677,11 @@
           </item>
           <item>
            <widget class="QLabel" name="globalSettingsCurrentPath">
+            <property name="textRole" stdset="0">
+             <string>mono</string>
+            </property>
             <property name="text">
              <string>Current: (default path)</string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #888888; font-style: italic;</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>
@@ -791,11 +788,11 @@
           </item>
           <item>
            <widget class="QLabel" name="comfyuiCurrentPath">
+            <property name="textRole" stdset="0">
+             <string>mono</string>
+            </property>
             <property name="text">
              <string>Current: (default path)</string>
-            </property>
-            <property name="styleSheet">
-             <string>color: #888888; font-style: italic;</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>

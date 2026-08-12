@@ -528,14 +528,15 @@ SCENARIOS = {
         {"zoo": 1}, {"wait": 1200}, {"shot": "zoo_widgets"},
         {"close": 1}, {"wait": 500},
     ],
+    # Settings is a nav + stack now, not one long scroll, so walk the sections.
     "settings": [
         {"tab": "settings"}, {"wait": 2500},
-        {"scroll": 0.0}, {"wait": 400}, {"shot": "settings_scroll_0"},
-        {"scroll": 0.25}, {"wait": 400}, {"shot": "settings_scroll_1"},
-        {"scroll": 0.50}, {"wait": 400}, {"shot": "settings_scroll_2"},
-        {"scroll": 0.75}, {"wait": 400}, {"shot": "settings_scroll_3"},
-        {"scroll": 1.0}, {"wait": 400}, {"shot": "settings_scroll_4"},
-        {"scroll": 0.0}, {"wait": 600},
+        {"nav": "Info"}, {"wait": 500}, {"shot": "settings_1_info"},
+        {"nav": "User Settings"}, {"wait": 500}, {"shot": "settings_2_user"},
+        {"nav": "Global"}, {"wait": 500}, {"shot": "settings_3_global"},
+        {"nav": "Preset Categories"}, {"wait": 500}, {"shot": "settings_4_categories"},
+        {"nav": "HDRI Maps"}, {"wait": 500}, {"shot": "settings_5_hdri"},
+        {"nav": "Info"}, {"wait": 600},
         {"click": r"^Version History$"}, {"wait": 1800}, {"shot": "settings_version_history"},
         {"close": 1}, {"wait": 800},
         {"click": r"^Submit Request$"}, {"wait": 1800}, {"shot": "settings_submit_request"},
@@ -669,6 +670,23 @@ def run_next():
                 log(f"click {cls}[{idx}]")
                 click(w)
             delay = 800
+        elif "nav" in step:
+            # Select a row in a named QListWidget used as section navigation.
+            lst = find_by_objname(step.get("nav_widget", "SettingsNav"))
+            if lst is None:
+                log(f"!! no nav list {step.get('nav_widget', 'SettingsNav')!r}")
+            else:
+                hit = -1
+                for i in range(lst.count()):
+                    if step["nav"].lower() in (lst.item(i).text() or "").lower():
+                        hit = i
+                        break
+                if hit < 0:
+                    log(f"!! no nav row matching {step['nav']!r}")
+                else:
+                    log(f"nav -> {lst.item(hit).text()!r}")
+                    lst.setCurrentRow(hit)
+            delay = 700
         elif "subtab" in step:
             tw, idx = find_subtab(step["subtab"])
             if tw is None:

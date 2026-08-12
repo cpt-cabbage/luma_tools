@@ -137,10 +137,10 @@ class Ui_GalleryTab(object):
 #endif // QT_CONFIG(tooltip)
         self.GalleryRefresh.setProperty(u"role", QCoreApplication.translate("GalleryTab", u"secondary", None))
         self.GalleryRefresh.setText(QCoreApplication.translate("GalleryTab", u"Refresh", None))
+        self.GalleryStatus.setProperty(u"textRole", QCoreApplication.translate("GalleryTab", u"help", None))
         self.GalleryStatus.setText(QCoreApplication.translate("GalleryTab", u"No images found", None))
-        self.GalleryStatus.setStyleSheet(QCoreApplication.translate("GalleryTab", u"color: #888888;", None))
+        self.GalleryViewOnlyLabel.setProperty(u"variant", QCoreApplication.translate("GalleryTab", u"badge", None))
         self.GalleryViewOnlyLabel.setText(QCoreApplication.translate("GalleryTab", u"View Only", None))
-        self.GalleryViewOnlyLabel.setStyleSheet(QCoreApplication.translate("GalleryTab", u"color: #4a9eff; font-weight: bold; padding: 2px 8px; background-color: rgba(74, 158, 255, 0.2); border-radius: 4px;", None))
         pass
     # retranslateUi
 

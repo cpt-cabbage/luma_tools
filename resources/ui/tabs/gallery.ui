@@ -151,11 +151,11 @@
     <layout class="QHBoxLayout" name="galleryFooterLayout">
      <item>
       <widget class="QLabel" name="GalleryStatus">
+       <property name="textRole" stdset="0">
+        <string>help</string>
+       </property>
        <property name="text">
         <string>No images found</string>
-       </property>
-       <property name="styleSheet">
-        <string>color: #888888;</string>
        </property>
       </widget>
      </item>
@@ -168,11 +168,11 @@
      </item>
      <item>
       <widget class="QLabel" name="GalleryViewOnlyLabel">
+       <property name="variant" stdset="0">
+        <string>badge</string>
+       </property>
        <property name="text">
         <string>View Only</string>
-       </property>
-       <property name="styleSheet">
-        <string>color: #4a9eff; font-weight: bold; padding: 2px 8px; background-color: rgba(74, 158, 255, 0.2); border-radius: 4px;</string>
        </property>
       </widget>
      </item>

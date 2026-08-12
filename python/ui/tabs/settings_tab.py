@@ -14,6 +14,7 @@ from .base_tab import BaseTab, TabConfig
 from dialog_helpers import confirm_action, show_warning, show_error, show_info
 from core.utils import ensure_directory
 from core.config import APP_VERSION, get_changelog, get_latest_changelog
+from core.design_tokens import Space
 
 logger = logging.getLogger(__name__)
 
@@ -201,10 +202,152 @@ class SettingsTab(BaseTab):
         if hasattr(self.ui, 'globalSettingsGroupBox'):
             self.ui.globalSettingsGroupBox.setVisible(self.app_state.is_admin)
 
+        # Split the single long scroll into navigable sections. Done here, in
+        # Python, by reparenting the existing group boxes rather than by
+        # rewriting settings.ui - every widget keeps its object name and its
+        # signal connections, so none of the settings logic above is touched.
+        self._build_section_nav()
+
         # Wire dirty tracking last so the loads above don't mark the tab dirty
         self._loading = False
         self._connect_dirty_tracking()
         self._update_save_button_states()
+
+    # =========================================================================
+    # Section navigation
+    # =========================================================================
+
+    # (nav label, ui attribute, admin_only)
+    _SECTIONS = [
+        ("Info", "infoGroupBox", False),
+        ("User Settings", "userSettingsGroupBox", False),
+        ("Global", "globalSettingsGroupBox", True),
+        ("Preset Categories", "categoriesGroupBox", True),
+        ("HDRI Maps", "hdriGroupBox", True),
+    ]
+
+    def _build_section_nav(self):
+        """Replace the single scrolling page with a nav list and a stack.
+
+        Settings was one five-screen scroll with no landmarks. Each group box
+        becomes its own page behind a left-hand nav, and the filter box
+        searches the text inside every page so a setting can be found without
+        knowing which section it lives in.
+        """
+        from PySide6 import QtCore, QtWidgets
+
+        ui = self.ui
+        main_layout = ui.SettingsTab.layout() if hasattr(ui, "SettingsTab") else None
+        if main_layout is None:
+            main_layout = self.ui.layout()
+        if main_layout is None:
+            logger.warning("Settings: no main layout, keeping the flat scroll")
+            return
+
+        is_admin = self.app_state.is_admin
+        sections = [(label, getattr(ui, attr, None), admin_only)
+                    for label, attr, admin_only in self._SECTIONS]
+        sections = [(label, box, admin_only) for label, box, admin_only in sections
+                    if box is not None and (is_admin or not admin_only)]
+        if not sections:
+            return
+
+        row = QtWidgets.QWidget()
+        row_layout = QtWidgets.QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(Space.PANEL_GAP)
+
+        # --- left: filter + nav -------------------------------------------
+        nav_col = QtWidgets.QWidget()
+        nav_col.setFixedWidth(200)
+        nav_layout = QtWidgets.QVBoxLayout(nav_col)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(Space.SM)
+
+        self._settings_filter = QtWidgets.QLineEdit()
+        self._settings_filter.setPlaceholderText("Filter settings...")
+        self._settings_filter.setClearButtonEnabled(True)
+        nav_layout.addWidget(self._settings_filter)
+
+        self._settings_nav = QtWidgets.QListWidget()
+        self._settings_nav.setObjectName("SettingsNav")
+        self._settings_nav.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        nav_layout.addWidget(self._settings_nav, 1)
+        row_layout.addWidget(nav_col)
+
+        # --- right: one scrollable page per section ------------------------
+        self._settings_stack = QtWidgets.QStackedWidget()
+        row_layout.addWidget(self._settings_stack, 1)
+
+        self._settings_search_index = []
+        for label, box, admin_only in sections:
+            # Detach from whatever layout currently owns it.
+            parent_layout = box.parentWidget().layout() if box.parentWidget() else None
+            if parent_layout is not None:
+                parent_layout.removeWidget(box)
+
+            page = QtWidgets.QScrollArea()
+            page.setWidgetResizable(True)
+            page.setFrameShape(QtWidgets.QFrame.NoFrame)
+            holder = QtWidgets.QWidget()
+            holder_layout = QtWidgets.QVBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 0, 0, 0)
+            holder_layout.setSpacing(Space.PANEL_GAP)
+            box.setVisible(True)
+            holder_layout.addWidget(box)
+            holder_layout.addStretch(1)
+            page.setWidget(holder)
+            self._settings_stack.addWidget(page)
+
+            item = QtWidgets.QListWidgetItem(label)
+            if admin_only:
+                item.setToolTip("Global — shared with everyone on the team")
+            self._settings_nav.addItem(item)
+            self._settings_search_index.append(self._collect_page_text(box, label))
+
+        # Retire the old flat scroll area.
+        old_scroll = getattr(ui, "settingsScrollArea", None)
+        if old_scroll is not None:
+            main_layout.removeWidget(old_scroll)
+            old_scroll.setParent(None)
+            old_scroll.deleteLater()
+
+        main_layout.addWidget(row)
+
+        self._settings_nav.currentRowChanged.connect(self._settings_stack.setCurrentIndex)
+        self._settings_filter.textChanged.connect(self._on_settings_filter_changed)
+        self._settings_nav.setCurrentRow(0)
+
+    @staticmethod
+    def _collect_page_text(widget, label):
+        """Everything readable on a page, lowercased, for the filter."""
+        from PySide6 import QtWidgets
+
+        parts = [label]
+        for child in widget.findChildren(QtWidgets.QWidget):
+            for getter in ("text", "placeholderText", "toolTip", "title"):
+                fn = getattr(child, getter, None)
+                if callable(fn):
+                    try:
+                        value = fn()
+                    except TypeError:
+                        continue
+                    if isinstance(value, str) and value:
+                        parts.append(value)
+        return " ".join(parts).lower()
+
+    def _on_settings_filter_changed(self, text):
+        """Show only the sections whose contents match the filter."""
+        needle = (text or "").strip().lower()
+        first_visible = -1
+        for i in range(self._settings_nav.count()):
+            match = not needle or needle in self._settings_search_index[i]
+            self._settings_nav.item(i).setHidden(not match)
+            if match and first_visible < 0:
+                first_visible = i
+        if first_visible >= 0 and self._settings_nav.currentItem() is not None \
+                and self._settings_nav.currentItem().isHidden():
+            self._settings_nav.setCurrentRow(first_visible)
 
     # =========================================================================
     # Unsaved-changes tracking

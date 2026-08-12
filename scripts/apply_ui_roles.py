@@ -143,6 +143,25 @@ ROLES = {
     "GalleryAgeLabel":          {"textRole": "label"},
     "GalleryPreviewSize":       {"textRole": "label"},
 
+    # ---- widgets that carried a styleSheet property in the .ui ------
+    # These were a second, invisible source of drift: an inline stylesheet
+    # baked into the XML, which a grep for setStyleSheet() never finds.
+    "GalleryStatus":            {"textRole": "help"},
+    "GalleryViewOnlyLabel":     {"variant": "badge"},
+    "MP4CustomPathLabel":       {"variant": "path"},
+    "MP4OutputPath":            {"variant": "path"},
+    "MP4StatusLabel":           {"textRole": "help"},
+    "passesHint":               {"textRole": "help"},
+    "PassBuilderStatusLabel":   {"textRole": "help"},
+    "RePublishStatusLabel":     {"textRole": "help"},
+    "versionValueLabel":        {"textRole": "value"},
+    "newVersionLabel":          {"variant": "note", "state": "warning"},
+    "userSettingsLabel":        {"textRole": "help"},
+    "integrationSectionLabel":  {"textRole": "micro"},
+    "viewerSettingsSectionLabel": {"textRole": "micro"},
+    "globalSettingsCurrentPath": {"textRole": "mono"},
+    "comfyuiCurrentPath":       {"textRole": "mono"},
+
     # NOTE: StatusLabel and LastLogLabel are built in Python
     # (core/luma_tools.py), not in a .ui file, so their properties are set
     # there directly. main_window.ui declares a StatusLabel but that file is
@@ -160,6 +179,14 @@ WIDGET_RE = r'(<widget class="[^"]+" name="{name}"\s*>\n)([ \t]*)'
 # Only stdset="0" entries are removed; a real <property name="text"> has no
 # stdset attribute and must be left alone.
 LEGACY_KEYS = ("text", "icon", "size")
+
+# An inline stylesheet baked into the XML is the same problem as one in
+# Python, and is easier to miss. Strip them all; the widgets above carry
+# dynamic properties instead.
+STYLESHEET_RE = re.compile(
+    r'[ \t]*<property name="styleSheet">\s*<string[^>]*>'
+    r'[\s\S]*?</string>\s*</property>\n'
+)
 
 LEGACY_RE = re.compile(
     r'[ \t]*<property name="(?:' + "|".join(LEGACY_KEYS) + r')" stdset="0">\s*'
@@ -219,6 +246,11 @@ def main():
         path = os.path.join(UI_DIR, filename)
         with open(path, "r", encoding="utf-8") as fh:
             text = original = fh.read()
+
+        text, sheet_n = STYLESHEET_RE.subn("", text)
+        if sheet_n:
+            print(f"{filename}: stripped {sheet_n} inline styleSheet propert"
+                  f"{'y' if sheet_n == 1 else 'ies'}")
 
         text, legacy_n = LEGACY_RE.subn("", text)
         if legacy_n:

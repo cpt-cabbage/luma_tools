@@ -92,7 +92,6 @@ class Ui_RePublishTab(object):
         self.republishCustomPathLayout.setObjectName(u"republishCustomPathLayout")
         self.RePublishCustomPathLabel = QLabel(self.republishRenderPathGroupBox)
         self.RePublishCustomPathLabel.setObjectName(u"RePublishCustomPathLabel")
-        self.RePublishCustomPathLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
         self.RePublishCustomPathLabel.setVisible(False)
 
         self.republishCustomPathLayout.addWidget(self.RePublishCustomPathLabel)
@@ -173,7 +172,6 @@ class Ui_RePublishTab(object):
 
         self.RePublishStatusLabel = QLabel(self.republishOptionsGroupBox)
         self.RePublishStatusLabel.setObjectName(u"RePublishStatusLabel")
-        self.RePublishStatusLabel.setStyleSheet(u"color: #666; padding: 8px;")
         self.RePublishStatusLabel.setWordWrap(True)
 
         self.republishOptionsLayout.addWidget(self.RePublishStatusLabel)
@@ -241,6 +239,7 @@ class Ui_RePublishTab(object):
         self.RePublishProductName.setToolTip(QCoreApplication.translate("RePublishTab", u"Select an existing AYON product or type a new name", None))
 #endif // QT_CONFIG(tooltip)
         self.RePublishProductName.setPlaceholderText(QCoreApplication.translate("RePublishTab", u"Select or type product name", None))
+        self.RePublishStatusLabel.setProperty(u"textRole", QCoreApplication.translate("RePublishTab", u"help", None))
         self.RePublishStatusLabel.setText(QCoreApplication.translate("RePublishTab", u"Status: Ready", None))
         self.RePublishPublish.setProperty(u"role", QCoreApplication.translate("RePublishTab", u"ayon", None))
 #if QT_CONFIG(tooltip)

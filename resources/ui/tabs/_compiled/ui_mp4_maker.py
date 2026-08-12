@@ -92,7 +92,6 @@ class Ui_MP4MakerTab(object):
         self.mp4CustomPathLayout.setObjectName(u"mp4CustomPathLayout")
         self.MP4CustomPathLabel = QLabel(self.mp4RenderPathGroupBox)
         self.MP4CustomPathLabel.setObjectName(u"MP4CustomPathLabel")
-        self.MP4CustomPathLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
         self.MP4CustomPathLabel.setVisible(False)
 
         self.mp4CustomPathLayout.addWidget(self.MP4CustomPathLabel)
@@ -241,7 +240,6 @@ class Ui_MP4MakerTab(object):
         self.MP4StatusLabel = QLabel(MP4MakerTab)
         self.MP4StatusLabel.setObjectName(u"MP4StatusLabel")
         self.MP4StatusLabel.setWordWrap(True)
-        self.MP4StatusLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
         self.MP4StatusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         self.mp4Layout.addWidget(self.MP4StatusLabel)
@@ -269,6 +267,7 @@ class Ui_MP4MakerTab(object):
         self.MP4ScanRenders.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Rescan version and find render files", None))
 #endif // QT_CONFIG(tooltip)
         self.MP4ScanRenders.setText(QCoreApplication.translate("MP4MakerTab", u"Rescan", None))
+        self.MP4CustomPathLabel.setProperty(u"variant", QCoreApplication.translate("MP4MakerTab", u"path", None))
         self.MP4CustomPathLabel.setText(QCoreApplication.translate("MP4MakerTab", u"Custom path: None", None))
         self.mp4RendersGroupBox.setTitle(QCoreApplication.translate("MP4MakerTab", u"Renders", None))
 #if QT_CONFIG(tooltip)
@@ -310,8 +309,8 @@ class Ui_MP4MakerTab(object):
         self.MP4BrowseOutput.setProperty(u"density", QCoreApplication.translate("MP4MakerTab", u"sm", None))
         self.MP4BrowseOutput.setProperty(u"role", QCoreApplication.translate("MP4MakerTab", u"secondary", None))
         self.MP4BrowseOutput.setText(QCoreApplication.translate("MP4MakerTab", u"Browse...", None))
+        self.MP4OutputPath.setProperty(u"variant", QCoreApplication.translate("MP4MakerTab", u"path", None))
         self.MP4OutputPath.setText(QCoreApplication.translate("MP4MakerTab", u"No output location selected", None))
-        self.MP4OutputPath.setStyleSheet(QCoreApplication.translate("MP4MakerTab", u"color: #888888; font-size: 9pt;", None))
         self.MP4Generate.setProperty(u"role", QCoreApplication.translate("MP4MakerTab", u"primary", None))
 #if QT_CONFIG(tooltip)
         self.MP4Generate.setToolTip(QCoreApplication.translate("MP4MakerTab", u"Generate MP4 from selected render (Ctrl+Return)", None))
@@ -320,6 +319,7 @@ class Ui_MP4MakerTab(object):
 #if QT_CONFIG(shortcut)
         self.MP4Generate.setShortcut(QCoreApplication.translate("MP4MakerTab", u"Ctrl+Return", None))
 #endif // QT_CONFIG(shortcut)
+        self.MP4StatusLabel.setProperty(u"textRole", QCoreApplication.translate("MP4MakerTab", u"help", None))
         self.MP4StatusLabel.setText("")
         pass
     # retranslateUi

@@ -170,9 +170,6 @@
           <property name="text">
            <string>Custom path: None</string>
           </property>
-          <property name="styleSheet">
-           <string notr="true">color: #888888; font-size: 9pt;</string>
-          </property>
           <property name="visible">
            <bool>false</bool>
           </property>
@@ -350,11 +347,11 @@
         </item>
         <item>
          <widget class="QLabel" name="RePublishStatusLabel">
+          <property name="textRole" stdset="0">
+           <string>help</string>
+          </property>
           <property name="text">
            <string>Status: Ready</string>
-          </property>
-          <property name="styleSheet">
-           <string notr="true">color: #666; padding: 8px;</string>
           </property>
           <property name="wordWrap">
            <bool>true</bool>

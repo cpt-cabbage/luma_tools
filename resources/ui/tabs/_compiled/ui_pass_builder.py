@@ -164,7 +164,6 @@ class Ui_PassBuilderTab(object):
         self.PassBuilderStatusLabel = QLabel(PassBuilderTab)
         self.PassBuilderStatusLabel.setObjectName(u"PassBuilderStatusLabel")
         self.PassBuilderStatusLabel.setWordWrap(True)
-        self.PassBuilderStatusLabel.setStyleSheet(u"color: #888888; font-size: 9pt;")
         self.PassBuilderStatusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         self.passBuilderLayout.addWidget(self.PassBuilderStatusLabel)
@@ -189,8 +188,8 @@ class Ui_PassBuilderTab(object):
         self.RendersList.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Renders found in the current version - select the sequence you want to update", None))
 #endif // QT_CONFIG(tooltip)
         self.passesGroupBox.setTitle(QCoreApplication.translate("PassBuilderTab", u"Available Passes", None))
+        self.passesHint.setProperty(u"textRole", QCoreApplication.translate("PassBuilderTab", u"help", None))
         self.passesHint.setText(QCoreApplication.translate("PassBuilderTab", u"Defaults (Beauty, Alpha, ...) are always included - select extras here", None))
-        self.passesHint.setStyleSheet(QCoreApplication.translate("PassBuilderTab", u"color: #888888; font-style: italic; font-size: 9pt;", None))
 #if QT_CONFIG(tooltip)
         self.Passes.setToolTip(QCoreApplication.translate("PassBuilderTab", u"Select the passes you want in the file (multi-select enabled)", None))
 #endif // QT_CONFIG(tooltip)
@@ -213,6 +212,7 @@ class Ui_PassBuilderTab(object):
 #if QT_CONFIG(shortcut)
         self.BuildPasses.setShortcut(QCoreApplication.translate("PassBuilderTab", u"Ctrl+Return", None))
 #endif // QT_CONFIG(shortcut)
+        self.PassBuilderStatusLabel.setProperty(u"textRole", QCoreApplication.translate("PassBuilderTab", u"help", None))
         self.PassBuilderStatusLabel.setText("")
         pass
     # retranslateUi

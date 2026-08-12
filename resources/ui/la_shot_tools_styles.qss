@@ -1602,6 +1602,32 @@ QPushButton[media="like"][state="on"]:hover {
     background-color: {{color.danger_hover}};
 }
 
+/* --- Settings section nav ------------------------------------------------ */
+QListWidget#SettingsNav {
+    background-color: {{color.panel}};
+    border: none;
+    border-radius: {{radius.md}}px;
+    padding: {{space.sm}}px;
+}
+
+QListWidget#SettingsNav::item {
+    border-radius: {{radius.sm}}px;
+    padding: {{space.sm}}px {{space.md}}px;
+    min-height: {{size.control}}px;
+    color: {{color.text_secondary}};
+}
+
+QListWidget#SettingsNav::item:hover {
+    background-color: {{color.hover}};
+    color: {{color.text}};
+}
+
+QListWidget#SettingsNav::item:selected {
+    background-color: {{color.accent_subtle}};
+    color: {{color.accent}};
+    font-weight: {{font.weight_semibold}};
+}
+
 /* --- Batch image selector ------------------------------------------------ */
 BatchImageSelector {
     background-color: transparent;

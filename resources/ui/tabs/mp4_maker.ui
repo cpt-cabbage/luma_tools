@@ -161,11 +161,11 @@
        <layout class="QHBoxLayout" name="mp4CustomPathLayout">
         <item>
          <widget class="QLabel" name="MP4CustomPathLabel">
+          <property name="variant" stdset="0">
+           <string>path</string>
+          </property>
           <property name="text">
            <string>Custom path: None</string>
-          </property>
-          <property name="styleSheet">
-           <string notr="true">color: #888888; font-size: 9pt;</string>
           </property>
           <property name="visible">
            <bool>false</bool>
@@ -435,14 +435,14 @@
         </item>
         <item>
          <widget class="QLabel" name="MP4OutputPath">
+          <property name="variant" stdset="0">
+           <string>path</string>
+          </property>
           <property name="text">
            <string>No output location selected</string>
           </property>
           <property name="wordWrap">
            <bool>true</bool>
-          </property>
-          <property name="styleSheet">
-           <string>color: #888888; font-size: 9pt;</string>
           </property>
          </widget>
         </item>
@@ -491,14 +491,14 @@
    </item>
    <item>
     <widget class="QLabel" name="MP4StatusLabel">
+     <property name="textRole" stdset="0">
+      <string>help</string>
+     </property>
      <property name="text">
       <string/>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
-     </property>
-     <property name="styleSheet">
-      <string notr="true">color: #888888; font-size: 9pt;</string>
      </property>
      <property name="textInteractionFlags">
       <set>Qt::TextSelectableByMouse</set>
