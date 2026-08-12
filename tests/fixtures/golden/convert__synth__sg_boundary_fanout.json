@@ -1,0 +1,26 @@
+{
+ "2": {
+  "class_type": "LoaderA",
+  "inputs": {
+   "ckpt_name": "model.safetensors"
+  }
+ },
+ "3": {
+  "class_type": "LoaderB",
+  "inputs": {
+   "ckpt_name": "model.safetensors"
+  }
+ },
+ "4": {
+  "class_type": "LoaderC",
+  "inputs": {
+   "ckpt_name": "model.safetensors"
+  }
+ },
+ "5": {
+  "class_type": "SamplerX",
+  "inputs": {
+   "steps": 42
+  }
+ }
+}

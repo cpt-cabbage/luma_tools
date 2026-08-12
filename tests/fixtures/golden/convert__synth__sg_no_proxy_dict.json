@@ -1,0 +1,14 @@
+{
+ "2": {
+  "class_type": "InternalA",
+  "inputs": {
+   "text": "broadcast"
+  }
+ },
+ "3": {
+  "class_type": "InternalB",
+  "inputs": {
+   "text": "broadcast"
+  }
+ }
+}

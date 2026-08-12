@@ -1,0 +1,43 @@
+{
+  "_comment": "Synthetic: widget propagation path 3 — proxyWidgets + DICT widgets_values. Covers an internal-node proxy entry ('30'), a boundary proxy entry ('-1'), a phantom 'control_after_generate' entry that must be skipped, a proxy entry whose widget name is absent from the dict, and a dict key with no proxy entry at all.",
+  "nodes": [
+    {
+      "id": 1,
+      "type": "aaaaaaaa-0000-4000-8000-000000000003",
+      "mode": 0,
+      "widgets_values": {
+        "seed": 123,
+        "control_after_generate": "randomize",
+        "ckpt_name": "dict_model.safetensors",
+        "orphan_key": "ignored"
+      },
+      "inputs": [{"name": "ckpt_name", "link": null}],
+      "outputs": [],
+      "properties": {
+        "proxyWidgets": [
+          ["30", "seed"],
+          ["30", "control_after_generate"],
+          ["-1", "ckpt_name"],
+          ["30", "not_in_dict"],
+          ["not_an_int", "seed"]
+        ]
+      }
+    }
+  ],
+  "links": [],
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "aaaaaaaa-0000-4000-8000-000000000003",
+        "name": "ProxyDict",
+        "inputs": [{"name": "ckpt_name", "link": null}],
+        "outputs": [],
+        "nodes": [
+          {"id": 30, "type": "KSampler", "inputs": [{"name": "seed", "slot_index": 0, "link": null}], "outputs": []},
+          {"id": 31, "type": "CheckpointLoaderSimple", "inputs": [{"name": "ckpt_name", "slot_index": 0, "link": null}], "outputs": []}
+        ],
+        "links": [[300, -10, 0, 31, 0, "COMBO"]]
+      }
+    ]
+  }
+}

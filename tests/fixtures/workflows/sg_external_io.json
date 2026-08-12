@@ -1,0 +1,67 @@
+{
+  "_comment": "Synthetic: external wiring. One external link feeds a boundary input that fans out to TWO internal nodes (first target rewires the existing link, the second gets a freshly minted link). The subgraph output has two external consumers that must both be rewired to the internal producer. Also exercises internal link id remapping (link 702).",
+  "nodes": [
+    {
+      "id": 5,
+      "type": "SourceNode",
+      "mode": 0,
+      "widgets_values": [],
+      "inputs": [],
+      "outputs": [{"name": "IMAGE", "links": [10], "slot_index": 0}],
+      "properties": {}
+    },
+    {
+      "id": 1,
+      "type": "aaaaaaaa-0000-4000-8000-000000000005",
+      "mode": 0,
+      "widgets_values": [],
+      "inputs": [{"name": "image", "link": 10}],
+      "outputs": [{"name": "OUT", "links": [11, 12], "slot_index": 0}],
+      "properties": {}
+    },
+    {
+      "id": 6,
+      "type": "SinkA",
+      "mode": 0,
+      "widgets_values": [],
+      "inputs": [{"name": "in", "link": 11, "slot_index": 0}],
+      "outputs": [],
+      "properties": {}
+    },
+    {
+      "id": 7,
+      "type": "SinkB",
+      "mode": 0,
+      "widgets_values": [],
+      "inputs": [{"name": "in", "link": 12, "slot_index": 0}],
+      "outputs": [],
+      "properties": {}
+    }
+  ],
+  "links": [
+    [10, 5, 0, 1, 0, "IMAGE"],
+    [11, 1, 0, 6, 0, "LATENT"],
+    [12, 1, 0, 7, 0, "LATENT"]
+  ],
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "aaaaaaaa-0000-4000-8000-000000000005",
+        "name": "ExtIO",
+        "inputs": [{"name": "image", "link": null}],
+        "outputs": [{"name": "OUT", "link": null}],
+        "nodes": [
+          {"id": 70, "type": "ConsumerA", "inputs": [{"name": "image", "slot_index": 0, "link": null}], "outputs": [{"name": "o", "links": [702], "slot_index": 0}]},
+          {"id": 71, "type": "ConsumerB", "inputs": [{"name": "image", "slot_index": 0, "link": null}], "outputs": []},
+          {"id": 72, "type": "Producer", "inputs": [{"name": "x", "slot_index": 0, "link": 702}], "outputs": [{"name": "OUT", "links": [], "slot_index": 0}]}
+        ],
+        "links": [
+          [700, -10, 0, 70, 0, "IMAGE"],
+          [701, -10, 0, 71, 0, "IMAGE"],
+          [702, 70, 0, 72, 0, "X"],
+          [703, 72, 0, -20, 0, "LATENT"]
+        ]
+      }
+    ]
+  }
+}

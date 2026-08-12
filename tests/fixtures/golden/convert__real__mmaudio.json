@@ -1,0 +1,84 @@
+{
+ "102": {
+  "class_type": "MMAudioFeatureUtilsLoader",
+  "inputs": {
+   "clip_model": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+   "mode": "44k",
+   "precision": "fp16",
+   "synchformer_model": "mmaudio_synchformer_fp16.safetensors",
+   "vae_model": "mmaudio_vae_44k_fp16.safetensors"
+  }
+ },
+ "105": {
+  "class_type": "VHS_VideoInfo",
+  "inputs": {
+   "video_info": [
+    "91",
+    3
+   ]
+  }
+ },
+ "108": {
+  "class_type": "SaveAudio",
+  "inputs": {
+   "audio": [
+    "92",
+    0
+   ]
+  }
+ },
+ "85": {
+  "class_type": "MMAudioModelLoader",
+  "inputs": {
+   "base_precision": "fp16",
+   "mmaudio_model": "mmaudio_large_44k_v2_fp16.safetensors"
+  }
+ },
+ "91": {
+  "_meta": {
+   "title": "Load Video_editable"
+  },
+  "class_type": "VHS_LoadVideo",
+  "inputs": {
+   "custom_height": 0,
+   "custom_width": 0,
+   "force_rate": 0,
+   "format": "AnimateDiff",
+   "frame_load_cap": 0,
+   "select_every_nth": 1,
+   "skip_first_frames": 0,
+   "video": "LTX_2.0_i2v_00001_.mp4"
+  }
+ },
+ "92": {
+  "_meta": {
+   "title": "MMAudio Sampler_editable"
+  },
+  "class_type": "MMAudioSampler",
+  "inputs": {
+   "cfg": 4.5,
+   "duration": [
+    "105",
+    7
+   ],
+   "feature_utils": [
+    "102",
+    0
+   ],
+   "force_offload": true,
+   "images": [
+    "91",
+    0
+   ],
+   "mask_away_clip": false,
+   "mmaudio_model": [
+    "85",
+    0
+   ],
+   "negative_prompt": "",
+   "prompt": "",
+   "seed": 7,
+   "steps": 50
+  }
+ }
+}

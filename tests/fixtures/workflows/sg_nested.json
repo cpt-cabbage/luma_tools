@@ -1,0 +1,48 @@
+{
+  "_comment": "Synthetic: NESTED subgraphs. The outer subgraph definition contains an instance of the inner subgraph, so expand_subgraphs must recurse (_depth 0 -> 1).",
+  "nodes": [
+    {
+      "id": 1,
+      "type": "aaaaaaaa-0000-4000-8000-00000000000a",
+      "mode": 0,
+      "widgets_values": ["outer_val"],
+      "inputs": [{"name": "outer_in", "link": null}],
+      "outputs": [],
+      "properties": {"proxyWidgets": [["-1", "outer_in"]]}
+    }
+  ],
+  "links": [],
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "aaaaaaaa-0000-4000-8000-00000000000a",
+        "name": "Outer",
+        "inputs": [{"name": "outer_in", "link": null}],
+        "outputs": [],
+        "nodes": [
+          {
+            "id": 50,
+            "type": "aaaaaaaa-0000-4000-8000-00000000000b",
+            "mode": 0,
+            "widgets_values": ["inner_val"],
+            "inputs": [{"name": "inner_in", "slot_index": 0, "link": null}],
+            "outputs": [],
+            "properties": {"proxyWidgets": [["-1", "inner_in"]]}
+          },
+          {"id": 51, "type": "PlainNode", "inputs": [{"name": "outer_in", "slot_index": 0, "link": null}], "outputs": []}
+        ],
+        "links": [[500, -10, 0, 51, 0, "STRING"]]
+      },
+      {
+        "id": "aaaaaaaa-0000-4000-8000-00000000000b",
+        "name": "Inner",
+        "inputs": [{"name": "inner_in", "link": null}],
+        "outputs": [],
+        "nodes": [
+          {"id": 60, "type": "LeafNode", "inputs": [{"name": "inner_in", "slot_index": 0, "link": null}], "outputs": []}
+        ],
+        "links": [[600, -10, 0, 60, 0, "STRING"]]
+      }
+    ]
+  }
+}

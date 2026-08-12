@@ -1,0 +1,56 @@
+{
+ "1": {
+  "_meta": {
+   "title": "NormalCrafter_settings"
+  },
+  "class_type": "NormalCrafterNode",
+  "inputs": {
+   "decode_chunk_size": 4,
+   "images": [
+    "2",
+    0
+   ],
+   "max_res_dimension": 1024,
+   "offload_pipe_to_cpu_on_finish": true,
+   "seed": 217347474868668,
+   "time_step_size": 10,
+   "use_xformers": "auto",
+   "window_size": 14
+  }
+ },
+ "2": {
+  "_meta": {
+   "title": "Load Video_editable"
+  },
+  "class_type": "VHS_LoadVideo",
+  "inputs": {
+   "custom_height": 0,
+   "custom_width": 0,
+   "force_rate": 0,
+   "format": "AnimateDiff",
+   "frame_load_cap": 0,
+   "select_every_nth": 1,
+   "skip_first_frames": 0,
+   "video": "LTX_2.0_i2v_00001_.mp4"
+  }
+ },
+ "3": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "filename_prefix": "NormalCrafter",
+   "images": [
+    "1",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "VHS_LoadImagesPath",
+  "inputs": {
+   "directory": "",
+   "image_load_cap": 0,
+   "select_every_nth": 1,
+   "skip_first_images": 0
+  }
+ }
+}

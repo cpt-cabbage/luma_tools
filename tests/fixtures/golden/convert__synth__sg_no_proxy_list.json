@@ -1,0 +1,14 @@
+{
+ "2": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "prompt text"
+  }
+ },
+ "3": {
+  "class_type": "KSampler",
+  "inputs": {
+   "cfg": 7.5
+  }
+ }
+}

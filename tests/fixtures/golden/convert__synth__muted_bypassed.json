@@ -1,0 +1,28 @@
+{
+ "1": {
+  "class_type": "NodeA",
+  "inputs": {
+   "a_in": "a"
+  }
+ },
+ "4": {
+  "class_type": "NodeD",
+  "inputs": {
+   "d_in": [
+    "1",
+    0
+   ],
+   "d_widget": "d"
+  }
+ },
+ "6": {
+  "class_type": "NodeF",
+  "inputs": {
+   "f_widget": "f"
+  }
+ },
+ "8": {
+  "class_type": "NodeG",
+  "inputs": {}
+ }
+}

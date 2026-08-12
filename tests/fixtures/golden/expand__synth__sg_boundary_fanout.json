@@ -1,0 +1,169 @@
+{
+ "_comment": "Synthetic: one boundary input (ckpt_name) fans out to THREE internal loader nodes; a second boundary input feeds one node. proxyWidgets + list widgets_values, both entries using the '-1' boundary node id.",
+ "definitions": {
+  "subgraphs": [
+   {
+    "id": "aaaaaaaa-0000-4000-8000-000000000001",
+    "inputs": [
+     {
+      "link": null,
+      "name": "ckpt_name"
+     },
+     {
+      "link": null,
+      "name": "steps"
+     }
+    ],
+    "links": [
+     [
+      100,
+      -10,
+      0,
+      10,
+      0,
+      "COMBO"
+     ],
+     [
+      101,
+      -10,
+      0,
+      11,
+      0,
+      "COMBO"
+     ],
+     [
+      102,
+      -10,
+      0,
+      12,
+      0,
+      "COMBO"
+     ],
+     [
+      103,
+      -10,
+      1,
+      13,
+      0,
+      "INT"
+     ]
+    ],
+    "name": "Fanout",
+    "nodes": [
+     {
+      "id": 10,
+      "inputs": [
+       {
+        "link": null,
+        "name": "ckpt_name",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "LoaderA"
+     },
+     {
+      "id": 11,
+      "inputs": [
+       {
+        "link": null,
+        "name": "ckpt_name",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "LoaderB"
+     },
+     {
+      "id": 12,
+      "inputs": [
+       {
+        "link": null,
+        "name": "ckpt_name",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "LoaderC"
+     },
+     {
+      "id": 13,
+      "inputs": [
+       {
+        "link": null,
+        "name": "steps",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "SamplerX"
+     }
+    ],
+    "outputs": []
+   }
+  ]
+ },
+ "links": [],
+ "nodes": [
+  {
+   "_input_overrides": {
+    "ckpt_name": "model.safetensors"
+   },
+   "id": 2,
+   "inputs": [
+    {
+     "link": null,
+     "name": "ckpt_name",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "LoaderA"
+  },
+  {
+   "_input_overrides": {
+    "ckpt_name": "model.safetensors"
+   },
+   "id": 3,
+   "inputs": [
+    {
+     "link": null,
+     "name": "ckpt_name",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "LoaderB"
+  },
+  {
+   "_input_overrides": {
+    "ckpt_name": "model.safetensors"
+   },
+   "id": 4,
+   "inputs": [
+    {
+     "link": null,
+     "name": "ckpt_name",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "LoaderC"
+  },
+  {
+   "_input_overrides": {
+    "steps": 42
+   },
+   "id": 5,
+   "inputs": [
+    {
+     "link": null,
+     "name": "steps",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "SamplerX"
+  }
+ ]
+}

@@ -1,0 +1,54 @@
+{
+ "_comment": "Synthetic: dict widgets_values with NO proxyWidgets — values are broadcast to every internal node. 'videopreview'/'audiopreview' UI-state keys must be skipped.",
+ "definitions": {
+  "subgraphs": [
+   {
+    "id": "aaaaaaaa-0000-4000-8000-000000000004",
+    "inputs": [
+     {
+      "link": null,
+      "name": "text"
+     }
+    ],
+    "links": [],
+    "name": "NoProxyDict",
+    "nodes": [
+     {
+      "id": 40,
+      "inputs": [],
+      "outputs": [],
+      "type": "InternalA"
+     },
+     {
+      "id": 41,
+      "inputs": [],
+      "outputs": [],
+      "type": "InternalB"
+     }
+    ],
+    "outputs": []
+   }
+  ]
+ },
+ "links": [],
+ "nodes": [
+  {
+   "_input_overrides": {
+    "text": "broadcast"
+   },
+   "id": 2,
+   "inputs": [],
+   "outputs": [],
+   "type": "InternalA"
+  },
+  {
+   "_input_overrides": {
+    "text": "broadcast"
+   },
+   "id": 3,
+   "inputs": [],
+   "outputs": [],
+   "type": "InternalB"
+  }
+ ]
+}

@@ -1,0 +1,253 @@
+{
+ "_comment": "Synthetic: external wiring. One external link feeds a boundary input that fans out to TWO internal nodes (first target rewires the existing link, the second gets a freshly minted link). The subgraph output has two external consumers that must both be rewired to the internal producer. Also exercises internal link id remapping (link 702).",
+ "definitions": {
+  "subgraphs": [
+   {
+    "id": "aaaaaaaa-0000-4000-8000-000000000005",
+    "inputs": [
+     {
+      "link": null,
+      "name": "image"
+     }
+    ],
+    "links": [
+     [
+      700,
+      -10,
+      0,
+      70,
+      0,
+      "IMAGE"
+     ],
+     [
+      701,
+      -10,
+      0,
+      71,
+      0,
+      "IMAGE"
+     ],
+     [
+      702,
+      70,
+      0,
+      72,
+      0,
+      "X"
+     ],
+     [
+      703,
+      72,
+      0,
+      -20,
+      0,
+      "LATENT"
+     ]
+    ],
+    "name": "ExtIO",
+    "nodes": [
+     {
+      "id": 70,
+      "inputs": [
+       {
+        "link": null,
+        "name": "image",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [
+       {
+        "links": [
+         702
+        ],
+        "name": "o",
+        "slot_index": 0
+       }
+      ],
+      "type": "ConsumerA"
+     },
+     {
+      "id": 71,
+      "inputs": [
+       {
+        "link": null,
+        "name": "image",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "ConsumerB"
+     },
+     {
+      "id": 72,
+      "inputs": [
+       {
+        "link": 702,
+        "name": "x",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [
+       {
+        "links": [],
+        "name": "OUT",
+        "slot_index": 0
+       }
+      ],
+      "type": "Producer"
+     }
+    ],
+    "outputs": [
+     {
+      "link": null,
+      "name": "OUT"
+     }
+    ]
+   }
+  ]
+ },
+ "links": [
+  [
+   10,
+   5,
+   0,
+   8,
+   0,
+   "IMAGE"
+  ],
+  [
+   11,
+   10,
+   0,
+   6,
+   0,
+   "LATENT"
+  ],
+  [
+   12,
+   10,
+   0,
+   7,
+   0,
+   "LATENT"
+  ],
+  [
+   15,
+   8,
+   0,
+   10,
+   0,
+   "X"
+  ],
+  [
+   17,
+   5,
+   0,
+   9,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "nodes": [
+  {
+   "id": 5,
+   "inputs": [],
+   "mode": 0,
+   "outputs": [
+    {
+     "links": [
+      10
+     ],
+     "name": "IMAGE",
+     "slot_index": 0
+    }
+   ],
+   "properties": {},
+   "type": "SourceNode",
+   "widgets_values": []
+  },
+  {
+   "id": 6,
+   "inputs": [
+    {
+     "link": 11,
+     "name": "in",
+     "slot_index": 0
+    }
+   ],
+   "mode": 0,
+   "outputs": [],
+   "properties": {},
+   "type": "SinkA",
+   "widgets_values": []
+  },
+  {
+   "id": 7,
+   "inputs": [
+    {
+     "link": 12,
+     "name": "in",
+     "slot_index": 0
+    }
+   ],
+   "mode": 0,
+   "outputs": [],
+   "properties": {},
+   "type": "SinkB",
+   "widgets_values": []
+  },
+  {
+   "id": 8,
+   "inputs": [
+    {
+     "link": 10,
+     "name": "image",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [
+    {
+     "links": [
+      15
+     ],
+     "name": "o",
+     "slot_index": 0
+    }
+   ],
+   "type": "ConsumerA"
+  },
+  {
+   "id": 9,
+   "inputs": [
+    {
+     "link": 17,
+     "name": "image",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "ConsumerB"
+  },
+  {
+   "id": 10,
+   "inputs": [
+    {
+     "link": 15,
+     "name": "x",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [
+    {
+     "links": [
+      11,
+      12
+     ],
+     "name": "OUT",
+     "slot_index": 0
+    }
+   ],
+   "type": "Producer"
+  }
+ ]
+}

@@ -1,0 +1,112 @@
+{
+ "1": {
+  "_meta": {
+   "title": "Load Image_editable"
+  },
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "CatPotato.png",
+   "upload": "image"
+  }
+ },
+ "11": {
+  "_meta": {
+   "title": "Focal PX to MM_settings"
+  },
+  "class_type": "FocalPXtoMM",
+  "inputs": {
+   "focal_px": [
+    "6",
+    2
+   ],
+   "image_height": [
+    "12",
+    1
+   ],
+   "image_width": [
+    "12",
+    0
+   ],
+   "sensor_mm": 24.576
+  }
+ },
+ "12": {
+  "class_type": "easy imageSize",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ]
+  }
+ },
+ "14": {
+  "class_type": "easy showAnything",
+  "inputs": {
+   "anything": [
+    "11",
+    1
+   ]
+  }
+ },
+ "2": {
+  "class_type": "LoadSharpModel",
+  "inputs": {
+   "checkpoint_path": "",
+   "device": "auto"
+  }
+ },
+ "4": {
+  "class_type": "GeomPackPreviewGaussian",
+  "inputs": {
+   "extrinsics": [
+    "5",
+    1
+   ],
+   "intrinsics": [
+    "5",
+    2
+   ],
+   "ply_path": [
+    "5",
+    0
+   ]
+  }
+ },
+ "5": {
+  "class_type": "SharpPredict",
+  "inputs": {
+   "focal_length_mm": [
+    "11",
+    0
+   ],
+   "image": [
+    "1",
+    0
+   ],
+   "model": [
+    "2",
+    0
+   ],
+   "output_prefix": "sharp"
+  }
+ },
+ "6": {
+  "class_type": "DepthPro",
+  "inputs": {
+   "depth_pro_model": [
+    "7",
+    0
+   ],
+   "image": [
+    "1",
+    0
+   ]
+  }
+ },
+ "7": {
+  "class_type": "LoadDepthPro",
+  "inputs": {
+   "precision": "fp32"
+  }
+ }
+}

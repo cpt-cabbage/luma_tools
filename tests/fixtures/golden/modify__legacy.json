@@ -1,0 +1,148 @@
+{
+ "files_to_copy": {},
+ "found_editable_prompt": true,
+ "workflow": {
+  "1": {
+   "class_type": "LoadImage",
+   "inputs": {
+    "image": "legacy_input.png"
+   }
+  },
+  "10": {
+   "_meta": {
+    "title": "Vid&if_MissingToggle"
+   },
+   "class_type": "SaveVideo",
+   "inputs": {
+    "video": [
+     "9",
+     0
+    ]
+   }
+  },
+  "11": {
+   "_meta": {
+    "title": "Fbx"
+   },
+   "class_type": "HYMotionExportFBX",
+   "inputs": {
+    "motion": [
+     "4",
+     0
+    ]
+   }
+  },
+  "12": {
+   "_meta": {
+    "title": "Advanced"
+   },
+   "class_type": "SamplerCustomAdvanced",
+   "inputs": {
+    "noise_seed": 4242
+   }
+  },
+  "13": {
+   "_meta": {
+    "title": "Editable Loader"
+   },
+   "class_type": "LoadImage",
+   "inputs": {
+    "image": "legacy_input.png"
+   }
+  },
+  "2": {
+   "_meta": {
+    "title": "Prompt_editable"
+   },
+   "class_type": "TextEncodeQwenImageEditPlus",
+   "inputs": {
+    "prompt": "legacy prompt"
+   }
+  },
+  "3": {
+   "_meta": {
+    "title": "Prompt fixed"
+   },
+   "class_type": "TextEncodeQwenImageEditPlus",
+   "inputs": {
+    "prompt": "not editable"
+   }
+  },
+  "4": {
+   "_meta": {
+    "title": "Sampler"
+   },
+   "class_type": "KSampler",
+   "inputs": {
+    "cfg": 4.5,
+    "model": [
+     "1",
+     0
+    ],
+    "seed": 4242,
+    "steps": 20
+   }
+  },
+  "5": {
+   "class_type": "SaveImage",
+   "inputs": {
+    "images": [
+     "4",
+     0
+    ]
+   }
+  },
+  "6": {
+   "_meta": {
+    "title": "Main_output"
+   },
+   "class_type": "SaveImage",
+   "inputs": {
+    "filename_prefix": "JOB_prefix",
+    "images": [
+     "4",
+     0
+    ]
+   }
+  },
+  "7": {
+   "_meta": {
+    "title": "Secondary"
+   },
+   "class_type": "SaveImage",
+   "inputs": {
+    "filename_prefix": "stale_secondary",
+    "images": [
+     "4",
+     0
+    ]
+   }
+  },
+  "8": {
+   "_meta": {
+    "title": "Upscale&if_UseUpscale"
+   },
+   "class_type": "ImageScale",
+   "inputs": {
+    "image": [
+     "1",
+     0
+    ],
+    "scale": 2
+   }
+  },
+  "9": {
+   "_meta": {
+    "title": "Blur"
+   },
+   "class_type": "ImageBlur",
+   "inputs": {
+    "blur": 3,
+    "image": [
+     "8",
+     0
+    ]
+   }
+  }
+ }
+}

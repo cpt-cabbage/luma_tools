@@ -1,0 +1,15 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "old.png"}},
+  "2": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "workflow default prompt"}, "_meta": {"title": "Prompt_editable"}},
+  "3": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "not editable"}, "_meta": {"title": "Prompt fixed"}},
+  "4": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 20, "cfg": 4.5, "model": ["1", 0]}, "_meta": {"title": "Sampler"}},
+  "5": {"class_type": "PreviewImage", "inputs": {"images": ["4", 0]}},
+  "6": {"class_type": "SaveImage", "inputs": {"images": ["4", 0], "filename_prefix": "stale"}, "_meta": {"title": "Main_output"}},
+  "7": {"class_type": "SaveImage", "inputs": {"images": ["4", 0], "filename_prefix": "stale_secondary"}, "_meta": {"title": "Secondary"}},
+  "8": {"class_type": "ImageScale", "inputs": {"image": ["1", 0], "scale": 2}, "_meta": {"title": "Upscale&if_UseUpscale"}},
+  "9": {"class_type": "ImageBlur", "inputs": {"image": ["8", 0], "blur": 3}, "_meta": {"title": "Blur"}},
+  "10": {"class_type": "SaveVideo", "inputs": {"video": ["9", 0]}, "_meta": {"title": "Vid&if_MissingToggle"}},
+  "11": {"class_type": "HYMotionExportFBX", "inputs": {"motion": ["4", 0]}, "_meta": {"title": "Fbx"}},
+  "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise_seed": 7}, "_meta": {"title": "Advanced"}},
+  "13": {"class_type": "LoadImage", "inputs": {"image": "already_editable.png"}, "_meta": {"title": "Editable Loader"}}
+}

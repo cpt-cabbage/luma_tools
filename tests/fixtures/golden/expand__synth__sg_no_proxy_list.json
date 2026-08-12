@@ -1,0 +1,99 @@
+{
+ "_comment": "Synthetic: widget propagation path 2 — NO proxyWidgets + list widgets_values, mapped by subgraph input index. One subgraph input definition has a non-null 'link' field, the other is null, so both sub-branches of the fallback path are exercised.",
+ "definitions": {
+  "subgraphs": [
+   {
+    "id": "aaaaaaaa-0000-4000-8000-000000000002",
+    "inputs": [
+     {
+      "link": 200,
+      "name": "text"
+     },
+     {
+      "link": null,
+      "name": "cfg"
+     }
+    ],
+    "links": [
+     [
+      200,
+      -10,
+      0,
+      20,
+      0,
+      "STRING"
+     ],
+     [
+      201,
+      -10,
+      1,
+      21,
+      0,
+      "FLOAT"
+     ]
+    ],
+    "name": "NoProxyList",
+    "nodes": [
+     {
+      "id": 20,
+      "inputs": [
+       {
+        "link": null,
+        "name": "text",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "CLIPTextEncode"
+     },
+     {
+      "id": 21,
+      "inputs": [
+       {
+        "link": null,
+        "name": "cfg",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "KSampler"
+     }
+    ],
+    "outputs": []
+   }
+  ]
+ },
+ "links": [],
+ "nodes": [
+  {
+   "_input_overrides": {
+    "text": "prompt text"
+   },
+   "id": 2,
+   "inputs": [
+    {
+     "link": null,
+     "name": "text",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "CLIPTextEncode"
+  },
+  {
+   "_input_overrides": {
+    "cfg": 7.5
+   },
+   "id": 3,
+   "inputs": [
+    {
+     "link": null,
+     "name": "cfg",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "KSampler"
+  }
+ ]
+}

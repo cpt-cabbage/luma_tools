@@ -1,0 +1,504 @@
+{
+ "102": {
+  "class_type": "ResizeImageMaskNode",
+  "inputs": {
+   "input": [
+    "98",
+    0
+   ],
+   "resize_type": "scale dimensions",
+   "resize_type.crop": "center",
+   "resize_type.height": 720,
+   "resize_type.width": 1280,
+   "scale_method": "lanczos"
+  }
+ },
+ "105": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "euler"
+  }
+ },
+ "106": {
+  "class_type": "LTXVScheduler",
+  "inputs": {
+   "base_shift": 0.95,
+   "latent": [
+    "126",
+    0
+   ],
+   "max_shift": 2.05,
+   "steps": 20,
+   "stretch": true,
+   "terminal": 0.1
+  }
+ },
+ "107": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "gradient_estimation"
+  }
+ },
+ "108": {
+  "class_type": "ManualSigmas",
+  "inputs": {
+   "sigmas": "0.909375, 0.725, 0.421875, 0.0"
+  }
+ },
+ "109": {
+  "class_type": "LTXVCropGuides",
+  "inputs": {
+   "latent": [
+    "120",
+    0
+   ],
+   "negative": [
+    "112",
+    1
+   ],
+   "positive": [
+    "112",
+    0
+   ]
+  }
+ },
+ "110": {
+  "class_type": "CFGGuider",
+  "inputs": {
+   "cfg": 1,
+   "model": [
+    "144",
+    0
+   ],
+   "negative": [
+    "109",
+    1
+   ],
+   "positive": [
+    "109",
+    0
+   ]
+  }
+ },
+ "111": {
+  "class_type": "LTXVEmptyLatentAudio",
+  "inputs": {
+   "audio_vae": [
+    "125",
+    0
+   ],
+   "batch_size": 1,
+   "frame_rate": 25,
+   "frames_number": [
+    "129",
+    0
+   ]
+  }
+ },
+ "112": {
+  "class_type": "LTXVConditioning",
+  "inputs": {
+   "frame_rate": 25,
+   "negative": [
+    "113",
+    0
+   ],
+   "positive": [
+    "118",
+    0
+   ]
+  }
+ },
+ "113": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "143",
+    0
+   ],
+   "text": "blurry, low quality, still frame, frames, watermark, overlay, titles, has blurbox, has subtitles"
+  }
+ },
+ "114": {
+  "class_type": "EmptyImage",
+  "inputs": {
+   "batch_size": 1,
+   "color": 0,
+   "height": [
+    "131",
+    1
+   ],
+   "width": [
+    "131",
+    0
+   ]
+  }
+ },
+ "115": {
+  "class_type": "SamplerCustomAdvanced",
+  "inputs": {
+   "guider": [
+    "137",
+    0
+   ],
+   "latent_image": [
+    "126",
+    0
+   ],
+   "noise": [
+    "117",
+    0
+   ],
+   "sampler": [
+    "105",
+    0
+   ],
+   "sigmas": [
+    "106",
+    0
+   ]
+  }
+ },
+ "116": {
+  "class_type": "RandomNoise",
+  "inputs": {
+   "noise_seed": 0
+  }
+ },
+ "117": {
+  "class_type": "RandomNoise",
+  "inputs": {
+   "noise_seed": null
+  }
+ },
+ "118": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "143",
+    0
+   ],
+   "text": "A cat stuck in bread, the cat breaks out of the bread and it flies everywhere. The cat then shakes it off, and then jumps off the table, leaving a mess of bread behind"
+  }
+ },
+ "119": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "audio": [
+    "124",
+    0
+   ],
+   "fps": 25,
+   "images": [
+    "121",
+    0
+   ]
+  }
+ },
+ "120": {
+  "class_type": "LTXVSeparateAVLatent",
+  "inputs": {
+   "av_latent": [
+    "115",
+    0
+   ]
+  }
+ },
+ "121": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "122",
+    0
+   ],
+   "vae": [
+    "142",
+    2
+   ]
+  }
+ },
+ "122": {
+  "class_type": "LTXVSeparateAVLatent",
+  "inputs": {
+   "av_latent": [
+    "123",
+    1
+   ]
+  }
+ },
+ "123": {
+  "class_type": "SamplerCustomAdvanced",
+  "inputs": {
+   "guider": [
+    "110",
+    0
+   ],
+   "latent_image": [
+    "135",
+    0
+   ],
+   "noise": [
+    "116",
+    0
+   ],
+   "sampler": [
+    "107",
+    0
+   ],
+   "sigmas": [
+    "108",
+    0
+   ]
+  }
+ },
+ "124": {
+  "class_type": "LTXVAudioVAEDecode",
+  "inputs": {
+   "audio_vae": [
+    "125",
+    0
+   ],
+   "samples": [
+    "122",
+    1
+   ]
+  }
+ },
+ "125": {
+  "class_type": "LTXVAudioVAELoader",
+  "inputs": {
+   "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+  }
+ },
+ "126": {
+  "class_type": "LTXVConcatAVLatent",
+  "inputs": {
+   "audio_latent": [
+    "111",
+    0
+   ],
+   "video_latent": [
+    "134",
+    0
+   ]
+  }
+ },
+ "127": {
+  "_meta": {
+   "title": "spatial"
+  },
+  "class_type": "LTXVLatentUpsampler",
+  "inputs": {
+   "samples": [
+    "109",
+    2
+   ],
+   "upscale_model": [
+    "145",
+    0
+   ],
+   "vae": [
+    "142",
+    2
+   ]
+  }
+ },
+ "128": {
+  "class_type": "ImageScaleBy",
+  "inputs": {
+   "image": [
+    "114",
+    0
+   ],
+   "scale_by": 0.5,
+   "upscale_method": "lanczos"
+  }
+ },
+ "129": {
+  "_meta": {
+   "title": "Length"
+  },
+  "class_type": "PrimitiveInt",
+  "inputs": {
+   "value": 121
+  }
+ },
+ "130": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "128",
+    0
+   ]
+  }
+ },
+ "131": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "102",
+    0
+   ]
+  }
+ },
+ "132": {
+  "class_type": "LTXVPreprocess",
+  "inputs": {
+   "image": [
+    "141",
+    0
+   ],
+   "img_compression": 33
+  }
+ },
+ "133": {
+  "class_type": "EmptyLTXVLatentVideo",
+  "inputs": {
+   "batch_size": 1,
+   "height": [
+    "130",
+    1
+   ],
+   "length": [
+    "129",
+    0
+   ],
+   "width": [
+    "130",
+    0
+   ]
+  }
+ },
+ "134": {
+  "class_type": "LTXVImgToVideoInplace",
+  "inputs": {
+   "bypass": false,
+   "image": [
+    "132",
+    0
+   ],
+   "latent": [
+    "133",
+    0
+   ],
+   "strength": 1,
+   "vae": [
+    "142",
+    2
+   ]
+  }
+ },
+ "135": {
+  "class_type": "LTXVConcatAVLatent",
+  "inputs": {
+   "audio_latent": [
+    "120",
+    1
+   ],
+   "video_latent": [
+    "136",
+    0
+   ]
+  }
+ },
+ "136": {
+  "class_type": "LTXVImgToVideoInplace",
+  "inputs": {
+   "bypass": false,
+   "image": [
+    "132",
+    0
+   ],
+   "latent": [
+    "127",
+    0
+   ],
+   "strength": 1,
+   "vae": [
+    "142",
+    2
+   ]
+  }
+ },
+ "137": {
+  "class_type": "CFGGuider",
+  "inputs": {
+   "cfg": 4,
+   "model": [
+    "142",
+    0
+   ],
+   "negative": [
+    "112",
+    1
+   ],
+   "positive": [
+    "112",
+    0
+   ]
+  }
+ },
+ "141": {
+  "class_type": "ResizeImagesByLongerEdge",
+  "inputs": {
+   "images": [
+    "102",
+    0
+   ],
+   "longer_edge": 1536
+  }
+ },
+ "142": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+  }
+ },
+ "143": {
+  "class_type": "LTXAVTextEncoderLoader",
+  "inputs": {
+   "ckpt_name": "ltx-2-19b-dev-fp8.safetensors",
+   "device": "default",
+   "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors"
+  }
+ },
+ "144": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
+   "model": [
+    "142",
+    0
+   ],
+   "strength_model": 1
+  }
+ },
+ "145": {
+  "class_type": "LatentUpscaleModelLoader",
+  "inputs": {
+   "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  }
+ },
+ "75": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "codec": "auto",
+   "filename_prefix": "video/LTX_2.0_i2v",
+   "format": "auto",
+   "video": [
+    "119",
+    0
+   ]
+  }
+ },
+ "98": {
+  "_meta": {
+   "title": "Load Image_editable"
+  },
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "CatBread.png",
+   "upload": "image"
+  }
+ }
+}

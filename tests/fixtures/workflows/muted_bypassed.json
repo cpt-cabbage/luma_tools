@@ -1,0 +1,20 @@
+{
+  "_comment": "Synthetic: link resolution through skipped nodes. 1 -> [2 muted] -> [3 muted] -> 4 exercises the muted CHAIN. Node 5 is bypassed (mode=2) with no inputs, so link 4 cannot be resolved upstream and must be dropped, taking node 6's 'f_in' with it. Node 7 is a Reroute (SKIP_NODE_TYPES). Node 8 links to a node that does not exist.",
+  "nodes": [
+    {"id": 1, "type": "NodeA", "mode": 0, "widgets_values": ["a"], "inputs": [{"name": "a_in", "widget": {"name": "a_in"}, "link": null}], "outputs": [{"name": "OUT", "links": [1], "slot_index": 0}], "properties": {}},
+    {"id": 2, "type": "NodeB", "mode": 4, "widgets_values": [], "inputs": [{"name": "in", "link": 1, "slot_index": 0}], "outputs": [{"name": "OUT", "links": [2], "slot_index": 0}], "properties": {}},
+    {"id": 3, "type": "NodeC", "mode": 4, "widgets_values": [], "inputs": [{"name": "in", "link": 2, "slot_index": 0}], "outputs": [{"name": "OUT", "links": [3], "slot_index": 0}], "properties": {}},
+    {"id": 4, "type": "NodeD", "mode": 0, "widgets_values": ["d"], "inputs": [{"name": "d_in", "link": 3, "slot_index": 0}, {"name": "d_widget", "widget": {"name": "d_widget"}, "link": null}], "outputs": [], "properties": {}},
+    {"id": 5, "type": "NodeE", "mode": 2, "widgets_values": [], "inputs": [], "outputs": [{"name": "OUT", "links": [4], "slot_index": 0}], "properties": {}},
+    {"id": 6, "type": "NodeF", "mode": 0, "widgets_values": ["f"], "inputs": [{"name": "f_in", "link": 4, "slot_index": 0}, {"name": "f_widget", "widget": {"name": "f_widget"}, "link": null}], "outputs": [], "properties": {}},
+    {"id": 7, "type": "Reroute", "mode": 0, "widgets_values": [], "inputs": [], "outputs": [], "properties": {}},
+    {"id": 8, "type": "NodeG", "mode": 0, "widgets_values": [], "inputs": [{"name": "g_in", "link": 99, "slot_index": 0}], "outputs": [], "properties": {}}
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "D"],
+    [2, 2, 0, 3, 0, "D"],
+    [3, 3, 0, 4, 0, "D"],
+    [4, 5, 0, 6, 0, "D"],
+    [99, 404, 0, 8, 0, "D"]
+  ]
+}

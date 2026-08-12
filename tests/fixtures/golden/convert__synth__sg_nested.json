@@ -1,0 +1,14 @@
+{
+ "3": {
+  "class_type": "PlainNode",
+  "inputs": {
+   "outer_in": "outer_val"
+  }
+ },
+ "4": {
+  "class_type": "LeafNode",
+  "inputs": {
+   "inner_in": "inner_val"
+  }
+ }
+}

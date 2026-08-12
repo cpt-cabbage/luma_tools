@@ -1,0 +1,51 @@
+{
+ "10": {
+  "class_type": "Producer",
+  "inputs": {
+   "x": [
+    "8",
+    0
+   ]
+  }
+ },
+ "5": {
+  "class_type": "SourceNode",
+  "inputs": {}
+ },
+ "6": {
+  "class_type": "SinkA",
+  "inputs": {
+   "in": [
+    "10",
+    0
+   ]
+  }
+ },
+ "7": {
+  "class_type": "SinkB",
+  "inputs": {
+   "in": [
+    "10",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "ConsumerA",
+  "inputs": {
+   "image": [
+    "5",
+    0
+   ]
+  }
+ },
+ "9": {
+  "class_type": "ConsumerB",
+  "inputs": {
+   "image": [
+    "5",
+    0
+   ]
+  }
+ }
+}

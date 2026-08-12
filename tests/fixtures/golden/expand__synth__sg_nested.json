@@ -1,0 +1,134 @@
+{
+ "_comment": "Synthetic: NESTED subgraphs. The outer subgraph definition contains an instance of the inner subgraph, so expand_subgraphs must recurse (_depth 0 -> 1).",
+ "definitions": {
+  "subgraphs": [
+   {
+    "id": "aaaaaaaa-0000-4000-8000-00000000000a",
+    "inputs": [
+     {
+      "link": null,
+      "name": "outer_in"
+     }
+    ],
+    "links": [
+     [
+      500,
+      -10,
+      0,
+      51,
+      0,
+      "STRING"
+     ]
+    ],
+    "name": "Outer",
+    "nodes": [
+     {
+      "id": 50,
+      "inputs": [
+       {
+        "link": null,
+        "name": "inner_in",
+        "slot_index": 0
+       }
+      ],
+      "mode": 0,
+      "outputs": [],
+      "properties": {
+       "proxyWidgets": [
+        [
+         "-1",
+         "inner_in"
+        ]
+       ]
+      },
+      "type": "aaaaaaaa-0000-4000-8000-00000000000b",
+      "widgets_values": [
+       "inner_val"
+      ]
+     },
+     {
+      "id": 51,
+      "inputs": [
+       {
+        "link": null,
+        "name": "outer_in",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "PlainNode"
+     }
+    ],
+    "outputs": []
+   },
+   {
+    "id": "aaaaaaaa-0000-4000-8000-00000000000b",
+    "inputs": [
+     {
+      "link": null,
+      "name": "inner_in"
+     }
+    ],
+    "links": [
+     [
+      600,
+      -10,
+      0,
+      60,
+      0,
+      "STRING"
+     ]
+    ],
+    "name": "Inner",
+    "nodes": [
+     {
+      "id": 60,
+      "inputs": [
+       {
+        "link": null,
+        "name": "inner_in",
+        "slot_index": 0
+       }
+      ],
+      "outputs": [],
+      "type": "LeafNode"
+     }
+    ],
+    "outputs": []
+   }
+  ]
+ },
+ "links": [],
+ "nodes": [
+  {
+   "_input_overrides": {
+    "outer_in": "outer_val"
+   },
+   "id": 3,
+   "inputs": [
+    {
+     "link": null,
+     "name": "outer_in",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "PlainNode"
+  },
+  {
+   "_input_overrides": {
+    "inner_in": "inner_val"
+   },
+   "id": 4,
+   "inputs": [
+    {
+     "link": null,
+     "name": "inner_in",
+     "slot_index": 0
+    }
+   ],
+   "outputs": [],
+   "type": "LeafNode"
+  }
+ ]
+}

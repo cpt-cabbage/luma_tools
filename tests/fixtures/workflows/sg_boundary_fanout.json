@@ -1,0 +1,43 @@
+{
+  "_comment": "Synthetic: one boundary input (ckpt_name) fans out to THREE internal loader nodes; a second boundary input feeds one node. proxyWidgets + list widgets_values, both entries using the '-1' boundary node id.",
+  "nodes": [
+    {
+      "id": 1,
+      "type": "aaaaaaaa-0000-4000-8000-000000000001",
+      "mode": 0,
+      "widgets_values": ["model.safetensors", 42],
+      "inputs": [
+        {"name": "ckpt_name", "link": null},
+        {"name": "steps", "link": null}
+      ],
+      "outputs": [],
+      "properties": {"proxyWidgets": [["-1", "ckpt_name"], ["-1", "steps"]]}
+    }
+  ],
+  "links": [],
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "name": "Fanout",
+        "inputs": [
+          {"name": "ckpt_name", "link": null},
+          {"name": "steps", "link": null}
+        ],
+        "outputs": [],
+        "nodes": [
+          {"id": 10, "type": "LoaderA", "inputs": [{"name": "ckpt_name", "slot_index": 0, "link": null}], "outputs": []},
+          {"id": 11, "type": "LoaderB", "inputs": [{"name": "ckpt_name", "slot_index": 0, "link": null}], "outputs": []},
+          {"id": 12, "type": "LoaderC", "inputs": [{"name": "ckpt_name", "slot_index": 0, "link": null}], "outputs": []},
+          {"id": 13, "type": "SamplerX", "inputs": [{"name": "steps", "slot_index": 0, "link": null}], "outputs": []}
+        ],
+        "links": [
+          [100, -10, 0, 10, 0, "COMBO"],
+          [101, -10, 0, 11, 0, "COMBO"],
+          [102, -10, 0, 12, 0, "COMBO"],
+          [103, -10, 1, 13, 0, "INT"]
+        ]
+      }
+    ]
+  }
+}

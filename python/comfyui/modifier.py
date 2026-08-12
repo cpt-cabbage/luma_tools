@@ -211,6 +211,522 @@ def normalize_file_paths_in_workflow(workflow: Dict[str, Any]) -> Dict[str, str]
     return files_to_copy
 
 
+def _iter_editable_entries(editable_values):
+    """Yield ``(node_id, entry)`` pairs from an editable_values mapping.
+
+    Callers may pass either the current list-per-node format
+    ``{node_id: [{'node': EditableNode, 'value': Any}, ...]}`` or the legacy
+    single-dict-per-node format; both are normalized here.
+    """
+    for node_id, entries in (editable_values or {}).items():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            yield node_id, data
+
+
+def _index_editable_nodes(editable_values):
+    """Summarize which nodes the dynamic UI touched.
+
+    Returns:
+        Tuple of (editable_by_node_id, found_editable_prompt) where the first is
+        a ``{node_id: True}`` lookup used to suppress legacy per-class_type
+        handling, and the second is True when any entry is a text widget.
+    """
+    editable_by_node_id = {}
+    found_editable_prompt = False
+    for node_id, entries in (editable_values or {}).items():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        editable_by_node_id[node_id] = True
+        for data in entry_list:
+            node_info = data.get('node')
+            if node_info and node_info.widget_type == 'text':
+                found_editable_prompt = True
+    return editable_by_node_id, found_editable_prompt
+
+
+def _convert_preview_to_save_nodes(workflow: Dict[str, Any]) -> None:
+    """Rewrite every PreviewImage node as a SaveImage node, in place.
+
+    PreviewImage writes temp files with generated names; SaveImage accepts a
+    ``filename_prefix``, which is what the gallery needs to find the output.
+    """
+    converted = []
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict) or node_data.get('class_type') != 'PreviewImage':
+            continue
+        node_data['class_type'] = 'SaveImage'
+        # SaveImage needs filename_prefix input (set later by EXPORT_NODE_TYPES handling)
+        if 'inputs' not in node_data:
+            node_data['inputs'] = {}
+        converted.append(node_id)
+
+    if converted:
+        logger.info(f"Converted {len(converted)} PreviewImage node(s) to "
+                    f"SaveImage: {converted}")
+
+
+def _log_workflow_summary(workflow: Dict[str, Any]) -> None:
+    """Log the workflow's node types and titles, grouped by class_type."""
+    node_types = {}
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict) or 'class_type' not in node_data:
+            continue
+        ct = node_data.get('class_type')
+        title = node_data.get('_meta', {}).get('title', '')
+        node_types.setdefault(ct, []).append(f"{node_id}:{title}" if title else node_id)
+
+    logger.info(f"Workflow contains {len(workflow)} nodes:")
+    for ct, nodes in sorted(node_types.items()):
+        logger.info(f"  {ct}: {nodes}")
+
+
+def _first_path(value: Any) -> Optional[str]:
+    """Return a single path from a widget value that may be a list or a string."""
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+# --- Per-widget-type appliers -------------------------------------------------
+# All of these take the same arguments so they can be dispatched from a table:
+#   inputs      the node's API-format inputs dict, mutated in place
+#   value       the value chosen in the UI
+#   widget_name explicit target input name (settings nodes), or None
+#   node_id/node_type  for logging only
+
+def _apply_text_widget(inputs, value, widget_name, node_id, node_type):
+    """Text/prompt widget — writes the named input, else 'prompt', else 'text'."""
+    if widget_name:
+        inputs[widget_name] = value
+    elif 'prompt' in inputs:
+        inputs['prompt'] = value
+    else:
+        inputs['text'] = value
+    logger.info(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
+
+
+def _apply_image_widget(inputs, value, widget_name, node_id, node_type):
+    """Image widget — stores the basename, rewritten to .png when converted."""
+    from comfyui.image_convert import needs_conversion, get_png_basename
+
+    if not value:
+        # No image provided — leave node as-is with its workflow default
+        logger.info(f"  Image node {node_id} ({node_type}): no file selected, "
+                    f"keeping workflow default")
+        return
+    image_path = _first_path(value)
+    if not image_path:
+        return
+    basename = os.path.basename(image_path)
+    if needs_conversion(image_path):
+        basename = get_png_basename(basename)
+        logger.info(f"  Image {os.path.basename(image_path)} will be converted "
+                    f"to {basename}")
+    inputs['image'] = basename
+    logger.info(f"  Set image node {node_id} ({node_type}): {basename}")
+
+
+def _apply_int_widget(inputs, value, widget_name, node_id, node_type):
+    """Int widget — named input for settings nodes, else the seed pair."""
+    if widget_name:
+        try:
+            inputs[widget_name] = int(value)
+            logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+        except (ValueError, TypeError):
+            logger.warning(f"  Failed to convert {value} to int for {widget_name}")
+        return
+    # Default behavior for editable nodes (seed-related)
+    inputs['seed'] = value
+    inputs['noise_seed'] = value
+    logger.info(f"  Set int node {node_id} ({node_type}): {value}")
+
+
+def _apply_float_widget(inputs, value, widget_name, node_id, node_type):
+    """Float widget — named input for settings nodes, else 'cfg'."""
+    if widget_name:
+        try:
+            inputs[widget_name] = float(value)
+            logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+        except (ValueError, TypeError):
+            logger.warning(f"  Failed to convert {value} to float for {widget_name}")
+        return
+    # Default behavior for editable nodes
+    inputs['cfg'] = value
+    logger.info(f"  Set float node {node_id} ({node_type}): {value}")
+
+
+def _apply_string_widget(inputs, value, widget_name, node_id, node_type):
+    """Single-line string widget — named input, else 'filename_prefix'."""
+    if widget_name:
+        inputs[widget_name] = value
+        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+    else:
+        inputs['filename_prefix'] = value
+        logger.info(f"  Set string node {node_id} ({node_type}): {value}")
+
+
+def _apply_combo_widget(inputs, value, widget_name, node_id, node_type):
+    """Dropdown widget — only actionable when the target input is named."""
+    if widget_name:
+        inputs[widget_name] = value
+        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
+    else:
+        logger.info(f"  Combo node {node_id} ({node_type}): {value} (no widget_name)")
+
+
+def _apply_toggle_widget(inputs, value, widget_name, node_id, node_type):
+    """Toggle widget — written as 0/1 to the named input, else 'index'."""
+    int_value = 1 if value else 0
+    if widget_name:
+        inputs[widget_name] = int_value
+        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {int_value}")
+    else:
+        inputs['index'] = int_value
+        logger.info(f"  Set toggle node {node_id} ({node_type}): {int_value}")
+
+
+def _apply_model_widget(inputs, value, widget_name, node_id, node_type):
+    """3D model widget — stores the basename in 'model_file'."""
+    if not value:
+        # No model provided — leave node as-is with its workflow default
+        logger.info(f"  3D model node {node_id} ({node_type}): no file selected, "
+                    f"keeping workflow default")
+        return
+    model_path = _first_path(value)
+    if model_path:
+        inputs['model_file'] = os.path.basename(model_path)
+        logger.info(f"  Set 3D model node {node_id} ({node_type}): "
+                    f"{os.path.basename(model_path)}")
+
+
+def _apply_video_widget(inputs, value, widget_name, node_id, node_type):
+    """Video widget — stores the basename in 'video'."""
+    if not value:
+        # No video provided — leave node as-is with its workflow default
+        logger.info(f"  Video node {node_id} ({node_type}): no file selected, "
+                    f"keeping workflow default")
+        return
+    video_path = _first_path(value)
+    if video_path:
+        inputs['video'] = os.path.basename(video_path)
+        logger.info(f"  Set video node {node_id} ({node_type}): "
+                    f"{os.path.basename(video_path)}")
+
+
+def _apply_directory_widget(inputs, value, widget_name, node_id, node_type):
+    """Directory widget — writes the full path to the named input, else 'directory'."""
+    if not value:
+        return
+    if widget_name:
+        inputs[widget_name] = str(value)
+        logger.info(f"  Set directory on node {node_id} ({node_type}): "
+                    f"{widget_name} = {value}")
+    else:
+        # Fallback to 'directory' if no specific widget name
+        inputs['directory'] = str(value)
+        logger.info(f"  Set directory on node {node_id} ({node_type}): {value}")
+
+
+# widget_type -> applier. Unlisted widget types are silently ignored.
+_WIDGET_APPLIERS = {
+    'text': _apply_text_widget,
+    'image': _apply_image_widget,
+    'int': _apply_int_widget,
+    'float': _apply_float_widget,
+    'string': _apply_string_widget,
+    'combo': _apply_combo_widget,
+    'toggle': _apply_toggle_widget,
+    '3d_model': _apply_model_widget,
+    'video': _apply_video_widget,
+    'directory': _apply_directory_widget,
+}
+
+
+def _is_expanded_subgraph_node(node_info) -> bool:
+    """True when an editable node belongs to a subgraph that has been expanded.
+
+    Subgraph node IDs never survive into API format — their internals were
+    already given the value during expansion — so a missing node is expected
+    and must not be warned about.
+    """
+    if not (node_info and hasattr(node_info, 'node_type')):
+        return False
+    from comfyui.workflow import _is_uuid
+    return _is_uuid(node_info.node_type)
+
+
+def _apply_editable_values(workflow: Dict[str, Any], editable_values) -> None:
+    """Write every value collected from the dynamic UI into the workflow.
+
+    Each entry names a node and a widget type; the widget type selects how the
+    value is written (see ``_WIDGET_APPLIERS``).
+    """
+    if not editable_values:
+        return
+
+    total_entries = sum(len(v) if isinstance(v, list) else 1
+                        for v in editable_values.values())
+    logger.info(f"=== Applying {total_entries} editable values across "
+                f"{len(editable_values)} nodes ===")
+
+    for node_id, data in _iter_editable_entries(editable_values):
+        node_id_str = str(node_id)
+        node_info = data.get('node')
+        value = data.get('value')
+
+        if node_id_str not in workflow:
+            if _is_expanded_subgraph_node(node_info):
+                continue
+            logger.warning(f"  Node {node_id} not found in workflow")
+            continue
+
+        node_data = workflow[node_id_str]
+        inputs = node_data.get('inputs', {})
+        node_type = node_info.node_type if node_info else 'unknown'
+        widget_type = node_info.widget_type if node_info else 'unknown'
+        # Settings nodes carry an explicit target input name
+        widget_name = getattr(node_info, 'widget_name', None)
+
+        applier = _WIDGET_APPLIERS.get(widget_type)
+        if applier is not None:
+            applier(inputs, value, widget_name, node_id, node_type)
+
+
+def _collect_toggle_values(editable_values) -> Dict[str, bool]:
+    """Map toggle names to their on/off state.
+
+    A toggle's name comes from its node title with the ``_editable`` suffix
+    stripped, lowercased — that is the key ``&if_``/``@if_`` conditionals refer to.
+    """
+    toggle_values = {}
+    for node_id, data in _iter_editable_entries(editable_values):
+        node_info = data.get('node')
+        if not (node_info and node_info.widget_type == 'toggle'):
+            continue
+        title = node_info.title or ''
+        base_name = title.replace('_editable', '').strip()
+        value = bool(data.get('value'))
+        base_key = base_name.lower()
+        if base_key in toggle_values:
+            logger.warning(f"[Toggle] Duplicate toggle name '{base_name}' "
+                           f"(node {node_id}), overwriting with value: {value}")
+        toggle_values[base_key] = value
+        logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
+    return toggle_values
+
+
+def _extract_conditional_toggle(title: str) -> Optional[str]:
+    """Parse the toggle name out of a ``Name&if_Toggle`` / ``Name@if_Toggle`` title.
+
+    Returns:
+        The lowercased toggle name, or None when the title has no conditional.
+    """
+    for separator in ['&if_', '@if_']:
+        if separator not in title.lower():
+            continue
+        parts = title.lower().split(separator)
+        if len(parts) > 1:
+            # Toggle name may carry _editable or further &-suffixes
+            return parts[1].split('_editable')[0].split('&')[0].strip()
+    return None
+
+
+def _collect_conditionally_disabled_nodes(workflow: Dict[str, Any],
+                                          toggle_values: Dict[str, bool]) -> set:
+    """Find nodes whose ``&if_`` toggle is switched off.
+
+    Nodes referencing an unknown toggle are kept (and warned about).
+    """
+    nodes_to_remove = set()
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+        title = node_data.get('_meta', {}).get('title', '')
+        if_match = _extract_conditional_toggle(title)
+        if not if_match:
+            continue
+
+        toggle_value = toggle_values.get(if_match)
+        if toggle_value is None:
+            logger.warning(f"[Bypass] Node {node_id} references toggle "
+                           f"'{if_match}' but toggle not found")
+        elif not toggle_value:
+            class_type = node_data.get('class_type', 'unknown')
+            nodes_to_remove.add(str(node_id))
+            logger.info(f"[Bypass] Will remove node {node_id} ({class_type}) - "
+                        f"'{if_match}' is OFF")
+    return nodes_to_remove
+
+
+def _iter_export_nodes(workflow: Dict[str, Any]):
+    """Yield ``(node_id, node_data, title)`` for every export node."""
+    for node_id, node_data in workflow.items():
+        if isinstance(node_data, dict) and node_data.get('class_type') in EXPORT_NODE_TYPES:
+            yield node_id, node_data, node_data.get('_meta', {}).get('title', '')
+
+
+def _has_designated_output_nodes(workflow: Dict[str, Any]) -> bool:
+    """True when at least one export node is marked with the ``_output`` suffix.
+
+    When that happens only the designated nodes receive the output prefix and
+    output_dir, so the other exports' files stay out of the user's gallery.
+    """
+    has_output_nodes = any(
+        title.lower().endswith(OUTPUT_SUFFIX)
+        for _nid, _nd, title in _iter_export_nodes(workflow)
+    )
+    if not has_output_nodes:
+        return False
+
+    logger.info(f"Detected {OUTPUT_SUFFIX} suffix node(s) - only setting prefix "
+                f"on designated output nodes")
+    # Diagnostic: log all export nodes and their designation status
+    for nid, nd, title in _iter_export_nodes(workflow):
+        logger.info(f"  Export node {nid} ({nd.get('class_type')}): "
+                    f"title='{title}', designated={title.lower().endswith(OUTPUT_SUFFIX)}")
+    return True
+
+
+def _widget_names_for(class_type: str) -> list:
+    """Widget names for a node type: node_info cache first, manual table second."""
+    from comfyui.node_info import get_widget_names as _get_ni_widget_names
+
+    widget_list = _get_ni_widget_names(class_type)
+    if widget_list is not None:
+        return [w for w in widget_list if w is not None]
+    return WIDGET_MAPPINGS.get(class_type, [])
+
+
+def _is_node_already_handled(node_id, editable_by_node_id) -> bool:
+    """True when the dynamic UI already wrote a value to this node.
+
+    editable_values may be keyed by ``int`` or ``str`` node ids, so both forms
+    are checked.
+    """
+    return str(node_id) in editable_by_node_id or int(node_id) in editable_by_node_id
+
+
+def _apply_editable_prompt_node(node_id, node_title, inputs, prompt) -> bool:
+    """Handle a ``TextEncodeQwenImageEditPlus`` node in the legacy prompt path.
+
+    Only nodes titled ``..._editable`` are modified.
+
+    Returns:
+        True if this node is an editable prompt node.
+    """
+    if not node_title.endswith('_editable'):
+        # Non-editable prompt node - log but don't modify
+        logger.info(f"Skipping non-editable prompt node {node_id} "
+                    f"(title: '{node_title}' - missing '_editable' suffix)")
+        return False
+
+    if prompt:
+        inputs['prompt'] = prompt
+        logger.info(f"Set editable prompt node {node_id} ({node_title}) to: "
+                    f"{prompt[:50]}...")
+    else:
+        existing = inputs.get('prompt', '')
+        if existing:
+            logger.info(f"Keeping existing prompt in editable node {node_id} "
+                        f"({node_title}): {str(existing)[:50]}...")
+    return True
+
+
+def _apply_output_dir(inputs, widget_list, class_type, node_id, node_title,
+                      output_dir, has_output_nodes) -> None:
+    """Set ``output_dir`` on any node that declares the widget."""
+    if 'output_dir' not in widget_list or not output_dir:
+        return
+    # If _output nodes exist, skip output_dir on non-designated export nodes
+    # so their files don't end up in the user's gallery directory
+    if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
+        logger.info(f"Skipping output_dir for non-{OUTPUT_SUFFIX} export node "
+                    f"{node_id} ({class_type}, title='{node_title}')")
+        return
+    inputs['output_dir'] = output_dir
+    logger.info(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
+
+
+def _apply_export_prefix(inputs, class_type, node_id, node_title,
+                         output_prefix, has_output_nodes) -> None:
+    """Set the output filename prefix on an export node."""
+    if class_type not in EXPORT_NODE_TYPES:
+        return
+    # If _output nodes exist, only set prefix on those
+    if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
+        logger.info(f"Skipping non-{OUTPUT_SUFFIX} export node {node_id} "
+                    f"({class_type}, title='{node_title}')")
+        return
+    prefix_key = EXPORT_NODE_TYPES[class_type]
+    inputs[prefix_key] = output_prefix
+    logger.info(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
+
+
+def _apply_seed(inputs, widget_list, class_type, node_id, seed) -> None:
+    """Set the per-job seed on any sampler/generator node."""
+    if 'seed' in widget_list:
+        inputs['seed'] = seed
+        logger.info(f"Set {class_type} node {node_id} seed to: {seed}")
+    elif 'noise_seed' in widget_list:
+        inputs['noise_seed'] = seed
+        logger.info(f"Set {class_type} node {node_id} noise_seed to: {seed}")
+
+
+def _apply_class_type_rules(workflow, editable_by_node_id, image_basename, prompt,
+                            output_prefix, seed, output_dir, has_output_nodes) -> bool:
+    """Apply the class_type-driven modifications to every node.
+
+    This covers the legacy image/prompt injection (skipped for nodes the dynamic
+    UI already handled) plus the capability-driven settings — output_dir,
+    filename prefix and seed — which are applied regardless.
+
+    Returns:
+        True if an editable prompt node was found.
+    """
+    found_editable_prompt = False
+
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict) or 'class_type' not in node_data:
+            continue
+
+        class_type = node_data.get('class_type')
+        inputs = node_data.get('inputs', {})
+        node_title = node_data.get('_meta', {}).get('title', '')
+        already_handled = _is_node_already_handled(node_id, editable_by_node_id)
+
+        # LoadImage nodes - set input image filename (only if we have a legacy
+        # image and the node was not already handled)
+        if class_type == 'LoadImage' and image_basename and not already_handled:
+            inputs['image'] = image_basename
+            logger.info(f"Set LoadImage node {node_id} to: {image_basename}")
+        elif class_type == 'TextEncodeQwenImageEditPlus' and not already_handled:
+            if _apply_editable_prompt_node(node_id, node_title, inputs, prompt):
+                found_editable_prompt = True
+
+        # Generic handling based on node capabilities: this handles output_dir,
+        # filename_prefix and seed for ANY node that supports them.
+        widget_list = _widget_names_for(class_type)
+        _apply_output_dir(inputs, widget_list, class_type, node_id, node_title,
+                          output_dir, has_output_nodes)
+        _apply_export_prefix(inputs, class_type, node_id, node_title,
+                             output_prefix, has_output_nodes)
+        _apply_seed(inputs, widget_list, class_type, node_id, seed)
+
+    return found_editable_prompt
+
+
+def _resolve_legacy_image_basename(input_image: Optional[str]) -> Optional[str]:
+    """Basename for the legacy single-input image, rewritten to .png if converted."""
+    from comfyui.image_convert import needs_conversion, get_png_basename
+
+    if not input_image:
+        return None
+    image_basename = os.path.basename(input_image)
+    if needs_conversion(input_image):
+        image_basename = get_png_basename(image_basename)
+    return image_basename
+
+
 def modify_workflow_api_format(
     workflow: Dict[str, Any],
     input_image: Optional[str],
@@ -240,361 +756,33 @@ def modify_workflow_api_format(
         Tuple of (modified_workflow, found_editable_prompt_node, files_to_copy)
         - files_to_copy: Dict mapping full paths to basenames for file copying
     """
-    from comfyui.image_convert import needs_conversion, get_png_basename
-
     modified = copy.deepcopy(workflow)
-    if input_image:
-        image_basename = os.path.basename(input_image)
-        if needs_conversion(input_image):
-            image_basename = get_png_basename(image_basename)
-    else:
-        image_basename = None
-    found_editable_prompt = False
+    image_basename = _resolve_legacy_image_basename(input_image)
 
-    # Convert PreviewImage nodes to SaveImage nodes so we can control the output filename
-    # PreviewImage saves to temp folder with temp names, SaveImage allows filename_prefix
-    preview_nodes_converted = []
-    for node_id, node_data in modified.items():
-        if isinstance(node_data, dict) and node_data.get('class_type') == 'PreviewImage':
-            node_data['class_type'] = 'SaveImage'
-            # SaveImage needs filename_prefix input (will be set later in EXPORT_NODE_TYPES handling)
-            if 'inputs' not in node_data:
-                node_data['inputs'] = {}
-            preview_nodes_converted.append(node_id)
+    _convert_preview_to_save_nodes(modified)
 
-    if preview_nodes_converted:
-        logger.info(f"Converted {len(preview_nodes_converted)} PreviewImage node(s) to SaveImage: {preview_nodes_converted}")
+    editable_by_node_id, found_editable_prompt = _index_editable_nodes(editable_values)
 
-    # Build a lookup of node_id -> True from editable_values for "already handled" checks
-    editable_by_node_id = {}
-    if editable_values:
-        for node_id, entries in editable_values.items():
-            entry_list = entries if isinstance(entries, list) else [entries]
-            editable_by_node_id[node_id] = True
-            for data in entry_list:
-                if data.get('node') and data['node'].widget_type == 'text':
-                    found_editable_prompt = True
+    _log_workflow_summary(modified)
 
-    # Log workflow summary for debugging
-    node_types = {}
-    for node_id, node_data in modified.items():
-        if isinstance(node_data, dict) and 'class_type' in node_data:
-            ct = node_data.get('class_type')
-            meta = node_data.get('_meta', {})
-            title = meta.get('title', '')
-            if ct not in node_types:
-                node_types[ct] = []
-            node_types[ct].append(f"{node_id}:{title}" if title else node_id)
-    logger.info(f"Workflow contains {len(modified)} nodes:")
-    for ct, nodes in sorted(node_types.items()):
-        logger.info(f"  {ct}: {nodes}")
+    # Apply values from the dynamic UI first, then the class_type rules below
+    # fill in / override the pipeline-controlled settings.
+    _apply_editable_values(modified, editable_values)
 
-    # Apply editable_values first (from dynamic UI)
-    # Format: {node_id: [{'node': EditableNode, 'value': Any}, ...]} (list-per-node)
-    # Also supports legacy format: {node_id: {'node': EditableNode, 'value': Any}}
-
-    if editable_values:
-        total_entries = sum(len(v) if isinstance(v, list) else 1 for v in editable_values.values())
-        logger.info(f"=== Applying {total_entries} editable values across {len(editable_values)} nodes ===")
-        for node_id, entries in editable_values.items():
-            # Normalize to list format
-            entry_list = entries if isinstance(entries, list) else [entries]
-
-            for data in entry_list:
-                node_id_str = str(node_id)
-                node_info = data.get('node')
-                value = data.get('value')
-
-                if node_id_str not in modified:
-                    # For subgraph nodes, the node_id won't be in the API format
-                    # (subgraphs are expanded into internal nodes). Skip silently.
-                    if node_info and hasattr(node_info, 'node_type'):
-                        from comfyui.workflow import _is_uuid
-                        if _is_uuid(node_info.node_type):
-                            continue
-                    logger.warning(f"  Node {node_id} not found in workflow")
-                    continue
-
-                node_data = modified[node_id_str]
-                inputs = node_data.get('inputs', {})
-                node_type = node_info.node_type if node_info else 'unknown'
-                widget_type = node_info.widget_type if node_info else 'unknown'
-
-                # Check if this is a settings node with explicit widget_name
-                # (from SettingsNode with widget_name attribute)
-                widget_name = getattr(node_info, 'widget_name', None)
-
-                # Apply value based on widget type
-                if widget_type == 'text':
-                    if widget_name:
-                        inputs[widget_name] = value
-                    elif 'prompt' in inputs:
-                        inputs['prompt'] = value
-                    elif 'text' in inputs:
-                        inputs['text'] = value
-                    else:
-                        inputs['text'] = value
-                    logger.info(f"  Set text node {node_id} ({node_type}): {str(value)[:50]}...")
-                elif widget_type == 'image':
-                    if value:
-                        # Handle both string paths and lists (from batch selector)
-                        if isinstance(value, list):
-                            image_path = value[0] if value else None
-                        else:
-                            image_path = value
-
-                        if image_path:
-                            basename = os.path.basename(image_path)
-                            # Rewrite to .png if format needs conversion
-                            if needs_conversion(image_path):
-                                basename = get_png_basename(basename)
-                                logger.info(f"  Image {os.path.basename(image_path)} will be converted to {basename}")
-                            inputs['image'] = basename
-                            logger.info(f"  Set image node {node_id} ({node_type}): {basename}")
-                    else:
-                        # No image provided — leave node as-is with its workflow default
-                        logger.info(f"  Image node {node_id} ({node_type}): no file selected, keeping workflow default")
-                elif widget_type == 'int':
-                    # For settings nodes, use explicit widget_name if available
-                    if widget_name:
-                        try:
-                            inputs[widget_name] = int(value)
-                            logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
-                        except (ValueError, TypeError):
-                            logger.warning(f"  Failed to convert {value} to int for {widget_name}")
-                    else:
-                        # Default behavior for editable nodes (seed-related)
-                        inputs['seed'] = value
-                        inputs['noise_seed'] = value
-                        logger.info(f"  Set int node {node_id} ({node_type}): {value}")
-                elif widget_type == 'float':
-                    # For settings nodes, use explicit widget_name if available
-                    if widget_name:
-                        try:
-                            inputs[widget_name] = float(value)
-                            logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
-                        except (ValueError, TypeError):
-                            logger.warning(f"  Failed to convert {value} to float for {widget_name}")
-                    else:
-                        # Default behavior for editable nodes
-                        inputs['cfg'] = value
-                        logger.info(f"  Set float node {node_id} ({node_type}): {value}")
-                elif widget_type == 'string':
-                    if widget_name:
-                        inputs[widget_name] = value
-                        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
-                    else:
-                        inputs['filename_prefix'] = value
-                        logger.info(f"  Set string node {node_id} ({node_type}): {value}")
-                elif widget_type == 'combo':
-                    # Combo box - use widget_name if available
-                    if widget_name:
-                        inputs[widget_name] = value
-                        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {value}")
-                    else:
-                        logger.info(f"  Combo node {node_id} ({node_type}): {value} (no widget_name)")
-                elif widget_type == 'toggle':
-                    # Toggle/switch value (0 or 1)
-                    int_value = 1 if value else 0
-                    if widget_name:
-                        inputs[widget_name] = int_value
-                        logger.info(f"  Set {widget_name} on node {node_id} ({node_type}): {int_value}")
-                    else:
-                        inputs['index'] = int_value
-                        logger.info(f"  Set toggle node {node_id} ({node_type}): {int_value}")
-                elif widget_type == '3d_model':
-                    # 3D model file path
-                    if value:
-                        # Handle both string paths and lists
-                        if isinstance(value, list):
-                            model_path = value[0] if value else None
-                        else:
-                            model_path = value
-
-                        if model_path:
-                            inputs['model_file'] = os.path.basename(model_path)
-                            logger.info(f"  Set 3D model node {node_id} ({node_type}): {os.path.basename(model_path)}")
-                    else:
-                        # No model provided — leave node as-is with its workflow default
-                        logger.info(f"  3D model node {node_id} ({node_type}): no file selected, keeping workflow default")
-                elif widget_type == 'video':
-                    # Video file path
-                    if value:
-                        # Handle both string paths and lists (from batch selector)
-                        if isinstance(value, list):
-                            video_path = value[0] if value else None
-                        else:
-                            video_path = value
-
-                        if video_path:
-                            inputs['video'] = os.path.basename(video_path)
-                            logger.info(f"  Set video node {node_id} ({node_type}): {os.path.basename(video_path)}")
-                    else:
-                        # No video provided — leave node as-is with its workflow default
-                        logger.info(f"  Video node {node_id} ({node_type}): no file selected, keeping workflow default")
-                elif widget_type == 'directory':
-                    # Directory path
-                    if value:
-                        # Use the widget_name to set the correct input field
-                        if widget_name:
-                            inputs[widget_name] = str(value)
-                            logger.info(f"  Set directory on node {node_id} ({node_type}): {widget_name} = {value}")
-                        else:
-                            # Fallback to 'directory' if no specific widget name
-                            inputs['directory'] = str(value)
-                            logger.info(f"  Set directory on node {node_id} ({node_type}): {value}")
-
-    # Build a map of toggle node names to their values (True/False)
-    # Toggle nodes have names like "Ultrashape_Only_editable" - extract base name
-    toggle_values = {}
-    for node_id, entries in (editable_values or {}).items():
-        entry_list = entries if isinstance(entries, list) else [entries]
-        for data in entry_list:
-            node_info = data.get('node')
-            if node_info and node_info.widget_type == 'toggle':
-                title = node_info.title or ''
-                # Extract base name (remove _editable suffix)
-                base_name = title.replace('_editable', '').strip()
-                value = bool(data.get('value'))
-                base_key = base_name.lower()
-                if base_key in toggle_values:
-                    logger.warning(f"[Toggle] Duplicate toggle name '{base_name}' "
-                                   f"(node {node_id}), overwriting with value: {value}")
-                toggle_values[base_key] = value
-                logger.info(f"[Toggle] Found toggle '{base_name}' = {value}")
-
-    # Process nodes with @if_ conditional in their title
-    # Format: "Node Name_editable&if_ToggleName" or "Node Name&if_ToggleName"
-    # If the referenced toggle is False, remove the node from the workflow
-    # with pass-through rerouting of downstream references
-    nodes_to_remove = set()
-    for node_id, node_data in modified.items():
-        if not isinstance(node_data, dict):
-            continue
-        meta = node_data.get('_meta', {})
-        title = meta.get('title', '')
-
-        # Check for &if_ or @if_ pattern in title
-        if_match = None
-        for separator in ['&if_', '@if_']:
-            if separator in title.lower():
-                # Extract the toggle name after &if_ or @if_
-                parts = title.lower().split(separator)
-                if len(parts) > 1:
-                    # Get toggle name (may have _editable or other suffixes)
-                    toggle_ref = parts[1].split('_editable')[0].split('&')[0].strip()
-                    if_match = toggle_ref
-                    break
-
-        if if_match:
-            # Check if this toggle exists and its value
-            toggle_value = toggle_values.get(if_match)
-            if toggle_value is not None:
-                if not toggle_value:
-                    # Toggle is OFF - mark for removal
-                    class_type = node_data.get('class_type', 'unknown')
-                    nodes_to_remove.add(str(node_id))
-                    logger.info(f"[Bypass] Will remove node {node_id} ({class_type}) - '{if_match}' is OFF")
-            else:
-                logger.warning(f"[Bypass] Node {node_id} references toggle '{if_match}' but toggle not found")
-
+    # Nodes whose title carries an &if_/@if_ conditional are removed when the
+    # referenced toggle is OFF, with pass-through rerouting of downstream refs.
+    toggle_values = _collect_toggle_values(editable_values)
+    nodes_to_remove = _collect_conditionally_disabled_nodes(modified, toggle_values)
     if nodes_to_remove:
-        logger.info(f"[Bypass] Removing {len(nodes_to_remove)} conditionally disabled node(s)")
+        logger.info(f"[Bypass] Removing {len(nodes_to_remove)} conditionally "
+                    f"disabled node(s)")
         remove_nodes_from_api_workflow(modified, nodes_to_remove)
 
-    # Check if any export node has _output suffix (primary output designation)
-    # If so, only those nodes get the output prefix — others are skipped
-    has_output_nodes = False
-    for _nid, _nd in modified.items():
-        if isinstance(_nd, dict) and _nd.get('class_type') in EXPORT_NODE_TYPES:
-            _title = _nd.get('_meta', {}).get('title', '')
-            if _title.lower().endswith(OUTPUT_SUFFIX):
-                has_output_nodes = True
-                break
-    if has_output_nodes:
-        logger.info(f"Detected {OUTPUT_SUFFIX} suffix node(s) - only setting prefix on designated output nodes")
-        # Diagnostic: log all export nodes and their designation status
-        for _nid, _nd in modified.items():
-            if isinstance(_nd, dict) and _nd.get('class_type') in EXPORT_NODE_TYPES:
-                _title = _nd.get('_meta', {}).get('title', '')
-                _is_designated = _title.lower().endswith(OUTPUT_SUFFIX)
-                logger.info(f"  Export node {_nid} ({_nd.get('class_type')}): "
-                            f"title='{_title}', designated={_is_designated}")
+    has_output_nodes = _has_designated_output_nodes(modified)
 
-    # Find and modify nodes by class_type
-    # Apply special handling for certain node types (seeds, output prefixes, directories)
-    # even if they were already handled by editable_values
-    from comfyui.node_info import get_widget_names as _get_ni_widget_names
-    for node_id, node_data in modified.items():
-        if not isinstance(node_data, dict) or 'class_type' not in node_data:
-            continue
-
-        class_type = node_data.get('class_type')
-        inputs = node_data.get('inputs', {})
-        meta = node_data.get('_meta', {})
-        node_title = meta.get('title', '')
-
-        # Check if this node was already modified by editable_values
-        # Use str() for consistent key type comparison
-        node_already_handled = str(node_id) in editable_by_node_id or int(node_id) in editable_by_node_id
-
-        # LoadImage nodes - set input image filename (only if we have a legacy image and not already handled)
-        if class_type == 'LoadImage' and image_basename and not node_already_handled:
-            inputs['image'] = image_basename
-            logger.info(f"Set LoadImage node {node_id} to: {image_basename}")
-
-        # TextEncodeQwenImageEditPlus nodes - only modify if title ends with "_editable" and not already handled
-        elif class_type == 'TextEncodeQwenImageEditPlus' and not node_already_handled:
-            if node_title.endswith('_editable'):
-                found_editable_prompt = True
-                if prompt:
-                    inputs['prompt'] = prompt
-                    logger.info(f"Set editable prompt node {node_id} ({node_title}) to: {prompt[:50]}...")
-                else:
-                    existing = inputs.get('prompt', '')
-                    if existing:
-                        logger.info(f"Keeping existing prompt in editable node {node_id} ({node_title}): {str(existing)[:50]}...")
-            else:
-                # Non-editable prompt node - log but don't modify
-                logger.info(f"Skipping non-editable prompt node {node_id} (title: '{node_title}' - missing '_editable' suffix)")
-
-        # Generic handling based on node capabilities
-        # This handles output_dir, filename_prefix, and seed for ANY node that supports them
-
-        # Get widget names: try node_info cache first, fall back to manual WIDGET_MAPPINGS
-        widget_list = _get_ni_widget_names(class_type)
-        if widget_list is not None:
-            widget_list = [w for w in widget_list if w is not None]
-        else:
-            widget_list = WIDGET_MAPPINGS.get(class_type, [])
-
-        # Set output_dir for any node that supports it
-        if 'output_dir' in widget_list and output_dir:
-            # If _output nodes exist, skip output_dir on non-designated export nodes
-            # so their files don't end up in the user's gallery directory
-            if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
-                logger.info(f"Skipping output_dir for non-{OUTPUT_SUFFIX} export node {node_id} ({class_type}, title='{node_title}')")
-            else:
-                inputs['output_dir'] = output_dir
-                logger.info(f"Set {class_type} node {node_id} output_dir to: {output_dir}")
-
-        # Set filename_prefix for export nodes
-        if class_type in EXPORT_NODE_TYPES:
-            # If _output nodes exist, only set prefix on those
-            if has_output_nodes and not node_title.lower().endswith(OUTPUT_SUFFIX):
-                logger.info(f"Skipping non-{OUTPUT_SUFFIX} export node {node_id} ({class_type}, title='{node_title}')")
-            else:
-                prefix_key = EXPORT_NODE_TYPES[class_type]
-                inputs[prefix_key] = output_prefix
-                logger.info(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
-
-        # Set seed for sampler/generator nodes
-        if 'seed' in widget_list:
-            inputs['seed'] = seed
-            logger.info(f"Set {class_type} node {node_id} seed to: {seed}")
-        elif 'noise_seed' in widget_list:
-            inputs['noise_seed'] = seed
-            logger.info(f"Set {class_type} node {node_id} noise_seed to: {seed}")
+    if _apply_class_type_rules(modified, editable_by_node_id, image_basename, prompt,
+                               output_prefix, seed, output_dir, has_output_nodes):
+        found_editable_prompt = True
 
     # Normalize all file paths in workflow to basenames
     logger.info("Scanning workflow for file paths to normalize...")
@@ -602,7 +790,6 @@ def modify_workflow_api_format(
     if files_to_copy:
         logger.info(f"Found {len(files_to_copy)} file path(s) to copy and normalize")
 
-    # Summary
     logger.info(f"=== Workflow Modification Summary ===")
     logger.info(f"Input image: {image_basename or '(from editable values)'}")
     logger.info(f"Prompt provided: {'Yes' if prompt else 'No (using workflow default or editable values)'}")
