@@ -61,8 +61,38 @@ class RePublishTab(RenderScanMixin, BaseTab):
         """Override: standalone mode defaults to custom."""
         return "custom" if self.app_state.standalone_mode else "for_comp"
 
-    # Tasks always offered in the Task dropdown
+    # Fallback task list, used only when the shot's work directory can't be read
     _DEFAULT_TASK_OPTIONS = ["lighting", "compositing", "fx"]
+    # Preference order when the launch-context task has no work directory
+    _TASK_PREFERENCE = ["lighting", "compositing", "fx"]
+
+    def _discover_task_options(self):
+        """List the task directories that actually exist under the shot's work root.
+
+        The launch-context task is not necessarily a task that has renders on
+        disk — a shot opened as 'lookdev' may only ever have had work done in
+        'lighting'. Offering the real directories means the dropdown always
+        reflects what can actually be published.
+
+        Returns [] when the work root is unreadable, so callers fall back to
+        the static option list.
+        """
+        shotpath = self.app_state.shotpath
+        if not shotpath:
+            return []
+        try:
+            from core.utils import truncate_at_suffix
+            work_root = truncate_at_suffix(shotpath, "work")
+            if not os.path.isdir(work_root):
+                return []
+            return sorted(
+                entry.name.lower()
+                for entry in os.scandir(work_root)
+                if entry.is_dir() and not entry.name.startswith((".", "_"))
+            )
+        except OSError as e:
+            logger.debug(f"Republish: could not list task directories: {e}")
+            return []
 
     def initialize(self):
         """Initialize rePublish tab."""
@@ -105,18 +135,42 @@ class RePublishTab(RenderScanMixin, BaseTab):
         self.ui.RePublishProductName.setMinimumWidth(200)
 
         # Task button manager - republish-specific.
-        # The launch context task is seeded into the options when it isn't one of
-        # the three defaults, so the current task is always selectable.
-        current_task = (self.app_state.task or "").strip()
-        task_values = list(self._DEFAULT_TASK_OPTIONS)
-        if current_task and current_task.lower() not in task_values:
-            task_values.append(current_task.lower())
+        #
+        # Options come from the task directories that actually exist for this
+        # shot, so the dropdown is never limited to a hardcoded three and never
+        # offers a task with nothing to publish. The launch-context task is
+        # always included even if it has no directory yet, so a user can still
+        # publish into a new task.
+        current_task = (self.app_state.task or "").strip().lower()
+        existing_tasks = self._discover_task_options()
+
+        task_values = list(existing_tasks) if existing_tasks else list(self._DEFAULT_TASK_OPTIONS)
+        if current_task and current_task not in task_values:
+            task_values.append(current_task)
+
+        # Prefer the launch-context task, but only when it has renders to scan.
+        # Forcing it regardless left the tab silently empty for shots opened as
+        # e.g. 'lookdev' whose work only ever lived under 'lighting'.
+        if current_task and current_task in existing_tasks:
+            initial_task = current_task
+        elif existing_tasks:
+            initial_task = next(
+                (t for t in self._TASK_PREFERENCE if t in existing_tasks),
+                existing_tasks[0],
+            )
+            if current_task:
+                logger.info(
+                    f"Republish: launch task '{current_task}' has no work directory; "
+                    f"defaulting to '{initial_task}' (available: {', '.join(existing_tasks)})"
+                )
+        else:
+            initial_task = current_task or "lighting"
 
         self._task_manager = OptionButtonManager(
             button=self.ui.RePublishTaskButton,
             options=[(t, t) for t in task_values],
-            initial_value=current_task.lower() if current_task else "lighting",
-            on_changed=lambda v: None,  # No special action on task change
+            initial_value=initial_task,
+            on_changed=self._on_task_changed,
             label_prefix="Task: ",
             parent_window=self.main_window
         )
@@ -129,15 +183,40 @@ class RePublishTab(RenderScanMixin, BaseTab):
         if self.app_state.has_shot_context():
             self._populate_product_combo("")
 
+    def _on_task_changed(self, value=None):
+        """Re-scan when the user picks a different task.
+
+        Without this, switching task left the render path pointing at the old
+        task's renders until the user also thought to press Rescan.
+        """
+        if not self.app_state.has_shot_context():
+            return
+        self.app_state.republish_searchpath = ""
+        self._run_initial_scan()
+
     def _run_initial_scan(self):
         """Find render directory and set republish_searchpath on startup (async)."""
         from services.file_operations import get_task_directory
 
-        task = self.app_state.task
+        # Use the SELECTED task, not app_state.task — they differ whenever the
+        # launch-context task has no work directory (see initialize()).
+        task = self._task or self.app_state.task
         task_dir = get_task_directory(self.app_state.shotpath, task)
 
         if not os.path.isdir(task_dir):
+            # This used to be a log-only warning, so the tab just sat there
+            # empty with no explanation of why.
             logger.warning(f"Republish: Task directory not found: {task_dir}")
+            available = self._discover_task_options()
+            if available:
+                self.show_status(
+                    f"No '{task}' work directory for this shot — try: {', '.join(available)}",
+                    "warning",
+                )
+            else:
+                self.show_status(
+                    f"No work directory found at {task_dir}", "warning"
+                )
             return
 
         def _on_scan_result(result):
