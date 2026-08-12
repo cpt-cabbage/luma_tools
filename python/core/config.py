@@ -219,7 +219,8 @@ def cache_tool_paths():
 # UI paths (relative to luma_tools root directory)
 UI_FILE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "main_window.ui")
 UI_TABS_DIR = os.path.join(_ROOT_DIR, "resources", "ui", "tabs")
-QDARKSTYLE_PATH = os.path.join(_PYTHON_DIR, "venv", "Lib", "site-packages", "qdarkstyle", "dark", "darkstyle.qss")
+# qdarkstyle is no longer used. The application owns its entire stylesheet;
+# layering on top of qdarkstyle is what forced 84 !important declarations.
 CUSTOM_STYLE_PATH = os.path.join(_ROOT_DIR, "resources", "ui", "la_shot_tools_styles.qss")
 ICON_PATH = os.path.join(_ROOT_DIR, "resources", "logo_White_small_filled.png")
 
@@ -431,150 +432,187 @@ GLOBAL_SETTINGS_FILENAME = "global_settings.json"
 # UI STYLING CONSTANTS
 # ============================================================================
 # Common colors used throughout the application UI.
-# Use these constants instead of hardcoding hex colors.
+# Use core.design_tokens directly in new code; UIColors is an alias layer.
+
+from core.design_tokens import (
+    Color as _Color,
+    Font as _Font,
+    Radius as _Radius,
+    Size as _Size,
+    Space as _Space,
+)
+
 
 class UIColors:
-    """Common UI color constants for consistent styling."""
+    """Common UI color constants — an alias layer over core.design_tokens.
+
+    DEPRECATED. design_tokens.Color is the single source of truth; these names
+    are kept so existing ``from core.config import UIColors`` imports keep
+    working while call sites migrate. Do not add new names here.
+
+    Several of these are now synonyms that used to be distinct values (the old
+    palette drew no consistent line between, say, BG_LIGHT and BG_LIGHT_ALT).
+    Collapsing them is the point — the drift they encoded is the bug.
+    """
 
     # Backgrounds
-    BG_DARK = "#1e1e1e"
-    BG_DARK_ALT = "#1e1e22"  # Slight blue tint
-    BG_MEDIUM = "#2a2a2a"
-    BG_MEDIUM_ALT = "#2a2e36"  # Slight blue tint
-    BG_LIGHT = "#3c3c3c"
-    BG_LIGHT_ALT = "#3c414b"  # For buttons, borders
-    BG_HOVER = "#4a5160"
+    BG_DARK = _Color.PAGE
+    BG_DARK_ALT = _Color.PAGE
+    BG_MEDIUM = _Color.PANEL
+    BG_MEDIUM_ALT = _Color.PANEL
+    BG_LIGHT = _Color.PANEL_ALT
+    BG_LIGHT_ALT = _Color.BORDER_STRONG
+    BG_HOVER = _Color.HOVER
 
     # Text colors
     TEXT_WHITE = "#ffffff"
-    TEXT_LIGHT = "#e0e0e0"
-    TEXT_SECONDARY = "#aaaaaa"
-    TEXT_MUTED = "#888888"
-    TEXT_DARK_MUTED = "#666666"
+    TEXT_LIGHT = _Color.TEXT
+    TEXT_SECONDARY = _Color.TEXT_SECONDARY
+    TEXT_MUTED = _Color.TEXT_MUTED
+    TEXT_DARK_MUTED = _Color.DISABLED_TEXT
 
     # Accent colors
-    ACCENT_BLUE = "#4a9eff"
-    ACCENT_BLUE_HOVER = "#5aa9ff"
-    ACCENT_BLUE_ALT = "#6ab0ff"
+    ACCENT_BLUE = _Color.ACCENT
+    ACCENT_BLUE_HOVER = _Color.ACCENT_HOVER
+    ACCENT_BLUE_ALT = _Color.ACCENT_HOVER
 
     # AYON brand colors
-    AYON_GREEN = "#00cea5"
-    AYON_GREEN_HOVER = "#00e6b8"
-    AYON_GREEN_DARK = "#00b892"
+    AYON_GREEN = _Color.AYON
+    AYON_GREEN_HOVER = _Color.AYON_HOVER
+    AYON_GREEN_DARK = _Color.AYON_PRESSED
 
     # Status colors
-    SUCCESS = "#10b981"
-    SUCCESS_HOVER = "#14ce94"
-    ERROR = "#ef4444"
-    ERROR_ALT = "#ff6b6b"
-    WARNING = "#f59e0b"
-    WARNING_DARK = "#d97706"
-    INFO = "#4a9eff"
-    SCANNING = "#8b5cf6"
+    SUCCESS = _Color.SUCCESS
+    SUCCESS_HOVER = _Color.SUCCESS
+    ERROR = _Color.DANGER
+    ERROR_ALT = _Color.DANGER_HOVER
+    WARNING = _Color.WARNING
+    WARNING_DARK = _Color.WARNING
+    INFO = _Color.INFO
+    SCANNING = _Color.SCANNING
 
     # Border colors
-    BORDER = "#3c3c3c"
-    BORDER_FOCUS = "#4a9eff"
+    BORDER = _Color.BORDER
+    BORDER_FOCUS = _Color.BORDER_FOCUS
 
-    # Group colors palette (for gallery groups)
-    GROUP_COLORS = [
-        "#ef4444",  # Red
-        "#f97316",  # Orange
-        "#eab308",  # Yellow
-        "#22c55e",  # Green
-        "#06b6d4",  # Cyan
-        "#3b82f6",  # Blue
-        "#8b5cf6",  # Purple
-        "#ec4899",  # Pink
-    ]
+    # Group colors palette (for gallery groups) — data, not chrome
+    GROUP_COLORS = _Color.GROUP_COLORS
 
 
 class UIStyles:
-    """Common stylesheet snippets for consistent styling."""
+    """Common stylesheet snippets — an alias layer over core.design_tokens.
 
-    # Label styles
-    LABEL_LIGHT = "color: #e0e0e0;"
-    LABEL_MUTED = "color: #888888;"
-    LABEL_SECONDARY = "color: #aaaaaa;"
-    LABEL_ITALIC_MUTED = "color: #888888; font-style: italic;"
-    LABEL_SMALL_MUTED = "color: #888888; font-size: 11px;"
-    LABEL_PATH = "color: white; font-size: 9pt;"
+    DEPRECATED. Prefer the component contract: set a dynamic property and let
+    the stylesheet do the work::
 
-    # Button base styles
-    BUTTON_PRIMARY = """
-        QPushButton {
-            background-color: #4a9eff;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            padding: 5px 15px;
-        }
-        QPushButton:hover { background-color: #5aa9ff; }
-        QPushButton:pressed { background-color: #3a8eef; }
-        QPushButton:disabled { background-color: #3c414b; color: #666; }
+        set_role(button, role="primary")     not  button.setStyleSheet(UIStyles.BUTTON_PRIMARY)
+        set_role(label, text="help")         not  label.setStyleSheet(UIStyles.LABEL_MUTED)
+
+    These are retained only so existing call sites keep rendering correctly
+    until they are migrated. Do not add new snippets here.
     """
 
-    BUTTON_SUCCESS = """
-        QPushButton {
-            background-color: #10b981;
-            color: white;
+    # Label styles — prefer QLabel[text="..."]
+    LABEL_LIGHT = f"color: {_Color.TEXT};"
+    LABEL_MUTED = f"color: {_Color.TEXT_MUTED};"
+    LABEL_SECONDARY = f"color: {_Color.TEXT_SECONDARY};"
+    LABEL_ITALIC_MUTED = f"color: {_Color.TEXT_MUTED}; font-style: italic;"
+    LABEL_SMALL_MUTED = f"color: {_Color.TEXT_MUTED}; font-size: {_Font.HELP}px;"
+    LABEL_PATH = (f"color: {_Color.TEXT_SECONDARY}; "
+                  f"font-family: {_Font.MONO_FAMILY}; font-size: {_Font.HELP}px;")
+
+    # Button styles — prefer QPushButton[role="..."]
+    BUTTON_PRIMARY = f"""
+        QPushButton {{
+            background-color: {_Color.ACCENT};
+            color: {_Color.TEXT_ON_ACCENT};
             border: none;
-            border-radius: 3px;
-            padding: 5px 15px;
-        }
-        QPushButton:hover { background-color: #14ce94; }
-        QPushButton:disabled { background-color: #3c414b; color: #6b6f78; }
+            border-radius: {_Radius.SM}px;
+            padding: 0px {_Space.LG}px;
+            min-height: {_Size.CONTROL}px;
+            font-weight: {_Font.WEIGHT_SEMIBOLD};
+        }}
+        QPushButton:hover {{ background-color: {_Color.ACCENT_HOVER}; }}
+        QPushButton:pressed {{ background-color: {_Color.ACCENT_PRESSED}; }}
+        QPushButton:disabled {{
+            background-color: {_Color.DISABLED_BG};
+            color: {_Color.DISABLED_TEXT};
+        }}
     """
 
-    BUTTON_SECONDARY = """
-        QPushButton {
-            background-color: #3c414b;
-            color: #e0e0e0;
+    BUTTON_SUCCESS = f"""
+        QPushButton {{
+            background-color: {_Color.AYON};
+            color: {_Color.TEXT_ON_ACCENT};
             border: none;
-            border-radius: 3px;
-            padding: 5px 15px;
-        }
-        QPushButton:hover { background-color: #4a5160; }
-        QPushButton:pressed { background-color: #2a2e36; }
-        QPushButton:checked { background-color: #4a9eff; }
-        QPushButton:disabled { background-color: #2a2e36; color: #666; }
+            border-radius: {_Radius.SM}px;
+            padding: 0px {_Space.LG}px;
+            min-height: {_Size.CONTROL}px;
+            font-weight: {_Font.WEIGHT_SEMIBOLD};
+        }}
+        QPushButton:hover {{ background-color: {_Color.AYON_HOVER}; }}
+        QPushButton:disabled {{
+            background-color: {_Color.DISABLED_BG};
+            color: {_Color.DISABLED_TEXT};
+        }}
     """
 
-    BUTTON_DANGER = """
-        QPushButton {
-            background-color: #ef4444;
-            color: white;
+    BUTTON_SECONDARY = f"""
+        QPushButton {{
+            background-color: {_Color.PANEL_ALT};
+            color: {_Color.TEXT};
             border: none;
-            border-radius: 3px;
-            padding: 5px 15px;
-        }
-        QPushButton:hover { background-color: #f87171; }
+            border-radius: {_Radius.SM}px;
+            padding: 0px {_Space.LG}px;
+            min-height: {_Size.CONTROL}px;
+        }}
+        QPushButton:hover {{ background-color: {_Color.HOVER}; }}
+        QPushButton:pressed {{ background-color: {_Color.SELECTED}; }}
+        QPushButton:checked {{
+            background-color: {_Color.ACCENT_SUBTLE};
+            color: {_Color.ACCENT};
+        }}
+        QPushButton:disabled {{
+            background-color: {_Color.DISABLED_BG};
+            color: {_Color.DISABLED_TEXT};
+        }}
     """
 
-    # Scroll area style
+    BUTTON_DANGER = f"""
+        QPushButton {{
+            background-color: {_Color.DANGER};
+            color: {_Color.TEXT_ON_DANGER};
+            border: none;
+            border-radius: {_Radius.SM}px;
+            padding: 0px {_Space.LG}px;
+            min-height: {_Size.CONTROL}px;
+            font-weight: {_Font.WEIGHT_SEMIBOLD};
+        }}
+        QPushButton:hover {{ background-color: {_Color.DANGER_HOVER}; }}
+    """
+
     SCROLL_AREA = """
         QScrollArea {
-            background-color: #1e1e1e;
-            border: 1px solid #3c3c3c;
+            background-color: transparent;
+            border: none;
         }
     """
 
-    # Input/ComboBox styles
-    COMBOBOX = """
-        QComboBox {
-            background-color: #3c414b;
-            color: #e0e0e0;
-            border: 1px solid #3c3c3c;
-            border-radius: 3px;
-            padding: 5px;
-        }
-        QComboBox:hover { background-color: #4a5160; }
+    COMBOBOX = f"""
+        QComboBox {{
+            background-color: {_Color.SUNKEN};
+            color: {_Color.TEXT};
+            border: 1px solid {_Color.BORDER};
+            border-radius: {_Radius.SM}px;
+            padding: 0px {_Space.SM}px;
+            min-height: {_Size.CONTROL}px;
+        }}
+        QComboBox:hover {{ border-color: {_Color.BORDER_STRONG}; }}
     """
 
-    # Dialog base style
-    DIALOG = """
-        QDialog { background-color: #1e1e22; }
-        QLabel { color: #e0e0e0; }
+    DIALOG = f"""
+        QDialog {{ background-color: {_Color.PAGE}; }}
+        QLabel {{ color: {_Color.TEXT}; }}
     """
 
 

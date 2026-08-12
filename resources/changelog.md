@@ -1,5 +1,8 @@
 # Luma Tools Changelog
 
+## Version 0.8
+refactor
+
 ## Version 0.7.1.2
 More bug fixes
 

@@ -1951,19 +1951,24 @@ class GallerySelectionToolbar(QWidget):
 
 
 def load_stylesheet():
-    """Load combined QDarkStyle and custom stylesheet."""
-    from core.config import QDARKSTYLE_PATH, CUSTOM_STYLE_PATH
-    file = QFile(QDARKSTYLE_PATH)
-    file.open(QFile.ReadOnly | QFile.Text)
-    stream = QTextStream(file)
-    base_style = stream.readAll()
-    file.close()
+    """Render the application stylesheet from the design tokens.
+
+    The sheet is a template of double-brace token placeholders resolved against
+    core.design_tokens. qdarkstyle is deliberately NOT concatenated any more:
+    layering on top of it was what forced 84 !important declarations and made
+    consistency impossible to hold. We own the whole sheet now, which also
+    means every widget class must be covered here — scripts/ui_ayon.py has a
+    "zoo" scenario that renders every control type for that check.
+    """
+    from core.config import CUSTOM_STYLE_PATH
+    from core.design_tokens import render_qss
+
     custom_file = QFile(CUSTOM_STYLE_PATH)
     custom_file.open(QFile.ReadOnly | QFile.Text)
     custom_stream = QTextStream(custom_file)
-    custom_style = custom_stream.readAll()
+    template = custom_stream.readAll()
     custom_file.close()
-    return base_style + "\n" + custom_style
+    return render_qss(template)
 
 
 def apply_stylesheet(app):

@@ -13,3 +13,6 @@ ENV/
 
 # Brainstorming / design session artifacts
 .superpowers/
+
+# UI screenshot sets
+.ui-ayon/

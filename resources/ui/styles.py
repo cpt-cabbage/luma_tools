@@ -7,6 +7,7 @@ import os
 import logging
 from PySide6.QtGui import QColor, QFont
 from core.config import UIColors
+from core.design_tokens import Color, Radius
 
 logger = logging.getLogger(__name__)
 
@@ -14,21 +15,22 @@ logger = logging.getLogger(__name__)
 class LoadingStyles:
     """Unified styling constants for loading screens."""
 
-    # Colors - AYON Theme
-    PRIMARY_COLOR = QColor(74, 158, 255)  # #4a9eff - Light blue accent (for spinner)
-    BACKGROUND_COLOR = QColor(33, 37, 43)  # #21252b - Dark background
-    SECONDARY_BG_COLOR = QColor(44, 49, 58)  # #2c313a - Lighter dark
-    TEXT_PRIMARY_COLOR = QColor(255, 255, 255)  # #ffffff - White
-    TEXT_SECONDARY_COLOR = QColor(197, 202, 211)  # #c5cad3 - Light gray
-    TEXT_TERTIARY_COLOR = QColor(121, 126, 137)  # #797e89 - Darker gray
+    # Colors — all derived from core.design_tokens. This class used to carry
+    # its own hardcoded palette, which was a third source of truth alongside
+    # UIColors and the stylesheet, and none of the three agreed.
+    PRIMARY_COLOR_STR = Color.ACCENT
+    BACKGROUND_COLOR_STR = Color.PAGE
+    SECONDARY_BG_COLOR_STR = Color.PANEL
+    TEXT_PRIMARY_COLOR_STR = Color.TEXT
+    TEXT_SECONDARY_COLOR_STR = Color.TEXT_SECONDARY
+    TEXT_TERTIARY_COLOR_STR = Color.TEXT_MUTED
 
-    # Color strings (for stylesheets) - reference UIColors for single source of truth
-    PRIMARY_COLOR_STR = UIColors.ACCENT_BLUE
-    BACKGROUND_COLOR_STR = "#21252b"
-    SECONDARY_BG_COLOR_STR = "#2c313a"
-    TEXT_PRIMARY_COLOR_STR = "#ffffff"
-    TEXT_SECONDARY_COLOR_STR = "#c5cad3"
-    TEXT_TERTIARY_COLOR_STR = "#797e89"
+    PRIMARY_COLOR = QColor(PRIMARY_COLOR_STR)
+    BACKGROUND_COLOR = QColor(BACKGROUND_COLOR_STR)
+    SECONDARY_BG_COLOR = QColor(SECONDARY_BG_COLOR_STR)
+    TEXT_PRIMARY_COLOR = QColor(TEXT_PRIMARY_COLOR_STR)
+    TEXT_SECONDARY_COLOR = QColor(TEXT_SECONDARY_COLOR_STR)
+    TEXT_TERTIARY_COLOR = QColor(TEXT_TERTIARY_COLOR_STR)
 
     # Fonts
     TITLE_FONT = QFont("Segoe UI", 24, QFont.Bold)
@@ -95,13 +97,14 @@ class LoadingStyles:
         """Get progress bar stylesheet for overlay (with gradient)."""
         return f"""
             QProgressBar {{
-                background-color: rgba(44, 49, 58, 180);
+                background-color: {Color.SUNKEN};
                 border: none;
                 border-radius: 3px;
             }}
             QProgressBar::chunk {{
                 background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                                  stop:0 #5cadff, stop:1 {LoadingStyles.PRIMARY_COLOR_STR});
+                                                  stop:0 {Color.ACCENT_HOVER},
+                                                  stop:1 {Color.ACCENT});
                 border-radius: 3px;
             }}
         """
@@ -109,11 +112,11 @@ class LoadingStyles:
     @staticmethod
     def get_overlay_background_stylesheet():
         """Get overlay background stylesheet."""
-        return """
-            LoadingOverlay {
-                background-color: rgba(33, 37, 43, 220);
-                border-radius: 10px;
-            }
+        return f"""
+            LoadingOverlay {{
+                background-color: {Color.OVERLAY_SCRIM};
+                border-radius: {Radius.MD}px;
+            }}
         """
 
     @staticmethod
