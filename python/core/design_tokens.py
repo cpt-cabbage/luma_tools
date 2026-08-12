@@ -71,7 +71,10 @@ class Color:
 
     # --- semantic -------------------------------------------------------
     SUCCESS = "#10b981"
+    SUCCESS_SUBTLE = "rgba(16, 185, 129, 0.14)"
     WARNING = "#f59e0b"
+    WARNING_SUBTLE = "rgba(245, 158, 11, 0.14)"
+    DANGER_SUBTLE = "rgba(239, 68, 68, 0.14)"
     DANGER = "#ef4444"
     DANGER_HOVER = "#f45f5f"
     DANGER_PRESSED = "#d63b3b"

@@ -55,10 +55,66 @@ QFrame[variant="panel"] {
     border-radius: {{radius.md}}px;
 }
 
-QFrame[variant="subtle"] {
+QFrame[variant="subtle"],
+QWidget[variant="subtle"] {
     background-color: {{color.panel_alt}};
     border: none;
     border-radius: {{radius.sm}}px;
+}
+
+/* A selectable row in a custom (non-QListWidget) list — the gallery groups
+   panel builds its rows as plain widgets. */
+QWidget[variant="row"] {
+    background-color: transparent;
+    border: none;
+    border-radius: {{radius.xs}}px;
+}
+
+QWidget[variant="row"]:hover {
+    background-color: {{color.hover}};
+}
+
+QWidget[variant="row"][state="active"] {
+    background-color: {{color.selected}};
+}
+
+QWidget[variant="row"][state="drop"] {
+    background-color: {{color.success_subtle}};
+    border: 2px dashed {{color.success}};
+}
+
+/* A selectable card in a picker grid. */
+QFrame[variant="card"] {
+    background-color: {{color.panel_alt}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+
+QFrame[variant="card"]:hover {
+    border-color: {{color.border_strong}};
+}
+
+QFrame[variant="card"][state="selected"] {
+    background-color: {{color.accent_subtle}};
+    border: 1px solid {{color.accent}};
+}
+
+/* An empty-state well: dashed, waiting to be filled. */
+QFrame[variant="empty"] {
+    background-color: {{color.sunken}};
+    border: 1px dashed {{color.border_strong}};
+    border-radius: {{radius.md}}px;
+}
+
+/* Thumbnail well at the top of a card. */
+QLabel[variant="thumb"],
+QFrame[variant="thumb"] {
+    background-color: {{color.sunken}};
+    color: {{color.text_muted}};
+    border: none;
+    border-top-left-radius: {{radius.md}}px;
+    border-top-right-radius: {{radius.md}}px;
+    font-size: {{font.help}}px;
 }
 
 QFrame[variant="sunken"] {
@@ -72,6 +128,11 @@ QFrame[variant="note"] {
     background-color: {{color.accent_subtle}};
     border: 1px solid {{color.accent}};
     border-radius: {{radius.sm}}px;
+}
+
+QFrame[variant="note"][state="success"] {
+    background-color: {{color.success_subtle}};
+    border-color: {{color.success}};
 }
 
 QFrame[variant="note"][state="warning"] {
@@ -356,6 +417,53 @@ QPushButton[role="link"]:disabled {
     color: {{color.disabled_text}};
 }
 
+/* --- menu affordance ----------------------------------------------------- */
+/* Buttons that open a menu (the OptionButtonManager pattern) get the same
+   chevron as a combo box. Left unstyled, Qt paints a raw black triangle over
+   the label. */
+QPushButton::menu-indicator {
+    image: url({{icon.chevron_down}});
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 12px;
+    height: 12px;
+    right: {{space.sm}}px;
+}
+
+QPushButton::menu-indicator:hover {
+    image: url({{icon.chevron_down_accent}});
+}
+
+QPushButton[iconOnly="true"]::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
+/* Reserve room for the chevron so the label does not run underneath it. */
+QPushButton[hasMenu="true"] {
+    padding-right: {{space.xxl}}px;
+    text-align: left;
+    padding-left: {{space.md}}px;
+}
+
+/* --- state tints -------------------------------------------------------- */
+/* Layered on top of whatever role the button carries — these only recolour
+   the label, so a ghost "Add" reads green and a ghost "Delete" reads red
+   without needing a role of their own. */
+QPushButton[state="success"] { color: {{color.success}}; }
+QPushButton[state="error"]   { color: {{color.danger}}; }
+QPushButton[state="warning"] { color: {{color.warning}}; }
+
+/* A filter/toggle button that is currently applied. */
+QPushButton[state="active"] {
+    background-color: {{color.accent_subtle}};
+    color: {{color.accent}};
+}
+
+QPushButton[state="active"]:hover {
+    background-color: {{color.hover}};
+}
+
 /* --- compact / icon ----------------------------------------------------- */
 QPushButton[density="sm"] {
     min-height: {{size.control_sm}}px;
@@ -454,6 +562,20 @@ QPlainTextEdit:disabled {
     background-color: {{color.disabled_bg}};
     border-color: {{color.disabled_border}};
     color: {{color.disabled_text}};
+}
+
+/* Validation failure — set via set_role(widget, state="error") so Qt
+   re-polishes, then cleared with state=None. */
+QLineEdit[state="error"],
+QTextEdit[state="error"],
+QPlainTextEdit[state="error"] {
+    border: 1px solid {{color.danger}};
+    background-color: {{color.danger_subtle}};
+}
+
+QLineEdit[state="warning"] {
+    border: 1px solid {{color.warning}};
+    background-color: {{color.warning_subtle}};
 }
 
 QLineEdit:read-only,
@@ -1049,6 +1171,12 @@ QLabel[textRole="mono"] {
     font-size: {{font.help}}px;
 }
 
+/* A large decorative glyph, e.g. a file-type icon in a properties dialog. */
+QLabel[textRole="glyph"] {
+    color: {{color.text_secondary}};
+    font-size: 40px;
+}
+
 QLabel[textRole="micro"] {
     color: {{color.text_secondary}};
     font-size: {{font.micro}}px;
@@ -1056,6 +1184,7 @@ QLabel[textRole="micro"] {
     letter-spacing: {{font.micro_letter_spacing}};
 }
 
+QLabel[state="info"]    { color: {{color.accent}}; }
 QLabel[state="success"] { color: {{color.success}}; }
 QLabel[state="warning"] { color: {{color.warning}}; }
 QLabel[state="error"]   { color: {{color.danger}}; }
@@ -1077,6 +1206,47 @@ QLabel[variant="sunken"] {
     background-color: {{color.sunken}};
     border: 1px solid {{color.border}};
     border-radius: {{radius.sm}}px;
+}
+
+/* A cell in a comparison grid. Unstated = the two sides agree; state="a"
+   and state="b" tint the two sides when they differ. */
+QLabel[variant="cell"] {
+    background-color: {{color.panel_alt}};
+    color: {{color.text_secondary}};
+    border-radius: {{radius.xs}}px;
+    padding: {{space.xxs}}px {{space.sm}}px;
+    font-size: {{font.help}}px;
+}
+
+QLabel[variant="cell"][state="a"] {
+    background-color: {{color.accent_subtle}};
+    color: {{color.accent}};
+    border-left: 2px solid {{color.accent}};
+}
+
+QLabel[variant="cell"][state="b"] {
+    background-color: {{color.success_subtle}};
+    color: {{color.success}};
+    border-left: 2px solid {{color.success}};
+}
+
+/* A count pill next to a list row label. */
+QLabel[variant="count"] {
+    background-color: {{color.panel_alt}};
+    color: {{color.text_muted}};
+    border-radius: {{radius.xs}}px;
+    padding: 2px {{space.xs}}px;
+    font-size: {{font.help}}px;
+}
+
+/* Selection tick pinned to a thumbnail corner. */
+QLabel[variant="selectionBadge"] {
+    background-color: {{color.scrim}};
+    color: {{color.accent}};
+    border: 2px solid {{color.accent}};
+    border-radius: 12px;
+    font-size: {{font.label}}px;
+    font-weight: {{font.weight_semibold}};
 }
 
 /* Badge / chip */

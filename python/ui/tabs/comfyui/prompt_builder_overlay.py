@@ -33,15 +33,10 @@ from dialog_helpers import confirm_action, show_error, show_info
 logger = logging.getLogger(__name__)
 
 
-# Color palette
+# The overlay backdrop is painted through QPalette rather than QSS, so it
+# is the one colour this module still needs as a QColor. Everything else now
+# comes from the stylesheet via the component contract.
 OVERLAY_BACKDROP = QColor(0, 0, 0, 180)
-CONTENT_BG = QColor(30, 30, 35)
-CARD_BG = QColor(40, 40, 45)
-SIDEBAR_BG = QColor(35, 35, 40)
-ACCENT = QColor(100, 150, 255)
-TEXT_PRIMARY = QColor(230, 230, 230)
-TEXT_SECONDARY = QColor(170, 170, 170)
-BORDER = QColor(60, 60, 65)
 
 
 class OverlayBackdrop(QWidget):
@@ -72,54 +67,8 @@ class CategorySection(QFrame):
     """
     selection_changed = Signal()
 
-    # Shared combobox stylesheet (class-level to avoid rebuilding per instance)
-    _COMBO_STYLE = f"""
-        QComboBox {{
-            background-color: {CARD_BG.name()};
-            border: 1px solid {BORDER.name()};
-            border-radius: 4px;
-            padding: 6px 10px;
-            color: {TEXT_PRIMARY.name()};
-            min-height: 24px;
-        }}
-        QComboBox:hover {{
-            border-color: {ACCENT.name()};
-        }}
-        QComboBox::drop-down {{
-            border: none;
-            width: 24px;
-        }}
-        QComboBox::down-arrow {{
-            image: none;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid {TEXT_SECONDARY.name()};
-            margin-right: 6px;
-        }}
-        QComboBox QAbstractItemView {{
-            background-color: {CARD_BG.name()};
-            border: 1px solid {BORDER.name()};
-            color: {TEXT_PRIMARY.name()};
-            selection-background-color: {ACCENT.name()};
-            outline: none;
-        }}
     """
 
-    _CHECKBOX_STYLE = f"""
-        QCheckBox {{ color: {TEXT_PRIMARY.name()}; }}
-        QCheckBox::indicator {{
-            width: 18px; height: 18px;
-            border: 2px solid {BORDER.name()};
-            border-radius: 4px;
-            background-color: {CARD_BG.name()};
-        }}
-        QCheckBox::indicator:hover {{
-            border-color: {ACCENT.name()};
-        }}
-        QCheckBox::indicator:checked {{
-            background-color: {ACCENT.name()};
-            border-color: {ACCENT.name()};
-        }}
     """
 
     def __init__(self, category: PromptCategory, parent=None):
@@ -140,7 +89,7 @@ class CategorySection(QFrame):
 
         # Header
         header = QLabel(self.category.label)
-        header.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {TEXT_PRIMARY.name()};")
+        header.setProperty("textRole", "title")
         layout.addWidget(header)
 
         if self.category.multi_select:
@@ -150,18 +99,11 @@ class CategorySection(QFrame):
 
         # Frame styling
         self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet(f"""
-            CategorySection {{
-                background-color: {CARD_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-            }}
-        """)
+        self.setProperty("variant", "subtle")
 
     def _setup_single_select(self, layout):
         """Build a dropdown for single-select categories"""
         self._combo = QComboBox()
-        self._combo.setStyleSheet(self._COMBO_STYLE)
 
         # First item is "None" (no selection)
         self._combo.addItem("— None —")
@@ -183,7 +125,6 @@ class CategorySection(QFrame):
 
             widget = QCheckBox(option.label)
             widget.setToolTip(option.description)
-            widget.setStyleSheet(self._CHECKBOX_STYLE)
             widget.toggled.connect(lambda _: self.selection_changed.emit())
 
             self.option_widgets[option.id] = widget
@@ -197,7 +138,6 @@ class CategorySection(QFrame):
                 weight_spin.setDecimals(1)
                 weight_spin.setFixedWidth(60)
                 weight_spin.setPrefix("×")
-                weight_spin.setStyleSheet(f"color: {TEXT_SECONDARY.name()};")
                 weight_spin.valueChanged.connect(lambda _: self.selection_changed.emit())
 
                 self.weight_widgets[option.id] = weight_spin
@@ -315,13 +255,7 @@ class PromptBuilderOverlay(QWidget):
         # Content frame (centered card)
         self.content_frame = QFrame(self)
         self.content_frame.setFrameShape(QFrame.StyledPanel)
-        self.content_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {CONTENT_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 10px;
-            }}
-        """)
+        self.content_frame.setProperty("variant", "panel")
 
         content_layout = QVBoxLayout(self.content_frame)
         content_layout.setContentsMargins(20, 20, 20, 20)
@@ -332,12 +266,12 @@ class PromptBuilderOverlay(QWidget):
         header_layout.setSpacing(10)
 
         title = QLabel("Prompt Builder")
-        title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {TEXT_PRIMARY.name()};")
+        title.setProperty("textRole", "display")
         header_layout.addWidget(title)
 
         # Template dropdown
         template_label = QLabel("Template:")
-        template_label.setStyleSheet(f"color: {TEXT_SECONDARY.name()};")
+        template_label.setProperty("textRole", "help")
         header_layout.addWidget(template_label)
 
         self.template_combo = QComboBox()
@@ -352,19 +286,8 @@ class PromptBuilderOverlay(QWidget):
         # Close button
         close_btn = QPushButton("×")
         close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {CARD_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 15px;
-                font-size: 20px;
-                color: {TEXT_SECONDARY.name()};
-            }}
-            QPushButton:hover {{
-                background-color: {ACCENT.name()};
-                color: white;
-            }}
-        """)
+        close_btn.setProperty("role", "ghost")
+        close_btn.setProperty("iconOnly", "true")
         close_btn.clicked.connect(self.hide_overlay)
         header_layout.addWidget(close_btn)
 
@@ -372,12 +295,6 @@ class PromptBuilderOverlay(QWidget):
 
         # Body: splitter with left (categories) and right (preview/presets)
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet(f"""
-            QSplitter::handle {{
-                background-color: {BORDER.name()};
-                width: 2px;
-            }}
-        """)
 
         # Left panel: categories
         left_panel = self._create_left_panel()
@@ -398,18 +315,18 @@ class PromptBuilderOverlay(QWidget):
 
         randomize_btn = QPushButton("🎲 Randomize")
         randomize_btn.clicked.connect(self._on_randomize)
-        randomize_btn.setStyleSheet(self._button_style())
+        randomize_btn.setProperty("role", "secondary")
         button_layout.addWidget(randomize_btn)
 
         clear_btn = QPushButton("Clear All")
         clear_btn.clicked.connect(self._on_clear_all)
-        clear_btn.setStyleSheet(self._button_style())
+        clear_btn.setProperty("role", "secondary")
         button_layout.addWidget(clear_btn)
 
         button_layout.addStretch()
 
         insert_btn = QPushButton("Insert Prompt")
-        insert_btn.setStyleSheet(self._button_style(primary=True))
+        insert_btn.setProperty("role", "primary")
         insert_btn.clicked.connect(self._on_insert_prompt)
         button_layout.addWidget(insert_btn)
 
@@ -426,21 +343,6 @@ class PromptBuilderOverlay(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {SIDEBAR_BG.name()};
-                border: none;
-            }}
-            QScrollBar:vertical {{
-                background-color: {SIDEBAR_BG.name()};
-                width: 10px;
-                border-radius: 5px;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {BORDER.name()};
-                border-radius: 5px;
-            }}
-        """)
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
@@ -449,21 +351,12 @@ class PromptBuilderOverlay(QWidget):
 
         # Description text area
         desc_label = QLabel("Video Description")
-        desc_label.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {TEXT_PRIMARY.name()};")
+        desc_label.setProperty("textRole", "title")
         scroll_layout.addWidget(desc_label)
 
         self.description_edit = QTextEdit()
         self.description_edit.setPlaceholderText("Describe your scene in natural language...")
         self.description_edit.setMaximumHeight(100)
-        self.description_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {CARD_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                color: {TEXT_PRIMARY.name()};
-                padding: 8px;
-            }}
-        """)
         self.description_edit.textChanged.connect(self._schedule_update_preview)
         scroll_layout.addWidget(self.description_edit)
 
@@ -483,26 +376,6 @@ class PromptBuilderOverlay(QWidget):
     def _create_right_panel(self) -> QWidget:
         """Create the right panel with tabs"""
         tabs = QTabWidget()
-        tabs.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: 1px solid {BORDER.name()};
-                background-color: {CARD_BG.name()};
-                border-radius: 6px;
-            }}
-            QTabBar::tab {{
-                background-color: {SIDEBAR_BG.name()};
-                color: {TEXT_SECONDARY.name()};
-                padding: 8px 16px;
-                border: 1px solid {BORDER.name()};
-                border-bottom: none;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-            }}
-            QTabBar::tab:selected {{
-                background-color: {CARD_BG.name()};
-                color: {TEXT_PRIMARY.name()};
-            }}
-        """)
 
         # Tab 1: Positive Preview
         preview_widget = QWidget()
@@ -510,25 +383,16 @@ class PromptBuilderOverlay(QWidget):
         preview_layout.setContentsMargins(10, 10, 10, 10)
 
         preview_label = QLabel("Positive Prompt Preview")
-        preview_label.setStyleSheet(f"font-weight: bold; color: {TEXT_PRIMARY.name()};")
+        preview_label.setProperty("textRole", "title")
         preview_layout.addWidget(preview_label)
 
         self.preview_edit = QTextEdit()
         self.preview_edit.setReadOnly(True)
-        self.preview_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {SIDEBAR_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                color: {TEXT_PRIMARY.name()};
-                padding: 10px;
-            }}
-        """)
         preview_layout.addWidget(self.preview_edit)
 
         copy_btn = QPushButton("📋 Copy to Clipboard")
         copy_btn.clicked.connect(self._on_copy_positive)
-        copy_btn.setStyleSheet(self._button_style())
+        copy_btn.setProperty("role", "secondary")
         preview_layout.addWidget(copy_btn)
 
         tabs.addTab(preview_widget, "Positive")
@@ -561,12 +425,6 @@ class PromptBuilderOverlay(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {SIDEBAR_BG.name()};
-                border: none;
-            }}
-        """)
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
@@ -590,26 +448,17 @@ class PromptBuilderOverlay(QWidget):
         preview_layout.setContentsMargins(10, 10, 10, 10)
 
         preview_label = QLabel("Negative Prompt Preview")
-        preview_label.setStyleSheet(f"font-weight: bold; color: {TEXT_PRIMARY.name()};")
+        preview_label.setProperty("textRole", "title")
         preview_layout.addWidget(preview_label)
 
         self.negative_preview_edit = QTextEdit()
         self.negative_preview_edit.setReadOnly(True)
         self.negative_preview_edit.setMaximumHeight(120)
-        self.negative_preview_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {SIDEBAR_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                color: {TEXT_PRIMARY.name()};
-                padding: 10px;
-            }}
-        """)
         preview_layout.addWidget(self.negative_preview_edit)
 
         copy_btn = QPushButton("📋 Copy to Clipboard")
         copy_btn.clicked.connect(self._on_copy_negative)
-        copy_btn.setStyleSheet(self._button_style())
+        copy_btn.setProperty("role", "secondary")
         preview_layout.addWidget(copy_btn)
 
         splitter.addWidget(preview_frame)
@@ -626,21 +475,12 @@ class PromptBuilderOverlay(QWidget):
         layout.setSpacing(10)
 
         label = QLabel("JSON Output")
-        label.setStyleSheet(f"font-weight: bold; color: {TEXT_PRIMARY.name()};")
+        label.setProperty("textRole", "title")
         layout.addWidget(label)
 
         self.json_preview_edit = QTextEdit()
         self.json_preview_edit.setReadOnly(True)
-        self.json_preview_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {SIDEBAR_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                color: {TEXT_PRIMARY.name()};
-                padding: 10px;
-                font-family: 'Courier New', monospace;
-            }}
-        """)
+        self.json_preview_edit.setProperty("textRole", "mono")
         layout.addWidget(self.json_preview_edit)
 
         # Buttons
@@ -649,12 +489,12 @@ class PromptBuilderOverlay(QWidget):
 
         copy_btn = QPushButton("📋 Copy JSON")
         copy_btn.clicked.connect(self._on_copy_json)
-        copy_btn.setStyleSheet(self._button_style(primary=True))
+        copy_btn.setProperty("role", "primary")
         btn_layout.addWidget(copy_btn)
 
         save_btn = QPushButton("💾 Save to File")
         save_btn.clicked.connect(self._on_save_json)
-        save_btn.setStyleSheet(self._button_style())
+        save_btn.setProperty("role", "secondary")
         btn_layout.addWidget(save_btn)
 
         layout.addLayout(btn_layout)
@@ -669,21 +509,10 @@ class PromptBuilderOverlay(QWidget):
         layout.setSpacing(10)
 
         label = QLabel("Saved Presets")
-        label.setStyleSheet(f"font-weight: bold; color: {TEXT_PRIMARY.name()};")
+        label.setProperty("textRole", "title")
         layout.addWidget(label)
 
         self.preset_list = QListWidget()
-        self.preset_list.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {SIDEBAR_BG.name()};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                color: {TEXT_PRIMARY.name()};
-            }}
-            QListWidget::item:selected {{
-                background-color: {ACCENT.name()};
-            }}
-        """)
         self.preset_list.itemDoubleClicked.connect(self._on_preset_load)
         layout.addWidget(self.preset_list)
 
@@ -693,17 +522,17 @@ class PromptBuilderOverlay(QWidget):
 
         save_btn = QPushButton("Save Current")
         save_btn.clicked.connect(self._on_preset_save)
-        save_btn.setStyleSheet(self._button_style())
+        save_btn.setProperty("role", "secondary")
         btn_layout.addWidget(save_btn)
 
         load_btn = QPushButton("Load")
         load_btn.clicked.connect(lambda: self._on_preset_load(self.preset_list.currentItem()))
-        load_btn.setStyleSheet(self._button_style())
+        load_btn.setProperty("role", "secondary")
         btn_layout.addWidget(load_btn)
 
         delete_btn = QPushButton("Delete")
         delete_btn.clicked.connect(self._on_preset_delete)
-        delete_btn.setStyleSheet(self._button_style())
+        delete_btn.setProperty("role", "secondary")
         btn_layout.addWidget(delete_btn)
 
         layout.addLayout(btn_layout)
@@ -712,28 +541,6 @@ class PromptBuilderOverlay(QWidget):
         self._refresh_preset_list()
 
         return widget
-
-    def _button_style(self, primary: bool = False) -> str:
-        """Get button stylesheet"""
-        bg_color = ACCENT.name() if primary else CARD_BG.name()
-        hover_color = ACCENT.lighter(120).name() if primary else ACCENT.name()
-
-        return f"""
-            QPushButton {{
-                background-color: {bg_color};
-                border: 1px solid {BORDER.name()};
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: {TEXT_PRIMARY.name()};
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {ACCENT.darker(120).name()};
-            }}
-        """
 
     def show_overlay(self, initial_text: str = "", model_name: str = None, workflow_name: str = None):
         """Show the overlay

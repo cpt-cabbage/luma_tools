@@ -7,6 +7,8 @@ Collapsible sidebar for filtering gallery by likes and groups.
 import logging
 from PySide6.QtCore import Qt, Signal
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -71,25 +73,17 @@ class GroupFilterItem(QWidget):
             layout.addWidget(self.color_dot)
         elif icon:
             icon_label = QLabel(icon)
-            icon_label.setStyleSheet("font-size: 14px;")
             icon_label.setAttribute(Qt.WA_TransparentForMouseEvents)
             layout.addWidget(icon_label)
 
         # Name
         self.name_label = QLabel(name)
-        self.name_label.setStyleSheet("color: #e0e0e0; font-size: 12px;")
         self.name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.name_label, 1)
 
         # Count badge
         self.count_label = QLabel(str(count))
-        self.count_label.setStyleSheet("""
-            color: #888888;
-            font-size: 11px;
-            background-color: #3c414b;
-            border-radius: 8px;
-            padding: 2px 6px;
-        """)
+        self.count_label.setProperty("variant", "count")
         self.count_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self.count_label)
 
@@ -124,24 +118,11 @@ class GroupFilterItem(QWidget):
             bg_active = "rgba(74, 158, 255, 0.2)"
 
         if self._is_active:
-            self.setStyleSheet(f"""
-                QWidget {{
-                    background-color: {bg_active};
-                    border-radius: 4px;
-                }}
-            """)
-            self.name_label.setStyleSheet("color: #4a9eff; font-size: 12px; font-weight: bold;")
+            set_role(self, variant="row", state="active")
+            set_role(self.name_label, state="info")
         else:
-            self.setStyleSheet(f"""
-                QWidget {{
-                    background-color: {bg_color};
-                    border-radius: 4px;
-                }}
-                QWidget:hover {{
-                    background-color: {bg_hover};
-                }}
-            """)
-            self.name_label.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+            set_role(self, variant="row", state=None)
+            set_role(self.name_label, state=None)
 
     # --- Drag-drop support for groups ---
     def dragEnterEvent(self, event):
@@ -199,13 +180,7 @@ class GroupFilterItem(QWidget):
 
         if show:
             # Use green drop target color
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: rgba(74, 222, 128, 0.3);
-                    border: 2px dashed #4ade80;
-                    border-radius: 4px;
-                }
-            """)
+            set_role(self, variant="row", state="drop")
         else:
             # Restore normal style
             self._update_style()
@@ -256,11 +231,6 @@ class GroupsFilterPanel(QWidget):
         # Set object name for specific styling - only this widget gets dark background
         # NOT children (which have their own tinted backgrounds)
         self.setObjectName("GroupsFilterPanel")
-        self.setStyleSheet("""
-            #GroupsFilterPanel {
-                background-color: #1e1e22;
-            }
-        """)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -269,12 +239,12 @@ class GroupsFilterPanel(QWidget):
         # Header with collapse toggle
         header = QWidget()
         header.setFixedHeight(40)
-        header.setStyleSheet("background-color: #2a2e36;")
+        header.setProperty("variant", "subtle")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 8, 0)
 
         title = QLabel("Filters")
-        title.setStyleSheet("color: #e0e0e0; font-weight: bold; font-size: 13px;")
+        title.setProperty("textRole", "title")
         header_layout.addWidget(title)
 
         header_layout.addStretch()
@@ -283,19 +253,8 @@ class GroupsFilterPanel(QWidget):
         self.collapse_btn.setFixedHeight(24)
         self.collapse_btn.setCursor(Qt.PointingHandCursor)
         self.collapse_btn.setToolTip("Collapse sidebar")
-        self.collapse_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3c414b;
-                color: #e0e0e0;
-                border: none;
-                border-radius: 4px;
-                font-size: 11px;
-                padding: 4px 8px;
-            }
-            QPushButton:hover {
-                background-color: #4a5160;
-            }
-        """)
+        self.collapse_btn.setProperty("role", "secondary")
+        self.collapse_btn.setProperty("density", "sm")
         self.collapse_btn.clicked.connect(self._toggle_collapse)
         header_layout.addWidget(self.collapse_btn)
 
@@ -304,14 +263,13 @@ class GroupsFilterPanel(QWidget):
         # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3c414b;")
+        sep.setProperty("variant", "divider")
         sep.setFixedHeight(1)
         main_layout.addWidget(sep)
 
         # Content area (scrollable)
         self.content = QWidget()
         self.content.setObjectName("GroupsFilterContent")
-        self.content.setStyleSheet("#GroupsFilterContent { background-color: #1e1e22; }")
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(8, 8, 8, 8)
         self.content_layout.setSpacing(4)
@@ -320,22 +278,6 @@ class GroupsFilterPanel(QWidget):
         scroll.setWidget(self.content)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
-                background-color: #2a2e36;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #4a5160;
-                border-radius: 4px;
-                min-height: 20px;
-            }
-        """)
         main_layout.addWidget(scroll, 1)
 
         # Add filter items
@@ -343,19 +285,7 @@ class GroupsFilterPanel(QWidget):
 
         # Add group button at bottom
         self.add_group_btn = QPushButton("+ New Group")
-        self.add_group_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3c414b;
-                color: #e0e0e0;
-                border: none;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #4a5160;
-            }
-        """)
+        self.add_group_btn.setProperty("role", "secondary")
         self.add_group_btn.clicked.connect(self._on_add_group)
         main_layout.addWidget(self.add_group_btn)
 
@@ -407,7 +337,7 @@ class GroupsFilterPanel(QWidget):
         # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3c414b;")
+        sep.setProperty("variant", "divider")
         sep.setFixedHeight(1)
         self.content_layout.addWidget(sep)
 
@@ -546,7 +476,7 @@ class GroupsFilterPanel(QWidget):
             # Stacks separator
             stacks_sep = QFrame()
             stacks_sep.setFrameShape(QFrame.HLine)
-            stacks_sep.setStyleSheet("background-color: #3c414b;")
+            stacks_sep.setProperty("variant", "divider")
             stacks_sep.setFixedHeight(1)
             self.content_layout.insertWidget(insert_idx, stacks_sep)
             self._stacks_separator = stacks_sep
@@ -563,13 +493,13 @@ class GroupsFilterPanel(QWidget):
 
             # Collapse toggle arrow
             self._stacks_toggle = QLabel("▼" if not self._stacks_collapsed else "▶")
-            self._stacks_toggle.setStyleSheet("color: #888888; font-size: 8px;")
+            self._stacks_toggle.setProperty("textRole", "micro")
             self._stacks_toggle.setFixedWidth(12)
             header_layout.addWidget(self._stacks_toggle)
 
             # Header text with count
             header_text = QLabel(f"Generations ({len(self._stacks_data)})")
-            header_text.setStyleSheet("color: #888888; font-size: 11px; font-weight: bold;")
+            header_text.setProperty("textRole", "micro")
             header_layout.addWidget(header_text)
             header_layout.addStretch()
 

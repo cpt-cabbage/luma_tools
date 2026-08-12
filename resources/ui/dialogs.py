@@ -13,53 +13,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 
 # Common dark theme stylesheet for edit dialogs
-EDIT_DIALOG_STYLESHEET = """
-    QDialog {
-        background-color: #1e1e22;
-    }
-    QLabel {
-        color: #e0e0e0;
-        font-size: 12px;
-    }
-    QPlainTextEdit {
-        background-color: #2c313a;
-        color: #e0e0e0;
-        border: 1px solid #3c414b;
-        border-radius: 4px;
-        padding: 8px;
-        font-size: 12px;
-    }
-    QPlainTextEdit:focus {
-        border-color: #4a9eff;
-    }
-    QPushButton {
-        background-color: #3c414b;
-        color: #e0e0e0;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        font-size: 12px;
-    }
-    QPushButton:hover {
-        background-color: #4a5160;
-    }
-    QPushButton:pressed {
-        background-color: #2a2e36;
-    }
-    QPushButton[primary="true"] {
-        background-color: #4a9eff;
-        color: white;
-    }
-    QPushButton[primary="true"]:hover {
-        background-color: #6ab0ff;
-    }
-"""
-
-
 class BaseEditDialog(QDialog):
     """
     Base dialog for editing gallery item notes.
@@ -85,7 +44,6 @@ class BaseEditDialog(QDialog):
         self.setMinimumSize(400, 300)
         self.resize(450, 350)
         self.setModal(True)
-        self.setStyleSheet(EDIT_DIALOG_STYLESHEET)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -93,7 +51,8 @@ class BaseEditDialog(QDialog):
 
         # Item name
         name_label = QLabel(f"{self.item_type_label}: {filename}")
-        name_label.setStyleSheet("font-weight: bold; color: #4a9eff;")
+        name_label.setProperty("textRole", "title")
+        name_label.setProperty("state", "info")
         layout.addWidget(name_label)
 
         # Note label
@@ -114,7 +73,7 @@ class BaseEditDialog(QDialog):
         button_layout.addWidget(self.cancel_btn)
 
         self.save_btn = QPushButton("Save")
-        self.save_btn.setProperty("primary", True)
+        self.save_btn.setProperty("role", "primary")
         self.save_btn.clicked.connect(self._save_note)
         button_layout.addWidget(self.save_btn)
 
@@ -223,19 +182,6 @@ class GroupEditorDialog(QDialog):
         self.setWindowTitle("Edit Group" if self.group else "New Group")
         self.setMinimumWidth(300)
         self.setModal(True)
-        self.setStyleSheet(EDIT_DIALOG_STYLESHEET + """
-            QLineEdit {
-                background-color: #2c313a;
-                color: #e0e0e0;
-                border: 1px solid #3c414b;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #4a9eff;
-            }
-        """)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
@@ -292,7 +238,7 @@ class GroupEditorDialog(QDialog):
         button_layout.addWidget(self.cancel_btn)
 
         self.save_btn = QPushButton("Save" if self.group else "Create")
-        self.save_btn.setProperty("primary", True)
+        self.save_btn.setProperty("role", "primary")
         self.save_btn.clicked.connect(self._on_save)
         button_layout.addWidget(self.save_btn)
 
@@ -325,16 +271,7 @@ class GroupEditorDialog(QDialog):
         name = self.name_input.text().strip()
         if not name:
             self.name_input.setFocus()
-            self.name_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2c313a;
-                    color: #e0e0e0;
-                    border: 2px solid #ef4444;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 12px;
-                }
-            """)
+            set_role(self.name_input, state="error")
             return
         self.accept()
 
@@ -374,19 +311,6 @@ class QuickGroupDialog(QDialog):
         self.setWindowTitle("Create Group")
         self.setMinimumWidth(280)
         self.setModal(True)
-        self.setStyleSheet(EDIT_DIALOG_STYLESHEET + """
-            QLineEdit {
-                background-color: #2c313a;
-                color: #e0e0e0;
-                border: 1px solid #3c414b;
-                border-radius: 4px;
-                padding: 10px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border-color: #4a9eff;
-            }
-        """)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -394,7 +318,7 @@ class QuickGroupDialog(QDialog):
 
         # Header message
         header = QLabel(f"Create a new group with {self._item_count} items")
-        header.setStyleSheet("color: #888; font-size: 11px;")
+        header.setProperty("textRole", "help")
         layout.addWidget(header)
 
         # Name input
@@ -406,7 +330,7 @@ class QuickGroupDialog(QDialog):
         # Color preview
         color_layout = QHBoxLayout()
         color_label = QLabel("Color:")
-        color_label.setStyleSheet("color: #888; font-size: 11px;")
+        color_label.setProperty("textRole", "help")
         color_layout.addWidget(color_label)
 
         self._color_preview = QLabel()
@@ -423,12 +347,8 @@ class QuickGroupDialog(QDialog):
         # Change color button
         change_btn = QPushButton("Change")
         change_btn.setFixedWidth(60)
-        change_btn.setStyleSheet("""
-            QPushButton {
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-        """)
+        change_btn.setProperty("role", "secondary")
+        change_btn.setProperty("density", "sm")
         change_btn.clicked.connect(self._cycle_color)
         color_layout.addWidget(change_btn)
 
@@ -445,7 +365,7 @@ class QuickGroupDialog(QDialog):
         button_layout.addWidget(cancel_btn)
 
         create_btn = QPushButton("Create")
-        create_btn.setProperty("primary", True)
+        create_btn.setProperty("role", "primary")
         create_btn.clicked.connect(self._on_create)
         button_layout.addWidget(create_btn)
 
@@ -475,16 +395,7 @@ class QuickGroupDialog(QDialog):
         name = self.name_input.text().strip()
         if not name:
             self.name_input.setFocus()
-            self.name_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2c313a;
-                    color: #e0e0e0;
-                    border: 2px solid #ef4444;
-                    border-radius: 4px;
-                    padding: 10px;
-                    font-size: 13px;
-                }
-            """)
+            set_role(self.name_input, state="error")
             return
         self.accept()
 
@@ -528,18 +439,6 @@ class MetadataDiffDialog(QDialog):
 
     def _setup_ui(self):
         """Set up the dialog UI."""
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e22;
-            }
-            QLabel {
-                color: #e0e0e0;
-            }
-            QScrollArea {
-                border: none;
-                background-color: #1e1e22;
-            }
-        """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -550,9 +449,11 @@ class MetadataDiffDialog(QDialog):
         name_b = os.path.basename(self._path_b)
 
         label_a = QLabel(f"A: {name_a}")
-        label_a.setStyleSheet("font-weight: bold; font-size: 12px; color: #4a9eff;")
+        label_a.setProperty("textRole", "title")
+        label_a.setProperty("state", "info")
         label_b = QLabel(f"B: {name_b}")
-        label_b.setStyleSheet("font-weight: bold; font-size: 12px; color: #10b981;")
+        label_b.setProperty("textRole", "title")
+        label_b.setProperty("state", "success")
 
         header.addWidget(label_a)
         header.addStretch()
@@ -576,18 +477,7 @@ class MetadataDiffDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3c414b;
-                color: #e0e0e0;
-                border: none;
-                padding: 8px 24px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #4a5160;
-            }
-        """)
+        close_btn.setProperty("role", "secondary")
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
@@ -600,7 +490,7 @@ class MetadataDiffDialog(QDialog):
         header_style = "font-weight: bold; color: #888; font-size: 10px; padding: 4px;"
         for col, text in enumerate(["Parameter", "Image A", "Image B"]):
             label = QLabel(text)
-            label.setStyleSheet(header_style)
+            label.setProperty("textRole", "micro")
             self._diff_layout.addWidget(label, row, col)
         row += 1
 
@@ -626,7 +516,7 @@ class MetadataDiffDialog(QDialog):
         if editable_a or editable_b:
             # Section header
             section_label = QLabel("-- Editable Parameters --")
-            section_label.setStyleSheet("color: #888; font-size: 10px; padding-top: 8px;")
+            section_label.setProperty("textRole", "micro")
             self._diff_layout.addWidget(section_label, row, 0, 1, 3)
             row += 1
 
@@ -670,7 +560,7 @@ class MetadataDiffDialog(QDialog):
 
         # Name label
         name_label = QLabel(name)
-        name_label.setStyleSheet(name_style)
+        name_label.setProperty("textRole", "label")
         self._diff_layout.addWidget(name_label, row, 0)
 
         # Value labels
@@ -678,11 +568,13 @@ class MetadataDiffDialog(QDialog):
         val_label_b = QLabel(str_b)
 
         if is_different:
-            val_label_a.setStyleSheet(value_style_diff_a)
-            val_label_b.setStyleSheet(value_style_diff_b)
+            val_label_a.setProperty("variant", "cell")
+            val_label_a.setProperty("state", "a")
+            val_label_b.setProperty("variant", "cell")
+            val_label_b.setProperty("state", "b")
         else:
-            val_label_a.setStyleSheet(value_style_same)
-            val_label_b.setStyleSheet(value_style_same)
+            val_label_a.setProperty("variant", "cell")
+            val_label_b.setProperty("variant", "cell")
 
         self._diff_layout.addWidget(val_label_a, row, 1)
         self._diff_layout.addWidget(val_label_b, row, 2)

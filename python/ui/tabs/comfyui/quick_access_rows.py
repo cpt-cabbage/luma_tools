@@ -70,12 +70,7 @@ class QuickAccessCard(QFrame):
         # Thumbnail placeholder
         thumb_frame = QFrame()
         thumb_frame.setFixedHeight(100)
-        thumb_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1e1e1e;
-                border-radius: 4px;
-            }
-        """)
+        thumb_frame.setProperty("variant", "thumb")
 
         thumb_layout = QVBoxLayout(thumb_frame)
         thumb_layout.setContentsMargins(0, 0, 0, 0)
@@ -96,12 +91,12 @@ class QuickAccessCard(QFrame):
                 thumb_layout.addWidget(thumb_label)
             else:
                 no_thumb = QLabel("No Preview")
-                no_thumb.setStyleSheet("color: #666; font-size: 10px;")
+                no_thumb.setProperty("textRole", "help")
                 no_thumb.setAlignment(Qt.AlignCenter)
                 thumb_layout.addWidget(no_thumb)
         else:
             no_thumb = QLabel("No Preview")
-            no_thumb.setStyleSheet("color: #666; font-size: 10px;")
+            no_thumb.setProperty("textRole", "help")
             no_thumb.setAlignment(Qt.AlignCenter)
             thumb_layout.addWidget(no_thumb)
 
@@ -110,11 +105,6 @@ class QuickAccessCard(QFrame):
         # Model name
         display_name = self._get_display_name()
         name_label = QLabel(display_name)
-        name_label.setStyleSheet(f"""
-            color: {TEXT_PRIMARY};
-            font-size: 11px;
-            font-weight: bold;
-        """)
         name_label.setWordWrap(False)
         # Elide long names
         metrics = name_label.fontMetrics()
@@ -139,17 +129,8 @@ class QuickAccessCard(QFrame):
             fav_btn = QPushButton("★" if is_favorite else "☆")
             fav_btn.setFixedSize(24, 24)
             fav_btn.setCursor(Qt.PointingHandCursor)
-            fav_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {"#fbbf24" if is_favorite else "#666"};
-                    border: none;
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{
-                    color: #fbbf24;
-                }}
-            """)
+            set_role(fav_btn, role="link",
+                     state="warning" if is_favorite else None)
             fav_btn.clicked.connect(self._on_favorite_clicked)
             btn_row.addWidget(fav_btn)
             btn_row.addStretch()
@@ -170,17 +151,7 @@ class QuickAccessCard(QFrame):
 
     def _apply_style(self):
         """Apply card style."""
-        self.setStyleSheet("""
-            QFrame#QuickAccessCard {
-                background-color: #2a2a2a;
-                border: 1px solid #3c414b;
-                border-radius: 6px;
-            }
-            QFrame#QuickAccessCard:hover {
-                border-color: #4a9eff;
-                background-color: #323232;
-            }
-        """)
+        self.setProperty("variant", "card")
 
     def _on_favorite_clicked(self):
         """Handle favorite button click."""
@@ -250,11 +221,7 @@ class QuickAccessRow(QWidget):
         # Title with icon
         title_text = f"{self._icon} {self._title}" if self._icon else self._title
         self._title_label = QLabel(title_text)
-        self._title_label.setStyleSheet(f"""
-            color: {SECTION_HEADER};
-            font-size: 13px;
-            font-weight: bold;
-        """)
+        self._title_label.setProperty("textRole", "title")
         header_layout.addWidget(self._title_label)
 
         header_layout.addStretch()
@@ -263,40 +230,16 @@ class QuickAccessRow(QWidget):
         self._scroll_left_btn = QPushButton("<")
         self._scroll_left_btn.setFixedSize(28, 28)
         self._scroll_left_btn.setCursor(Qt.PointingHandCursor)
-        self._scroll_left_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2d32;
-                color: #888;
-                border: none;
-                border-radius: 14px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3c414b;
-                color: #fff;
-            }
-        """)
+        self._scroll_left_btn.setProperty("role", "ghost")
+        self._scroll_left_btn.setProperty("iconOnly", "true")
         self._scroll_left_btn.clicked.connect(self._scroll_left)
         header_layout.addWidget(self._scroll_left_btn)
 
         self._scroll_right_btn = QPushButton(">")
         self._scroll_right_btn.setFixedSize(28, 28)
         self._scroll_right_btn.setCursor(Qt.PointingHandCursor)
-        self._scroll_right_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2d32;
-                color: #888;
-                border: none;
-                border-radius: 14px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3c414b;
-                color: #fff;
-            }
-        """)
+        self._scroll_right_btn.setProperty("role", "ghost")
+        self._scroll_right_btn.setProperty("iconOnly", "true")
         self._scroll_right_btn.clicked.connect(self._scroll_right)
         header_layout.addWidget(self._scroll_right_btn)
 
@@ -308,12 +251,6 @@ class QuickAccessRow(QWidget):
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll_area.setFixedHeight(QUICK_CARD_HEIGHT + 16)
-        self._scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-        """)
 
         self._cards_container = QWidget()
         self._cards_layout = QHBoxLayout(self._cards_container)
@@ -326,13 +263,7 @@ class QuickAccessRow(QWidget):
 
         # Empty state widget
         self._empty_widget = QFrame()
-        self._empty_widget.setStyleSheet("""
-            QFrame {
-                background-color: #1a1d21;
-                border: 1px dashed #3c414b;
-                border-radius: 8px;
-            }
-        """)
+        self._empty_widget.setProperty("variant", "empty")
         self._empty_widget.setFixedHeight(100)
 
         empty_layout = QVBoxLayout(self._empty_widget)
@@ -347,17 +278,17 @@ class QuickAccessRow(QWidget):
             empty_icon = QLabel("⏱")
             hint_text = "Models you use will appear here"
 
-        empty_icon.setStyleSheet("color: #4a4a4a; font-size: 24px;")
+        empty_icon.setProperty("textRole", "help")
         empty_icon.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(empty_icon)
 
         self._empty_label = QLabel(f"No {self._title.lower()} yet")
-        self._empty_label.setStyleSheet("color: #666; font-size: 12px;")
+        self._empty_label.setProperty("textRole", "help")
         self._empty_label.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(self._empty_label)
 
         hint_label = QLabel(hint_text)
-        hint_label.setStyleSheet("color: #4a4a4a; font-size: 10px;")
+        hint_label.setProperty("textRole", "help")
         hint_label.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(hint_label)
 

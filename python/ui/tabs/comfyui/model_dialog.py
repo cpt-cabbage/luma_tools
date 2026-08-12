@@ -236,7 +236,7 @@ class ModelDialog(QDialog):
             "Multi-Workflow Mode allows you to bundle multiple workflows under one model.\n"
             "Each workflow can have different settings. Users select which workflow to use from a dropdown."
         )
-        info_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_label.setProperty("textRole", "help")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
@@ -244,7 +244,6 @@ class ModelDialog(QDialog):
         self._workflows_scroll = QScrollArea()
         self._workflows_scroll.setWidgetResizable(True)
         self._workflows_scroll.setMinimumHeight(300)
-        self._workflows_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3c3c; }")
 
         self._workflows_container = QWidget()
         self._workflows_layout = QVBoxLayout(self._workflows_container)
@@ -257,7 +256,8 @@ class ModelDialog(QDialog):
         add_btn_layout = QHBoxLayout()
         self._add_workflow_btn = QPushButton("+ Add Workflow")
         self._add_workflow_btn.setFixedWidth(150)
-        self._add_workflow_btn.setStyleSheet("QPushButton { color: #10b981; }")
+        self._add_workflow_btn.setProperty("role", "ghost")
+        self._add_workflow_btn.setProperty("state", "success")
         self._add_workflow_btn.clicked.connect(self._on_add_workflow)
         add_btn_layout.addWidget(self._add_workflow_btn)
         add_btn_layout.addStretch()
@@ -323,7 +323,7 @@ class ModelDialog(QDialog):
             }
 
         entry_widget = QWidget()
-        entry_widget.setStyleSheet("QWidget { background-color: #2a2a2a; border-radius: 4px; }")
+        entry_widget.setProperty("variant", "subtle")
         entry_layout = QVBoxLayout(entry_widget)
         entry_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -337,7 +337,8 @@ class ModelDialog(QDialog):
         header_row.addStretch()
 
         delete_btn = QPushButton("Remove")
-        delete_btn.setStyleSheet("QPushButton { color: #ef4444; }")
+        delete_btn.setProperty("role", "ghost")
+        delete_btn.setProperty("state", "error")
         delete_btn.setFixedWidth(80)
         delete_btn.clicked.connect(lambda checked=False, w=entry_widget, n=wf_name: self._on_remove_workflow(w, n))
         header_row.addWidget(delete_btn)
@@ -452,16 +453,13 @@ class ModelDialog(QDialog):
         # Info label
         info_label = QLabel("Toggle which parameters are visible to users. "
                             "Optionally set default values for text/string parameters.")
-        info_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_label.setProperty("textRole", "help")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
         # Scroll area for parameter rows
         self._exposed_scroll = QScrollArea()
         self._exposed_scroll.setWidgetResizable(True)
-        self._exposed_scroll.setStyleSheet(
-            "QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3c3c; }"
-        )
 
         self._exposed_container = QWidget()
         self._exposed_layout = QVBoxLayout(self._exposed_container)
@@ -580,7 +578,6 @@ class ModelDialog(QDialog):
             name_label = QLabel(node.display_name)
             name_label.setMinimumWidth(180)
             name_label.setMaximumWidth(250)
-            name_label.setStyleSheet("color: #e0e0e0;")
             name_label.setToolTip(
                 f"Node: {node.title}\nID: {node.node_id}\n"
                 f"Type: {node.node_type}\nWidget: {node.widget_name or 'value'}"
@@ -591,10 +588,7 @@ class ModelDialog(QDialog):
             type_badge = QLabel(node.widget_type)
             type_badge.setFixedWidth(60)
             type_badge.setAlignment(Qt.AlignCenter)
-            type_badge.setStyleSheet(
-                "color: #888; background-color: #333; border-radius: 3px; "
-                "padding: 1px 4px; font-size: 10px;"
-            )
+            type_badge.setProperty("variant", "count")
             row_layout.addWidget(type_badge)
 
             # Default value input (text/string only)
@@ -620,7 +614,7 @@ class ModelDialog(QDialog):
     def _add_no_params_label(self, text: str):
         """Add an informational label to the exposed params area."""
         label = QLabel(text)
-        label.setStyleSheet("color: #888; font-style: italic;")
+        label.setProperty("textRole", "help")
         label.setWordWrap(True)
         self._exposed_layout.addWidget(label)
         self._exposed_layout.addStretch()
@@ -673,19 +667,13 @@ class ModelDialog(QDialog):
 
         # Preview
         preview_frame = QFrame()
-        preview_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1e1e1e;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-            }
-        """)
+        preview_frame.setProperty("variant", "sunken")
         preview_layout = QVBoxLayout(preview_frame)
 
         self._thumb_preview = QLabel()
         self._thumb_preview.setAlignment(Qt.AlignCenter)
         self._thumb_preview.setMinimumSize(300, 200)
-        self._thumb_preview.setStyleSheet("color: #666;")
+        self._thumb_preview.setProperty("textRole", "help")
         self._thumb_preview.setText("No thumbnail")
         preview_layout.addWidget(self._thumb_preview)
 
@@ -722,18 +710,12 @@ class ModelDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         label = QLabel("Select tags to categorize this model:")
-        label.setStyleSheet("color: #888;")
+        label.setProperty("textRole", "help")
         layout.addWidget(label)
 
         # Tags grid
         tags_frame = QFrame()
-        tags_frame.setStyleSheet("""
-            QFrame {
-                background-color: #2a2a2a;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-            }
-        """)
+        tags_frame.setProperty("variant", "subtle")
         tags_layout = QGridLayout(tags_frame)
         tags_layout.setContentsMargins(15, 15, 15, 15)
         tags_layout.setSpacing(10)
@@ -749,7 +731,6 @@ class ModelDialog(QDialog):
         for i, tag in enumerate(predefined):
             check = QCheckBox(tag)
             check.setChecked(tag in current_tags)
-            check.setStyleSheet("color: #e0e0e0;")
             self._tag_checks[tag] = check
             tags_layout.addWidget(check, i // cols, i % cols)
 
@@ -774,11 +755,12 @@ class ModelDialog(QDialog):
         summary_layout = QHBoxLayout()
 
         avg_label = QLabel(f"Average: {average:.1f}")
-        avg_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #fbbf24;")
+        avg_label.setProperty("textRole", "display")
+        avg_label.setProperty("state", "warning")
         summary_layout.addWidget(avg_label)
 
         count_label = QLabel(f"({count} ratings)")
-        count_label.setStyleSheet("color: #888; font-size: 14px;")
+        count_label.setProperty("textRole", "help")
         summary_layout.addWidget(count_label)
 
         summary_layout.addStretch()
@@ -790,7 +772,7 @@ class ModelDialog(QDialog):
 
         # Breakdown
         breakdown_label = QLabel("Rating Distribution:")
-        breakdown_label.setStyleSheet("color: #888; margin-top: 20px;")
+        breakdown_label.setProperty("textRole", "help")
         layout.addWidget(breakdown_label)
 
         self._rating_breakdown = RatingBreakdownWidget()
@@ -804,19 +786,8 @@ class ModelDialog(QDialog):
         clear_layout.addStretch()
 
         clear_btn = QPushButton("Clear All Ratings")
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #ef4444;
-                border: 1px solid #ef4444;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #ef4444;
-                color: white;
-            }
-        """)
+        clear_btn.setProperty("role", "ghost")
+        clear_btn.setProperty("state", "error")
         clear_btn.clicked.connect(self._on_clear_ratings)
         clear_layout.addWidget(clear_btn)
 

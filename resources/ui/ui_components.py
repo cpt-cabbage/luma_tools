@@ -398,16 +398,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
         self.selection_indicator = QLabel(self.thumbnail_label)
         self.selection_indicator.setText("✓")
         self.selection_indicator.setAlignment(Qt.AlignCenter)
-        self.selection_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 0.4);
-                color: rgba(59, 130, 246, 0.95);
-                border: 2px solid rgba(59, 130, 246, 0.8);
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-        """)
+        self.selection_indicator.setProperty("variant", "selectionBadge")
         self.selection_indicator.setFixedSize(24, 24)
         self.selection_indicator.move(4, 4)
         self.selection_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -495,7 +486,7 @@ class ThumbnailWidget(DraggableMixin, DropTargetMixin, MetadataCopyMixin, BaseTh
 
     def _apply_filename_style(self):
         # New items no longer use green - they have a pulsing NEW badge instead
-        self.filename_label.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.filename_label.setProperty("textRole", "help")
 
     def set_metadata_level(self, level):
         """Update the metadata level and refresh the indicator.
@@ -1762,19 +1753,12 @@ class GallerySelectionToolbar(QWidget):
 
         # Selection count label
         self.count_label = QLabel("0 items selected")
-        self.count_label.setStyleSheet("""
-            QLabel {
-                color: #ffffff;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 4px;
-            }
-        """)
+        self.count_label.setProperty("textRole", "value")
         layout.addWidget(self.count_label)
 
         # Separator
         sep1 = QLabel("|")
-        sep1.setStyleSheet("color: rgba(255, 255, 255, 0.3);")
+        sep1.setProperty("variant", "divider")
         layout.addWidget(sep1)
 
         # === ComfyUI Actions (show for single or multi-select) ===
@@ -1783,33 +1767,38 @@ class GallerySelectionToolbar(QWidget):
         self.use_comfyui_btn = QPushButton("Use in ComfyUI")
         self.use_comfyui_btn.setToolTip("Load selected images as ComfyUI inputs")
         self.use_comfyui_btn.clicked.connect(self._on_use_in_comfyui)
-        self.use_comfyui_btn.setStyleSheet(self._get_button_style("#059669"))  # Green
+        self.use_comfyui_btn.setProperty("role", "primary")
+        self.use_comfyui_btn.setProperty("density", "sm")
+# Green
         layout.addWidget(self.use_comfyui_btn)
 
         # Copy Prompt button (single selection only)
         self.copy_prompt_btn = QPushButton("Copy Prompt")
         self.copy_prompt_btn.setToolTip("Copy the prompt text from this image")
         self.copy_prompt_btn.clicked.connect(self._on_copy_prompt)
-        self.copy_prompt_btn.setStyleSheet(self._get_button_style())
+        self.copy_prompt_btn.setProperty("role", "secondary")
+        self.copy_prompt_btn.setProperty("density", "sm")
         layout.addWidget(self.copy_prompt_btn)
 
         # Compare to Source button (single selection only)
         self.compare_btn = QPushButton("Compare")
         self.compare_btn.setToolTip("Open side-by-side with the source image")
         self.compare_btn.clicked.connect(self._on_compare_to_source)
-        self.compare_btn.setStyleSheet(self._get_button_style())
+        self.compare_btn.setProperty("role", "secondary")
+        self.compare_btn.setProperty("density", "sm")
         layout.addWidget(self.compare_btn)
 
         # Recreate Settings button (single selection only)
         self.recreate_btn = QPushButton("Recreate")
         self.recreate_btn.setToolTip("Restore all ComfyUI settings from this image")
         self.recreate_btn.clicked.connect(self._on_recreate_settings)
-        self.recreate_btn.setStyleSheet(self._get_button_style())
+        self.recreate_btn.setProperty("role", "secondary")
+        self.recreate_btn.setProperty("density", "sm")
         layout.addWidget(self.recreate_btn)
 
         # Separator
         sep2 = QLabel("|")
-        sep2.setStyleSheet("color: rgba(255, 255, 255, 0.3);")
+        sep2.setProperty("variant", "divider")
         layout.addWidget(sep2)
 
         # === Standard Actions ===
@@ -1818,7 +1807,8 @@ class GallerySelectionToolbar(QWidget):
         self.view_btn = QPushButton("View")
         self.view_btn.setToolTip("Open selected images in viewer")
         self.view_btn.clicked.connect(self.view_selected.emit)
-        self.view_btn.setStyleSheet(self._get_button_style())
+        self.view_btn.setProperty("role", "secondary")
+        self.view_btn.setProperty("density", "sm")
         layout.addWidget(self.view_btn)
 
         # Publish to AYON button
@@ -1827,14 +1817,16 @@ class GallerySelectionToolbar(QWidget):
         self.publish_btn.setIcon(get_ayon_icon(16))
         self.publish_btn.setToolTip("Publish selected images to AYON")
         self.publish_btn.clicked.connect(self.publish_selected.emit)
-        self.publish_btn.setStyleSheet(self._get_button_style("#00cea5"))
+        self.publish_btn.setProperty("role", "ayon")
+        self.publish_btn.setProperty("density", "sm")
         layout.addWidget(self.publish_btn)
 
         # Delete button
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setToolTip("Delete selected images")
         self.delete_btn.clicked.connect(self.delete_selected.emit)
-        self.delete_btn.setStyleSheet(self._get_button_style("#dc2626"))
+        self.delete_btn.setProperty("role", "danger")
+        self.delete_btn.setProperty("density", "sm")
         layout.addWidget(self.delete_btn)
 
         # Clear selection button
@@ -1842,30 +1834,12 @@ class GallerySelectionToolbar(QWidget):
         self.clear_btn.setToolTip("Clear selection (Escape)")
         self.clear_btn.setFixedSize(28, 28)
         self.clear_btn.clicked.connect(self.clear_selection.emit)
-        self.clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #9ca3af;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                color: #ffffff;
-            }
-        """)
+        self.clear_btn.setProperty("role", "ghost")
+        self.clear_btn.setProperty("iconOnly", "true")
         layout.addWidget(self.clear_btn)
 
         # Toolbar background style - 65% opacity with darker, less saturated blue
-        self.setStyleSheet("""
-            GallerySelectionToolbar {
-                background-color: rgba(45, 65, 95, 0.65);
-                border: 1px solid rgba(70, 90, 120, 0.6);
-                border-radius: 8px;
-            }
-        """)
+        self.setProperty("variant", "scrim")
 
     def _get_button_style(self, hover_color="#2563eb"):
         """Get button stylesheet with optional custom hover color."""

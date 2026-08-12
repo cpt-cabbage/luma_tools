@@ -324,13 +324,7 @@ class PropertiesDialog(QDialog):
         # Thumbnail / type icon (96x96)
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(96, 96)
-        self.icon_label.setStyleSheet("""
-            QLabel {
-                background-color: #2a3040;
-                border: 1px solid #3a4050;
-                border-radius: 6px;
-            }
-        """)
+        self.icon_label.setProperty("variant", "sunken")
         self.icon_label.setAlignment(Qt.AlignCenter)
         header_layout.addWidget(self.icon_label)
 
@@ -349,12 +343,12 @@ class PropertiesDialog(QDialog):
 
         # Row 2: Type + format + dimensions + size
         self.info_line_label = QLabel()
-        self.info_line_label.setStyleSheet("color: #aaaaaa;")
+        self.info_line_label.setProperty("textRole", "label")
         header_text_layout.addWidget(self.info_line_label)
 
         # Row 3: Modification date
         self.date_label = QLabel()
-        self.date_label.setStyleSheet("color: #888888;")
+        self.date_label.setProperty("textRole", "help")
         header_text_layout.addWidget(self.date_label)
 
         # Row 4: Tag chips
@@ -372,19 +366,13 @@ class PropertiesDialog(QDialog):
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("background-color: #3a4050;")
+        separator.setProperty("variant", "divider")
         layout.addWidget(separator)
 
         # ---- Scrollable content area ----
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
-        """)
 
         scroll_widget = QWidget()
         self.content_layout = QVBoxLayout(scroll_widget)
@@ -421,47 +409,6 @@ class PropertiesDialog(QDialog):
         layout.addLayout(button_layout)
 
         # Apply stylesheet
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
-                color: #cccccc;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #3a4050;
-                border-radius: 6px;
-                margin-top: 8px;
-                padding-top: 12px;
-                background-color: #252530;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
-                color: #4a9eff;
-            }
-            QLabel {
-                color: #cccccc;
-            }
-            QPushButton {
-                background-color: #3a4050;
-                border: 1px solid #4a5060;
-                border-radius: 4px;
-                padding: 6px 16px;
-                color: #cccccc;
-            }
-            QPushButton:hover {
-                background-color: #4a5060;
-                border-color: #5a6070;
-            }
-            QPushButton:pressed {
-                background-color: #2a3040;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a2a;
-                color: #666666;
-            }
-        """)
 
     # ------------------------------------------------------------------
     # Populate data
@@ -636,9 +583,7 @@ class PropertiesDialog(QDialog):
         except Exception as e:
             logger.error(f"Error loading thumbnail: {e}")
             self.icon_label.setText("\U0001f5bc\ufe0f")
-            self.icon_label.setStyleSheet(
-                self.icon_label.styleSheet() + "font-size: 40px;"
-            )
+            self.icon_label.setProperty("textRole", "glyph")
 
     # ------------------------------------------------------------------
     # Section 1: Generation Details
@@ -716,7 +661,8 @@ class PropertiesDialog(QDialog):
         if editable and isinstance(editable, dict):
             self._add_separator(group)
             label = QLabel("Editable Parameters:")
-            label.setStyleSheet("font-weight: bold; color: #4a9eff; margin-top: 8px;")
+            label.setProperty("textRole", "title")
+            label.setProperty("state", "info")
             group.layout().addWidget(label)
 
             for node_id, data in editable.items():
@@ -782,9 +728,8 @@ class PropertiesDialog(QDialog):
         if error:
             self._add_separator(group)
             error_label = QLabel("Error:")
-            error_label.setStyleSheet(
-                "font-weight: bold; color: #f44336; margin-top: 8px;"
-            )
+            error_label.setProperty("textRole", "title")
+            error_label.setProperty("state", "error")
             group.layout().addWidget(error_label)
             self._add_text_property(group, "", error)
             has_content = True
@@ -794,9 +739,8 @@ class PropertiesDialog(QDialog):
         if node_trace and isinstance(node_trace, list):
             self._add_separator(group)
             trace_label = QLabel("Node Execution Trace:")
-            trace_label.setStyleSheet(
-                "font-weight: bold; color: #4a9eff; margin-top: 8px;"
-            )
+            trace_label.setProperty("textRole", "title")
+            trace_label.setProperty("state", "info")
             group.layout().addWidget(trace_label)
 
             for node in node_trace:
@@ -909,9 +853,8 @@ class PropertiesDialog(QDialog):
             if not (len(source_images) == 1 and source_images[0] == input_image):
                 self._add_separator(group)
                 label = QLabel("Source Images:")
-                label.setStyleSheet(
-                    "font-weight: bold; color: #4a9eff; margin-top: 8px;"
-                )
+                label.setProperty("textRole", "title")
+                label.setProperty("state", "info")
                 group.layout().addWidget(label)
 
                 for img in source_images:
@@ -923,9 +866,8 @@ class PropertiesDialog(QDialog):
         if source_models and isinstance(source_models, list) and len(source_models) > 0:
             self._add_separator(group)
             label = QLabel("Source 3D Models:")
-            label.setStyleSheet(
-                "font-weight: bold; color: #4a9eff; margin-top: 8px;"
-            )
+            label.setProperty("textRole", "title")
+            label.setProperty("state", "info")
             group.layout().addWidget(label)
 
             for model in source_models:
@@ -1096,7 +1038,7 @@ class PropertiesDialog(QDialog):
         row_layout.setSpacing(8)
 
         label_widget = QLabel(label)
-        label_widget.setStyleSheet("color: #888888; min-width: 120px;")
+        label_widget.setProperty("textRole", "label")
         label_widget.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         row_layout.addWidget(label_widget)
 
@@ -1112,29 +1054,20 @@ class PropertiesDialog(QDialog):
         """Add a multi-line text property."""
         if label:
             label_widget = QLabel(label)
-            label_widget.setStyleSheet("color: #888888; margin-bottom: 4px;")
+            label_widget.setProperty("textRole", "label")
             group.layout().addWidget(label_widget)
 
         text_widget = QTextEdit()
         text_widget.setPlainText(value)
         text_widget.setReadOnly(True)
         text_widget.setMaximumHeight(100)
-        text_widget.setStyleSheet("""
-            QTextEdit {
-                background-color: #1a1a1a;
-                border: 1px solid #3a4050;
-                border-radius: 4px;
-                padding: 6px;
-                color: #cccccc;
-            }
-        """)
         group.layout().addWidget(text_widget)
 
     def _add_separator(self, group: QGroupBox):
         """Add a separator line."""
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3a4050; margin: 6px 0;")
+        sep.setProperty("variant", "divider")
         group.layout().addWidget(sep)
 
     # ------------------------------------------------------------------

@@ -29,6 +29,8 @@ from core.settings_manager import safe_get_setting, safe_set_setting
 from comfyui.presets_manager import get_comfyui_workflow_presets
 from comfyui.ratings import get_sorted_models, get_model_rating, get_predefined_tags
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 # Card dimensions
@@ -38,15 +40,6 @@ THUMB_HEIGHT = 120
 CARD_SPACING = 10
 
 # Colors
-CARD_BG = "#22252b"
-CARD_BG_HOVER = "#2a2e36"
-CARD_BG_SELECTED = "#1a2636"
-CARD_BORDER = "#3c414b"
-CARD_BORDER_HOVER = "#4a9eff"
-CARD_BORDER_SELECTED = "#4a9eff"
-TEXT_PRIMARY = "#e0e0e0"
-TEXT_SECONDARY = "#888888"
-TEXT_DESCRIPTION = "#999999"
 GRID_BG = "#1e2127"
 
 # Output type display
@@ -67,24 +60,6 @@ SORT_OPTIONS = [
 ]
 
 # Filter button styling
-FILTER_BTN_STYLE = (
-    "QPushButton {"
-    "  background-color: #2a2d32; border: 1px solid #3c414b;"
-    "  border-radius: 6px; padding: 5px 10px;"
-    "  color: #aaa; font-size: 11px;"
-    "}"
-    "QPushButton:hover { border-color: #4a9eff; color: #e0e0e0; }"
-    "QPushButton::menu-indicator { image: none; width: 0; }"
-)
-FILTER_BTN_ACTIVE_STYLE = (
-    "QPushButton {"
-    "  background-color: rgba(74, 158, 255, 0.15); border: 1px solid #4a9eff;"
-    "  border-radius: 6px; padding: 5px 10px;"
-    "  color: #4a9eff; font-size: 11px;"
-    "}"
-    "QPushButton:hover { background-color: rgba(74, 158, 255, 0.25); }"
-    "QPushButton::menu-indicator { image: none; width: 0; }"
-)
 
 
 class _InlineModelCard(QFrame):
@@ -125,17 +100,13 @@ class _InlineModelCard(QFrame):
         self._thumbnail = QLabel()
         self._thumbnail.setFixedHeight(THUMB_HEIGHT)
         self._thumbnail.setAlignment(Qt.AlignCenter)
-        self._thumbnail.setStyleSheet(
-            "QLabel { background-color: #1a1d21;"
-            "  border-top-left-radius: 8px; border-top-right-radius: 8px;"
-            "  color: #555; font-size: 11px; }"
-        )
+        self._thumbnail.setProperty("variant", "thumb")
         self._load_thumbnail()
         layout.addWidget(self._thumbnail)
 
         # Info area
         info = QWidget()
-        info.setStyleSheet("background: transparent;")
+        info.setProperty("variant", "transparent")
         info_layout = QVBoxLayout(info)
         info_layout.setContentsMargins(10, 8, 10, 10)
         info_layout.setSpacing(4)
@@ -147,7 +118,6 @@ class _InlineModelCard(QFrame):
         display_name = self._get_display_name()
         self._name_label = QLabel(display_name)
         self._name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self._name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
         self._name_label.setToolTip(self._model_name)
         top.addWidget(self._name_label, 1)
 
@@ -167,7 +137,7 @@ class _InlineModelCard(QFrame):
         desc = self._preset_config.get("description", "").strip()
         self._desc_label = QLabel(desc or "")
         self._desc_label.setFont(QFont("Segoe UI", 9))
-        self._desc_label.setStyleSheet(f"color: {TEXT_DESCRIPTION}; background: transparent;")
+        self._desc_label.setProperty("textRole", "help")
         self._desc_label.setWordWrap(True)
         self._desc_label.setMaximumHeight(32)
         if desc:
@@ -199,17 +169,10 @@ class _InlineModelCard(QFrame):
         return name
 
     def _apply_style(self):
-        if self._is_selected:
-            bg, border, bw = CARD_BG_SELECTED, CARD_BORDER_SELECTED, 2
-        elif self._is_hovered:
-            bg, border, bw = CARD_BG_HOVER, CARD_BORDER_HOVER, 1
-        else:
-            bg, border, bw = CARD_BG, CARD_BORDER, 1
-        self.setStyleSheet(
-            f"QFrame#InlineModelCard {{"
-            f"  background-color: {bg}; border: {bw}px solid {border}; border-radius: 8px;"
-            f"}}"
-        )
+        # Hover is handled by QFrame[variant="card"]:hover in the stylesheet,
+        # so only selection needs to be pushed through as state.
+        set_role(self, variant="card",
+                 state="selected" if self._is_selected else None)
 
     def set_selected(self, selected: bool):
         self._is_selected = selected
@@ -220,13 +183,13 @@ class _InlineModelCard(QFrame):
         return self._model_name
 
     def enterEvent(self, event):
+        # No restyle here: hover is a QSS pseudo-state now, and unpolishing
+        # every card on every mouse-over was pure churn.
         self._is_hovered = True
-        self._apply_style()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._is_hovered = False
-        self._apply_style()
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
@@ -279,9 +242,7 @@ class InlineModelGrid(QWidget):
         header.setSpacing(12)
 
         title = QLabel("Choose a Model")
-        title.setStyleSheet(
-            "color: #e0e0e0; font-size: 15px; font-weight: bold;"
-        )
+        title.setProperty("textRole", "display")
         header.addWidget(title)
         header.addStretch()
 
@@ -289,34 +250,14 @@ class InlineModelGrid(QWidget):
         self._search_input.setPlaceholderText("Search models...")
         self._search_input.setClearButtonEnabled(True)
         self._search_input.setFixedWidth(220)
-        self._search_input.setStyleSheet(
-            "QLineEdit {"
-            "  background-color: #2a2d32; border: 1px solid #3c414b;"
-            "  border-radius: 6px; padding: 6px 10px;"
-            "  color: #e0e0e0; font-size: 12px;"
-            "}"
-            "QLineEdit:focus { border-color: #4a9eff; }"
-        )
         self._search_input.textChanged.connect(self._on_search_changed)
         header.addWidget(self._search_input)
 
         # Add Model button (admin only)
         self._add_model_btn = QPushButton("+ Add Model")
         self._add_model_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._add_model_btn.setStyleSheet(
-            "QPushButton {"
-            "  background-color: transparent;"
-            "  border: 1px solid #10b981;"
-            "  border-radius: 6px;"
-            "  color: #10b981;"
-            "  padding: 6px 14px;"
-            "  font-size: 12px;"
-            "}"
-            "QPushButton:hover {"
-            "  background-color: #10b981;"
-            "  color: white;"
-            "}"
-        )
+        self._add_model_btn.setProperty("role", "ghost")
+        self._add_model_btn.setProperty("state", "success")
         self._add_model_btn.clicked.connect(self.add_model_requested.emit)
         self._add_model_btn.setVisible(app_state.is_admin)
         header.addWidget(self._add_model_btn)
@@ -339,10 +280,11 @@ class InlineModelGrid(QWidget):
         # Category dropdown
         self._category_btn = QPushButton("Category: All")
         self._category_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._category_btn.setStyleSheet(FILTER_BTN_STYLE)
+        self._category_btn.setProperty("role", "secondary")
         self._category_menu = QMenu(self._category_btn)
         self._rebuild_category_menu()
         self._category_btn.setMenu(self._category_menu)
+        self._category_btn.setProperty("hasMenu", "true")
         filter_bar.addWidget(self._category_btn)
 
         # Sort dropdown
@@ -354,19 +296,20 @@ class InlineModelGrid(QWidget):
                 break
         self._sort_btn = QPushButton(f"Sort: {sort_label}")
         self._sort_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self._sort_btn.setStyleSheet(FILTER_BTN_STYLE)
+        self._sort_btn.setProperty("role", "secondary")
         sort_menu = QMenu(self._sort_btn)
         for label, key in SORT_OPTIONS:
             action = sort_menu.addAction(label)
             action.triggered.connect(lambda checked=False, k=key, l=label: self._on_sort_selected(k, l))
         self._sort_btn.setMenu(sort_menu)
+        self._sort_btn.setProperty("hasMenu", "true")
         filter_bar.addWidget(self._sort_btn)
 
         filter_bar.addStretch()
 
         # Result count
         self._count_label = QLabel("")
-        self._count_label.setStyleSheet("color: #797e89; font-size: 11px;")
+        self._count_label.setProperty("textRole", "help")
         filter_bar.addWidget(self._count_label)
 
         outer.addLayout(filter_bar)
@@ -376,10 +319,6 @@ class InlineModelGrid(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.NoFrame)
-        self._scroll.setStyleSheet(
-            "QScrollArea { background: transparent; border: none; }"
-            "QScrollArea > QWidget > QWidget { background: transparent; }"
-        )
 
         self._grid_widget = QWidget()
         self._grid_layout = QGridLayout(self._grid_widget)
@@ -392,9 +331,7 @@ class InlineModelGrid(QWidget):
         # Empty state
         self._empty_label = QLabel("No models available")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setStyleSheet(
-            "color: #797e89; font-size: 13px; font-style: italic; padding: 40px;"
-        )
+        self._empty_label.setProperty("textRole", "help")
         self._empty_label.setVisible(False)
         outer.addWidget(self._empty_label)
 
@@ -560,18 +497,18 @@ class InlineModelGrid(QWidget):
     def _update_fav_btn_style(self):
         """Update favorites button style based on checked state."""
         if self._fav_btn.isChecked():
-            self._fav_btn.setStyleSheet(FILTER_BTN_ACTIVE_STYLE)
+            set_role(self._fav_btn, state="active")
         else:
-            self._fav_btn.setStyleSheet(FILTER_BTN_STYLE)
+            set_role(self._fav_btn, state=None)
 
     def _update_category_btn_label(self):
         """Update category button text based on current filter."""
         if self._category_filter in ("all", "favorites"):
             self._category_btn.setText("Category: All")
-            self._category_btn.setStyleSheet(FILTER_BTN_STYLE)
+            set_role(self._category_btn, state=None)
         else:
             self._category_btn.setText(f"Category: {self._category_filter}")
-            self._category_btn.setStyleSheet(FILTER_BTN_ACTIVE_STYLE)
+            set_role(self._category_btn, state="active")
 
     def _rebuild_category_menu(self):
         """Rebuild category dropdown menu from current tags."""

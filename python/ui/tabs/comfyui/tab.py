@@ -32,6 +32,8 @@ from .state_manager import ComfyUIStateManager, read_seed, write_seed, random_se
 from .inline_model_grid import InlineModelGrid
 from .variant_selector import VariantSelector
 
+from core.design_tokens import set_role
+
 logger = logging.getLogger(__name__)
 
 from core.import_utils import get_event_bus
@@ -249,21 +251,13 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Status icon + text label
         self._server_status_label = QLabel("Checking server...")
-        self._server_status_label.setStyleSheet(
-            "color: #797e89; font-size: 12px; border: none;"
-        )
+        self._server_status_label.setProperty("textRole", "help")
         self.ui.serverStatusLayout.addWidget(self._server_status_label)
         self.ui.serverStatusLayout.addStretch()
 
         # Always show the banner
         banner.setVisible(True)
-        banner.setStyleSheet(
-            "QFrame#serverStatusBanner {"
-            "  background-color: #2c313a;"
-            "  border: 1px solid #3c414b;"
-            "  border-radius: 6px;"
-            "}"
-        )
+        banner.setProperty("variant", "subtle")
 
     def _check_server_status(self):
         """Read heartbeat file(s) from the network path to determine server status.
@@ -370,29 +364,13 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         if status == "online":
             self._server_status_label.setText("\u25cf  Server Online")
-            self._server_status_label.setStyleSheet(
-                "color: #10b981; font-size: 12px; font-weight: bold; border: none;"
-            )
-            banner.setStyleSheet(
-                "QFrame#serverStatusBanner {"
-                "  background-color: rgba(16, 185, 129, 0.08);"
-                "  border: 1px solid rgba(16, 185, 129, 0.25);"
-                "  border-radius: 6px;"
-                "}"
-            )
+            set_role(self._server_status_label, state="success")
+            set_role(banner, variant="note", state="success")
             self._server_status_label.setToolTip(info)
         elif status == "starting":
             self._server_status_label.setText("\u25cf  Server Starting...")
-            self._server_status_label.setStyleSheet(
-                "color: #f59e0b; font-size: 12px; font-weight: bold; border: none;"
-            )
-            banner.setStyleSheet(
-                "QFrame#serverStatusBanner {"
-                "  background-color: rgba(245, 158, 11, 0.08);"
-                "  border: 1px solid rgba(245, 158, 11, 0.25);"
-                "  border-radius: 6px;"
-                "}"
-            )
+            set_role(self._server_status_label, state="warning")
+            set_role(banner, variant="note", state="warning")
             self._server_status_label.setToolTip(info)
         else:
             # Build helpful offline message
@@ -405,16 +383,8 @@ class ComfyUITab(PollingMixin, BaseTab):
             behavior_text = behavior_labels.get(behavior, "")
             offline_text = f"\u25cf  Server Offline \u2014 {behavior_text}" if behavior_text else "\u25cf  Server Offline"
             self._server_status_label.setText(offline_text)
-            self._server_status_label.setStyleSheet(
-                "color: #ef4444; font-size: 12px; font-weight: bold; border: none;"
-            )
-            banner.setStyleSheet(
-                "QFrame#serverStatusBanner {"
-                "  background-color: rgba(239, 68, 68, 0.08);"
-                "  border: 1px solid rgba(239, 68, 68, 0.25);"
-                "  border-radius: 6px;"
-                "}"
-            )
+            set_role(self._server_status_label, state="error")
+            set_role(banner, variant="note", state="error")
             tip = info or "ComfyUI server is not responding"
             self._server_status_label.setToolTip(tip)
 
@@ -432,13 +402,8 @@ class ComfyUITab(PollingMixin, BaseTab):
         banner = QFrame(self.ui.comfyuiSubmitFrame)
         banner.setObjectName("comfyuiSubmitFailureBanner")
         banner.setVisible(False)
-        banner.setStyleSheet(
-            "QFrame#comfyuiSubmitFailureBanner {"
-            "  background-color: rgba(239, 68, 68, 0.08);"
-            "  border: 1px solid rgba(239, 68, 68, 0.35);"
-            "  border-radius: 6px;"
-            "}"
-        )
+        banner.setProperty("variant", "note")
+        banner.setProperty("state", "error")
 
         layout = QHBoxLayout(banner)
         layout.setContentsMargins(10, 6, 10, 6)
@@ -446,16 +411,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         label = QLabel("")
         label.setWordWrap(True)
-        label.setStyleSheet("color: #ef4444; font-size: 11px; border: none;")
+        label.setProperty("textRole", "help")
+        label.setProperty("state", "error")
         layout.addWidget(label, 1)
 
         dismiss = QPushButton("Dismiss")
         dismiss.setCursor(Qt.PointingHandCursor)
-        dismiss.setStyleSheet(
-            "QPushButton { background-color: transparent; border: 1px solid #3c414b;"
-            " border-radius: 4px; color: #c5cad3; padding: 2px 10px; font-size: 11px; }"
-            "QPushButton:hover { border-color: #ef4444; color: #ef4444; }"
-        )
+        dismiss.setProperty("role", "ghost")
+        dismiss.setProperty("density", "sm")
         dismiss.clicked.connect(self._clear_submit_failure)
         layout.addWidget(dismiss, 0)
 
@@ -776,10 +739,10 @@ class ComfyUITab(PollingMixin, BaseTab):
         network_path = safe_get_setting("network_output_path", "")
         if network_path:
             self.ui.ComfyUINetworkPathDisplay.setText(network_path)
-            self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #aaaaaa;")
+            set_role(self.ui.ComfyUINetworkPathDisplay, state=None)
         else:
             self.ui.ComfyUINetworkPathDisplay.setText("(Not configured - set in Settings tab)")
-            self.ui.ComfyUINetworkPathDisplay.setStyleSheet("color: #888888; font-style: italic;")
+            set_role(self.ui.ComfyUINetworkPathDisplay, state="warning")
 
     # =========================================================================
     # WORKFLOW SELECTOR (for multi-workflow models)
@@ -804,10 +767,6 @@ class ComfyUITab(PollingMixin, BaseTab):
         dialog = QDialog(self.main_window)
         dialog.setWindowTitle("Advanced Settings")
         dialog.setMinimumWidth(380)
-        dialog.setStyleSheet(
-            "QDialog { background-color: #282c34; }"
-            "QLabel { color: #c5cad3; font-size: 12px; }"
-        )
 
         # Snapshot original (layout, index) for every widget we're about to
         # reparent, so closing the dialog can restore them in place.
@@ -883,7 +842,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Server behavior
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("color: #3c414b;")
+        sep.setProperty("variant", "divider")
         layout.addWidget(sep)
 
         server_row = QHBoxLayout()
