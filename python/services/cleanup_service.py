@@ -10,7 +10,7 @@ import shutil
 from typing import List
 
 from core.error_handling import handle_errors
-from core.config import RENDERS_SUBPATH, USD_SUBPATH
+from core.config import RENDERS_SUBPATH
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,19 @@ def cleanup_renders(lookdev_dir, render_dirs_to_delete):
 
 
 def cleanup_usd(lookdev_dir, usd_dirs_to_delete):
-    """Delete specified USD directories."""
-    return _cleanup_directories(
-        os.path.join(lookdev_dir, USD_SUBPATH), usd_dirs_to_delete, "USD"
-    )
+    """Delete specified USD directories.
+
+    Resolves the USD directory the same way the scan did — deleting from a
+    differently-derived path than the one that produced the list is how you
+    remove the wrong directories. No resolved directory means nothing to do.
+    """
+    from services.file_operations import resolve_usd_directory
+
+    usd_path = resolve_usd_directory(lookdev_dir)
+    if not usd_path:
+        logger.warning(f"No USD directory under {lookdev_dir}; nothing to clean")
+        return []
+    return _cleanup_directories(usd_path, usd_dirs_to_delete, "USD")
 
 
 def cleanup_hip_backups(lookdev_dir):
@@ -103,12 +112,16 @@ def calculate_cleanup_size(lookdev_dir, render_dirs, usd_dirs, include_backups):
         if dir_path.exists():
             total_size += get_folder_size(dir_path)
 
-    # Calculate USD sizes
-    usd_path = os.path.join(lookdev_dir, USD_SUBPATH)
-    for dir_name in usd_dirs:
-        dir_path = Path(os.path.join(usd_path, dir_name))
-        if dir_path.exists():
-            total_size += get_folder_size(dir_path)
+    # Calculate USD sizes — resolve exactly as cleanup_usd() will, so the size
+    # shown in the confirmation dialog describes what actually gets deleted.
+    from services.file_operations import resolve_usd_directory
+
+    usd_path = resolve_usd_directory(lookdev_dir)
+    if usd_path:
+        for dir_name in usd_dirs:
+            dir_path = Path(os.path.join(usd_path, dir_name))
+            if dir_path.exists():
+                total_size += get_folder_size(dir_path)
 
     # Calculate backup size
     if include_backups:

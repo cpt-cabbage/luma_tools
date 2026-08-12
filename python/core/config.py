@@ -319,7 +319,14 @@ FRAME_PADDING_FORMAT = f"%0{FRAME_PADDING}d"
 
 # Directory structure expectations (relative to task directory)
 RENDERS_SUBPATH = os.path.join("img", "renders")
-USD_SUBPATH = r"usd_files"
+# Where USD caches live under a task directory, in priority order. Shots write
+# them to render/usd (<task>/render/usd/<version>/...); "usd_files" is the
+# older convention and is kept so shots using it still scan and clean.
+# Resolve with services.file_operations.resolve_usd_directory() rather than
+# joining one of these directly — the scan and the cleanup MUST agree on the
+# same directory, or Shot Cleaner would delete from a path it never listed.
+USD_SUBPATHS = (os.path.join("render", "usd"), r"usd_files")
+USD_SUBPATH = USD_SUBPATHS[0]
 DEFAULT_TASK = "lookdev"
 
 # File extensions

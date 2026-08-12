@@ -245,6 +245,32 @@ def get_working_directory(shot_path, task=None):
     return working_dir
 
 
+def resolve_usd_directory(lookdev_dir):
+    """Return the USD directory for a task directory, or "" if there is none.
+
+    Tries each entry in USD_SUBPATHS in order and returns the first that
+    exists. Every consumer (scan, size calculation, deletion) must go through
+    here so they operate on the same directory — the cleaner deletes
+    subdirectories of whatever the scan listed, and resolving the path twice
+    by different rules is how you delete from the wrong place.
+
+    Args:
+        lookdev_dir: Task directory (e.g. .../work/lighting)
+
+    Returns:
+        str: Absolute USD directory path, or "" when none of the candidates exist
+    """
+    from core.config import USD_SUBPATHS
+
+    if not lookdev_dir:
+        return ""
+    for subpath in USD_SUBPATHS:
+        candidate = os.path.join(lookdev_dir, subpath)
+        if os.path.isdir(candidate):
+            return candidate
+    return ""
+
+
 def get_comp_directory(shot_path):
     """
     Get the compositing directory from shot path.

@@ -191,32 +191,19 @@ class DirectoryScanner:
         Returns:
             str: Path to USD directory, or empty string if not found
         """
-        from core.config import USD_SUBPATH
+        # Resolve through the shared helper so the scan and the cleanup agree
+        # on the same directory. Previously this searched the pre-scanned dir
+        # list for a hardcoded "usd_files" fragment and let an IndexError stand
+        # in for "not found" — which reported "USD Directory Not Found!" for
+        # every shot in this studio, since USDs live under render/usd.
+        from services.file_operations import resolve_usd_directory
 
-        if dirs is None:
-            try:
-                dirs = fast_scandir(self.state.lookdev_dir)
-            except Exception as e:
-                logger.error(f"Error scanning directory: {e}")
-                dirs = ()
+        usd_directory = resolve_usd_directory(self.state.lookdev_dir)
 
-        usd_folders = []
-        usd_directory = ""
-
-        if len(dirs) > 0:
-            for i in dirs:
-                if USD_SUBPATH in i:
-                    usd_folders.append(i)
-
-            try:
-                usd_directory = usd_folders[0]
-                usd_directory = truncate_at_suffix(usd_directory, USD_SUBPATH)
-                self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
-            except Exception as e:
-                usd_directory = ""
-                logger.warning(f"No USDs Found: {e}")
+        if usd_directory:
+            self.signals.set_label_text.emit('USDlabel', f'USD Directory Found: {usd_directory}')
         else:
-            usd_directory = ""
+            logger.info(f"No USD directory under {self.state.lookdev_dir}")
             self.signals.set_label_text.emit('USDlabel', 'USD Directory Not Found!')
             self.signals.set_widget_enabled.emit('CleanUSD', False)
             self.signals.set_widget_checked.emit('CleanUSD', False)

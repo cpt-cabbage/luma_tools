@@ -121,6 +121,60 @@ class TestFindCompFiles:
 
 
 # ============================================================================
+# resolve_usd_directory
+#
+# This decides what Shot Cleaner deletes, so scan and cleanup must always
+# resolve to the same directory.
+# ============================================================================
+
+class TestResolveUsdDirectory:
+    def test_prefers_render_usd(self, tmp_path):
+        from services.file_operations import resolve_usd_directory
+        (tmp_path / "render" / "usd").mkdir(parents=True)
+        assert resolve_usd_directory(str(tmp_path)) == str(tmp_path / "render" / "usd")
+
+    def test_falls_back_to_usd_files(self, tmp_path):
+        from services.file_operations import resolve_usd_directory
+        (tmp_path / "usd_files").mkdir()
+        assert resolve_usd_directory(str(tmp_path)) == str(tmp_path / "usd_files")
+
+    def test_render_usd_wins_when_both_exist(self, tmp_path):
+        from services.file_operations import resolve_usd_directory
+        (tmp_path / "render" / "usd").mkdir(parents=True)
+        (tmp_path / "usd_files").mkdir()
+        assert resolve_usd_directory(str(tmp_path)) == str(tmp_path / "render" / "usd")
+
+    def test_returns_empty_when_absent(self, tmp_path):
+        from services.file_operations import resolve_usd_directory
+        assert resolve_usd_directory(str(tmp_path)) == ""
+
+    def test_returns_empty_for_falsy_input(self):
+        from services.file_operations import resolve_usd_directory
+        assert resolve_usd_directory("") == ""
+        assert resolve_usd_directory(None) == ""
+
+    def test_cleanup_uses_the_same_directory_as_resolution(self, tmp_path):
+        # Guards the invariant that matters: cleanup_usd must delete from the
+        # directory resolve_usd_directory() reports, not a separately built one.
+        from services.file_operations import resolve_usd_directory
+        from services.cleanup_service import cleanup_usd
+
+        usd_dir = tmp_path / "render" / "usd"
+        (usd_dir / "v001").mkdir(parents=True)
+        (usd_dir / "v002").mkdir(parents=True)
+        assert resolve_usd_directory(str(tmp_path)) == str(usd_dir)
+
+        deleted = cleanup_usd(str(tmp_path), ["v001"])
+        assert deleted == ["v001"]
+        assert not (usd_dir / "v001").exists()
+        assert (usd_dir / "v002").exists()      # untouched
+
+    def test_cleanup_is_noop_without_a_usd_directory(self, tmp_path):
+        from services.cleanup_service import cleanup_usd
+        assert cleanup_usd(str(tmp_path), ["anything"]) == []
+
+
+# ============================================================================
 # Path helpers
 # ============================================================================
 
