@@ -91,10 +91,28 @@ class TestFindCompFiles:
         result = find_comp_files(str(tmp_path))
         assert len(result) == 1
 
+    def test_finds_lowercase_compositing(self, tmp_path):
+        # Real shots name comps in lowercase (Cha_sh0040_compositing_v023.nk).
+        # Only the capitalised form was ever tested, so a case-sensitive match
+        # silently returned nothing for every real shot — which left Shot
+        # Cleaner with an empty "renders in use" list and every render
+        # pre-selected for deletion.
+        (tmp_path / "Cha_sh0040_compositing_v023.nk").write_text("")
+        result = find_comp_files(str(tmp_path))
+        assert result == ["Cha_sh0040_compositing_v023.nk"]
+
+    def test_finds_mixed_case_compositing(self, tmp_path):
+        (tmp_path / "shot_COMPOSITING_v02.nk").write_text("")
+        assert len(find_comp_files(str(tmp_path))) == 1
+
     def test_excludes_baking(self, tmp_path):
         (tmp_path / "shot_Compositing_baking.nk").write_text("")
         result = find_comp_files(str(tmp_path))
         assert len(result) == 0
+
+    def test_excludes_baking_lowercase(self, tmp_path):
+        (tmp_path / "shot_compositing_Baking_v01.nk").write_text("")
+        assert find_comp_files(str(tmp_path)) == []
 
     def test_excludes_non_comp(self, tmp_path):
         (tmp_path / "shot_v01.nk").write_text("")  # No "Compositing" in name

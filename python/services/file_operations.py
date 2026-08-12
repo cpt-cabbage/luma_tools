@@ -148,8 +148,14 @@ def find_hip_files(dirname, task=None):
 
 def find_comp_files(compdirname):
     """
-    Find compositing files (Nuke/Fusion) containing 'Compositing' in the name.
+    Find compositing files (Nuke/Fusion) with 'compositing' in the name.
     Ignores files with 'baking' in the name.
+
+    The name match is case-insensitive: shots name their comps
+    ``<show>_<shot>_compositing_v021.nk`` in lowercase, while this used to
+    require a capital "Compositing". That mismatch made every comp scan return
+    nothing, which surfaced as "Comp Directory Not Found!" in the shot summary
+    and left Shot Cleaner unable to see which renders a comp still uses.
 
     Args:
         compdirname: Directory to search
@@ -161,7 +167,8 @@ def find_comp_files(compdirname):
     for root, dirs, files in os.walk(compdirname):
         for file in files:
             if any(file.endswith(ext) for ext in COMP_EXTENSIONS):
-                if "Compositing" in file and "baking" not in file.lower():
+                lowered = file.lower()
+                if "compositing" in lowered and "baking" not in lowered:
                     compfiles.append(file)
     return compfiles
 
