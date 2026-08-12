@@ -148,48 +148,65 @@ class CleanerTab(BaseTab):
         s.set_spinbox_value.connect(self._scanner_set_spinbox_value)
         s.set_combobox_text.connect(self._scanner_set_combobox_text)
 
-    def _scanner_set_label_text(self, widget_name, text):
+    def _scanner_widget(self, widget_name):
+        """Resolve a widget the scanner addresses by name.
+
+        The scanner reports into widgets that do not all live on this tab —
+        the shot-summary labels (Complabel, Renderlabel, USDlabel, HIPlabel,
+        HipNumber) are defined in settings.ui. Looking them up only on
+        ``self.ui`` silently found nothing, so those labels sat on their
+        placeholder text ("Not Found") no matter what the scan actually found.
+        The main window's unified namespace holds every tab's named widgets,
+        so fall back to it.
+        """
         widget = getattr(self.ui, widget_name, None)
+        if widget is not None:
+            return widget
+        main_ui = getattr(self.main_window, 'ui', None)
+        return getattr(main_ui, widget_name, None) if main_ui is not None else None
+
+    def _scanner_set_label_text(self, widget_name, text):
+        widget = self._scanner_widget(widget_name)
         if widget is not None:
             widget.setText(text)
 
     def _scanner_add_list_item(self, list_name, item_text):
-        widget = getattr(self.ui, list_name, None)
+        widget = self._scanner_widget(list_name)
         if widget is not None:
             widget.addItem(item_text)
 
     def _scanner_clear_list(self, list_name):
-        widget = getattr(self.ui, list_name, None)
+        widget = self._scanner_widget(list_name)
         if widget is not None:
             widget.clear()
 
     def _scanner_scroll_list_to_bottom(self, list_name):
-        widget = getattr(self.ui, list_name, None)
+        widget = self._scanner_widget(list_name)
         if widget is not None and widget.count() > 0:
             widget.scrollToBottom()
 
     def _scanner_set_widget_enabled(self, widget_name, enabled):
-        widget = getattr(self.ui, widget_name, None)
+        widget = self._scanner_widget(widget_name)
         if widget is not None:
             widget.setEnabled(enabled)
 
     def _scanner_set_widget_checked(self, widget_name, checked):
-        widget = getattr(self.ui, widget_name, None)
+        widget = self._scanner_widget(widget_name)
         if widget is not None and hasattr(widget, "setChecked"):
             widget.setChecked(checked)
 
     def _scanner_set_spinbox_range(self, widget_name, lo, hi):
-        widget = getattr(self.ui, widget_name, None)
+        widget = self._scanner_widget(widget_name)
         if widget is not None:
             widget.setRange(lo, hi)
 
     def _scanner_set_spinbox_value(self, widget_name, value):
-        widget = getattr(self.ui, widget_name, None)
+        widget = self._scanner_widget(widget_name)
         if widget is not None:
             widget.setValue(value)
 
     def _scanner_set_combobox_text(self, widget_name, text):
-        widget = getattr(self.ui, widget_name, None)
+        widget = self._scanner_widget(widget_name)
         if widget is None:
             return
         idx = widget.findText(text)

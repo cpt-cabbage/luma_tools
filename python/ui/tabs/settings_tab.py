@@ -562,14 +562,23 @@ class SettingsTab(BaseTab):
         """
         from core.settings_manager import safe_get_setting
 
-        # Snapshot all values first to avoid partial reads during external changes
+        # Snapshot all values first to avoid partial reads during external changes.
+        #
+        # Call safe_get_setting WITHOUT an explicit default: passing None
+        # overrode the SettingDef default, so any setting the user had never
+        # saved read back as None and fell through to whatever the .ui widget
+        # happened to ship with — which is not necessarily the declared
+        # default (e.g. comfyui_convert_colorspace defaults to True). It also
+        # logged a warning per unsaved setting on every visit to this tab.
         values = {}
         for entry in settings_map:
             key = entry[0]
-            value = safe_get_setting(key, None)
+            value = safe_get_setting(key)
             values[key] = value
             if value is None:
-                logger.warning("Setting '%s' missing or unreadable; using widget default", key)
+                # Registered settings always yield their default, so None here
+                # means the key is genuinely unknown — a real wiring mistake.
+                logger.warning("Setting '%s' is not in SETTINGS_REGISTRY; using widget default", key)
 
         for entry in settings_map:
             key, widget_name, widget_type = entry[0], entry[1], entry[2]
