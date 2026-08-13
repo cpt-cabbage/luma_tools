@@ -113,18 +113,30 @@ entirely about workflow submission.
   `OnJobComplete=Delete`, pool `DEADLINE_POOL`, group `DEADLINE_GROUP_COMFYUI`,
   priority `min(99, DEADLINE_PRIORITY_COMFYUI + 20)` so a quick diagnostic does
   not queue behind renders
-- `plugin_info.txt`: `ScriptFile=<job dir>/comfyui_path_check.py`, `Version=3`,
+- `plugin_info.txt`: `ScriptFile=<job dir>/comfyui_path_check.py`,
+  `Version=3.10`,
   `Arguments=--comfyui-path "…" --comfyui-mode … --comfyui-python "…" --result-file "…"`
+  — the version must name a row configured under *Configure Plugins → Python →
+  Python Executables* in the Deadline repository (3.9 / 3.10 / 3.11 are
+  configured in this studio). Defined as a module constant
+  `DEADLINE_PYTHON_PLUGIN_VERSION = "3.10"` with a comment pointing at that
+  dialog. The check script is stdlib-only and version-tolerant, so any
+  configured 3.x works.
 - All embedded paths pass through `normalize_path` (forward slashes; Deadline's
   parser treats backslashes in quoted arguments as escapes)
 - `read_path_check_result(path) -> dict | None`
 - `cleanup_old_path_checks(root, keep_days=1)`, called on each submit
 
-**Why `Plugin=Python`:** it runs under Deadline's own bundled interpreter, which
-is present on every worker by definition. A missing or broken
-`comfyui_python_path` therefore reports as a clear per-item ✗ rather than an
-opaque job error, and "no result file" unambiguously means the farm never
-picked the job up.
+**Why `Plugin=Python`:** it runs under an interpreter configured centrally in
+the Deadline repository, entirely independent of the ComfyUI install being
+tested. A missing or broken `comfyui_python_path` therefore reports as a clear
+per-item ✗ rather than an opaque job error, and "no result file" means the farm
+never picked the job up.
+
+The residual dependency is that the worker actually has the configured
+interpreter installed (e.g. `C:\Program Files\Python310\python.exe`). If it does
+not, Deadline errors the job and the UI surfaces that error message — which is
+itself actionable, and distinct from a ComfyUI path problem.
 
 ## 4. Settings tab wiring (`python/ui/tabs/settings_tab.py`)
 
