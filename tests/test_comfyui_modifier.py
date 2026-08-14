@@ -520,3 +520,66 @@ class TestReferenceTagValidation:
                         {"id": 3, "type": "Reroute"},
                         {"id": 4, "type": "LoadImage"}]}
         assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+
+# ============================================================================
+# End-to-end: fan-out through the full modify_workflow pipeline
+# ============================================================================
+
+class TestFanoutEndToEnd:
+    def test_fanout_survives_modify_workflow(self, tmp_path, monkeypatch):
+        """Fan-out, path normalization and file collection must compose.
+
+        Fan-out writes absolute paths on purpose so that
+        normalize_file_paths_in_workflow basenames them and collects them for
+        staging. If either half regressed, the farm would get paths it cannot
+        resolve, or the files would never be copied.
+        """
+        import comfyui.node_info as ni
+        from comfyui.modifier import modify_workflow
+        from comfyui.editable import EditableNode, CARDINALITY_MANY
+
+        declared = ([f"media_{i}" for i in range(1, 16)]
+                    + [f"media_type_{i}" for i in range(1, 16)])
+        monkeypatch.setattr(
+            ni, "get_optional_input_names",
+            lambda class_type: declared if class_type == "MiniMaxH3Easy" else None)
+
+        refs = []
+        for name in ("r1.png", "r2.png", "r3.png"):
+            p = tmp_path / name
+            p.write_bytes(b"x")
+            refs.append(str(p))
+
+        workflow = {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "old.png"},
+                   "_meta": {"title": "Ref Images_editable*"}},
+            "50": {"class_type": "MiniMaxH3Easy",
+                   "inputs": {"prompt": "a cat", "media_1": ["41", 0],
+                              "media_type_1": "image"},
+                   "_meta": {"title": "Video_editable"}},
+            "60": {"class_type": "SaveVideo",
+                   "inputs": {"filename_prefix": "out", "video": ["50", 0]},
+                   "_meta": {"title": "Result_output"}},
+        }
+        node = EditableNode(node_id="41", node_type="LoadImage",
+                            title="Ref Images_editable*", display_name="Ref Images",
+                            widget_type="image", widget_name="image",
+                            cardinality=CARDINALITY_MANY)
+
+        modified, _found, files_to_copy = modify_workflow(
+            workflow, None, None, "job_prefix", seed=1,
+            editable_values={"41": [{"node": node, "value": refs}]})
+
+        loaders = [n for n in modified.values() if n["class_type"] == "LoadImage"]
+        assert len(loaders) == 3, "one loader node per reference file"
+
+        # Every reference reached the farm as a bare basename...
+        assert {n["inputs"]["image"] for n in loaders} == {"r1.png", "r2.png", "r3.png"}
+        # ...and every source file was collected for staging.
+        assert set(files_to_copy) == set(refs)
+
+        consumer = modified["50"]["inputs"]
+        wired = [consumer[f"media_{i}"][0] for i in (1, 2, 3)]
+        assert len(set(wired)) == 3, "each slot wired to a distinct loader"
+        assert all(consumer[f"media_type_{i}"] == "image" for i in (1, 2, 3))
