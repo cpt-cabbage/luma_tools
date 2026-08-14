@@ -19,6 +19,9 @@ from .config import (
     REQUIRED_PASSES,
     DEFAULT_GLOBAL_SETTINGS_PATH,
     GLOBAL_SETTINGS_FILENAME,
+    DEADLINE_POOL,
+    DEADLINE_GROUP_COMFYUI,
+    DEADLINE_PRIORITY_COMFYUI,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,14 @@ def _validate_server_behavior(v):
 
 def _validate_stacking_mode(v):
     return _validate_enum(v, ("job", "groups", "both", "grid"), "job")
+
+def _validate_deadline_priority(v):
+    """Deadline priorities run 0-100; anything else is rejected by the farm."""
+    try:
+        return max(0, min(100, int(v)))
+    except (ValueError, TypeError):
+        return DEADLINE_PRIORITY_COMFYUI
+
 
 def _validate_deadline_poll_interval(v):
     """Validate Deadline poll interval (1-60 seconds)."""
@@ -123,6 +134,17 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
         "global"
     ),
     # Deadline Settings
+    # Where ComfyUI work lands on the farm. These cover ComfyUI generation
+    # jobs and the ComfyUI farm path check; pass building and AYON publishing
+    # keep their own constants (DEADLINE_GROUP / DEADLINE_PRIORITY_*).
+    "comfyui_deadline_pool": SettingDef("comfyui_deadline_pool", DEADLINE_POOL, "global"),
+    "comfyui_deadline_group": SettingDef(
+        "comfyui_deadline_group", DEADLINE_GROUP_COMFYUI, "global"
+    ),
+    "comfyui_deadline_priority": SettingDef(
+        "comfyui_deadline_priority", DEADLINE_PRIORITY_COMFYUI, "global",
+        _validate_deadline_priority
+    ),
     "deadline_poll_interval": SettingDef(
         "deadline_poll_interval", 5, "global", _validate_deadline_poll_interval
     ),

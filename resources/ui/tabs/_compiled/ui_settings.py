@@ -442,6 +442,50 @@ class Ui_SettingsTab(object):
 
         self.globalSettingsLayout.addWidget(self.comfyuiVerifyStatus)
 
+        self.deadlineTargetNoteLabel = QLabel(self.globalSettingsGroupBox)
+        self.deadlineTargetNoteLabel.setObjectName(u"deadlineTargetNoteLabel")
+        self.deadlineTargetNoteLabel.setWordWrap(True)
+
+        self.globalSettingsLayout.addWidget(self.deadlineTargetNoteLabel)
+
+        self.deadlineTargetLayout = QHBoxLayout()
+        self.deadlineTargetLayout.setObjectName(u"deadlineTargetLayout")
+        self.deadlinePoolLabel = QLabel(self.globalSettingsGroupBox)
+        self.deadlinePoolLabel.setObjectName(u"deadlinePoolLabel")
+
+        self.deadlineTargetLayout.addWidget(self.deadlinePoolLabel)
+
+        self.ComfyUIDeadlinePoolEdit = QLineEdit(self.globalSettingsGroupBox)
+        self.ComfyUIDeadlinePoolEdit.setObjectName(u"ComfyUIDeadlinePoolEdit")
+
+        self.deadlineTargetLayout.addWidget(self.ComfyUIDeadlinePoolEdit)
+
+        self.deadlineGroupLabel = QLabel(self.globalSettingsGroupBox)
+        self.deadlineGroupLabel.setObjectName(u"deadlineGroupLabel")
+
+        self.deadlineTargetLayout.addWidget(self.deadlineGroupLabel)
+
+        self.ComfyUIDeadlineGroupEdit = QLineEdit(self.globalSettingsGroupBox)
+        self.ComfyUIDeadlineGroupEdit.setObjectName(u"ComfyUIDeadlineGroupEdit")
+
+        self.deadlineTargetLayout.addWidget(self.ComfyUIDeadlineGroupEdit)
+
+        self.deadlinePriorityLabel = QLabel(self.globalSettingsGroupBox)
+        self.deadlinePriorityLabel.setObjectName(u"deadlinePriorityLabel")
+
+        self.deadlineTargetLayout.addWidget(self.deadlinePriorityLabel)
+
+        self.ComfyUIDeadlinePrioritySpinBox = QSpinBox(self.globalSettingsGroupBox)
+        self.ComfyUIDeadlinePrioritySpinBox.setObjectName(u"ComfyUIDeadlinePrioritySpinBox")
+        self.ComfyUIDeadlinePrioritySpinBox.setMinimum(0)
+        self.ComfyUIDeadlinePrioritySpinBox.setMaximum(100)
+        self.ComfyUIDeadlinePrioritySpinBox.setValue(50)
+
+        self.deadlineTargetLayout.addWidget(self.ComfyUIDeadlinePrioritySpinBox)
+
+
+        self.globalSettingsLayout.addLayout(self.deadlineTargetLayout)
+
         self.networkOutputLayout = QHBoxLayout()
         self.networkOutputLayout.setObjectName(u"networkOutputLayout")
         self.networkOutputLabel = QLabel(self.globalSettingsGroupBox)
@@ -853,6 +897,22 @@ class Ui_SettingsTab(object):
 #endif // QT_CONFIG(tooltip)
         self.comfyuiVerifyStatus.setProperty(u"textRole", QCoreApplication.translate("SettingsTab", u"help", None))
         self.comfyuiVerifyStatus.setText("")
+        self.deadlineTargetNoteLabel.setProperty(u"textRole", QCoreApplication.translate("SettingsTab", u"help", None))
+        self.deadlineTargetNoteLabel.setText(QCoreApplication.translate("SettingsTab", u"Where ComfyUI work runs on the farm. Applies to ComfyUI generation jobs and the path check above. Pass building and AYON publishing are unaffected. Leave a field blank to use the built-in default.", None))
+        self.deadlinePoolLabel.setText(QCoreApplication.translate("SettingsTab", u"Deadline Pool:", None))
+        self.ComfyUIDeadlinePoolEdit.setPlaceholderText(QCoreApplication.translate("SettingsTab", u"luma", None))
+#if QT_CONFIG(tooltip)
+        self.ComfyUIDeadlinePoolEdit.setToolTip(QCoreApplication.translate("SettingsTab", u"Deadline pool for ComfyUI jobs. Blank uses the built-in default (luma).", None))
+#endif // QT_CONFIG(tooltip)
+        self.deadlineGroupLabel.setText(QCoreApplication.translate("SettingsTab", u"Group:", None))
+        self.ComfyUIDeadlineGroupEdit.setPlaceholderText(QCoreApplication.translate("SettingsTab", u"temp_compute", None))
+#if QT_CONFIG(tooltip)
+        self.ComfyUIDeadlineGroupEdit.setToolTip(QCoreApplication.translate("SettingsTab", u"Deadline group for ComfyUI jobs - the machines that have ComfyUI installed. Blank uses the built-in default (temp_compute).", None))
+#endif // QT_CONFIG(tooltip)
+        self.deadlinePriorityLabel.setText(QCoreApplication.translate("SettingsTab", u"Priority:", None))
+#if QT_CONFIG(tooltip)
+        self.ComfyUIDeadlinePrioritySpinBox.setToolTip(QCoreApplication.translate("SettingsTab", u"Deadline job priority for ComfyUI jobs (0-100). The farm path check runs 20 higher so a quick diagnostic does not queue behind a render.", None))
+#endif // QT_CONFIG(tooltip)
         self.networkOutputLabel.setText(QCoreApplication.translate("SettingsTab", u"Network Output Path:", None))
         self.NetworkOutputEdit.setPlaceholderText(QCoreApplication.translate("SettingsTab", u"Network path for outputs...", None))
 #if QT_CONFIG(tooltip)

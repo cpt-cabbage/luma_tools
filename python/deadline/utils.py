@@ -6,10 +6,41 @@ Provides common functionality for Deadline job submission and management.
 import logging
 from typing import Optional, Tuple, List
 
+from core.config import (
+    DEADLINE_POOL,
+    DEADLINE_GROUP_COMFYUI,
+    DEADLINE_PRIORITY_COMFYUI,
+)
 from core.subprocess_utils import run_command
 from deadline.parser import extract_job_id
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_comfyui_targeting(pool=None, group=None, priority=None):
+    """Resolve where a ComfyUI job should land on the farm.
+
+    Explicit arguments win, then the global settings, then the built-in
+    constants. A blank setting falls through to the constant so an empty
+    Settings field never submits to a pool literally named "".
+
+    Returns (pool, group, priority).
+    """
+    from core.settings_manager import safe_get_setting
+
+    if pool is None:
+        pool = str(safe_get_setting("comfyui_deadline_pool", DEADLINE_POOL) or "").strip()
+    if group is None:
+        group = str(safe_get_setting("comfyui_deadline_group", DEADLINE_GROUP_COMFYUI) or "").strip()
+    if priority is None:
+        priority = safe_get_setting("comfyui_deadline_priority", DEADLINE_PRIORITY_COMFYUI)
+
+    try:
+        priority = max(0, min(100, int(priority)))
+    except (ValueError, TypeError):
+        priority = DEADLINE_PRIORITY_COMFYUI
+
+    return pool or DEADLINE_POOL, group or DEADLINE_GROUP_COMFYUI, priority
 
 
 def run_deadline_command(deadline_command: List[str], log_prefix: str = "") -> Tuple[bool, str, str]:

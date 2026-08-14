@@ -856,6 +856,80 @@
            </widget>
           </item>
           <item>
+           <widget class="QLabel" name="deadlineTargetNoteLabel">
+            <property name="textRole" stdset="0">
+             <string>help</string>
+            </property>
+            <property name="text">
+             <string>Where ComfyUI work runs on the farm. Applies to ComfyUI generation jobs and the path check above. Pass building and AYON publishing are unaffected. Leave a field blank to use the built-in default.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="deadlineTargetLayout">
+            <item>
+             <widget class="QLabel" name="deadlinePoolLabel">
+              <property name="text">
+               <string>Deadline Pool:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="ComfyUIDeadlinePoolEdit">
+              <property name="placeholderText">
+               <string>luma</string>
+              </property>
+              <property name="toolTip">
+               <string>Deadline pool for ComfyUI jobs. Blank uses the built-in default (luma).</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="deadlineGroupLabel">
+              <property name="text">
+               <string>Group:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="ComfyUIDeadlineGroupEdit">
+              <property name="placeholderText">
+               <string>temp_compute</string>
+              </property>
+              <property name="toolTip">
+               <string>Deadline group for ComfyUI jobs - the machines that have ComfyUI installed. Blank uses the built-in default (temp_compute).</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="deadlinePriorityLabel">
+              <property name="text">
+               <string>Priority:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="ComfyUIDeadlinePrioritySpinBox">
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>100</number>
+              </property>
+              <property name="value">
+               <number>50</number>
+              </property>
+              <property name="toolTip">
+               <string>Deadline job priority for ComfyUI jobs (0-100). The farm path check runs 20 higher so a quick diagnostic does not queue behind a render.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
            <layout class="QHBoxLayout" name="networkOutputLayout">
             <item>
              <widget class="QLabel" name="networkOutputLabel">

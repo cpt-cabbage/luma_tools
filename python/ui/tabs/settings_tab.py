@@ -92,6 +92,10 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_fast_mode", "ComfyUIFastMode", _CHECKBOX),
     ("comfyui_disable_smart_memory", "ComfyUIDisableSmartMemory", _CHECKBOX),
     ("comfyui_timeout", "ComfyUITimeoutSpinBox", _SPINBOX, _seconds_to_minutes, _minutes_to_seconds),
+    # Where ComfyUI work runs on the farm
+    ("comfyui_deadline_pool", "ComfyUIDeadlinePoolEdit", _TEXT),
+    ("comfyui_deadline_group", "ComfyUIDeadlineGroupEdit", _TEXT),
+    ("comfyui_deadline_priority", "ComfyUIDeadlinePrioritySpinBox", _SPINBOX),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]

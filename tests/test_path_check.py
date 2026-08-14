@@ -241,6 +241,80 @@ class TestJobFiles:
         assert build_check_id("alice", "WS01", "20260813_140000") == "alice_WS01_20260813_140000"
 
 
+class TestFarmTargeting:
+    """Where ComfyUI work lands: explicit args > global settings > constants."""
+
+    @staticmethod
+    def _fake_settings(monkeypatch, values):
+        import core.settings_manager as sm
+
+        def fake(key, default=None):
+            return values.get(key, default)
+
+        # resolve_comfyui_targeting imports this at call time, so patching the
+        # module attribute is enough.
+        monkeypatch.setattr(sm, "safe_get_setting", fake)
+
+    def test_settings_override_the_built_in_constants(self, monkeypatch):
+        from deadline.utils import resolve_comfyui_targeting
+
+        self._fake_settings(monkeypatch, {
+            "comfyui_deadline_pool": "gpu_pool",
+            "comfyui_deadline_group": "rtx_boxes",
+            "comfyui_deadline_priority": 70,
+        })
+
+        assert resolve_comfyui_targeting() == ("gpu_pool", "rtx_boxes", 70)
+
+    def test_explicit_arguments_beat_settings(self, monkeypatch):
+        from deadline.utils import resolve_comfyui_targeting
+
+        self._fake_settings(monkeypatch, {
+            "comfyui_deadline_pool": "gpu_pool",
+            "comfyui_deadline_group": "rtx_boxes",
+            "comfyui_deadline_priority": 70,
+        })
+
+        assert resolve_comfyui_targeting("other", "elsewhere", 10) == ("other", "elsewhere", 10)
+
+    def test_blank_settings_fall_back_to_the_constants(self, monkeypatch):
+        # An empty Settings field must never submit to a pool named "".
+        from core.config import DEADLINE_GROUP_COMFYUI, DEADLINE_POOL
+        from deadline.utils import resolve_comfyui_targeting
+
+        self._fake_settings(monkeypatch, {
+            "comfyui_deadline_pool": "   ",
+            "comfyui_deadline_group": "",
+        })
+
+        pool, group, _ = resolve_comfyui_targeting()
+        assert pool == DEADLINE_POOL
+        assert group == DEADLINE_GROUP_COMFYUI
+
+    def test_priority_is_clamped_to_the_deadline_range(self, monkeypatch):
+        from deadline.utils import resolve_comfyui_targeting
+
+        self._fake_settings(monkeypatch, {"comfyui_deadline_priority": 5000})
+        assert resolve_comfyui_targeting()[2] == 100
+
+        self._fake_settings(monkeypatch, {"comfyui_deadline_priority": -20})
+        assert resolve_comfyui_targeting()[2] == 0
+
+    def test_unparseable_priority_falls_back(self, monkeypatch):
+        from core.config import DEADLINE_PRIORITY_COMFYUI
+        from deadline.utils import resolve_comfyui_targeting
+
+        self._fake_settings(monkeypatch, {"comfyui_deadline_priority": "not a number"})
+
+        assert resolve_comfyui_targeting()[2] == DEADLINE_PRIORITY_COMFYUI
+
+    def test_the_check_outranks_generation_jobs_but_stays_under_100(self):
+        from deadline.path_check import _check_priority
+
+        assert _check_priority(50) == 70
+        assert _check_priority(95) == 99
+
+
 class TestReadResult:
     def test_missing_file_reads_as_none(self, tmp_path):
         assert read_path_check_result(str(tmp_path / RESULT_FILENAME)) is None

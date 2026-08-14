@@ -14,9 +14,6 @@ from typing import Optional, Callable, List, Dict, Any, Tuple
 
 from core.config import (
     DEADLINE_PATH,
-    DEADLINE_POOL,
-    DEADLINE_GROUP_COMFYUI,
-    DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
     DEADLINE_JOB_NAME_PREFIX,
 )
@@ -71,6 +68,7 @@ def submit_comfyui_to_deadline(
     group: Optional[str] = None,
     full_restart: bool = False,
     restart_lowvram: bool = False,
+    ui_workflow_path: Optional[str] = None,
 ) -> Optional[str]:
     """
     Submit ComfyUI job to Deadline using CommandLine plugin.
@@ -100,12 +98,8 @@ def submit_comfyui_to_deadline(
         logger.error("Deadline not available — DEADLINE_PATH is not set")
         return None
 
-    if priority is None:
-        priority = DEADLINE_PRIORITY_COMFYUI
-    if pool is None:
-        pool = DEADLINE_POOL
-    if group is None:
-        group = DEADLINE_GROUP_COMFYUI
+    from deadline.utils import resolve_comfyui_targeting
+    pool, group, priority = resolve_comfyui_targeting(pool, group, priority)
 
     import shutil
 
@@ -196,6 +190,12 @@ def submit_comfyui_to_deadline(
 
     comfyui_default_output = normalize_path(os.path.join(comfyui_path, "ComfyUI", "output"))
     runner_args += f' --comfyui-output-dir "{comfyui_default_output}"'
+
+    # Ship the UI-format graph so SaveImage can embed it in the output files,
+    # the same way ComfyUI's own frontend does. Without it, a studio render
+    # can't be dragged back into ComfyUI to recover the workflow that made it.
+    if ui_workflow_path:
+        runner_args += f' --ui-workflow "{normalize_path(ui_workflow_path)}"'
 
     job_info_path = os.path.join(job_data_dir, "comfyui_job_info.txt")
     job_info_content = f"""Plugin=CommandLine
@@ -420,6 +420,21 @@ def submit_comfyui_job(
 
         workflow_file = save_workflow(modified, job_data_dir, job_id=job_data_id)
 
+        # Persist the source UI graph alongside the API one so the runner can
+        # hand it to ComfyUI for embedding in the outputs. Only meaningful when
+        # the preset is in UI/nodes format — an API-format preset has no graph
+        # to embed.
+        ui_workflow_file = None
+        if isinstance(workflow, dict) and 'nodes' in workflow:
+            ui_workflow_file = os.path.join(
+                job_data_dir, f"comfyui_ui_workflow_{job_data_id}.json"
+            )
+            try:
+                save_json(ui_workflow_file, workflow)
+            except Exception as e:
+                logger.warning(f"Could not save UI workflow for embedding: {e}")
+                ui_workflow_file = None
+
         if base_seed is not None:
             seeds = [base_seed + i for i in range(generation_count)]
         else:
@@ -479,10 +494,24 @@ def submit_comfyui_job(
                 custom_name=custom_name,
             )
 
-        # Copy input file to working directory for farm access (convert if needed)
+        # Copy input files to the working directory for farm access, converting
+        # unsupported formats to PNG. A failed *required* conversion is fatal:
+        # the workflow already references the .png that was never written, so
+        # submitting would burn a farm slot to produce a missing-file error.
         apply_cs = safe_get_setting("comfyui_convert_colorspace", True)
+        conversion_failures = []
+
+        def _stage_input(path, label):
+            """Copy/convert one input, recording a failure instead of hiding it."""
+            result_path = copy_or_convert(path, current_working_dir, apply_colorspace=apply_cs)
+            if result_path:
+                logger.info(f"Copied/converted {label}: {os.path.basename(result_path)}")
+            else:
+                conversion_failures.append(os.path.basename(path))
+            return result_path
+
         if current_file and os.path.exists(current_file):
-            copy_or_convert(current_file, current_working_dir, apply_colorspace=apply_cs)
+            _stage_input(current_file, "input file")
 
         # Copy additional files (images, 3D models) from editable values
         if current_editable_values:
@@ -505,9 +534,7 @@ def submit_comfyui_job(
                     for file_path in files_to_copy:
                         # Skip the primary input file (already copied above)
                         if file_path and file_path != current_file and os.path.exists(file_path):
-                            result_path = copy_or_convert(file_path, current_working_dir, apply_colorspace=apply_cs)
-                            if result_path:
-                                logger.info(f"Copied/converted {node_info.widget_type} file: {os.path.basename(result_path)}")
+                            _stage_input(file_path, f"{node_info.widget_type} file")
 
         # Copy all files detected in workflow (from automatic path normalization)
         if workflow_files_to_copy:
@@ -517,11 +544,19 @@ def submit_comfyui_job(
                 if full_path == current_file:
                     continue
                 if os.path.exists(full_path):
-                    result_path = copy_or_convert(full_path, current_working_dir, apply_colorspace=apply_cs)
-                    if result_path:
-                        logger.info(f"Copied/converted workflow file: {os.path.basename(result_path)}")
+                    _stage_input(full_path, "workflow file")
                 else:
                     logger.warning(f"File not found (skipping): {full_path}")
+
+        if conversion_failures:
+            error = (
+                "Could not prepare input file(s) for the farm: "
+                + ", ".join(sorted(set(conversion_failures)))
+                + ". Check that OIIO is available and the source files are readable."
+            )
+            logger.error(error)
+            errors.append(error)
+            continue  # Don't submit a job that is guaranteed to fail
 
         job_id = submit_comfyui_to_deadline(
             workflow_path=workflow_file,
@@ -533,6 +568,7 @@ def submit_comfyui_job(
             job_data_dir=job_data_dir,
             full_restart=full_restart,
             restart_lowvram=restart_lowvram,
+            ui_workflow_path=ui_workflow_file,
         )
 
         if job_id:

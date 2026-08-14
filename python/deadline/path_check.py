@@ -19,9 +19,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from core.config import (
     DEADLINE_PATH,
-    DEADLINE_POOL,
-    DEADLINE_GROUP_COMFYUI,
-    DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
     DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC,
 )
@@ -49,9 +46,9 @@ FARM_SCRIPTS = (
 )
 
 
-def _check_priority() -> int:
+def _check_priority(base: int) -> int:
     """A five-second diagnostic should not queue behind a render."""
-    return min(99, DEADLINE_PRIORITY_COMFYUI + 20)
+    return min(99, base + 20)
 
 
 def build_check_id(user: Optional[str] = None, host: Optional[str] = None,
@@ -163,12 +160,17 @@ def submit_path_check(comfyui_path: str, comfyui_mode: str = "embedded",
 
     job_info_path = os.path.join(job_dir, "path_check_job_info.txt")
     plugin_info_path = os.path.join(job_dir, "path_check_plugin_info.txt")
+    from deadline.utils import resolve_comfyui_targeting
+
+    # The check must land where real ComfyUI jobs land, or it verifies the
+    # wrong machines - so it shares their pool/group resolution.
+    resolved_pool, resolved_group, base_priority = resolve_comfyui_targeting(pool, group)
     with open(job_info_path, "w", encoding="utf-8") as handle:
         handle.write(build_job_info(
             job_dir,
-            pool or DEADLINE_POOL,
-            group or DEADLINE_GROUP_COMFYUI,
-            _check_priority() if priority is None else priority,
+            resolved_pool,
+            resolved_group,
+            _check_priority(base_priority) if priority is None else priority,
         ))
     with open(plugin_info_path, "w", encoding="utf-8") as handle:
         handle.write(build_plugin_info(
