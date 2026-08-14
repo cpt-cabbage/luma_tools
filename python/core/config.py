@@ -238,6 +238,11 @@ DEADLINE_CHUNK_SIZE = 1
 DEADLINE_GROUP_COMFYUI = "temp_compute"
 DEADLINE_PRIORITY_COMFYUI = 50
 DEADLINE_JOB_NAME_PREFIX = "LUMA TOOLS - "
+# Diagnostic jobs (e.g. the ComfyUI farm path check) are identifiable on the
+# farm but must NOT be mistaken for generation jobs: crash recovery scans by
+# job name, and adopting a probe makes the ComfyUI tab track a job that never
+# produces renders. See deadline.poller.is_recoverable_luma_job.
+DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC = "LUMA TOOLS DIAG - "
 
 # ============================================================================
 # AYON SETTINGS

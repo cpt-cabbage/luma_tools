@@ -23,7 +23,7 @@ from core.config import (
     DEADLINE_GROUP_COMFYUI,
     DEADLINE_PRIORITY_COMFYUI,
     DEADLINE_DEPARTMENT,
-    DEADLINE_JOB_NAME_PREFIX,
+    DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC,
 )
 from core.utils import ensure_directory, load_json, normalize_path
 
@@ -67,7 +67,7 @@ def build_job_info(job_dir: str, pool: str, group: str, priority: int) -> str:
     """Deadline job_info for a single-task check job."""
     return (
         "Plugin=Python\n"
-        f"Name={DEADLINE_JOB_NAME_PREFIX}ComfyUI Path Check\n"
+        f"Name={DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC}ComfyUI Path Check\n"
         f"Department={DEADLINE_DEPARTMENT}\n"
         f"Pool={pool}\n"
         f"Group={group}\n"

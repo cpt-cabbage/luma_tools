@@ -221,6 +221,22 @@ class TestJobFiles:
         assert '--comfyui-python "C:/Python310/python.exe"' in arguments
         assert '--result-file "W:/checks/abc/result.json"' in arguments
 
+    def test_the_check_job_is_not_adopted_by_crash_recovery(self):
+        """The check job must not look like a ComfyUI generation job.
+
+        Regression: it was named with DEADLINE_JOB_NAME_PREFIX, so the ComfyUI
+        tab's startup recovery adopted the probe, reported phantom running
+        submissions, and glowed the Gallery for renders that never arrive.
+        """
+        from deadline.poller import is_recoverable_luma_job
+
+        text = build_job_info("W:/checks/abc", "luma", "temp_compute", 70)
+        name = [ln for ln in text.splitlines() if ln.startswith("Name=")][0][len("Name="):]
+
+        assert not is_recoverable_luma_job(name), name
+        # ...while real ComfyUI jobs still are
+        assert is_recoverable_luma_job("LUMA TOOLS - my_render")
+
     def test_check_id_is_unique_per_user_host_and_time(self):
         assert build_check_id("alice", "WS01", "20260813_140000") == "alice_WS01_20260813_140000"
 

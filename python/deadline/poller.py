@@ -13,7 +13,11 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
-from core.config import DEADLINE_PATH, DEADLINE_JOB_NAME_PREFIX
+from core.config import (
+    DEADLINE_PATH,
+    DEADLINE_JOB_NAME_PREFIX,
+    DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC,
+)
 from core.subprocess_utils import run_command
 from core.caching import cached_with_ttl
 from deadline.parser import (
@@ -252,6 +256,11 @@ _RUNNER_LOG_PATH_CACHE: Dict[str, str] = {}
 _RUNNER_LOG_PATH_CACHE_LOCK = threading.RLock()
 _RUNNER_LOG_PATH_CACHE_MAX = 200
 
+# How long a cached runner log may sit unmodified before we re-glob for a newer
+# one. Comfortably longer than a poll interval, short enough that the handover
+# between frames of a multi-task job costs at most one stale tick.
+_RUNNER_LOG_STALE_SECONDS = 45
+
 
 def _cache_runner_log_path(cache_key: str, path: str) -> None:
     """Store a resolved runner-log path, evicting oldest entries when full."""
@@ -300,9 +309,21 @@ def get_runner_log_from_network(
         with _RUNNER_LOG_PATH_CACHE_LOCK:
             cached_path = _RUNNER_LOG_PATH_CACHE.get(cache_key)
         if cached_path:
+            still_current = False
             if os.path.isfile(cached_path):
+                # A multi-frame Deadline job writes ONE log per task, each with
+                # its own timestamp. Pinning the first task's log for the life
+                # of the job froze progress reporting at frame 1 — the file
+                # still exists, it just stopped growing. Re-resolve once the
+                # cached log goes quiet so later frames are picked up.
+                try:
+                    age = time.time() - os.path.getmtime(cached_path)
+                    still_current = age < _RUNNER_LOG_STALE_SECONDS
+                except OSError:
+                    still_current = False
+            if still_current:
                 return _read_log_tail(cached_path)
-            # File vanished (rotated/cleaned up) — invalidate and re-resolve.
+            # Vanished, or stopped growing — invalidate and re-resolve.
             with _RUNNER_LOG_PATH_CACHE_LOCK:
                 _RUNNER_LOG_PATH_CACHE.pop(cache_key, None)
 
@@ -597,6 +618,24 @@ def complete_deadline_job(job_id: str) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def is_recoverable_luma_job(job_name: str) -> bool:
+    """Is this a luma_tools job worth recovering as a running generation job?
+
+    Diagnostic jobs are excluded. They carry their own prefix precisely so
+    crash recovery skips them: a ComfyUI farm path check is a 13-second probe
+    that produces no renders, and adopting one makes the ComfyUI tab report
+    phantom submissions and glow the Gallery for outputs that never arrive.
+    """
+    if not job_name or job_name.startswith(DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC):
+        return False
+
+    return (
+        job_name.startswith(DEADLINE_JOB_NAME_PREFIX) or
+        job_name.endswith("_luma_tools") or
+        job_name == "luma_tools_job"
+    )
+
+
 def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
     """
     Find all running luma_tools jobs for a specific user on Deadline.
@@ -666,14 +705,7 @@ def find_user_running_jobs(username: str) -> List[Dict[str, Any]]:
                 submit_date = job_info.get("SubmitDate", "")
                 output_dir = job_info.get("OutputDirectory0", "")
 
-                # Check if this is a luma_tools job
-                is_luma_job = (
-                    job_name.startswith(DEADLINE_JOB_NAME_PREFIX) or
-                    job_name.endswith("_luma_tools") or
-                    job_name == "luma_tools_job"
-                )
-
-                if is_luma_job:
+                if is_recoverable_luma_job(job_name):
                     running_jobs.append({
                         "job_id": job_id,
                         "name": job_name,
