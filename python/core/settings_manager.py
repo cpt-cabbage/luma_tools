@@ -94,7 +94,10 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_fast_mode": SettingDef("comfyui_fast_mode", False, "global"),
     "comfyui_lowvram": SettingDef("comfyui_lowvram", False, "global"),
     "comfyui_highvram": SettingDef("comfyui_highvram", False, "global"),
-    "comfyui_normalvram": SettingDef("comfyui_normalvram", False, "global"),
+    # comfyui_normalvram is gone: ComfyUI removed --normalvram, so there is no
+    # longer a flag that forces normal VRAM management. Legacy configs may
+    # still carry the key; nothing reads it, and the VRAM combo falls back to
+    # Auto, which is the closest surviving behaviour.
     "comfyui_disable_smart_memory": SettingDef("comfyui_disable_smart_memory", False, "global"),
     "network_output_path": SettingDef("network_output_path", "", "global"),
     "comfyui_workflows_directory": SettingDef(

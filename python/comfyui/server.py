@@ -659,9 +659,8 @@ def _restart_comfyui_locked(reason: str):
     if server_state.get('restart_lowvram_override'):
         server_state['restart_lowvram_override'] = False
         extra_args = list(config['extra_args'])  # copy — don't mutate config
-        for flag in ('--highvram', '--normalvram'):
-            if flag in extra_args:
-                extra_args.remove(flag)
+        if '--highvram' in extra_args:
+            extra_args.remove('--highvram')
         if '--lowvram' not in extra_args:
             extra_args.append('--lowvram')
         logger.info("Applying one-time --lowvram override for this restart")
@@ -989,9 +988,6 @@ def main():
     parser.add_argument('--highvram', action='store_true',
                         default=global_settings.get('comfyui_highvram', False),
                         help='Keep models in VRAM (default from global settings)')
-    parser.add_argument('--normalvram', action='store_true',
-                        default=global_settings.get('comfyui_normalvram', False),
-                        help='Use normal VRAM mode (default from global settings)')
     parser.add_argument('--disable-smart-memory', action='store_true',
                         default=global_settings.get('comfyui_disable_smart_memory', False),
                         help='Disable smart memory management to keep models loaded (default from global settings)')
@@ -1026,15 +1022,19 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    # --lowvram/--normalvram/--highvram are mutually exclusive ComfyUI launch
-    # flags, but they come from three independent booleans in global settings
-    # and older configs can have more than one set. Passing several makes
-    # ComfyUI's own arg parsing the arbiter — resolve it here instead, with a
-    # documented priority (low > normal > high) matching the Settings tab.
+    # --lowvram/--highvram are mutually exclusive ComfyUI launch flags, but
+    # they come from independent booleans in global settings and older configs
+    # can have both set. Passing both makes ComfyUI's own arg parsing the
+    # arbiter — resolve it here instead, with a documented priority
+    # (low > high) matching the Settings tab.
+    #
+    # --normalvram used to be a third option here. ComfyUI removed it, and
+    # passing it now aborts startup with "unrecognized arguments", so there is
+    # no way to force normal VRAM management any more; omitting all flags lets
+    # ComfyUI choose, which is the closest surviving behaviour.
     _vram_flags = [
         name for name, enabled in (
             ('lowvram', args.lowvram),
-            ('normalvram', args.normalvram),
             ('highvram', args.highvram),
         ) if enabled
     ]
@@ -1043,10 +1043,9 @@ def main():
         logger.warning(
             f"Multiple VRAM flags set ({', '.join('--' + f for f in _vram_flags)}) — "
             f"these are mutually exclusive; applying --{winner} "
-            "(priority: lowvram > normalvram > highvram)"
+            "(priority: lowvram > highvram)"
         )
         args.lowvram = winner == 'lowvram'
-        args.normalvram = winner == 'normalvram'
         args.highvram = winner == 'highvram'
 
     extra_args = []
@@ -1060,8 +1059,6 @@ def main():
         extra_args.append('--lowvram')
     if args.highvram:
         extra_args.append('--highvram')
-    if args.normalvram:
-        extra_args.append('--normalvram')
     if args.disable_smart_memory:
         extra_args.append('--disable-smart-memory')
     if args.gpu_only:
@@ -1096,8 +1093,6 @@ def main():
         flags_enabled.append("--lowvram")
     if args.highvram:
         flags_enabled.append("--highvram")
-    if args.normalvram:
-        flags_enabled.append("--normalvram")
     if args.disable_smart_memory:
         flags_enabled.append("--disable-smart-memory")
     if args.fast:

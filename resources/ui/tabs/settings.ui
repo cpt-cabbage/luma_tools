@@ -900,14 +900,14 @@
                <string>VRAM Mode:</string>
               </property>
               <property name="toolTip">
-               <string>ComfyUI GPU memory strategy. --lowvram, --normalvram and --highvram are mutually exclusive launch flags.</string>
+               <string>ComfyUI GPU memory strategy. --lowvram and --highvram are mutually exclusive launch flags.</string>
               </property>
              </widget>
             </item>
             <item>
              <widget class="QComboBox" name="ComfyUIVRAMMode">
               <property name="toolTip">
-               <string>Auto: let ComfyUI decide. Low (--lowvram): least VRAM, slowest. Normal (--normalvram): default memory management. High (--highvram): keep models in VRAM, needs high-end GPUs (24GB+).</string>
+               <string>Auto: let ComfyUI decide. Low (--lowvram): least VRAM, slowest. High (--highvram): keep models in VRAM, needs high-end GPUs (24GB+).</string>
               </property>
               <property name="minimumWidth">
                <number>200</number>
@@ -920,11 +920,6 @@
               <item>
                <property name="text">
                 <string>Low VRAM (--lowvram)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Normal VRAM (--normalvram)</string>
                </property>
               </item>
               <item>

@@ -263,7 +263,6 @@
   "comfyui_fp16_accumulation": true,
   "comfyui_lowvram": false,
   "comfyui_highvram": false,
-  "comfyui_normalvram": true,
   "comfyui_disable_smart_memory": false,
   "restricted_tabs": [
     "comfyui",

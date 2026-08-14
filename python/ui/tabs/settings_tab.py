@@ -95,17 +95,20 @@ _GLOBAL_SETTINGS_MAP = [
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]
-# NOTE: comfyui_lowvram / comfyui_normalvram / comfyui_highvram are NOT in the
-# map above. They used to be three independent checkboxes that could all be
-# ticked at once even though --lowvram/--normalvram/--highvram are mutually
-# exclusive ComfyUI launch flags. They are now driven by the single
-# ComfyUIVRAMMode combo (see _VRAM_MODE_KEYS) and still written as the same
-# three booleans for backward compatibility with server.py / runner.py.
+# NOTE: comfyui_lowvram / comfyui_highvram are NOT in the map above. They used
+# to be independent checkboxes that could both be ticked at once even though
+# --lowvram/--highvram are mutually exclusive ComfyUI launch flags. They are
+# now driven by the single ComfyUIVRAMMode combo (see _VRAM_MODE_KEYS) and
+# still written as the same booleans for server.py / runner.py.
+#
+# comfyui_normalvram was a third option until ComfyUI removed --normalvram;
+# passing it now aborts startup. A legacy config with it set simply shows Auto,
+# which is the closest surviving behaviour.
 
 # Combo index -> setting key that must be True (index 0 = Auto, none true).
 # The order is also the precedence used when legacy settings have more than
 # one flag set: low > normal > high.
-_VRAM_MODE_KEYS = ("comfyui_lowvram", "comfyui_normalvram", "comfyui_highvram")
+_VRAM_MODE_KEYS = ("comfyui_lowvram", "comfyui_highvram")
 
 
 class SettingsTab(BaseTab):
@@ -864,11 +867,11 @@ class SettingsTab(BaseTab):
         return sorted(values.keys())
 
     # =========================================================================
-    # ComfyUI VRAM mode (one combo -> three mutually exclusive boolean settings)
+    # ComfyUI VRAM mode (one combo -> mutually exclusive boolean settings)
     # =========================================================================
 
     def _load_vram_mode_ui(self):
-        """Set the VRAM combo from the three legacy boolean settings."""
+        """Set the VRAM combo from the legacy boolean settings."""
         from core.settings_manager import safe_get_setting
 
         combo = getattr(self.ui, 'ComfyUIVRAMMode', None)
@@ -879,14 +882,14 @@ class SettingsTab(BaseTab):
         if len(enabled) > 1:
             logger.warning(
                 "Multiple ComfyUI VRAM flags enabled (%s) — these are mutually "
-                "exclusive launch flags; using %s (priority low > normal > high)",
+                "exclusive launch flags; using %s (priority low > high)",
                 ", ".join(enabled), enabled[0],
             )
         index = _VRAM_MODE_KEYS.index(enabled[0]) + 1 if enabled else 0
         combo.setCurrentIndex(index)
 
     def _collect_vram_mode_values(self):
-        """Return the three boolean VRAM settings derived from the combo."""
+        """Return the boolean VRAM settings derived from the combo."""
         combo = getattr(self.ui, 'ComfyUIVRAMMode', None)
         if combo is None:
             return {}
