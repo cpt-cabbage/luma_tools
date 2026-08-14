@@ -2,68 +2,15 @@
  "files_to_copy": {},
  "found_editable_prompt": false,
  "workflow": {
-  "110": {
-   "class_type": "ModelSamplingAuraFlow",
-   "inputs": {
-    "model": [
-     "112",
-     0
-    ],
-    "shift": 3.1
-   }
-  },
-  "111": {
-   "class_type": "VAELoader",
-   "inputs": {
-    "vae_name": "qwen_image_vae.safetensors"
-   }
-  },
-  "112": {
-   "class_type": "UNETLoader",
-   "inputs": {
-    "unet_name": "qwen_image_edit_2511_bf16.safetensors",
-    "weight_dtype": "default"
-   }
-  },
-  "113": {
-   "class_type": "FluxKontextMultiReferenceLatentMethod",
-   "inputs": {
-    "conditioning": [
-     "117",
-     0
-    ],
-    "reference_latents_method": "index_timestep_zero"
-   }
-  },
-  "114": {
-   "class_type": "FluxKontextMultiReferenceLatentMethod",
-   "inputs": {
-    "conditioning": [
-     "120",
-     0
-    ],
-    "reference_latents_method": "index_timestep_zero"
-   }
-  },
-  "115": {
-   "class_type": "CFGNorm",
-   "inputs": {
-    "model": [
-     "110",
-     0
-    ],
-    "strength": 1
-   }
-  },
-  "117": {
+  "101": {
    "class_type": "TextEncodeQwenImageEditPlus",
    "inputs": {
     "clip": [
-     "124",
+     "108",
      0
     ],
     "image1": [
-     "123",
+     "107",
      0
     ],
     "image2": [
@@ -76,36 +23,36 @@
     ],
     "prompt": "",
     "vae": [
-     "111",
+     "95",
      0
     ]
    }
   },
-  "119": {
+  "103": {
    "class_type": "VAEDecode",
    "inputs": {
     "samples": [
-     "122",
+     "106",
      0
     ],
     "vae": [
-     "111",
+     "95",
      0
     ]
    }
   },
-  "120": {
+  "104": {
    "_meta": {
     "title": "TextEncodeQwenImageEditPlus (Positive)"
    },
    "class_type": "TextEncodeQwenImageEditPlus",
    "inputs": {
     "clip": [
-     "124",
+     "108",
      0
     ],
     "image1": [
-     "123",
+     "107",
      0
     ],
     "image2": [
@@ -118,43 +65,43 @@
     ],
     "prompt": "Change the furniture leather difference in image 1 to the fur material in image 2.",
     "vae": [
-     "111",
+     "95",
      0
     ]
    }
   },
-  "121": {
+  "105": {
    "class_type": "VAEEncode",
    "inputs": {
     "pixels": [
-     "123",
+     "107",
      0
     ],
     "vae": [
-     "111",
+     "95",
      0
     ]
    }
   },
-  "122": {
+  "106": {
    "class_type": "KSampler",
    "inputs": {
     "cfg": 4,
     "denoise": 1,
     "latent_image": [
-     "121",
+     "105",
      0
     ],
     "model": [
-     "115",
+     "99",
      0
     ],
     "negative": [
-     "113",
+     "97",
      0
     ],
     "positive": [
-     "114",
+     "98",
      0
     ],
     "sampler_name": "euler",
@@ -163,7 +110,7 @@
     "steps": 40
    }
   },
-  "123": {
+  "107": {
    "class_type": "FluxKontextImageScale",
    "inputs": {
     "image": [
@@ -172,7 +119,7 @@
     ]
    }
   },
-  "124": {
+  "108": {
    "class_type": "CLIPLoader",
    "inputs": {
     "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
@@ -205,7 +152,7 @@
    "inputs": {
     "filename_prefix": "CHAR_prefix",
     "images": [
-     "119",
+     "103",
      0
     ]
    }
@@ -218,6 +165,59 @@
    "inputs": {
     "image": "input_frame.png",
     "upload": "image"
+   }
+  },
+  "94": {
+   "class_type": "ModelSamplingAuraFlow",
+   "inputs": {
+    "model": [
+     "96",
+     0
+    ],
+    "shift": 3.1
+   }
+  },
+  "95": {
+   "class_type": "VAELoader",
+   "inputs": {
+    "vae_name": "qwen_image_vae.safetensors"
+   }
+  },
+  "96": {
+   "class_type": "UNETLoader",
+   "inputs": {
+    "unet_name": "qwen_image_edit_2511_bf16.safetensors",
+    "weight_dtype": "default"
+   }
+  },
+  "97": {
+   "class_type": "FluxKontextMultiReferenceLatentMethod",
+   "inputs": {
+    "conditioning": [
+     "101",
+     0
+    ],
+    "reference_latents_method": "index_timestep_zero"
+   }
+  },
+  "98": {
+   "class_type": "FluxKontextMultiReferenceLatentMethod",
+   "inputs": {
+    "conditioning": [
+     "104",
+     0
+    ],
+    "reference_latents_method": "index_timestep_zero"
+   }
+  },
+  "99": {
+   "class_type": "CFGNorm",
+   "inputs": {
+    "model": [
+     "94",
+     0
+    ],
+    "strength": 1
    }
   }
  }

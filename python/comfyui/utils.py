@@ -141,21 +141,28 @@ def wait_for_server(server_url: str = None, port: int = None, timeout: int = 60)
 # Workflow Submission & History
 # =============================================================================
 
-def submit_workflow(workflow: dict, server_url: str = None, port: int = None, client_id: str = None) -> Optional[str]:
+def submit_workflow(workflow: dict, server_url: str = None, port: int = None,
+                    client_id: str = None, ui_workflow: dict = None) -> Optional[str]:
     """Submit workflow to ComfyUI API and return prompt_id.
 
     Args:
-        workflow: The workflow dict to submit.
+        workflow: The API-format workflow dict to execute.
         server_url: Server URL.
         port: Server port.
         client_id: WebSocket client ID for execution event routing.
             If provided, ComfyUI will send execution events (executing, executed,
             execution_start) to the WebSocket client with this ID.
+        ui_workflow: Optional UI/nodes-format workflow to embed in the outputs
+            via extra_data.extra_pnginfo. This is what ComfyUI's own frontend
+            sends, and it's what lets SaveImage bake the graph into the PNG so
+            an artist can drag a render back into ComfyUI to recover it.
     """
     base_url = _normalize_server_url(server_url, port)
     prompt_data = {"prompt": workflow}
     if client_id:
         prompt_data["client_id"] = client_id
+    if ui_workflow:
+        prompt_data["extra_data"] = {"extra_pnginfo": {"workflow": ui_workflow}}
     url = f"{base_url}/prompt"
     data = json.dumps(prompt_data).encode('utf-8')
 
@@ -176,11 +183,85 @@ def submit_workflow(workflow: dict, server_url: str = None, port: int = None, cl
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
         logger.error(f"HTTP Error {e.code}: {e.reason}")
-        logger.error(f"Error details: {error_body}")
+        # ComfyUI returns a structured validation failure on 400. Unpacking it
+        # turns "HTTP Error 400" into the actual node and input at fault, which
+        # is the difference between a usable farm log and a dead end.
+        try:
+            payload = json.loads(error_body)
+        except (ValueError, TypeError):
+            payload = None
+        if isinstance(payload, dict):
+            err = payload.get('error')
+            if isinstance(err, dict):
+                logger.error(
+                    f"  {err.get('type', 'error')}: {err.get('message', '')} "
+                    f"{err.get('details', '')}".rstrip()
+                )
+            for node_id, node_err in (payload.get('node_errors') or {}).items():
+                if not isinstance(node_err, dict):
+                    continue
+                logger.error(
+                    f"  node {node_id} ({node_err.get('class_type', '?')}): "
+                    f"{node_err.get('errors', node_err)}"
+                )
+        else:
+            logger.error(f"Error details: {error_body}")
         return None
     except Exception as e:
         logger.error(f"Error submitting workflow: {e}")
         return None
+
+
+def _post_json(url: str, payload: dict = None, timeout: int = 10) -> bool:
+    """POST an optional JSON body, returning True on a 2xx response."""
+    data = json.dumps(payload).encode('utf-8') if payload is not None else None
+    headers = {'Content-Type': 'application/json'} if data else {}
+    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except Exception as e:
+        logger.warning(f"POST {url} failed: {e}")
+        return False
+
+
+def interrupt_prompt(server_url: str = None, port: int = None,
+                     prompt_id: str = None) -> bool:
+    """Ask ComfyUI to stop executing.
+
+    MUST be called from the farm worker — the artist's workstation has no
+    network route to the ComfyUI server, only Deadline and the shared filesystem.
+    Without this, cancelling a Deadline job removes the job but leaves the
+    already-submitted prompt rendering to completion on the GPU.
+
+    Args:
+        prompt_id: Target a specific prompt where the server supports it.
+            Older builds ignore the body and interrupt whatever is running.
+    """
+    base_url = _normalize_server_url(server_url, port)
+    payload = {"prompt_id": prompt_id} if prompt_id else None
+    ok = _post_json(f"{base_url}/interrupt", payload)
+    logger.info(
+        f"Interrupt {'sent' if ok else 'FAILED'}"
+        + (f" for prompt {prompt_id}" if prompt_id else "")
+    )
+    return ok
+
+
+def free_memory(server_url: str = None, port: int = None,
+                unload_models: bool = True, free_memory_cache: bool = True) -> bool:
+    """Release VRAM without restarting the ComfyUI process.
+
+    A full process restart costs minutes of model reloading; this achieves the
+    usual intent in seconds. Reach for the restart only when the process itself
+    is in a bad state (a CUDA fault), not merely to reclaim memory.
+    """
+    base_url = _normalize_server_url(server_url, port)
+    payload = {"unload_models": bool(unload_models),
+               "free_memory": bool(free_memory_cache)}
+    ok = _post_json(f"{base_url}/free", payload)
+    logger.info(f"Free memory request {'sent' if ok else 'FAILED'}: {payload}")
+    return ok
 
 
 def check_history_for_completion(prompt_id: str, server_url: str = None, port: int = None) -> dict:
@@ -326,6 +407,35 @@ def wait_for_completion_websocket(
     node_timing = {}  # node_id -> {start_time, end_time, duration_ms, node_type}
     current_node = {'id': None, 'start': None}
 
+    def _log_progress(value, max_val):
+        """Emit the canonical progress line, throttled to ~10% steps.
+
+        The exact wording matters: deadline.poller parses these lines out of the
+        runner log to drive the tab's progress bar, so both the legacy
+        'progress' message and the current 'progress_state' funnel through here.
+        """
+        nonlocal last_progress
+        if not max_val or max_val <= 0:
+            return
+        pct = int(100 * value / max_val)
+        last_pct = int(100 * last_progress['value'] / max(last_progress['max'], 1))
+        if pct >= last_pct + 10 or value >= max_val:
+            elapsed = int(time.time() - start_time)
+            logger.info(
+                f"  Progress: {pct}% ({int(value)}/{int(max_val)}) ({elapsed}s)"
+            )
+            last_progress = {'value': value, 'max': max_val}
+
+    def _finalize_current_node():
+        """Close out timing for the node that was executing, if any."""
+        if not track_node_timing or current_node['id'] is None:
+            return
+        entry = node_timing.get(current_node['id'])
+        if entry is not None and entry.get('end_time') is None:
+            now = time.time()
+            entry['end_time'] = now
+            entry['duration_ms'] = int((now - current_node['start']) * 1000)
+
     def on_message(ws, message):
         nonlocal result, last_progress
         if isinstance(message, bytes):
@@ -352,14 +462,8 @@ def wait_for_completion_websocket(
                 if exec_data.get('prompt_id') == prompt_id:
                     node_id = exec_data.get('node')
                     if node_id is None:
-                        # Execution completed - finalize timing for last node
-                        if track_node_timing and current_node['id'] is not None:
-                            end_time = time.time()
-                            duration_ms = int((end_time - current_node['start']) * 1000)
-                            if current_node['id'] in node_timing:
-                                node_timing[current_node['id']]['end_time'] = end_time
-                                node_timing[current_node['id']]['duration_ms'] = duration_ms
-
+                        # Legacy terminal signal (pre-execution_success builds)
+                        _finalize_current_node()
                         elapsed = int(time.time() - start_time)
                         logger.info(f"Execution completed in {elapsed}s")
                         result['success'] = True
@@ -368,11 +472,7 @@ def wait_for_completion_websocket(
                         # New node starting - finalize previous node timing
                         if track_node_timing:
                             now = time.time()
-                            if current_node['id'] is not None:
-                                duration_ms = int((now - current_node['start']) * 1000)
-                                if current_node['id'] in node_timing:
-                                    node_timing[current_node['id']]['end_time'] = now
-                                    node_timing[current_node['id']]['duration_ms'] = duration_ms
+                            _finalize_current_node()
 
                             # Start tracking new node
                             current_node['id'] = node_id
@@ -390,16 +490,33 @@ def wait_for_completion_websocket(
                         last_progress = {'value': 0, 'max': 0}
 
             elif msg_type == 'progress':
+                # Legacy per-node progress. Removed from ComfyUI in favour of
+                # 'progress_state' — kept so an older pinned server still works.
                 prog_data = data.get('data', {})
-                value = prog_data.get('value', 0)
-                max_val = prog_data.get('max', 100)
-                if max_val > 0:
-                    pct = int(100 * value / max_val)
-                    last_pct = int(100 * last_progress['value'] / max(last_progress['max'], 1))
-                    if pct >= last_pct + 10 or value == max_val:
-                        elapsed = int(time.time() - start_time)
-                        logger.info(f"  Progress: {pct}% ({value}/{max_val}) ({elapsed}s)")
-                        last_progress = {'value': value, 'max': max_val}
+                _log_progress(prog_data.get('value', 0),
+                              prog_data.get('max', 100))
+
+            elif msg_type == 'progress_state':
+                # Current ComfyUI progress message: a map of node_id -> state.
+                # Collapse it to a single running/total pair so the runner log
+                # keeps emitting the "Progress: N% (a/b)" line the Deadline
+                # poller parses for the tab's progress bar.
+                prog_data = data.get('data', {})
+                if prog_data.get('prompt_id') not in (None, prompt_id):
+                    pass
+                else:
+                    value = 0.0
+                    max_val = 0.0
+                    for node_state in (prog_data.get('nodes') or {}).values():
+                        if not isinstance(node_state, dict):
+                            continue
+                        node_max = node_state.get('max') or 0
+                        if node_max <= 0:
+                            continue
+                        max_val += node_max
+                        value += min(node_state.get('value') or 0, node_max)
+                    if max_val > 0:
+                        _log_progress(value, max_val)
 
             elif msg_type == 'executed':
                 exec_data = data.get('data', {})
@@ -434,6 +551,18 @@ def wait_for_completion_websocket(
                     if nodes:
                         logger.info(f"Cached: {len(nodes)} node(s)")
 
+            elif msg_type == 'execution_success':
+                # Current ComfyUI's terminal success message. Older builds
+                # instead sent executing(node=None), handled above; both paths
+                # land here-equivalent, and the HTTP poll is the backstop.
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    _finalize_current_node()
+                    elapsed = int(time.time() - start_time)
+                    logger.info(f"Execution completed in {elapsed}s")
+                    result['success'] = True
+                    ws.close()
+
             elif msg_type == 'execution_error':
                 exec_data = data.get('data', {})
                 if exec_data.get('prompt_id') == prompt_id:
@@ -442,6 +571,37 @@ def wait_for_completion_websocket(
                     node_type = exec_data.get('node_type')
                     logger.error(f"ERROR in node {node_id} ({node_type}): {error}")
                     result['error'] = error
+                    result['success'] = False
+                    ws.close()
+
+            elif msg_type == 'execution_interrupted':
+                # Someone cancelled the prompt (or /interrupt was called).
+                # Without this branch the prompt just vanishes from queue AND
+                # history, which the not_found handler below reads as "server
+                # restarted after finishing" — reporting a killed job as a
+                # success and recording bogus timings for it.
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    node_id = exec_data.get('node_id')
+                    node_type = exec_data.get('node_type')
+                    logger.error(
+                        f"Execution INTERRUPTED at node {node_id} ({node_type})"
+                    )
+                    result['error'] = 'execution_interrupted'
+                    result['success'] = False
+                    ws.close()
+
+            elif msg_type == 'execution_blocked':
+                exec_data = data.get('data', {})
+                if exec_data.get('prompt_id') == prompt_id:
+                    node_id = exec_data.get('node_id')
+                    node_type = exec_data.get('node_type')
+                    message_text = exec_data.get('exception_message', '')
+                    logger.error(
+                        f"Execution BLOCKED at node {node_id} ({node_type}): "
+                        f"{message_text}"
+                    )
+                    result['error'] = f'execution_blocked: {message_text}'.strip(': ')
                     result['success'] = False
                     ws.close()
 
@@ -532,7 +692,12 @@ def wait_for_completion_websocket(
                     # history) — so not_found is expected while nodes are running.
                     # Check the queue endpoint to see if the prompt is still active.
                     still_in_queue = _is_prompt_in_queue(prompt_id, base_url)
-                    had_execution = bool(node_timing) or bool(result.get('outputs'))
+                    # Prefer hard evidence (a node actually reported an output)
+                    # over "some node started". An interrupted or crashed
+                    # prompt also leaves node_timing behind, and treating that
+                    # as completion is how a killed job gets logged as success.
+                    saw_outputs = bool(result.get('outputs'))
+                    had_execution = saw_outputs or bool(node_timing)
 
                     if still_in_queue:
                         # Prompt is in the queue (running or pending) — not_found
@@ -549,10 +714,23 @@ def wait_for_completion_websocket(
                             # Verify server is actually healthy before treating as completed
                             if check_server_health(server_url=base_url, timeout=5):
                                 elapsed_int = int(elapsed)
-                                logger.info(
-                                    f"Server restarted after execution — treating as "
-                                    f"completed ({elapsed_int}s, saw {len(node_timing)} nodes)"
-                                )
+                                if saw_outputs:
+                                    logger.info(
+                                        f"Server restarted after execution — treating as "
+                                        f"completed ({elapsed_int}s, "
+                                        f"{len(result['outputs'])} node(s) produced output)"
+                                    )
+                                else:
+                                    # No node ever reported an output. This is
+                                    # an inference, not a fact — say so, because
+                                    # the alternative reading is a crash.
+                                    logger.warning(
+                                        f"Prompt vanished from queue and history after "
+                                        f"{len(node_timing)} node(s) started but produced "
+                                        f"no output ({elapsed_int}s). Assuming the server "
+                                        f"restarted post-completion; if outputs are missing, "
+                                        f"this job actually died mid-render."
+                                    )
                                 result['success'] = True
                                 break
                             else:
@@ -764,16 +942,45 @@ def wait_for_completion(
 # Workflow Modification
 # =============================================================================
 
-# Node types that accept a seed value, mapped to their seed parameter name
-_SEED_NODES = {
-    'KSampler': 'seed',
-    'RandomNoise': 'noise_seed',
-    'HYMotionGenerate': 'seed',
-    'Trellis2MeshWithVoxelAdvancedGenerator': 'seed',
-    'Trellis2ImageToShape': 'seed',
-    'Trellis2ShapeToTexturedMesh': 'seed',
-    'UltraShapeRefine': 'seed',
-}
+# Input names that carry a generation seed. Applied to ANY node exposing one.
+#
+# This replaces a hardcoded node-type allow-list. That list covered seven types
+# and silently missed everything else — most importantly KSamplerAdvanced,
+# SamplerCustom and SamplerCustomAdvanced, which use `noise_seed`. A workflow
+# built on those kept whatever seed the submitter baked in, so every frame of a
+# multi-generation job rendered the identical image.
+#
+# Working from the node's own inputs is also self-maintaining: a new sampler
+# node pack needs no code change here.
+SEED_INPUT_NAMES = ('seed', 'noise_seed')
+
+
+def _is_link_ref(value) -> bool:
+    """True when an API-format input value is a ``[node_id, slot]`` reference.
+
+    A seed driven by another node (a converted widget, a seed-generator node)
+    must not be overwritten with a literal.
+    """
+    return (
+        isinstance(value, list)
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and isinstance(value[1], int)
+        and not isinstance(value[1], bool)
+    )
+
+
+def iter_seed_inputs(node_data: dict):
+    """Yield the seed input names on one API-format node that we may set.
+
+    Skips seeds wired to another node, since those are driven by the graph.
+    """
+    inputs = node_data.get('inputs', {})
+    if not isinstance(inputs, dict):
+        return
+    for name in SEED_INPUT_NAMES:
+        if name in inputs and not _is_link_ref(inputs[name]):
+            yield name
 
 # Node types that accept an output filename prefix.
 # Derived from EXPORT_NODE_TYPES in node_configs.py to stay in sync.
@@ -812,9 +1019,10 @@ def has_output_suffix_nodes(workflow: dict) -> bool:
 def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     """Modify workflow to use a specific seed and output prefix.
 
-    Handles seed nodes (KSampler, RandomNoise, etc.), export/prefix nodes
-    (SaveImage, HYMotionExportFBX, etc.), and converts PreviewImage to SaveImage.
-    See _SEED_NODES and _PREFIX_NODES for the full list of supported node types.
+    Seeds are applied to every node exposing a `seed`/`noise_seed` input that
+    isn't driven by a link (see iter_seed_inputs). Export/prefix nodes are
+    matched by class_type via _PREFIX_NODES, and PreviewImage is rewritten to
+    SaveImage so the output filename can be controlled.
 
     Respects '_output' suffix convention: if any export node has '_output' in its
     title, only that node gets the prefix. Others are left with their defaults.
@@ -835,6 +1043,7 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
     if has_output_nodes:
         logger.info("Detected _output suffix node(s) - only setting prefix on designated output nodes")
 
+    seeded_nodes = 0
     for node_id, node_data in modified.items():
         if not isinstance(node_data, dict) or 'class_type' not in node_data:
             continue
@@ -842,14 +1051,14 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
         class_type = node_data.get('class_type')
         inputs = node_data.get('inputs', {})
 
-        # Apply seed to matching node types
-        if class_type in _SEED_NODES:
-            seed_param = _SEED_NODES[class_type]
+        # Apply the seed to every node that exposes one (not just a known list)
+        for seed_param in iter_seed_inputs(node_data):
             inputs[seed_param] = seed
+            seeded_nodes += 1
             logger.info(f"Set {class_type} node {node_id} {seed_param} to: {seed}")
 
         # Apply output prefix to matching node types
-        elif class_type in _PREFIX_NODES:
+        if class_type in _PREFIX_NODES:
             # If _output nodes exist, only set prefix on those
             if has_output_nodes:
                 meta = node_data.get('_meta', {})
@@ -862,6 +1071,16 @@ def modify_workflow_seed(workflow: dict, seed: int, output_prefix: str) -> dict:
             for key, value in overrides.items():
                 inputs[key] = output_prefix if value is None else value
             logger.info(f"Set {class_type} node {node_id} prefix to: {output_prefix}")
+
+    if not seeded_nodes:
+        # Every frame of this job will be byte-identical. Almost always means
+        # the seed input is named something we don't recognise, or is driven by
+        # a link — either way the artist asked for variations and won't get any.
+        logger.warning(
+            "No seed input found in this workflow — all generations will be "
+            "identical. Expected an unlinked input named one of: %s",
+            ", ".join(SEED_INPUT_NAMES),
+        )
 
     return modified
 
@@ -1010,9 +1229,11 @@ def move_output_files(
         filename_prefix: Prefix for renamed files
         extensions: File extensions to look for
         recent_minutes: Only move files modified within this many minutes
-        strict_prefix: If True, only move files that start with filename_prefix.
-            Used with the '_output' suffix convention to avoid moving files
-            from non-designated export nodes.
+        strict_prefix: If True, never fall back to the recency sweep — move only
+            files starting with filename_prefix. Used with the '_output' suffix
+            convention to avoid moving files from non-designated export nodes.
+            Note that prefix-matching files are preferred regardless of this
+            flag; strict_prefix only controls what happens when none match.
 
     Returns:
         List of moved file paths in target directory
@@ -1050,14 +1271,39 @@ def move_output_files(
 
     recent_files.sort(key=lambda x: x[1], reverse=True)
 
+    # Prefer files this job actually named. ComfyUI's output directory is shared
+    # by every job on the worker, so the recency sweep can otherwise pick up a
+    # concurrent job's renders — and rename them with THIS job's prefix, which
+    # lands another artist's work in this artist's gallery under the wrong name.
+    # Fall back to the sweep only when nothing carries our prefix (nodes that
+    # ignore filename_prefix entirely, which is why the sweep exists).
+    prefixed = [(p, m) for p, m in recent_files
+                if os.path.basename(p).startswith(filename_prefix)]
+    if prefixed:
+        if len(prefixed) < len(recent_files):
+            logger.info(
+                f"[move_output_files] {len(recent_files) - len(prefixed)} recent "
+                f"file(s) don't carry prefix '{filename_prefix}' — leaving them "
+                f"alone (likely another job's output)"
+            )
+        recent_files = prefixed
+    elif strict_prefix:
+        logger.info(
+            f"[move_output_files] No files matched prefix '{filename_prefix}' "
+            f"and strict_prefix is set — moving nothing"
+        )
+        recent_files = []
+    elif recent_files:
+        logger.warning(
+            f"[move_output_files] No file carries prefix '{filename_prefix}'; "
+            f"falling back to moving {len(recent_files)} recent file(s) by "
+            f"timestamp. If other jobs share this worker, their output may be "
+            f"picked up here."
+        )
+
     for src_path, mtime in recent_files:
         original_filename = os.path.basename(src_path)
         ext = os.path.splitext(original_filename)[1]
-
-        # When strict_prefix is True, only move files from _output designated nodes
-        if strict_prefix and not original_filename.startswith(filename_prefix):
-            logger.debug(f"[move_output_files] Skipping non-output file: {original_filename}")
-            continue
 
         if original_filename.startswith(filename_prefix):
             new_filename = original_filename

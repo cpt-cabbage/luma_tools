@@ -25,7 +25,7 @@ import logging
 import threading
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from typing import Any, Dict, List, Optional
 
 from core.config import USER_SETTINGS_DIR
@@ -48,6 +48,10 @@ class WidgetInfo:
     step: Optional[float] = None
     options: Optional[List[str]] = None  # For combo types
     multiline: bool = False  # For string type
+    # True when ComfyUI attaches a 'control_after_generate' phantom widget to
+    # this input. Read from the input spec's options dict; see
+    # _widget_has_control_after_generate() for why this beats name-matching.
+    control_after_generate: bool = False
 
 
 @dataclass
@@ -68,9 +72,11 @@ class NodeTypeInfo:
 # Constants
 # =============================================================================
 
-# Input names that trigger a control_after_generate phantom widget
-# in ComfyUI's frontend. This widget appears in widgets_values but NOT
-# in /object_info's input definitions.
+# Fallback for input names that trigger a control_after_generate phantom
+# widget. Only consulted when /object_info does NOT report the explicit
+# `control_after_generate` flag (older ComfyUI builds) — see
+# _widget_has_control_after_generate(). The phantom widget occupies a slot in
+# widgets_values but is absent from /object_info's input definitions.
 SEED_INPUT_NAMES = frozenset({'seed', 'noise_seed'})
 
 # Nodes with additional phantom widgets (buttons, internal state) that appear
@@ -106,23 +112,43 @@ NETWORK_CACHE_SUBDIR = "_node_info"
 # These are ComfyUI's built-in connection types that are NOT widgets.
 # Any input type NOT in this set and NOT a list is assumed to be a
 # connection type too (custom node types like "TRELLIS_MODEL" etc.).
-# Widget types are: INT, FLOAT, STRING, BOOLEAN, or a list (combo).
-WIDGET_TYPE_NAMES = frozenset({'INT', 'FLOAT', 'STRING', 'BOOLEAN'})
+#
+# Widget types are: INT, FLOAT, STRING, BOOLEAN, COMBO, or a bare list.
+#
+# 'COMBO' matters: nodes written against ComfyUI's V3 schema serialize combos
+# as ("COMBO", {"options": [...]}) rather than the V1 ([opt1, opt2, ...],)
+# form. Treating that as a connection slot drops the widget from
+# widget_names_for_values, which silently shifts every widget after it by one
+# index — so widget values land on the wrong inputs with no error raised.
+WIDGET_TYPE_NAMES = frozenset({'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'})
+
+
+def _is_combo_spec(type_info) -> bool:
+    """True when an input's type field denotes a combo/dropdown widget.
+
+    Handles both serializations:
+    - V1: the type field IS the list of options
+    - V3: the type field is the literal string "COMBO" (options live in opts)
+    """
+    if isinstance(type_info, list):
+        return True
+    return isinstance(type_info, str) and type_info == 'COMBO'
 
 
 def _is_widget_input(input_spec) -> bool:
     """Check if an input specification represents a widget (not a connection slot).
 
-    Widget inputs have types like INT, FLOAT, STRING, BOOLEAN, or are combo
-    lists. Connection inputs have typed names like MODEL, CONDITIONING, etc.
+    Widget inputs have types like INT, FLOAT, STRING, BOOLEAN, COMBO, or are
+    bare combo lists. Connection inputs have typed names like MODEL,
+    CONDITIONING, etc.
     """
     if not isinstance(input_spec, (list, tuple)) or len(input_spec) == 0:
         return False
 
     type_info = input_spec[0]
 
-    # Combo type: first element is a list of options
-    if isinstance(type_info, list):
+    # Combo type (V1 bare list or V3 "COMBO")
+    if _is_combo_spec(type_info):
         return True
 
     # Known widget type names
@@ -136,18 +162,44 @@ def _is_widget_input(input_spec) -> bool:
     return False
 
 
+def _widget_has_control_after_generate(widget: WidgetInfo) -> bool:
+    """True when this widget is followed by a control_after_generate phantom.
+
+    Prefers the explicit flag ComfyUI reports in the input's options dict.
+    Falls back to matching the input name against SEED_INPUT_NAMES only when
+    the flag is absent, which is the case on older ComfyUI builds — the name
+    heuristic misses any node whose seeded input isn't literally called
+    'seed'/'noise_seed' (rand_seed, seed_num, and most custom-node variants).
+    """
+    if widget.control_after_generate:
+        return True
+    return widget.name in SEED_INPUT_NAMES
+
+
 def _parse_widget_type(input_name: str, input_spec) -> WidgetInfo:
-    """Parse an input specification into a WidgetInfo."""
+    """Parse an input specification into a WidgetInfo.
+
+    Understands both the V1 serialization ([type_or_options, opts]) and the V3
+    schema, where combos arrive as ("COMBO", {"options": [...]}) and the
+    control_after_generate phantom is declared explicitly in the opts dict.
+    """
     type_info = input_spec[0]
     opts = input_spec[1] if len(input_spec) > 1 and isinstance(input_spec[1], dict) else {}
+    # ComfyUI reports this for INT and COMBO inputs that carry the phantom
+    # 'control_after_generate' widget. Absent on older builds.
+    cag = bool(opts.get('control_after_generate', False))
 
-    # Combo type
-    if isinstance(type_info, list):
+    # Combo type — options are the type field itself (V1) or in opts (V3)
+    if _is_combo_spec(type_info):
+        options = type_info if isinstance(type_info, list) else opts.get('options')
+        if not isinstance(options, list):
+            options = []
         return WidgetInfo(
             name=input_name,
             widget_type='combo',
-            default=opts.get('default', type_info[0] if type_info else None),
-            options=type_info,
+            default=opts.get('default', options[0] if options else None),
+            options=options,
+            control_after_generate=cag,
         )
 
     # Scalar types
@@ -159,6 +211,7 @@ def _parse_widget_type(input_name: str, input_spec) -> WidgetInfo:
             min_val=opts.get('min'),
             max_val=opts.get('max'),
             step=opts.get('step'),
+            control_after_generate=cag,
         )
     elif type_info == 'FLOAT':
         return WidgetInfo(
@@ -227,8 +280,9 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
     for widget in widgets:
         widget_names.append(widget.name)
 
-        # Insert control_after_generate placeholder after seed inputs
-        if widget.name in SEED_INPUT_NAMES:
+        # Insert control_after_generate placeholder — flag-driven, with a
+        # name-based fallback for ComfyUI builds that don't report the flag
+        if _widget_has_control_after_generate(widget):
             widget_names.append(None)
 
         # Insert node-specific phantom widgets (buttons, internal state)
@@ -333,10 +387,18 @@ class NodeInfoCache:
         raw_nodes = data.get('nodes', {})
         self._node_types.clear()
 
+        # The network cache is shared by workstations that may be running
+        # different luma_tools versions, so a cache written by a NEWER build
+        # can carry WidgetInfo fields this build doesn't know about. Filter to
+        # known fields instead of letting WidgetInfo(**w) raise TypeError and
+        # drop the whole node definition.
+        _widget_fields = {f.name for f in fields(WidgetInfo)}
+
         for class_type, node_data in raw_nodes.items():
             try:
                 widgets = [
-                    WidgetInfo(**w) for w in node_data.get('widgets', [])
+                    WidgetInfo(**{k: v for k, v in w.items() if k in _widget_fields})
+                    for w in node_data.get('widgets', [])
                 ]
                 widget_names = node_data.get('widget_names_for_values', [])
 

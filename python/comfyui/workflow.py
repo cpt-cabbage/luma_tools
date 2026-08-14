@@ -911,6 +911,22 @@ def _expand_subgraph_instance(ctx, sg_node, sg_def):
                                 node_id_map, ctx.new_nodes)
 
 
+def _is_expandable_subgraph_node(node: Dict[str, Any], subgraph_defs: dict) -> bool:
+    """True when a node is a subgraph instance that should be expanded.
+
+    A muted or bypassed subgraph node is deliberately NOT expanded. Expanding
+    it would splice its internals into the graph carrying their own (active)
+    modes, and the wrapper node — the only thing that recorded the artist's
+    intent to switch the whole group off — would be gone before
+    :func:`_collect_skipped_node_ids` ever ran. Leaving the wrapper in place
+    lets the normal mute/bypass machinery handle it: a muted subgraph severs
+    its outputs, a bypassed one passes its inputs through by type.
+    """
+    if not (_is_uuid(node.get('type')) and node.get('type') in subgraph_defs):
+        return False
+    return node.get('mode', MODE_ALWAYS) not in (MODE_MUTED, MODE_BYPASSED)
+
+
 def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any]:
     """
     Expand all subgraph/component nodes into their constituent nodes.
@@ -936,7 +952,17 @@ def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any
     # Check if any nodes use subgraph types
     nodes = workflow.get('nodes', [])
     subgraph_nodes = [n for n in nodes
-                      if _is_uuid(n.get('type')) and n.get('type') in subgraph_defs]
+                      if _is_expandable_subgraph_node(n, subgraph_defs)]
+
+    # Report the ones held back so a "why didn't my subgraph run?" question has
+    # an answer in the log rather than silence.
+    for n in nodes:
+        if (_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
+                and n.get('mode', MODE_ALWAYS) in (MODE_MUTED, MODE_BYPASSED)):
+            state = 'bypassed' if n.get('mode') == MODE_BYPASSED else 'muted'
+            logger.info(f"Subgraph node {n.get('id')} is {state} — "
+                        f"not expanding; handled as a unit")
+
     if not subgraph_nodes:
         return workflow  # No subgraph instances to expand
 
@@ -982,7 +1008,7 @@ def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any
     # Recursively expand in case of nested subgraphs (with depth limit)
     if _depth >= 10:
         logger.warning("  Subgraph expansion depth limit reached (10), stopping expansion")
-    elif any(_is_uuid(n.get('type')) and n.get('type') in subgraph_defs
+    elif any(_is_expandable_subgraph_node(n, subgraph_defs)
              for n in expanded['nodes']):
         logger.debug("  Checking for nested subgraphs...")
         return expand_subgraphs(expanded, _depth=_depth + 1)
@@ -992,26 +1018,57 @@ def expand_subgraphs(workflow: Dict[str, Any], _depth: int = 0) -> Dict[str, Any
     return expanded
 
 
-def _collect_skipped_node_ids(nodes: List[Dict[str, Any]]) -> set:
-    """Collect the IDs of nodes that must not appear in the API workflow.
+# litegraph node modes (LGraphEventMode). These values are NOT interchangeable
+# and the two that matter here behave differently:
+#
+#   MODE_MUTED (2, "NEVER")  — the node does not run and produces nothing.
+#                              Links out of it are severed; downstream inputs
+#                              that depended on it are dropped.
+#   MODE_BYPASSED (4)        — the node does not run but passes data straight
+#                              through, matching each output to an input of the
+#                              same type.
+#
+# Conflating them (the previous behaviour) makes muting a node silently act
+# like bypassing it, so a branch the artist meant to cut stays wired.
+MODE_ALWAYS = 0
+MODE_MUTED = 2
+MODE_BYPASSED = 4
 
-    Two reasons to skip: the node is muted (``mode=4``) or bypassed
-    (``mode=2``) in the UI, or its type is UI-only (``SKIP_NODE_TYPES``).
+
+def _collect_skipped_node_ids(nodes: List[Dict[str, Any]]) -> tuple:
+    """Collect node IDs that must not appear in the API workflow.
+
+    Three reasons to skip: the node is muted (``mode=2``), bypassed
+    (``mode=4``), or its type is UI-only (``SKIP_NODE_TYPES``).
+
+    Returns:
+        Tuple of (skipped_ids, passthrough_ids). ``passthrough_ids`` is the
+        subset whose links should be re-sourced upstream — bypassed nodes plus
+        the UI-only wrappers (Reroute) that exist purely to relay a link. Muted
+        nodes are deliberately excluded: their links must be dropped.
     """
     skipped = set()
+    passthrough = set()
     for node in nodes:
         node_id = node.get('id')
         node_type = node.get('type')
-        node_mode = node.get('mode', 0)
-        # Skip muted or bypassed nodes (mode 2 = bypass, mode 4 = mute)
-        if node_mode in (2, 4):
+        node_mode = node.get('mode', MODE_ALWAYS)
+
+        if node_mode == MODE_BYPASSED:
+            skipped.add(node_id)
+            passthrough.add(node_id)
+            logger.info(f"Will skip node {node_id} ({node_type}) - "
+                        f"mode 4 (bypassed, links pass through)")
+        elif node_mode == MODE_MUTED:
             skipped.add(node_id)
             logger.info(f"Will skip node {node_id} ({node_type}) - "
-                        f"mode {node_mode} (muted/bypassed)")
-        # Skip certain node types (defined in comfyui_node_configs.py)
+                        f"mode 2 (muted, links severed)")
+        # Skip certain node types (defined in comfyui_node_configs.py).
+        # These are UI-only relays, so they pass through like a bypass.
         elif node_type in SKIP_NODE_TYPES or node_type is None:
             skipped.add(node_id)
-    return skipped
+            passthrough.add(node_id)
+    return skipped, passthrough
 
 
 def _build_link_map(links: List[Any], valid_node_ids: set) -> Dict[Any, tuple]:
@@ -1038,82 +1095,146 @@ def _build_link_map(links: List[Any], valid_node_ids: set) -> Dict[Any, tuple]:
     return link_map
 
 
-def _build_skipped_input_links(nodes: List[Dict[str, Any]],
-                               skipped_node_ids: set) -> Dict[Any, Dict[int, Any]]:
-    """Map each skipped node's input slots to their incoming link IDs.
+def _slot_entries(node: Dict[str, Any], key: str):
+    """Yield ``(slot_index, spec)`` for a node's ``inputs`` or ``outputs``.
 
-    This is what makes a muted node behave as a pass-through: output slot N is
-    served by whatever is connected to input slot N.
+    Honours an explicit ``slot_index`` and falls back to array position.
+    """
+    for idx, spec in enumerate(node.get(key) or []):
+        if isinstance(spec, dict):
+            yield spec.get('slot_index', idx), spec
+
+
+def _types_match(out_type: Any, in_type: Any) -> bool:
+    """True when a bypassed node's output slot can be fed by an input slot.
+
+    ComfyUI matches bypass connections by data type, not slot position. ``*``
+    is litegraph's wildcard and matches anything.
+    """
+    if out_type is None or in_type is None:
+        return False
+    out_s = str(out_type).upper()
+    in_s = str(in_type).upper()
+    if out_s == '*' or in_s == '*':
+        return True
+    return out_s == in_s
+
+
+def _build_passthrough_map(nodes: List[Dict[str, Any]],
+                           passthrough_ids: set) -> Dict[Any, Dict[int, Any]]:
+    """Map each pass-through node's output slots to the link feeding them.
+
+    Type-matched, mirroring ComfyUI: for output slot N, find the first *unused*
+    connected input carrying the same type. An output with no type-compatible
+    input is left unmapped, so the downstream link is dropped — which is what
+    ComfyUI does, rather than inventing a mismatched connection.
+
+    Falls back to positional matching only when the node carries no type
+    metadata at all (legacy workflows, bare Reroute nodes).
 
     Returns:
-        Dict of node_id -> {input_slot: link_id}.
+        Dict of node_id -> {output_slot: link_id}.
     """
-    skipped_input_links = {}
+    passthrough_map = {}
     for node in nodes:
         nid = node.get('id')
-        if nid not in skipped_node_ids:
+        if nid not in passthrough_ids:
             continue
+
+        inputs = list(_slot_entries(node, 'inputs'))
+        outputs = list(_slot_entries(node, 'outputs'))
+        linked = {slot: spec.get('link') for slot, spec in inputs
+                  if spec.get('link') is not None}
+
+        has_types = (any(spec.get('type') for _s, spec in inputs)
+                     and any(spec.get('type') for _s, spec in outputs))
+
         slot_map = {}
-        for default_idx, inp_spec in enumerate(node.get('inputs', [])):
-            slot_idx = inp_spec.get('slot_index', default_idx)
-            lid = inp_spec.get('link')
-            if lid is not None:
-                slot_map[slot_idx] = lid
-        skipped_input_links[nid] = slot_map
-    return skipped_input_links
+        if has_types:
+            used_inputs = set()
+            for out_slot, out_spec in outputs:
+                out_type = out_spec.get('type')
+                for in_slot, in_spec in inputs:
+                    if in_slot in used_inputs or in_slot not in linked:
+                        continue
+                    if _types_match(out_type, in_spec.get('type')):
+                        slot_map[out_slot] = linked[in_slot]
+                        used_inputs.add(in_slot)
+                        break
+                else:
+                    logger.debug(
+                        f"Bypass node {nid}: output slot {out_slot} "
+                        f"({out_type}) has no type-compatible input — "
+                        f"downstream link will be dropped"
+                    )
+        elif outputs:
+            # No type info — preserve the historical positional behaviour
+            for out_slot, _spec in outputs:
+                if out_slot in linked:
+                    slot_map[out_slot] = linked[out_slot]
+        else:
+            # Node declares no outputs array at all (bare relay)
+            slot_map = dict(linked)
+
+        passthrough_map[nid] = slot_map
+    return passthrough_map
 
 
 def _trace_through_skipped(from_node, from_slot, skipped_node_ids,
-                           skipped_input_links, link_map, visited=None):
-    """Walk upstream through muted/bypassed nodes to the first live source.
+                           passthrough_map, link_map, visited=None):
+    """Walk upstream through bypassed/relay nodes to the first live source.
 
-    Follows chains of skipped nodes; ``visited`` guards against cycles.
+    Follows chains of pass-through nodes; ``visited`` guards against cycles.
+    A *muted* node has no entry in ``passthrough_map``, so the walk terminates
+    with ``(None, None)`` and the caller drops the link.
 
     Returns:
         Tuple of (node_id, slot), or ``(None, None)`` when the chain has no
-        pass-through source (e.g. a bypassed node with nothing on that input).
+        pass-through source.
     """
     if visited is None:
         visited = set()
     if from_node not in skipped_node_ids or from_node in visited:
         return from_node, from_slot
     visited.add(from_node)
-    upstream_link = skipped_input_links.get(from_node, {}).get(from_slot)
+    upstream_link = passthrough_map.get(from_node, {}).get(from_slot)
     if upstream_link is not None and upstream_link in link_map:
         up_node, up_slot = link_map[upstream_link]
         return _trace_through_skipped(up_node, up_slot, skipped_node_ids,
-                                      skipped_input_links, link_map, visited)
+                                      passthrough_map, link_map, visited)
     return None, None  # No pass-through found
 
 
 def _resolve_links_through_skipped(link_map: Dict[Any, tuple],
                                    nodes: List[Dict[str, Any]],
-                                   skipped_node_ids: set) -> None:
+                                   skipped_node_ids: set,
+                                   passthrough_ids: set) -> None:
     """Repoint links that originate at a skipped node, in place.
 
-    Each such link is re-sourced at the first live node upstream. Links with no
-    resolvable source are deleted from ``link_map`` so the consuming input is
-    dropped rather than left dangling.
+    Links out of a bypassed/relay node are re-sourced at the first live node
+    upstream. Links out of a muted node — and any link with no resolvable
+    source — are deleted from ``link_map`` so the consuming input is dropped
+    rather than left dangling.
     """
     if not skipped_node_ids:
         return
 
-    skipped_input_links = _build_skipped_input_links(nodes, skipped_node_ids)
+    passthrough_map = _build_passthrough_map(nodes, passthrough_ids)
 
     for link_id in list(link_map.keys()):
         from_node, from_slot = link_map[link_id]
         if from_node not in skipped_node_ids:
             continue
         resolved_node, resolved_slot = _trace_through_skipped(
-            from_node, from_slot, skipped_node_ids, skipped_input_links, link_map)
+            from_node, from_slot, skipped_node_ids, passthrough_map, link_map)
         if resolved_node is not None:
             link_map[link_id] = (resolved_node, resolved_slot)
-            logger.debug(f"Resolved link {link_id} through muted node(s): "
+            logger.debug(f"Resolved link {link_id} through bypassed node(s): "
                          f"{from_node}:{from_slot} -> {resolved_node}:{resolved_slot}")
         else:
             del link_map[link_id]
-            logger.debug(f"Removed link {link_id}: can't resolve through "
-                         f"muted node {from_node}")
+            logger.debug(f"Removed link {link_id}: no pass-through source "
+                         f"through skipped node {from_node}")
 
 
 def _normalize_widgets_values(node_id: str, node_type: Any, widgets_values: Any):
@@ -1133,13 +1254,21 @@ def _normalize_widgets_values(node_id: str, node_type: Any, widgets_values: Any)
 
 
 def _build_connected_inputs(inputs_spec, link_map, skipped_node_ids,
-                            node_id, node_type) -> Dict[str, Any]:
+                            node_id, node_type) -> tuple:
     """Turn a node's linked input slots into API-format node references.
 
     Each connected input becomes ``[from_node_id_str, from_slot]``. Inputs still
     pointing at a skipped node after link resolution are dropped entirely.
+
+    Returns:
+        Tuple of (inputs, linked_keys). ``linked_keys`` names exactly the
+        inputs backed by a link, so later passes can refuse to overwrite them
+        without having to guess from the value's shape — a widget whose value
+        is genuinely a two-element list (a resolution pair, a range) is
+        otherwise indistinguishable from a node reference.
     """
     inputs = {}
+    linked_keys = set()
     for input_spec in inputs_spec:
         input_name = input_spec.get('name')
         link_id = input_spec.get('link')
@@ -1152,7 +1281,24 @@ def _build_connected_inputs(inputs_spec, link_map, skipped_node_ids,
             continue
         # Reference format: [node_id, slot_index]
         inputs[input_name] = [str(from_node), from_slot]
-    return inputs
+        linked_keys.add(input_name)
+    return inputs, linked_keys
+
+
+def _is_node_reference(value: Any) -> bool:
+    """True when an API-format input value is a ``[node_id, slot]`` reference.
+
+    References are always built as ``[str(node_id), int(slot)]``. Requiring the
+    string first element keeps genuine list-valued widgets (``[512, 512]``)
+    from being mistaken for connections. ``bool`` is excluded explicitly since
+    it is a subclass of ``int``.
+    """
+    if not (isinstance(value, list) and len(value) == 2):
+        return False
+    ref, slot = value
+    return (isinstance(ref, str)
+            and isinstance(slot, int)
+            and not isinstance(slot, bool))
 
 
 def _resolve_widget_names(node, node_type, widgets_values, subgraph_widgets):
@@ -1238,17 +1384,16 @@ def _apply_widget_values(inputs, node, node_type, widgets_values,
             inputs[widget_name] = widgets_values[i]
 
 
-def _apply_input_overrides(inputs, node) -> None:
+def _apply_input_overrides(inputs, node, linked_keys) -> None:
     """Apply ``_input_overrides`` left behind by subgraph expansion, in place.
 
     These carry the parent subgraph node's live widget values, so they beat the
     stale defaults baked into the subgraph definition — but they must never
-    clobber a link reference (a two-element list).
+    clobber a link reference. ``linked_keys`` names those exactly, so a widget
+    whose value happens to be a list is still overridable.
     """
     for key, val in node.get('_input_overrides', {}).items():
-        existing = inputs.get(key)
-        # Skip if the existing value is a link reference [node_id_str, slot_index]
-        if isinstance(existing, list):
+        if key in linked_keys:
             continue
         inputs[key] = val
 
@@ -1260,14 +1405,14 @@ def _strip_invalid_references(api_workflow: Dict[str, Any]) -> None:
         inputs = node_data.get('inputs', {})
         invalid_inputs = []
         for input_name, input_value in inputs.items():
-            # Check if it's a node reference [node_id, slot]
-            if isinstance(input_value, list) and len(input_value) == 2:
-                ref_node_id = str(input_value[0])
-                if ref_node_id not in valid_api_ids:
-                    logger.warning(f"Removing invalid input '{input_name}' from "
-                                   f"node {node_id}: references non-existent "
-                                   f"node {ref_node_id}")
-                    invalid_inputs.append(input_name)
+            if not _is_node_reference(input_value):
+                continue
+            ref_node_id = str(input_value[0])
+            if ref_node_id not in valid_api_ids:
+                logger.warning(f"Removing invalid input '{input_name}' from "
+                               f"node {node_id}: references non-existent "
+                               f"node {ref_node_id}")
+                invalid_inputs.append(input_name)
         for input_name in invalid_inputs:
             del inputs[input_name]
 
@@ -1300,13 +1445,14 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
     subgraph_widgets = _build_subgraph_widget_map(workflow)
 
     # First pass: collect all node IDs that will be skipped (muted/bypassed)
-    skipped_node_ids = _collect_skipped_node_ids(nodes)
+    skipped_node_ids, passthrough_node_ids = _collect_skipped_node_ids(nodes)
     logger.info(f"Skipped node IDs: {skipped_node_ids}")
 
     valid_node_ids = set(node.get('id') for node in nodes
                          if node.get('id') is not None)
     link_map = _build_link_map(links, valid_node_ids)
-    _resolve_links_through_skipped(link_map, nodes, skipped_node_ids)
+    _resolve_links_through_skipped(link_map, nodes, skipped_node_ids,
+                                   passthrough_node_ids)
 
     api_workflow = {}
     for node in nodes:
@@ -1322,11 +1468,11 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
         if node.get('id') in skipped_node_ids:
             continue
 
-        inputs = _build_connected_inputs(inputs_spec, link_map, skipped_node_ids,
-                                         node_id, node_type)
+        inputs, linked_keys = _build_connected_inputs(
+            inputs_spec, link_map, skipped_node_ids, node_id, node_type)
         _apply_widget_values(inputs, node, node_type, widgets_values,
                              widgets_values_is_dict, subgraph_widgets)
-        _apply_input_overrides(inputs, node)
+        _apply_input_overrides(inputs, node, linked_keys)
 
         api_workflow[node_id] = {
             'class_type': node_type,

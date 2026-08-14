@@ -43,6 +43,8 @@ try:
         move_output_files,
         get_workflow_images,
         has_output_suffix_nodes,
+        interrupt_prompt,
+        free_memory,
     )
 except ImportError:
     # When running standalone on farm, import from copied utils file
@@ -57,7 +59,15 @@ except ImportError:
         move_output_files,
         get_workflow_images,
         has_output_suffix_nodes,
+        interrupt_prompt,
+        free_memory,
     )
+
+
+# The prompt currently executing on the server, so the SIGTERM handler can stop
+# it. Deadline kills this process when the artist cancels the job; without an
+# explicit interrupt the prompt keeps rendering on the GPU after the job is gone.
+_active_prompt = {'id': None, 'port': None}
 
 # Try to use centralized utilities, fall back to local implementations for farm execution
 try:
@@ -411,6 +421,10 @@ def _parse_args():
     parser.add_argument('--output-prefix', default='comfyui_output', help='Base output filename prefix')
     parser.add_argument('--batch', action='store_true', help='Process all generations in a single session')
     parser.add_argument('--comfyui-output-dir', help='ComfyUI default output directory (for moving 3D files)')
+    parser.add_argument('--ui-workflow',
+                        help='Path to the UI/nodes-format workflow. Embedded in outputs '
+                             'via extra_data.extra_pnginfo so a saved image carries its '
+                             'graph and can be dragged back into ComfyUI.')
     parser.add_argument('--full-restart', action='store_true', help='Force full server restart between jobs')
     parser.add_argument('--restart-lowvram', action='store_true', help='Restart server with --lowvram (only used with --full-restart)')
     parser.add_argument('--server-not-found', choices=['fail', 'wait', 'fail_delete'], default='fail',
@@ -660,7 +674,29 @@ def _store_per_file_metadata(args, moved, frame_num, actual_seed,
             )
 
 
-def _process_frame(args, frame_num, workflow, use_strict_prefix):
+def _load_ui_workflow(args):
+    """Load the UI/nodes-format workflow for output metadata embedding.
+
+    Optional and non-fatal: a missing or unreadable file just means outputs
+    won't carry their graph, which is a loss of convenience, not correctness.
+    """
+    path = getattr(args, 'ui_workflow', None)
+    if not path:
+        return None
+    if not os.path.exists(path):
+        logger.warning(f"UI workflow not found, outputs won't embed it: {path}")
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            ui_wf = json.load(f)
+        logger.info(f"Loaded UI workflow for output embedding: {os.path.basename(path)}")
+        return ui_wf
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not read UI workflow ({e}); outputs won't embed it")
+        return None
+
+
+def _process_frame(args, frame_num, workflow, use_strict_prefix, ui_workflow=None):
     """Submit one workflow, wait for completion, and post-process outputs.
 
     Returns:
@@ -677,10 +713,15 @@ def _process_frame(args, frame_num, workflow, use_strict_prefix):
     # submitted the prompt, so both submit and wait must share the same ID.
     frame_client_id = str(uuid.uuid4())
 
-    prompt_id = submit_workflow(workflow, port=args.port, client_id=frame_client_id)
+    prompt_id = submit_workflow(workflow, port=args.port, client_id=frame_client_id,
+                                ui_workflow=ui_workflow)
     if not prompt_id:
         logger.error(f"Failed to submit workflow for frame {frame_num}")
         return None
+
+    # Record it so cleanup() can interrupt this prompt if Deadline kills us
+    _active_prompt['id'] = prompt_id
+    _active_prompt['port'] = args.port
 
     def on_image_output(img, base_url, output_dir):
         download_image_from_server(
@@ -697,6 +738,9 @@ def _process_frame(args, frame_num, workflow, use_strict_prefix):
         track_node_timing=True, client_id=frame_client_id,
         workflow_dict=workflow
     )
+
+    # No longer in flight — don't interrupt a finished prompt on shutdown
+    _active_prompt['id'] = None
 
     # Handle both dict result (with timing) and bool result (fallback)
     if isinstance(completion_result, dict):
@@ -802,6 +846,7 @@ def main():
     setup_logging(args.output_prefix, args.output_directory)
 
     base_workflow, use_strict_prefix, workflows_to_run = _load_workflows(args)
+    ui_workflow = _load_ui_workflow(args)
 
     # Connect to persistent server
     logger.info(f"Connecting to persistent server on port {args.port}...")
@@ -822,6 +867,24 @@ def main():
     # persistent mode, but the runner process must terminate so Deadline can
     # release the slot.
     def cleanup(signum=None, frame=None, exit_code=None):
+        if signum is not None:
+            # Killed (job cancelled, task requeued, worker going down). Stop the
+            # prompt we queued, otherwise the GPU keeps working on output nobody
+            # is waiting for and the next job queues behind a ghost render.
+            active_id = _active_prompt.get('id')
+            if active_id:
+                logger.info(
+                    f"Signal {signum} received — interrupting prompt {active_id}"
+                )
+                try:
+                    interrupt_prompt(port=_active_prompt.get('port') or args.port,
+                                     prompt_id=active_id)
+                    # Release VRAM promptly so the next job isn't starved
+                    free_memory(port=_active_prompt.get('port') or args.port,
+                                unload_models=False, free_memory_cache=True)
+                except Exception as e:
+                    logger.warning(f"Could not interrupt running prompt: {e}")
+
         logger.info("Persistent mode - server stays running")
         if signum is not None:
             sys.exit(1)
@@ -844,7 +907,8 @@ def main():
             logger.info(f"Processing generation {i}/{total_frames} (frame {frame_num})")
             logger.info(f"{'='*60}")
 
-            result = _process_frame(args, frame_num, workflow, use_strict_prefix)
+            result = _process_frame(args, frame_num, workflow, use_strict_prefix,
+                                    ui_workflow=ui_workflow)
             if result is None:
                 # Submission itself failed — counted as failed, no analytics entry
                 failed += 1

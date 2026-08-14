@@ -23,6 +23,196 @@ logger = logging.getLogger(__name__)
 _active_publish_workers: List["object"] = []
 
 
+# AYON product types offered for ComfyUI assets, in the order the dialog lists
+# them. Shared so the batch publisher infers exactly what the dialog defaults to.
+AYON_PRODUCT_TYPES = (
+    "model",        # 3D models/geometry
+    "rig",          # Character rigs
+    "look",         # Materials/shading
+    "animation",    # Animation caches
+    "pointcache",   # Alembic/USD caches
+    "camera",       # Camera exports
+    "image",        # Still images
+    "render",       # Rendered images/sequences
+    "plate",        # Input plates
+    "review",       # Preview videos/turntables
+    "audio",        # Audio files
+)
+
+AYON_TASKS = ("lighting", "compositing", "fx", "lookdev", "animation")
+
+# Suffixes stripped when deriving a product name from a filename
+_PRODUCT_NAME_SUFFIXES = ('_000', '_001', '_002', '_view', '_export')
+
+
+def infer_product_type(file_path: str) -> str:
+    """Guess the AYON product type from a file extension."""
+    from core.config import (
+        IMAGE_EXTENSIONS,
+        VIDEO_EXTENSIONS,
+        AUDIO_EXTENSIONS,
+        MODEL_EXTENSIONS,
+    )
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in MODEL_EXTENSIONS:
+        return "model"
+    if ext in {'.abc', '.npz'}:
+        return "pointcache"
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in VIDEO_EXTENSIONS:
+        return "review"
+    if ext in AUDIO_EXTENSIONS or ext == '.aiff':
+        return "audio"
+    return "image"
+
+
+def infer_product_name(file_path: str) -> str:
+    """Derive a product name from a filename, dropping generated suffixes."""
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    for suffix in _PRODUCT_NAME_SUFFIXES:
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+            break
+    return base_name
+
+
+def publish_asset_headless(
+    file_path: str,
+    app_state,
+    product_type: str = None,
+    product_name: str = None,
+    variant: str = "",
+    task: str = None,
+    comment: str = "",
+    use_farm: bool = False,
+) -> Tuple[bool, str]:
+    """Publish one asset to AYON with no UI at all.
+
+    Safe to call from a worker thread — it creates no Qt widgets and shows no
+    dialogs, which is what a batch publish needs. The interactive
+    publish_comfyui_asset_to_ayon() collects the same values from a dialog and
+    then does the same work.
+
+    Returns:
+        Tuple of (success, message). ``message`` explains the failure, or names
+        what was published on success.
+    """
+    from ayon.service import (
+        AYON_AVAILABLE,
+        create_ayon_metadata_single_file,
+        write_metadata_file,
+        publish_to_ayon_local,
+        convert_to_ayon_folder_path,
+        build_ayon_metadata_filename,
+    )
+
+    if not AYON_AVAILABLE:
+        return False, "AYON is not available or not configured"
+    if getattr(app_state, 'standalone_mode', False):
+        return False, "Publishing is not available in standalone mode"
+    if not file_path or not os.path.isfile(file_path):
+        return False, f"File not found: {file_path}"
+
+    product_type = product_type or infer_product_type(file_path)
+    product_name = product_name or infer_product_name(file_path)
+    task = task or AYON_TASKS[0]
+
+    if not product_name:
+        return False, "Product name is empty"
+
+    passed, validator_error = _run_publish_validators(
+        file_path, product_type, product_name, variant, parent_widget=None
+    )
+    if not passed:
+        return False, f"Validation failed: {validator_error}"
+
+    full_product_name = f"{product_name}_{variant}" if variant else product_name
+    folder_path = convert_to_ayon_folder_path(app_state.shotpath, app_state.jobname)
+    render_dir = os.path.dirname(file_path)
+
+    metadata = create_ayon_metadata_single_file(
+        project_name=app_state.jobname,
+        file_path=file_path,
+        product_name=full_product_name,
+        product_type=product_type,
+        folder_path=folder_path,
+        task=task,
+        user=app_state.user,
+        variant=variant or "",
+        comment=comment or "",
+    )
+
+    metadata_filename = build_ayon_metadata_filename(full_product_name, prefix="comfyui")
+    metadata_path = write_metadata_file(
+        metadata, os.path.join(render_dir, metadata_filename)
+    )
+    if not metadata_path:
+        return False, f"Could not write metadata next to {os.path.basename(file_path)}"
+
+    if use_farm:
+        from ayon.service import submit_ayon_publish_to_deadline
+        job_id = submit_ayon_publish_to_deadline(
+            project_name=app_state.jobname,
+            render_name=full_product_name,
+            render_file=os.path.basename(file_path),
+            metadata_path=metadata_path,
+            folder_path=folder_path,
+            task=task,
+            user=app_state.user,
+            build_job_id=None,
+        )
+        if job_id:
+            return True, f"Submitted to Deadline ({job_id})"
+        return False, "Failed to submit publish job to Deadline"
+
+    ok = publish_to_ayon_local(
+        metadata_path=metadata_path,
+        project_name=app_state.jobname,
+        folder_path=folder_path,
+        task=task,
+        user=app_state.user,
+    )
+    if ok:
+        return True, f"Published {full_product_name}"
+    return False, "AYON publish command failed (see log)"
+
+
+class ComfyUIAYONPublisher:
+    """Headless batch publisher for gallery multi-select publishing.
+
+    Deliberately UI-free so the gallery can run it on a worker thread. Options
+    default to the same inference the interactive dialog uses, and may be
+    overridden per batch.
+    """
+
+    def __init__(self, app_state, product_type: str = None, variant: str = "",
+                 task: str = None, comment: str = "", use_farm: bool = False):
+        self.app_state = app_state
+        self.product_type = product_type
+        self.variant = variant
+        self.task = task
+        self.comment = comment
+        self.use_farm = use_farm
+        self.last_message = ""
+
+    def publish_single_file(self, file_path: str) -> bool:
+        """Publish one file. Returns True on success; see last_message for detail."""
+        success, message = publish_asset_headless(
+            file_path,
+            self.app_state,
+            product_type=self.product_type,
+            variant=self.variant,
+            task=self.task,
+            comment=self.comment,
+            use_farm=self.use_farm,
+        )
+        self.last_message = message
+        level = logger.info if success else logger.warning
+        level(f"[AYON Batch] {os.path.basename(file_path)}: {message}")
+        return success
+
+
 def _run_publish_validators(
     file_path: str,
     product_type: str,
@@ -387,42 +577,11 @@ class ComfyUIPublishDialog(QDialog):
         type_layout.addWidget(QLabel("Product Type:"))
         self.product_type_combo = QComboBox()
 
-        # Standard AYON product types (same as Houdini/Blender)
-        product_types = [
-            "model",        # 3D models/geometry
-            "rig",          # Character rigs
-            "look",         # Materials/shading
-            "animation",    # Animation caches
-            "pointcache",   # Alembic/USD caches
-            "camera",       # Camera exports
-            "image",        # Still images
-            "render",       # Rendered images/sequences
-            "plate",        # Input plates
-            "review",       # Preview videos/turntables
-            "audio",        # Audio files
-        ]
-        self.product_type_combo.addItems(product_types)
+        # Standard AYON product types (same as Houdini/Blender).
+        # Shared with the headless batch publisher so both stay in step.
+        self.product_type_combo.addItems(list(AYON_PRODUCT_TYPES))
 
-        # Auto-detect type from file extension
-        from core.config import (
-            IMAGE_EXTENSIONS,
-            VIDEO_EXTENSIONS,
-            AUDIO_EXTENSIONS,
-            MODEL_EXTENSIONS,
-        )
-        ext = os.path.splitext(filename)[1].lower()
-        default_type = "image"  # Default
-        if ext in MODEL_EXTENSIONS:
-            default_type = "model"
-        elif ext in {'.abc', '.npz'}:
-            default_type = "pointcache"
-        elif ext in IMAGE_EXTENSIONS:
-            default_type = "image"
-        elif ext in VIDEO_EXTENSIONS:
-            default_type = "review"
-        elif ext in AUDIO_EXTENSIONS or ext == '.aiff':
-            default_type = "audio"
-
+        default_type = infer_product_type(self.file_path)
         idx = self.product_type_combo.findText(default_type)
         if idx >= 0:
             self.product_type_combo.setCurrentIndex(idx)
@@ -434,13 +593,8 @@ class ComfyUIPublishDialog(QDialog):
         name_layout = QHBoxLayout()
         name_layout.addWidget(QLabel("Product Name:"))
         self.product_name_edit = QLineEdit()
-        # Auto-populate from filename
-        base_name = os.path.splitext(filename)[0]
-        # Remove common suffixes
-        for suffix in ['_000', '_001', '_002', '_view', '_export']:
-            if base_name.endswith(suffix):
-                base_name = base_name[:-len(suffix)]
-        self.product_name_edit.setText(base_name)
+        # Auto-populate from filename (shared with the batch publisher)
+        self.product_name_edit.setText(infer_product_name(self.file_path))
         name_layout.addWidget(self.product_name_edit)
         layout.addLayout(name_layout)
 
@@ -456,7 +610,7 @@ class ComfyUIPublishDialog(QDialog):
         task_layout = QHBoxLayout()
         task_layout.addWidget(QLabel("Task:"))
         self.task_combo = QComboBox()
-        self.task_combo.addItems(["lighting", "compositing", "fx", "lookdev", "animation"])
+        self.task_combo.addItems(list(AYON_TASKS))
         # Try to default to current task if available
         if hasattr(self.app_state, 'task') and self.app_state.task:
             idx = self.task_combo.findText(self.app_state.task.lower())

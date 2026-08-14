@@ -185,7 +185,8 @@
       "Bash(git checkout *)",
       "PowerShell(powershell -ExecutionPolicy Bypass -File 'C:\\\\Temp\\\\claude\\\\L--tools--studio-tools-AYON--dev-christophe-la-shot-tools-luma-tools\\\\7afa02fe-376d-4070-85d9-9cd478de95aa\\\\scratchpad\\\\run_check.ps1')",
       "Artifact",
-      "PowerShell(powershell -ExecutionPolicy Bypass -File _shoot_deep.ps1)"
+      "PowerShell(powershell -ExecutionPolicy Bypass -File _shoot_deep.ps1)",
+      "PowerShell(Set-Location 'L:\\\\tools\\\\_studio_tools\\\\AYON\\\\_dev\\\\christophe\\\\la_shot_tools\\\\luma_tools'; powershell -ExecutionPolicy Bypass -File _verify_audit_fixes.ps1 2>&1 | Select-Object -Last 30)"
     ],
     "deny": [
       "Read(./python/venv/**)",

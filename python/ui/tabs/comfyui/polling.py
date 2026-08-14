@@ -123,6 +123,20 @@ class PollingMixin:
     - self.show_status(): Status display method
     """
 
+    def _timing_preset_name(self) -> str:
+        """The preset to attribute an execution timing to.
+
+        Prefers the name captured at submit time (``_current_preset_name``),
+        because a completing job belongs to whatever was selected when it was
+        queued — not to whatever the artist has switched to since. Falls back to
+        the live selection for job-recovery paths, which never saw a submit.
+        """
+        submitted = getattr(self, '_current_preset_name', '') or ''
+        if submitted:
+            return submitted
+        state_manager = getattr(self, 'state_manager', None)
+        return getattr(state_manager, 'current_preset_name', '') or ''
+
     def _init_polling_state(self):
         """Initialize polling state variables. Call from __init__."""
         # Iterate mode state
@@ -516,11 +530,12 @@ class PollingMixin:
         elapsed_str = format_elapsed_time(elapsed)
         frames = self._iterate_total_tasks
 
-        # Record per-frame execution time for future estimates. Read from the
-        # authoritative state_manager rather than the stale tab-level shadow
-        # so job-recovery paths that don't go through _on_submit_result still
-        # record timings.
-        preset_name = getattr(self.state_manager, 'current_preset_name', '') if hasattr(self, 'state_manager') else ''
+        # Record per-frame execution time for future estimates against the
+        # preset that was SUBMITTED, not whatever is selected now — the artist
+        # may well have switched models while the farm was busy, and attributing
+        # this timing to the new selection poisons its ETA. Falls back to the
+        # live selection for recovery paths that never saw a submit.
+        preset_name = self._timing_preset_name()
         if frames > 0 and preset_name:
             from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / frames
@@ -1089,8 +1104,8 @@ class PollingMixin:
         total_frames = sum(self._batch_total_tasks.values())
         completed_frames = sum(self._batch_completed_tasks.values())
 
-        # Record per-frame execution time for future estimates
-        preset_name = getattr(self.state_manager, 'current_preset_name', '') if hasattr(self, 'state_manager') else ''
+        # Record per-frame execution time against the submitted preset
+        preset_name = self._timing_preset_name()
         if completed_frames > 0 and preset_name:
             from core.user_preferences import record_workflow_execution_time
             per_frame_time = elapsed / completed_frames

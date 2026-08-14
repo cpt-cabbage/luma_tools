@@ -119,10 +119,13 @@ def _make_simple_workflow():
     return {'nodes': nodes, 'links': links}
 
 
-def _make_muted_node_workflow():
-    """Workflow with a muted node (mode=4) between two active nodes.
+def _make_bypassed_node_workflow():
+    """Workflow with a bypassed node (mode=4) between two active nodes.
 
-    node 1 (active) -> node 2 (muted, mode=4) -> node 3 (active)
+    node 1 (active) -> node 2 (bypassed, mode=4) -> node 3 (active)
+
+    litegraph modes: 2 = NEVER (mute), 4 = BYPASS. Only BYPASS passes data
+    through, which is why this fixture uses mode 4 for the pass-through case.
     """
     nodes = [
         _make_ui_node(
@@ -155,10 +158,10 @@ def _make_muted_node_workflow():
     return {'nodes': nodes, 'links': links}
 
 
-def _make_chained_muted_workflow():
-    """Workflow with 2 consecutive muted nodes.
+def _make_chained_bypassed_workflow():
+    """Workflow with 2 consecutive bypassed nodes.
 
-    node 1 (active) -> node 2 (muted) -> node 3 (muted) -> node 4 (active)
+    node 1 (active) -> node 2 (bypassed) -> node 3 (bypassed) -> node 4 (active)
     """
     nodes = [
         _make_ui_node(
@@ -1194,14 +1197,51 @@ class TestExpandSubgraphsRealWorkflows:
         # Should have significantly more nodes after expansion
         assert expanded_count > original_count
 
-    def test_qwen_edit_dual_subgraphs_expand(self):
-        """image_qwen_image_edit_2511.json has 2 subgraphs, both expand."""
-        from comfyui.workflow import expand_subgraphs, _is_uuid
+    def test_qwen_edit_active_subgraph_expands(self):
+        """image_qwen_image_edit_2511.json: the active subgraph (89) expands."""
+        from comfyui.workflow import expand_subgraphs, _is_uuid, MODE_ALWAYS
         wf = _load_test_workflow('image_qwen_image_edit_2511.json')
         result = expand_subgraphs(wf)
-        # No UUID-type nodes should remain
+        # Every UUID node that survives expansion must be one that was
+        # deliberately held back (muted/bypassed), never an active one.
         for n in result['nodes']:
-            assert not _is_uuid(n.get('type', '')), f"UUID node still present: {n.get('type')}"
+            if _is_uuid(n.get('type', '')):
+                assert n.get('mode', MODE_ALWAYS) != MODE_ALWAYS, (
+                    f"Active subgraph node {n.get('id')} was not expanded"
+                )
+
+    def test_qwen_edit_bypassed_subgraph_not_expanded(self):
+        """A bypassed subgraph node is left intact, not spliced into the graph.
+
+        Fixture node 91 has mode=4. Expanding it would inject its internals
+        carrying their own active modes, so the whole group would execute
+        despite the artist having switched it off.
+        """
+        from comfyui.workflow import expand_subgraphs, MODE_BYPASSED
+        wf = _load_test_workflow('image_qwen_image_edit_2511.json')
+        bypassed_type = next(
+            n['type'] for n in wf['nodes'] if n.get('id') == 91
+        )
+        result = expand_subgraphs(wf)
+
+        survivor = [n for n in result['nodes'] if n.get('id') == 91]
+        assert len(survivor) == 1, "Bypassed subgraph wrapper should survive expansion"
+        assert survivor[0]['type'] == bypassed_type
+        assert survivor[0].get('mode') == MODE_BYPASSED
+
+    def test_qwen_edit_bypassed_subgraph_absent_from_api(self):
+        """The bypassed subgraph and its internals never reach the API workflow."""
+        from comfyui.workflow import convert_to_api_format
+        wf = _load_test_workflow('image_qwen_image_edit_2511.json')
+        api = convert_to_api_format(wf)
+        # The wrapper itself is skipped like any other bypassed node...
+        assert '91' not in api
+        # ...and no node in the output is a raw UUID class_type
+        for node_id, data in api.items():
+            ct = data.get('class_type') or ''
+            assert len(ct) != 36 or '-' not in ct, (
+                f"Subgraph UUID leaked into API workflow as node {node_id}: {ct}"
+            )
 
     def test_no_subgraph_workflow_unchanged(self):
         """audio_stable_audio.json has no subgraphs — passes through unchanged."""
@@ -1363,44 +1403,124 @@ class TestConvertToApiFormat:
         assert isinstance(model_input, list)
         assert model_input == ['5', 0]
 
-    def test_muted_node_skipped(self):
-        """Node with mode=4 (muted) is excluded from API output."""
+    def test_bypassed_node_skipped(self):
+        """Node with mode=4 (bypass) is excluded from API output."""
         from comfyui.workflow import convert_to_api_format
-        wf = _make_muted_node_workflow()
+        wf = _make_bypassed_node_workflow()
         with self._mock_get_widget_names():
             result = convert_to_api_format(wf)
-        assert '2' not in result  # Muted node excluded
+        assert '2' not in result  # Bypassed node excluded
 
-    def test_bypassed_node_skipped(self):
-        """Node with mode=2 (bypassed) is excluded from API output."""
+    def test_muted_node_skipped(self):
+        """Node with mode=2 (mute) is excluded from API output."""
         from comfyui.workflow import convert_to_api_format
         wf = _make_simple_workflow()
-        wf['nodes'][1]['mode'] = 2  # Bypass KSampler
+        wf['nodes'][1]['mode'] = 2  # Mute KSampler
         with self._mock_get_widget_names():
             result = convert_to_api_format(wf)
         assert '2' not in result
 
-    def test_muted_node_link_resolved_upstream(self):
-        """Link through a muted node resolves to the upstream active node."""
+    def test_bypassed_node_link_resolved_upstream(self):
+        """Link through a bypassed node resolves to the upstream active node."""
         from comfyui.workflow import convert_to_api_format
-        wf = _make_muted_node_workflow()
+        wf = _make_bypassed_node_workflow()
         with self._mock_get_widget_names():
             result = convert_to_api_format(wf)
-        # Node 3's input should resolve through muted node 2 to node 1
+        # Node 3's input should resolve through bypassed node 2 to node 1
         c_in = result['3']['inputs'].get('c_in')
         assert c_in is not None
         assert c_in == ['1', 0]
 
-    def test_chained_muted_nodes_resolved(self):
-        """Links through consecutive muted nodes resolve to the upstream active node."""
+    def test_chained_bypassed_nodes_resolved(self):
+        """Links through consecutive bypassed nodes resolve to the upstream node."""
         from comfyui.workflow import convert_to_api_format
-        wf = _make_chained_muted_workflow()
+        wf = _make_chained_bypassed_workflow()
         with self._mock_get_widget_names():
             result = convert_to_api_format(wf)
-        # Node 4's input should resolve through muted nodes 3 and 2 to node 1
+        # Node 4's input should resolve through bypassed nodes 3 and 2 to node 1
         d_in = result['4']['inputs'].get('d_in')
         assert d_in is not None
         assert d_in == ['1', 0]
+
+    def test_muted_node_severs_the_link(self):
+        """A MUTED node does NOT pass data through — the downstream input is dropped.
+
+        This is the behaviour that distinguishes mute from bypass. Treating the
+        two the same means muting a node to cut a branch silently leaves the
+        branch wired, which is the opposite of what the artist asked for.
+        """
+        from comfyui.workflow import convert_to_api_format
+        wf = _make_bypassed_node_workflow()
+        wf['nodes'][1]['mode'] = 2  # mute node 2 instead of bypassing it
+        with self._mock_get_widget_names():
+            result = convert_to_api_format(wf)
+        assert '2' not in result
+        assert 'c_in' not in result['3']['inputs'], (
+            "muted node must sever the link, not pass it through"
+        )
+
+    def test_bypass_matches_input_to_output_by_type(self):
+        """Bypass picks the type-compatible input, not the same-numbered slot."""
+        from comfyui.workflow import convert_to_api_format
+        nodes = [
+            _make_ui_node(1, 'LatentSource', widgets_values=[],
+                          outputs=[{'name': 'LATENT', 'type': 'LATENT',
+                                    'links': [1], 'slot_index': 0}]),
+            _make_ui_node(2, 'ImageSource', widgets_values=[],
+                          outputs=[{'name': 'IMAGE', 'type': 'IMAGE',
+                                    'links': [2], 'slot_index': 0}]),
+            # Bypassed: inputs are [LATENT, IMAGE] but the single output is IMAGE.
+            # Positional matching would wrongly wire output 0 to the LATENT input.
+            _make_ui_node(3, 'Mixer', mode=4, widgets_values=[],
+                          inputs=[{'name': 'samples', 'type': 'LATENT',
+                                   'link': 1, 'slot_index': 0},
+                                  {'name': 'image', 'type': 'IMAGE',
+                                   'link': 2, 'slot_index': 1}],
+                          outputs=[{'name': 'IMAGE', 'type': 'IMAGE',
+                                    'links': [3], 'slot_index': 0}]),
+            _make_ui_node(4, 'Sink', widgets_values=[],
+                          inputs=[{'name': 'image', 'type': 'IMAGE',
+                                   'link': 3, 'slot_index': 0}]),
+        ]
+        links = [
+            [1, 1, 0, 3, 0, 'LATENT'],
+            [2, 2, 0, 3, 1, 'IMAGE'],
+            [3, 3, 0, 4, 0, 'IMAGE'],
+        ]
+        with self._mock_get_widget_names():
+            result = convert_to_api_format({'nodes': nodes, 'links': links})
+        assert '3' not in result
+        # Must resolve to the IMAGE producer (node 2), not the LATENT one (node 1)
+        assert result['4']['inputs']['image'] == ['2', 0]
+
+    def test_bypass_drops_link_with_no_compatible_input(self):
+        """An output with no type-compatible input yields no connection."""
+        from comfyui.workflow import convert_to_api_format
+        nodes = [
+            _make_ui_node(1, 'LatentSource', widgets_values=[],
+                          outputs=[{'name': 'LATENT', 'type': 'LATENT',
+                                    'links': [1], 'slot_index': 0}]),
+            # VAEDecode-shaped: LATENT in, IMAGE out. Bypassing it can produce
+            # nothing sensible, so ComfyUI drops the connection entirely.
+            _make_ui_node(2, 'VAEDecode', mode=4, widgets_values=[],
+                          inputs=[{'name': 'samples', 'type': 'LATENT',
+                                   'link': 1, 'slot_index': 0}],
+                          outputs=[{'name': 'IMAGE', 'type': 'IMAGE',
+                                    'links': [2], 'slot_index': 0}]),
+            _make_ui_node(3, 'SaveImage', widgets_values=['out'],
+                          inputs=[{'name': 'images', 'type': 'IMAGE',
+                                   'link': 2, 'slot_index': 0}]),
+        ]
+        links = [
+            [1, 1, 0, 2, 0, 'LATENT'],
+            [2, 2, 0, 3, 0, 'IMAGE'],
+        ]
+        with self._mock_get_widget_names():
+            result = convert_to_api_format({'nodes': nodes, 'links': links})
+        assert '2' not in result
+        assert 'images' not in result['3']['inputs'], (
+            "a LATENT source must not be wired into an IMAGE input"
+        )
 
     def test_skip_node_types_excluded(self):
         """Nodes in SKIP_NODE_TYPES are excluded from API output."""

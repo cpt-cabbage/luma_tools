@@ -1,5 +1,5 @@
 {
-  "_comment": "Synthetic: link resolution through skipped nodes. 1 -> [2 muted] -> [3 muted] -> 4 exercises the muted CHAIN. Node 5 is bypassed (mode=2) with no inputs, so link 4 cannot be resolved upstream and must be dropped, taking node 6's 'f_in' with it. Node 7 is a Reroute (SKIP_NODE_TYPES). Node 8 links to a node that does not exist.",
+  "_comment": "Synthetic: link resolution through skipped nodes. litegraph modes: 2 = NEVER (mute, links severed), 4 = BYPASS (links pass through by type). 1 -> [2 bypassed] -> [3 bypassed] -> 4 exercises the BYPASS CHAIN. Node 5 is muted (mode=2) with no inputs, so link 4 has no pass-through source and must be dropped, taking node 6's 'f_in' with it. Node 7 is a Reroute (SKIP_NODE_TYPES). Node 8 links to a node that does not exist.",
   "nodes": [
     {"id": 1, "type": "NodeA", "mode": 0, "widgets_values": ["a"], "inputs": [{"name": "a_in", "widget": {"name": "a_in"}, "link": null}], "outputs": [{"name": "OUT", "links": [1], "slot_index": 0}], "properties": {}},
     {"id": 2, "type": "NodeB", "mode": 4, "widgets_values": [], "inputs": [{"name": "in", "link": 1, "slot_index": 0}], "outputs": [{"name": "OUT", "links": [2], "slot_index": 0}], "properties": {}},

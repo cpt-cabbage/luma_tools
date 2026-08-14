@@ -6,6 +6,7 @@ Extracted from comfyui_tab.py to improve maintainability.
 """
 
 import os
+import copy
 import logging
 from typing import Dict, Any, Optional, Tuple
 
@@ -34,7 +35,9 @@ class ComfyUIWidgetManager:
         self.app_state = app_state
         self.layout = layout
 
-        # Widget tracking
+        # Widget tracking. Both dicts are keyed by a (node_id, widget_name)
+        # TUPLE — a node can expose several editable widgets, so node_id alone
+        # is not unique. Loop variables over these are named widget_key.
         self.dynamic_widgets = {}  # (node_id, widget_name) -> widget container
         self.condition_map = {}  # Maps condition_node_name -> list of dependent widget node_ids
         self.settings_widgets = {}  # (node_id, widget_name) -> widget container for settings nodes
@@ -88,7 +91,7 @@ class ComfyUIWidgetManager:
         Returns dict like: {'text/Prompt': 'value', 'text/Negative': 'value2', ...}
         """
         values = {}
-        for node_id, container in self.dynamic_widgets.items():
+        for widget_key, container in self.dynamic_widgets.items():
             node = getattr(container, 'editable_node', None)
             input_widget = getattr(container, 'input_widget', None)
             if node and input_widget:
@@ -186,7 +189,12 @@ class ComfyUIWidgetManager:
             # Apply default value override if present (for text and string nodes)
             default_value = override.get("default_value", "")
             if default_value and node.widget_type in ('text', 'string'):
-                # Override the current_value with the default
+                # Copy first. extract_editable_nodes() memoizes by (path, mtime)
+                # and hands out the SAME EditableNode instances to every caller,
+                # so assigning current_value in place leaks this preset's
+                # override into the submitter, the model dialog, and any other
+                # preset pointing at the same workflow file.
+                node = copy.copy(node)
                 node.current_value = default_value
 
             widget = self._create_editable_node_widget(node, total_image_nodes, total_video_nodes)
@@ -303,7 +311,7 @@ class ComfyUIWidgetManager:
 
     def _find_toggle_widget_by_name(self, condition_name):
         """Find a toggle widget by the condition node name."""
-        for node_id, widget in self.dynamic_widgets.items():
+        for widget_key, widget in self.dynamic_widgets.items():
             node = getattr(widget, 'editable_node', None)
             if node:
                 # Match by display name (base title without _editable)
@@ -664,7 +672,7 @@ class ComfyUIWidgetManager:
         if not self.pending_semantic_values:
             return
 
-        for node_id, container in self.dynamic_widgets.items():
+        for widget_key, container in self.dynamic_widgets.items():
             node = getattr(container, 'editable_node', None)
             input_widget = getattr(container, 'input_widget', None)
             if node and input_widget:

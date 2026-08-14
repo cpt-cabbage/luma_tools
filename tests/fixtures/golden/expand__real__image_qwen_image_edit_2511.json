@@ -2686,7 +2686,7 @@
  "links": [
   [
    220,
-   119,
+   103,
    0,
    9,
    0,
@@ -2696,7 +2696,7 @@
    221,
    41,
    0,
-   123,
+   107,
    0,
    "IMAGE"
   ],
@@ -2704,7 +2704,7 @@
    222,
    83,
    0,
-   120,
+   104,
    3,
    "IMAGE"
   ],
@@ -2712,7 +2712,7 @@
    224,
    41,
    0,
-   106,
+   91,
    0,
    "IMAGE"
   ],
@@ -2720,13 +2720,13 @@
    225,
    83,
    0,
-   104,
-   3,
+   91,
+   1,
    "IMAGE"
   ],
   [
    226,
-   103,
+   91,
    0,
    92,
    0,
@@ -2736,21 +2736,21 @@
    227,
    93,
    0,
-   120,
+   104,
    4,
    "IMAGE"
   ],
   [
    228,
-   107,
+   101,
    0,
-   95,
+   97,
    0,
-   "MODEL"
+   "CONDITIONING"
   ],
   [
    229,
-   109,
+   104,
    0,
    98,
    0,
@@ -2758,305 +2758,145 @@
   ],
   [
    230,
-   104,
+   94,
    0,
    99,
-   0,
-   "CONDITIONING"
-  ],
-  [
-   231,
-   95,
-   0,
-   100,
    0,
    "MODEL"
   ],
   [
-   232,
-   94,
+   231,
+   108,
    0,
-   109,
+   101,
    0,
    "CLIP"
   ],
   [
-   233,
-   96,
+   232,
+   95,
    0,
-   109,
+   101,
    1,
    "VAE"
   ],
   [
-   234,
-   106,
+   233,
+   107,
    0,
-   109,
+   101,
    2,
+   "IMAGE"
+  ],
+  [
+   234,
+   107,
+   0,
+   105,
+   0,
    "IMAGE"
   ],
   [
    235,
-   106,
+   95,
    0,
    105,
-   0,
-   "IMAGE"
+   1,
+   "VAE"
   ],
   [
    236,
-   96,
+   108,
    0,
-   105,
-   1,
-   "VAE"
+   104,
+   0,
+   "CLIP"
   ],
   [
    237,
-   94,
+   95,
    0,
    104,
-   0,
-   "CLIP"
+   1,
+   "VAE"
   ],
   [
    238,
-   96,
+   99,
    0,
-   104,
-   1,
-   "VAE"
+   106,
+   0,
+   "MODEL"
   ],
   [
    239,
+   98,
+   0,
    106,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   240,
+   97,
+   0,
+   106,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   241,
+   105,
+   0,
+   106,
+   3,
+   "LATENT"
+  ],
+  [
+   242,
+   106,
+   0,
+   103,
+   0,
+   "LATENT"
+  ],
+  [
+   243,
+   95,
+   0,
+   103,
+   1,
+   "VAE"
+  ],
+  [
+   251,
+   107,
    0,
    104,
    2,
    "IMAGE"
   ],
   [
-   240,
-   100,
-   0,
-   108,
-   0,
-   "MODEL"
-  ],
-  [
-   241,
-   99,
-   0,
-   108,
-   1,
-   "CONDITIONING"
-  ],
-  [
-   242,
-   98,
-   0,
-   108,
-   2,
-   "CONDITIONING"
-  ],
-  [
-   243,
-   105,
-   0,
-   108,
-   3,
-   "LATENT"
-  ],
-  [
-   244,
-   97,
-   0,
-   107,
-   0,
-   "MODEL"
-  ],
-  [
-   245,
-   108,
-   0,
-   103,
-   0,
-   "LATENT"
-  ],
-  [
-   246,
+   252,
    96,
    0,
-   103,
-   1,
-   "VAE"
+   94,
+   0,
+   "MODEL"
+  ],
+  [
+   253,
+   83,
+   0,
+   101,
+   3,
+   "IMAGE"
   ],
   [
    254,
-   83,
-   0,
-   109,
-   3,
-   "IMAGE"
-  ],
-  [
-   255,
-   117,
-   0,
-   113,
-   0,
-   "CONDITIONING"
-  ],
-  [
-   256,
-   120,
-   0,
-   114,
-   0,
-   "CONDITIONING"
-  ],
-  [
-   257,
-   110,
-   0,
-   115,
-   0,
-   "MODEL"
-  ],
-  [
-   258,
-   124,
-   0,
-   117,
-   0,
-   "CLIP"
-  ],
-  [
-   259,
-   111,
-   0,
-   117,
-   1,
-   "VAE"
-  ],
-  [
-   260,
-   123,
-   0,
-   117,
-   2,
-   "IMAGE"
-  ],
-  [
-   261,
-   123,
-   0,
-   121,
-   0,
-   "IMAGE"
-  ],
-  [
-   262,
-   111,
-   0,
-   121,
-   1,
-   "VAE"
-  ],
-  [
-   263,
-   124,
-   0,
-   120,
-   0,
-   "CLIP"
-  ],
-  [
-   264,
-   111,
-   0,
-   120,
-   1,
-   "VAE"
-  ],
-  [
-   265,
-   115,
-   0,
-   122,
-   0,
-   "MODEL"
-  ],
-  [
-   266,
-   114,
-   0,
-   122,
-   1,
-   "CONDITIONING"
-  ],
-  [
-   267,
-   113,
-   0,
-   122,
-   2,
-   "CONDITIONING"
-  ],
-  [
-   268,
-   121,
-   0,
-   122,
-   3,
-   "LATENT"
-  ],
-  [
-   269,
-   122,
-   0,
-   119,
-   0,
-   "LATENT"
-  ],
-  [
-   270,
-   111,
-   0,
-   119,
-   1,
-   "VAE"
-  ],
-  [
-   278,
-   123,
-   0,
-   120,
-   2,
-   "IMAGE"
-  ],
-  [
-   279,
-   112,
-   0,
-   110,
-   0,
-   "MODEL"
-  ],
-  [
-   280,
-   83,
-   0,
-   117,
-   3,
-   "IMAGE"
-  ],
-  [
-   281,
    93,
    0,
-   117,
+   101,
    4,
    "IMAGE"
   ]
@@ -3322,6 +3162,90 @@
   },
   {
    "flags": {},
+   "id": 91,
+   "inputs": [
+    {
+     "label": "image_1",
+     "link": 224,
+     "localized_name": "image2",
+     "name": "image2",
+     "type": "IMAGE"
+    },
+    {
+     "label": "image_2(optional)",
+     "link": 225,
+     "localized_name": "image3",
+     "name": "image3",
+     "type": "IMAGE"
+    },
+    {
+     "label": "image_3(optional)",
+     "link": null,
+     "localized_name": "image",
+     "name": "image",
+     "type": "IMAGE"
+    },
+    {
+     "link": null,
+     "name": "prompt",
+     "type": "STRING",
+     "widget": {
+      "name": "prompt"
+     }
+    }
+   ],
+   "mode": 4,
+   "order": 4,
+   "outputs": [
+    {
+     "links": [
+      226
+     ],
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE"
+    }
+   ],
+   "pos": [
+    -357.9999058800639,
+    205.99989896900502
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "enableTabs": false,
+    "hasSecondTab": false,
+    "proxyWidgets": [
+     [
+      "-1",
+      "prompt"
+     ],
+     [
+      "65",
+      "seed"
+     ],
+     [
+      "65",
+      "control_after_generate"
+     ]
+    ],
+    "secondTabOffset": 80,
+    "secondTabText": "Send Back",
+    "secondTabWidth": 65,
+    "tabWidth": 65,
+    "tabXOffset": 10,
+    "ver": "0.5.1"
+   },
+   "size": [
+    480,
+    492
+   ],
+   "type": "8deb84c1-8382-4dff-8045-41b8c873a9c8",
+   "widgets_values": [
+    "Change the furniture leather difference in image 1 to the fur material in image 2."
+   ]
+  },
+  {
+   "flags": {},
    "id": 93,
    "inputs": [
     {
@@ -3393,87 +3317,7 @@
    "id": 94,
    "inputs": [
     {
-     "link": null,
-     "localized_name": "clip_name",
-     "name": "clip_name",
-     "type": "COMBO",
-     "widget": {
-      "name": "clip_name"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "type",
-     "name": "type",
-     "type": "COMBO",
-     "widget": {
-      "name": "type"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "device",
-     "name": "device",
-     "shape": 7,
-     "type": "COMBO",
-     "widget": {
-      "name": "device"
-     }
-    }
-   ],
-   "mode": 4,
-   "order": 0,
-   "outputs": [
-    {
-     "links": [
-      237,
-      232
-     ],
-     "localized_name": "CLIP",
-     "name": "CLIP",
-     "type": "CLIP"
-    }
-   ],
-   "pos": [
-    -773.199577938495,
-    12.782413757282573
-   ],
-   "properties": {
-    "Node name for S&R": "CLIPLoader",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "models": [
-     {
-      "directory": "text_encoders",
-      "name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"
-     }
-    ],
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    475.359375,
-    180
-   ],
-   "type": "CLIPLoader",
-   "widgets_values": [
-    "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-    "qwen_image",
-    "default"
-   ]
-  },
-  {
-   "flags": {},
-   "id": 95,
-   "inputs": [
-    {
-     "link": 228,
+     "link": 252,
      "localized_name": "model",
      "name": "model",
      "type": "MODEL"
@@ -3488,12 +3332,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 6,
+   "mode": 0,
+   "order": 5,
    "outputs": [
     {
      "links": [
-      231
+      230
      ],
      "localized_name": "MODEL",
      "name": "MODEL",
@@ -3527,7 +3371,7 @@
   },
   {
    "flags": {},
-   "id": 96,
+   "id": 95,
    "inputs": [
     {
      "link": null,
@@ -3539,15 +3383,15 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 1,
+   "mode": 0,
+   "order": 0,
    "outputs": [
     {
      "links": [
-      246,
-      238,
-      233,
-      236
+      243,
+      237,
+      232,
+      235
      ],
      "localized_name": "VAE",
      "name": "VAE",
@@ -3589,7 +3433,7 @@
   },
   {
    "flags": {},
-   "id": 97,
+   "id": 96,
    "inputs": [
     {
      "link": null,
@@ -3610,12 +3454,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 2,
+   "mode": 0,
+   "order": 1,
    "outputs": [
     {
      "links": [
-      244
+      252
      ],
      "localized_name": "MODEL",
      "name": "MODEL",
@@ -3660,10 +3504,10 @@
    "bgcolor": "#000",
    "color": "#222",
    "flags": {},
-   "id": 98,
+   "id": 97,
    "inputs": [
     {
-     "link": 229,
+     "link": 228,
      "localized_name": "conditioning",
      "name": "conditioning",
      "type": "CONDITIONING"
@@ -3678,12 +3522,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 13,
+   "mode": 0,
+   "order": 12,
    "outputs": [
     {
      "links": [
-      242
+      240
      ],
      "localized_name": "CONDITIONING",
      "name": "CONDITIONING",
@@ -3719,10 +3563,10 @@
    "bgcolor": "#000",
    "color": "#222",
    "flags": {},
-   "id": 99,
+   "id": 98,
    "inputs": [
     {
-     "link": 230,
+     "link": 229,
      "localized_name": "conditioning",
      "name": "conditioning",
      "type": "CONDITIONING"
@@ -3737,12 +3581,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 12,
+   "mode": 0,
+   "order": 11,
    "outputs": [
     {
      "links": [
-      241
+      239
      ],
      "localized_name": "CONDITIONING",
      "name": "CONDITIONING",
@@ -3776,10 +3620,10 @@
   },
   {
    "flags": {},
-   "id": 100,
+   "id": 99,
    "inputs": [
     {
-     "link": 231,
+     "link": 230,
      "localized_name": "model",
      "name": "model",
      "type": "MODEL"
@@ -3794,12 +3638,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 7,
+   "mode": 0,
+   "order": 6,
    "outputs": [
     {
      "links": [
-      240
+      238
      ],
      "localized_name": "patched_model",
      "name": "patched_model",
@@ -3835,10 +3679,10 @@
    "bgcolor": "#000",
    "color": "#222",
    "flags": {},
-   "id": 101,
+   "id": 100,
    "inputs": [],
-   "mode": 4,
-   "order": 3,
+   "mode": 0,
+   "order": 2,
    "outputs": [],
    "pos": [
     770,
@@ -3856,13 +3700,100 @@
    ]
   },
   {
+   "bgcolor": "#533",
+   "color": "#322",
+   "flags": {},
+   "id": 101,
+   "inputs": [
+    {
+     "link": 231,
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP"
+    },
+    {
+     "link": 232,
+     "localized_name": "vae",
+     "name": "vae",
+     "shape": 7,
+     "type": "VAE"
+    },
+    {
+     "link": 233,
+     "localized_name": "image1",
+     "name": "image1",
+     "shape": 7,
+     "type": "IMAGE"
+    },
+    {
+     "link": 253,
+     "localized_name": "image2",
+     "name": "image2",
+     "shape": 7,
+     "type": "IMAGE"
+    },
+    {
+     "link": 254,
+     "localized_name": "image3",
+     "name": "image3",
+     "shape": 7,
+     "type": "IMAGE"
+    },
+    {
+     "link": null,
+     "localized_name": "prompt",
+     "name": "prompt",
+     "type": "STRING",
+     "widget": {
+      "name": "prompt"
+     }
+    }
+   ],
+   "mode": 0,
+   "order": 10,
+   "outputs": [
+    {
+     "links": [
+      228
+     ],
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING"
+    }
+   ],
+   "pos": [
+    -202,
+    38
+   ],
+   "properties": {
+    "Node name for S&R": "TextEncodeQwenImageEditPlus",
+    "cnr_id": "comfy-core",
+    "enableTabs": false,
+    "hasSecondTab": false,
+    "secondTabOffset": 80,
+    "secondTabText": "Send Back",
+    "secondTabWidth": 65,
+    "tabWidth": 65,
+    "tabXOffset": 10,
+    "ver": "0.5.1"
+   },
+   "size": [
+    504,
+    294
+   ],
+   "type": "TextEncodeQwenImageEditPlus",
+   "widgets_values": [
+    ""
+   ]
+  },
+  {
    "bgcolor": "#653",
    "color": "#432",
    "flags": {},
    "id": 102,
    "inputs": [],
-   "mode": 4,
-   "order": 4,
+   "mode": 0,
+   "order": 3,
    "outputs": [],
    "pos": [
     398,
@@ -3885,25 +3816,25 @@
    "id": 103,
    "inputs": [
     {
-     "link": 245,
+     "link": 242,
      "localized_name": "samples",
      "name": "samples",
      "type": "LATENT"
     },
     {
-     "link": 246,
+     "link": 243,
      "localized_name": "vae",
      "name": "vae",
      "type": "VAE"
     }
    ],
-   "mode": 4,
-   "order": 8,
+   "mode": 0,
+   "order": 7,
    "outputs": [
     {
      "links": [
-      247,
-      226
+      244,
+      220
      ],
      "localized_name": "IMAGE",
      "name": "IMAGE",
@@ -3944,41 +3875,41 @@
    "id": 104,
    "inputs": [
     {
-     "link": 237,
+     "link": 236,
      "localized_name": "clip",
      "name": "clip",
      "type": "CLIP"
     },
     {
-     "link": 238,
+     "link": 237,
      "localized_name": "vae",
      "name": "vae",
      "shape": 7,
      "type": "VAE"
     },
     {
-     "link": 239,
+     "link": 251,
      "localized_name": "image1",
      "name": "image1",
      "shape": 7,
      "type": "IMAGE"
     },
     {
-     "link": 225,
+     "link": 222,
      "localized_name": "image2",
      "name": "image2",
      "shape": 7,
      "type": "IMAGE"
     },
     {
-     "link": 253,
+     "link": 227,
      "localized_name": "image3",
      "name": "image3",
      "shape": 7,
      "type": "IMAGE"
     },
     {
-     "link": 248,
+     "link": 245,
      "localized_name": "prompt",
      "name": "prompt",
      "type": "STRING",
@@ -3987,12 +3918,12 @@
      }
     }
    ],
-   "mode": 4,
-   "order": 10,
+   "mode": 0,
+   "order": 9,
    "outputs": [
     {
      "links": [
-      230
+      229
      ],
      "localized_name": "CONDITIONING",
      "name": "CONDITIONING",
@@ -4030,24 +3961,24 @@
    "id": 105,
    "inputs": [
     {
-     "link": 235,
+     "link": 234,
      "localized_name": "pixels",
      "name": "pixels",
      "type": "IMAGE"
     },
     {
-     "link": 236,
+     "link": 235,
      "localized_name": "vae",
      "name": "vae",
      "type": "VAE"
     }
    ],
-   "mode": 4,
-   "order": 14,
+   "mode": 0,
+   "order": 13,
    "outputs": [
     {
      "links": [
-      243
+      241
      ],
      "localized_name": "LATENT",
      "name": "LATENT",
@@ -4082,1056 +4013,25 @@
    "id": 106,
    "inputs": [
     {
-     "link": 224,
-     "localized_name": "image",
-     "name": "image",
-     "type": "IMAGE"
-    }
-   ],
-   "mode": 4,
-   "order": 15,
-   "outputs": [
-    {
-     "links": [
-      239,
-      234,
-      235
-     ],
-     "localized_name": "IMAGE",
-     "name": "IMAGE",
-     "type": "IMAGE"
-    }
-   ],
-   "pos": [
-    -766,
-    458
-   ],
-   "properties": {
-    "Node name for S&R": "FluxKontextImageScale",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    233.935078125,
-    61.2
-   ],
-   "type": "FluxKontextImageScale",
-   "widgets_values": []
-  },
-  {
-   "flags": {},
-   "id": 107,
-   "inputs": [
-    {
-     "link": 244,
+     "link": 238,
      "localized_name": "model",
      "name": "model",
      "type": "MODEL"
     },
     {
-     "link": null,
-     "localized_name": "lora_name",
-     "name": "lora_name",
-     "type": "COMBO",
-     "widget": {
-      "name": "lora_name"
-     }
+     "link": 239,
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING"
     },
-    {
-     "link": null,
-     "localized_name": "strength_model",
-     "name": "strength_model",
-     "type": "FLOAT",
-     "widget": {
-      "name": "strength_model"
-     }
-    }
-   ],
-   "mode": 4,
-   "order": 5,
-   "outputs": [
-    {
-     "links": [
-      228
-     ],
-     "localized_name": "MODEL",
-     "name": "MODEL",
-     "type": "MODEL"
-    }
-   ],
-   "pos": [
-    -773.199577938495,
-    -172.01768849521957
-   ],
-   "properties": {
-    "Node name for S&R": "LoraLoaderModelOnly",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "models": [
-     {
-      "directory": "loras",
-      "name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-      "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
-     }
-    ],
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    475.359375,
-    146
-   ],
-   "type": "LoraLoaderModelOnly",
-   "widgets_values": [
-    "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-    1
-   ]
-  },
-  {
-   "flags": {},
-   "id": 108,
-   "inputs": [
     {
      "link": 240,
-     "localized_name": "model",
-     "name": "model",
-     "type": "MODEL"
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING"
     },
     {
      "link": 241,
-     "localized_name": "positive",
-     "name": "positive",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": 242,
-     "localized_name": "negative",
-     "name": "negative",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": 243,
-     "localized_name": "latent_image",
-     "name": "latent_image",
-     "type": "LATENT"
-    },
-    {
-     "link": null,
-     "localized_name": "seed",
-     "name": "seed",
-     "type": "INT",
-     "widget": {
-      "name": "seed"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "steps",
-     "name": "steps",
-     "type": "INT",
-     "widget": {
-      "name": "steps"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "cfg",
-     "name": "cfg",
-     "type": "FLOAT",
-     "widget": {
-      "name": "cfg"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "sampler_name",
-     "name": "sampler_name",
-     "type": "COMBO",
-     "widget": {
-      "name": "sampler_name"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "scheduler",
-     "name": "scheduler",
-     "type": "COMBO",
-     "widget": {
-      "name": "scheduler"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "denoise",
-     "name": "denoise",
-     "type": "FLOAT",
-     "widget": {
-      "name": "denoise"
-     }
-    }
-   ],
-   "mode": 4,
-   "order": 9,
-   "outputs": [
-    {
-     "links": [
-      245
-     ],
-     "localized_name": "LATENT",
-     "name": "LATENT",
-     "type": "LATENT"
-    }
-   ],
-   "pos": [
-    758,
-    -394
-   ],
-   "properties": {
-    "Node name for S&R": "KSampler",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    336,
-    702
-   ],
-   "type": "KSampler",
-   "widgets_values": [
-    374470990866512,
-    "randomize",
-    4,
-    1,
-    "euler",
-    "simple",
-    1
-   ]
-  },
-  {
-   "bgcolor": "#533",
-   "color": "#322",
-   "flags": {},
-   "id": 109,
-   "inputs": [
-    {
-     "link": 232,
-     "localized_name": "clip",
-     "name": "clip",
-     "type": "CLIP"
-    },
-    {
-     "link": 233,
-     "localized_name": "vae",
-     "name": "vae",
-     "shape": 7,
-     "type": "VAE"
-    },
-    {
-     "link": 234,
-     "localized_name": "image1",
-     "name": "image1",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 254,
-     "localized_name": "image2",
-     "name": "image2",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 252,
-     "localized_name": "image3",
-     "name": "image3",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": null,
-     "localized_name": "prompt",
-     "name": "prompt",
-     "type": "STRING",
-     "widget": {
-      "name": "prompt"
-     }
-    }
-   ],
-   "mode": 4,
-   "order": 11,
-   "outputs": [
-    {
-     "links": [
-      229
-     ],
-     "localized_name": "CONDITIONING",
-     "name": "CONDITIONING",
-     "type": "CONDITIONING"
-    }
-   ],
-   "pos": [
-    -202,
-    38
-   ],
-   "properties": {
-    "Node name for S&R": "TextEncodeQwenImageEditPlus",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    504,
-    294
-   ],
-   "type": "TextEncodeQwenImageEditPlus",
-   "widgets_values": [
-    ""
-   ]
-  },
-  {
-   "flags": {},
-   "id": 110,
-   "inputs": [
-    {
-     "link": 279,
-     "localized_name": "model",
-     "name": "model",
-     "type": "MODEL"
-    },
-    {
-     "link": null,
-     "localized_name": "shift",
-     "name": "shift",
-     "type": "FLOAT",
-     "widget": {
-      "name": "shift"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 5,
-   "outputs": [
-    {
-     "links": [
-      257
-     ],
-     "localized_name": "MODEL",
-     "name": "MODEL",
-     "type": "MODEL"
-    }
-   ],
-   "pos": [
-    386,
-    -394
-   ],
-   "properties": {
-    "Node name for S&R": "ModelSamplingAuraFlow",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    324,
-    112.00000000000001
-   ],
-   "type": "ModelSamplingAuraFlow",
-   "widgets_values": [
-    3.1
-   ]
-  },
-  {
-   "flags": {},
-   "id": 111,
-   "inputs": [
-    {
-     "link": null,
-     "localized_name": "vae_name",
-     "name": "vae_name",
-     "type": "COMBO",
-     "widget": {
-      "name": "vae_name"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 0,
-   "outputs": [
-    {
-     "links": [
-      270,
-      264,
-      259,
-      262
-     ],
-     "localized_name": "VAE",
-     "name": "VAE",
-     "slot_index": 0,
-     "type": "VAE"
-    }
-   ],
-   "pos": [
-    -773.199577938495,
-    226.38227538989668
-   ],
-   "properties": {
-    "Node name for S&R": "VAELoader",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "models": [
-     {
-      "directory": "vae",
-      "name": "qwen_image_vae.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors"
-     }
-    ],
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    475.359375,
-    112.00000000000001
-   ],
-   "type": "VAELoader",
-   "widgets_values": [
-    "qwen_image_vae.safetensors"
-   ]
-  },
-  {
-   "flags": {},
-   "id": 112,
-   "inputs": [
-    {
-     "link": null,
-     "localized_name": "unet_name",
-     "name": "unet_name",
-     "type": "COMBO",
-     "widget": {
-      "name": "unet_name"
-     }
-    },
-    {
-     "link": null,
-     "localized_name": "weight_dtype",
-     "name": "weight_dtype",
-     "type": "COMBO",
-     "widget": {
-      "name": "weight_dtype"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 1,
-   "outputs": [
-    {
-     "links": [
-      279
-     ],
-     "localized_name": "MODEL",
-     "name": "MODEL",
-     "slot_index": 0,
-     "type": "MODEL"
-    }
-   ],
-   "pos": [
-    -773.199577938495,
-    -356.8177094524074
-   ],
-   "properties": {
-    "Node name for S&R": "UNETLoader",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "models": [
-     {
-      "directory": "diffusion_models",
-      "name": "qwen_image_edit_2511_bf16.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_bf16.safetensors"
-     }
-    ],
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    475.359375,
-    146
-   ],
-   "type": "UNETLoader",
-   "widgets_values": [
-    "qwen_image_edit_2511_bf16.safetensors",
-    "default"
-   ]
-  },
-  {
-   "bgcolor": "#000",
-   "color": "#222",
-   "flags": {},
-   "id": 113,
-   "inputs": [
-    {
-     "link": 255,
-     "localized_name": "conditioning",
-     "name": "conditioning",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": null,
-     "localized_name": "reference_latents_method",
-     "name": "reference_latents_method",
-     "type": "COMBO",
-     "widget": {
-      "name": "reference_latents_method"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 12,
-   "outputs": [
-    {
-     "links": [
-      267
-     ],
-     "localized_name": "CONDITIONING",
-     "name": "CONDITIONING",
-     "type": "CONDITIONING"
-    }
-   ],
-   "pos": [
-    374,
-    50
-   ],
-   "properties": {
-    "Node name for S&R": "FluxKontextMultiReferenceLatentMethod",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    371.608125,
-    114
-   ],
-   "type": "FluxKontextMultiReferenceLatentMethod",
-   "widgets_values": [
-    "index_timestep_zero"
-   ]
-  },
-  {
-   "bgcolor": "#000",
-   "color": "#222",
-   "flags": {},
-   "id": 114,
-   "inputs": [
-    {
-     "link": 256,
-     "localized_name": "conditioning",
-     "name": "conditioning",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": null,
-     "localized_name": "reference_latents_method",
-     "name": "reference_latents_method",
-     "type": "COMBO",
-     "widget": {
-      "name": "reference_latents_method"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 11,
-   "outputs": [
-    {
-     "links": [
-      266
-     ],
-     "localized_name": "CONDITIONING",
-     "name": "CONDITIONING",
-     "type": "CONDITIONING"
-    }
-   ],
-   "pos": [
-    374,
-    -106
-   ],
-   "properties": {
-    "Node name for S&R": "FluxKontextMultiReferenceLatentMethod",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    371.608125,
-    114
-   ],
-   "type": "FluxKontextMultiReferenceLatentMethod",
-   "widgets_values": [
-    "index_timestep_zero"
-   ]
-  },
-  {
-   "flags": {},
-   "id": 115,
-   "inputs": [
-    {
-     "link": 257,
-     "localized_name": "model",
-     "name": "model",
-     "type": "MODEL"
-    },
-    {
-     "link": null,
-     "localized_name": "strength",
-     "name": "strength",
-     "type": "FLOAT",
-     "widget": {
-      "name": "strength"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 6,
-   "outputs": [
-    {
-     "links": [
-      265
-     ],
-     "localized_name": "patched_model",
-     "name": "patched_model",
-     "type": "MODEL"
-    }
-   ],
-   "pos": [
-    386,
-    -262
-   ],
-   "properties": {
-    "Node name for S&R": "CFGNorm",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    324,
-    112.00000000000001
-   ],
-   "type": "CFGNorm",
-   "widgets_values": [
-    1
-   ]
-  },
-  {
-   "bgcolor": "#000",
-   "color": "#222",
-   "flags": {},
-   "id": 116,
-   "inputs": [],
-   "mode": 0,
-   "order": 2,
-   "outputs": [],
-   "pos": [
-    770,
-    338
-   ],
-   "properties": {},
-   "size": [
-    324,
-    258
-   ],
-   "title": "KSampler settings",
-   "type": "MarkdownNote",
-   "widgets_values": [
-    "You can test and find the best setting by yourself. The following table is for reference.\n|   | Qwen | Comfy | lightning LoRA |\n|--------|---------|------------|---------------------------|\n| Steps  | 40      | 20         | 4                         |\n| CFG    | 4.0     | 4.0       | 1.0                       |\n\nBy default, we use 20 steps as we just don't want it to take too long. Try 40 if you want a better result, but it will take longer."
-   ]
-  },
-  {
-   "bgcolor": "#533",
-   "color": "#322",
-   "flags": {},
-   "id": 117,
-   "inputs": [
-    {
-     "link": 258,
-     "localized_name": "clip",
-     "name": "clip",
-     "type": "CLIP"
-    },
-    {
-     "link": 259,
-     "localized_name": "vae",
-     "name": "vae",
-     "shape": 7,
-     "type": "VAE"
-    },
-    {
-     "link": 260,
-     "localized_name": "image1",
-     "name": "image1",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 280,
-     "localized_name": "image2",
-     "name": "image2",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 281,
-     "localized_name": "image3",
-     "name": "image3",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": null,
-     "localized_name": "prompt",
-     "name": "prompt",
-     "type": "STRING",
-     "widget": {
-      "name": "prompt"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 10,
-   "outputs": [
-    {
-     "links": [
-      255
-     ],
-     "localized_name": "CONDITIONING",
-     "name": "CONDITIONING",
-     "type": "CONDITIONING"
-    }
-   ],
-   "pos": [
-    -202,
-    38
-   ],
-   "properties": {
-    "Node name for S&R": "TextEncodeQwenImageEditPlus",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    504,
-    294
-   ],
-   "type": "TextEncodeQwenImageEditPlus",
-   "widgets_values": [
-    ""
-   ]
-  },
-  {
-   "bgcolor": "#653",
-   "color": "#432",
-   "flags": {},
-   "id": 118,
-   "inputs": [],
-   "mode": 0,
-   "order": 3,
-   "outputs": [],
-   "pos": [
-    398,
-    194
-   ],
-   "properties": {},
-   "size": [
-    336,
-    138
-   ],
-   "type": "Note",
-   "widgets_values": [
-    "The \"Edit Model Reference Method\" nodes above are not needed if you use Comfy files, but may be needed if you use repackaged ones from other people."
-   ]
-  },
-  {
-   "flags": {
-    "collapsed": false
-   },
-   "id": 119,
-   "inputs": [
-    {
-     "link": 269,
-     "localized_name": "samples",
-     "name": "samples",
-     "type": "LATENT"
-    },
-    {
-     "link": 270,
-     "localized_name": "vae",
-     "name": "vae",
-     "type": "VAE"
-    }
-   ],
-   "mode": 0,
-   "order": 7,
-   "outputs": [
-    {
-     "links": [
-      271,
-      220
-     ],
-     "localized_name": "IMAGE",
-     "name": "IMAGE",
-     "slot_index": 0,
-     "type": "IMAGE"
-    }
-   ],
-   "pos": [
-    1154,
-    -382
-   ],
-   "properties": {
-    "Node name for S&R": "VAEDecode",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    168,
-    85.19999999999999
-   ],
-   "type": "VAEDecode",
-   "widgets_values": []
-  },
-  {
-   "_input_overrides": {
-    "prompt": "Change the furniture leather difference in image 1 to the fur material in image 2."
-   },
-   "bgcolor": "#353",
-   "color": "#232",
-   "flags": {},
-   "id": 120,
-   "inputs": [
-    {
-     "link": 263,
-     "localized_name": "clip",
-     "name": "clip",
-     "type": "CLIP"
-    },
-    {
-     "link": 264,
-     "localized_name": "vae",
-     "name": "vae",
-     "shape": 7,
-     "type": "VAE"
-    },
-    {
-     "link": 278,
-     "localized_name": "image1",
-     "name": "image1",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 222,
-     "localized_name": "image2",
-     "name": "image2",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 227,
-     "localized_name": "image3",
-     "name": "image3",
-     "shape": 7,
-     "type": "IMAGE"
-    },
-    {
-     "link": 272,
-     "localized_name": "prompt",
-     "name": "prompt",
-     "type": "STRING",
-     "widget": {
-      "name": "prompt"
-     }
-    }
-   ],
-   "mode": 0,
-   "order": 9,
-   "outputs": [
-    {
-     "links": [
-      256
-     ],
-     "localized_name": "CONDITIONING",
-     "name": "CONDITIONING",
-     "type": "CONDITIONING"
-    }
-   ],
-   "pos": [
-    -202,
-    -346
-   ],
-   "properties": {
-    "Node name for S&R": "TextEncodeQwenImageEditPlus",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    511.953125,
-    348.67187500000006
-   ],
-   "title": "TextEncodeQwenImageEditPlus (Positive)",
-   "type": "TextEncodeQwenImageEditPlus",
-   "widgets_values": [
-    "Change the furniture leather difference in image 1 to the fur material in image 2."
-   ]
-  },
-  {
-   "flags": {},
-   "id": 121,
-   "inputs": [
-    {
-     "link": 261,
-     "localized_name": "pixels",
-     "name": "pixels",
-     "type": "IMAGE"
-    },
-    {
-     "link": 262,
-     "localized_name": "vae",
-     "name": "vae",
-     "type": "VAE"
-    }
-   ],
-   "mode": 0,
-   "order": 13,
-   "outputs": [
-    {
-     "links": [
-      268
-     ],
-     "localized_name": "LATENT",
-     "name": "LATENT",
-     "type": "LATENT"
-    }
-   ],
-   "pos": [
-    50,
-    446
-   ],
-   "properties": {
-    "Node name for S&R": "VAEEncode",
-    "cnr_id": "comfy-core",
-    "enableTabs": false,
-    "hasSecondTab": false,
-    "secondTabOffset": 80,
-    "secondTabText": "Send Back",
-    "secondTabWidth": 65,
-    "tabWidth": 65,
-    "tabXOffset": 10,
-    "ver": "0.5.1"
-   },
-   "size": [
-    225,
-    102
-   ],
-   "type": "VAEEncode",
-   "widgets_values": []
-  },
-  {
-   "flags": {},
-   "id": 122,
-   "inputs": [
-    {
-     "link": 265,
-     "localized_name": "model",
-     "name": "model",
-     "type": "MODEL"
-    },
-    {
-     "link": 266,
-     "localized_name": "positive",
-     "name": "positive",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": 267,
-     "localized_name": "negative",
-     "name": "negative",
-     "type": "CONDITIONING"
-    },
-    {
-     "link": 268,
      "localized_name": "latent_image",
      "name": "latent_image",
      "type": "LATENT"
@@ -5196,7 +4096,7 @@
    "outputs": [
     {
      "links": [
-      269
+      242
      ],
      "localized_name": "LATENT",
      "name": "LATENT",
@@ -5236,7 +4136,7 @@
   },
   {
    "flags": {},
-   "id": 123,
+   "id": 107,
    "inputs": [
     {
      "link": 221,
@@ -5250,9 +4150,9 @@
    "outputs": [
     {
      "links": [
-      260,
-      261,
-      278
+      233,
+      234,
+      251
      ],
      "localized_name": "IMAGE",
      "name": "IMAGE",
@@ -5284,7 +4184,7 @@
   },
   {
    "flags": {},
-   "id": 124,
+   "id": 108,
    "inputs": [
     {
      "link": null,
@@ -5320,8 +4220,8 @@
    "outputs": [
     {
      "links": [
-      263,
-      258
+      236,
+      231
      ],
      "localized_name": "CLIP",
      "name": "CLIP",

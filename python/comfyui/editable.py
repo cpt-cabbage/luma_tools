@@ -171,10 +171,43 @@ _COMFYUI_TYPE_MAP = {
 # Phantom/internal widgets that should be skipped
 _PHANTOM_WIDGET_NAMES = {'control_after_generate'}
 
-# Memoization for extract_editable_nodes: path -> (mtime, result).
-# Bounded implicitly by the number of workflow presets in use.
+# Memoization for extract_editable_nodes / extract_settings_nodes:
+# path -> (mtime, result). Bounded implicitly by the number of workflow presets
+# in use. Both live on the network workflows share, and the UI re-extracts on
+# every preset and variant switch, so re-parsing is a remote read each time.
 _editable_cache = {}
 _editable_cache_lock = threading.RLock()
+_settings_cache = {}
+_settings_cache_lock = threading.RLock()
+
+
+def _cache_lookup(cache, lock, workflow_path):
+    """Return (mtime, cached_result). ``mtime`` is None when unavailable."""
+    try:
+        mtime = os.path.getmtime(workflow_path)
+    except OSError:
+        return None, None
+    with lock:
+        entry = cache.get(workflow_path)
+    if entry is not None and entry[0] == mtime:
+        return mtime, entry[1]
+    return mtime, None
+
+
+def _cache_store(cache, lock, workflow_path, mtime, result):
+    """Record a parse result keyed by the file's mtime."""
+    if mtime is None:
+        return
+    with lock:
+        cache[workflow_path] = (mtime, result)
+
+
+def clear_workflow_parse_caches():
+    """Drop memoized editable/settings extraction results (used by tests)."""
+    with _editable_cache_lock:
+        _editable_cache.clear()
+    with _settings_cache_lock:
+        _settings_cache.clear()
 
 
 def _extract_subgraph_widgets(
@@ -329,15 +362,23 @@ def _extract_subgraph_widgets(
 
     else:
         # Fallback: no proxyWidgets - use node's inputs array
-        # Extract inputs that have a 'widget' property (these are widget inputs)
-        widget_idx = 0
-        widget_entries = []
-        for inp in node_inputs:
-            widget_def = inp.get('widget')
-            if widget_def and isinstance(widget_def, dict) and inp.get('link') is None:
-                widget_entries.append(inp)
+        # Extract inputs that have a 'widget' property (these are widget inputs).
+        #
+        # The index into widgets_values must advance across EVERY widget input,
+        # including connected ones: a widget that has been wired to another node
+        # still occupies its slot in widgets_values. Filtering first and then
+        # walking a separate counter read every value after the first connected
+        # widget one position early.
+        all_widget_inputs = [inp for inp in node_inputs
+                             if isinstance(inp.get('widget'), dict)]
+        editable_count = sum(1 for inp in all_widget_inputs
+                             if inp.get('link') is None)
 
-        for inp in widget_entries:
+        for widget_idx, inp in enumerate(all_widget_inputs):
+            # Connected widgets are driven by the graph, not the user
+            if inp.get('link') is not None:
+                continue
+
             widget_def = inp.get('widget', {})
             widget_name = widget_def.get('name', inp.get('name', ''))
             inp_type = inp.get('type', '')
@@ -348,7 +389,6 @@ def _extract_subgraph_widgets(
                 widget_type = 'text'
 
             value = widgets_values[widget_idx] if widget_idx < len(widgets_values) else None
-            widget_idx += 1
 
             display_label = label.replace('_', ' ')
 
@@ -356,7 +396,7 @@ def _extract_subgraph_widgets(
                 node_id=node_id,
                 node_type=node_type,
                 title=title,
-                display_name=f"{display_name} - {display_label}" if len(widget_entries) > 1 else display_name,
+                display_name=f"{display_name} - {display_label}" if editable_count > 1 else display_name,
                 widget_type=widget_type,
                 widget_name=widget_name,
                 current_value=value,
@@ -386,15 +426,9 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     # Central mtime-based memoization: several UI paths (model pickers,
     # dialogs) call this directly per invocation, each re-reading and
     # re-parsing the workflow JSON from the network workflows directory
-    try:
-        mtime = os.path.getmtime(workflow_path)
-    except OSError:
-        mtime = None
-    if mtime is not None:
-        with _editable_cache_lock:
-            cached = _editable_cache.get(workflow_path)
-            if cached is not None and cached[0] == mtime:
-                return cached[1]
+    mtime, cached = _cache_lookup(_editable_cache, _editable_cache_lock, workflow_path)
+    if cached is not None:
+        return cached
 
     try:
         workflow = load_workflow(workflow_path)
@@ -558,9 +592,8 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         condition_info = f" (visible when {node.condition_node})" if node.condition_node else ""
         logger.info(f"  - {node.display_name} ({node.node_type}): {node.widget_type}{condition_info}")
 
-    if mtime is not None:
-        with _editable_cache_lock:
-            _editable_cache[workflow_path] = (mtime, editable_nodes)
+    _cache_store(_editable_cache, _editable_cache_lock, workflow_path,
+                 mtime, editable_nodes)
 
     return editable_nodes
 
@@ -598,8 +631,9 @@ def _parse_settings_title(title: str) -> Tuple[bool, str]:
         - is_settings: True if node is a settings node
         - group_name: Title without _settings suffix
     """
-    # Match `<group>_settings` as an end-of-name marker so titles like
-    # `Upscale_settings_v2` aren't mis-detected.
+    # Match `<group>_settings` either at the end of the title or as an infix
+    # (`Upscale_settings_v2`), so versioned settings nodes are still detected.
+    # The group name is everything before the first `_settings`.
     if title.endswith('_settings') or '_settings_' in title:
         group_name = title.split('_settings', 1)[0].replace('_', ' ').strip()
         return True, group_name
@@ -621,6 +655,12 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
     """
     if not workflow_path or not os.path.exists(workflow_path):
         return []
+
+    # Same memoization as extract_editable_nodes — this is called on every
+    # preset/variant switch and re-parses the workflow off the network share.
+    mtime, cached = _cache_lookup(_settings_cache, _settings_cache_lock, workflow_path)
+    if cached is not None:
+        return cached
 
     try:
         workflow = load_workflow(workflow_path)
@@ -736,5 +776,8 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
             groups[node.group_name].append(node)
         for group, nodes_list in groups.items():
             logger.info(f"  {group}: {[n.widget_name for n in nodes_list]}")
+
+    _cache_store(_settings_cache, _settings_cache_lock, workflow_path,
+                 mtime, settings_nodes)
 
     return settings_nodes

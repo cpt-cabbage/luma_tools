@@ -127,43 +127,6 @@ def copy_workflow_to_central_directory(source_path: str) -> Optional[str]:
 
 
 # ============================================================================
-# COMFYUI TEXT PRESETS (User Settings)
-# ============================================================================
-
-def get_comfyui_text_presets() -> Dict[str, str]:
-    """Get saved ComfyUI text presets."""
-    settings = load_user_settings()
-    presets = settings.get("comfyui_text_presets", {})
-    legacy_presets = settings.get("prompt_presets", {})
-    return {**presets, **legacy_presets}
-
-
-def save_comfyui_text_preset(name: str, text: str):
-    """Save a ComfyUI text preset."""
-    settings = load_user_settings()
-    if "comfyui_text_presets" not in settings:
-        settings["comfyui_text_presets"] = {}
-    settings["comfyui_text_presets"][name] = text
-    save_user_settings(settings)
-    logger.info(f"Saved ComfyUI text preset: {name}")
-
-
-def delete_comfyui_text_preset(name: str):
-    """Delete a ComfyUI text preset."""
-    settings = load_user_settings()
-    deleted = False
-    if "comfyui_text_presets" in settings and name in settings["comfyui_text_presets"]:
-        del settings["comfyui_text_presets"][name]
-        deleted = True
-    if "prompt_presets" in settings and name in settings["prompt_presets"]:
-        del settings["prompt_presets"][name]
-        deleted = True
-    if deleted:
-        save_user_settings(settings)
-        logger.info(f"Deleted ComfyUI text preset: {name}")
-
-
-# ============================================================================
 # COMFYUI PROMPT PRESETS BY NODE TYPE (User Settings)
 # ============================================================================
 
@@ -196,11 +159,6 @@ def delete_comfyui_prompt_preset_for_node_type(node_type: str, preset_name: str)
         settings["comfyui_prompt_presets_by_node_type"] = all_presets
         save_user_settings(settings)
         logger.info(f"Deleted prompt preset '{preset_name}' from node type '{node_type}'")
-
-
-def get_all_comfyui_prompt_presets_by_node_type() -> Dict[str, Dict[str, str]]:
-    """Get all prompt presets for all node types."""
-    return load_user_settings().get("comfyui_prompt_presets_by_node_type", {})
 
 
 # ============================================================================
@@ -423,157 +381,6 @@ def _get_workflow_preset_field(name: str, field: str, default: Any = None) -> An
     return default
 
 
-def is_workflow_preset_iteratable(name: str) -> bool:
-    """Check if a workflow preset supports iterate mode."""
-    return _get_workflow_preset_field(name, "iteratable", False)
-
-
-def is_workflow_preset_full_restart(name: str) -> bool:
-    """Check if a workflow preset requires full ComfyUI server restart."""
-    return _get_workflow_preset_field(name, "full_restart", False)
-
-
-def get_workflow_preset_output_type(name: str) -> str:
-    """Get the output type for a workflow preset.
-
-    Args:
-        name: Preset name
-
-    Returns:
-        Output type string (image, video, 3d, audio, other). Defaults to "image".
-    """
-    output_type = _get_workflow_preset_field(name, "output_type", "image")
-    if output_type not in OUTPUT_TYPES:
-        return "image"
-    return output_type
-
-
-# ============================================================================
-# COMFYUI STYLE PRESETS (User Settings)
-# ============================================================================
-
-def get_style_presets(workflow_preset: str = None) -> Dict[str, Dict[str, Any]]:
-    """Get saved style presets.
-
-    Style presets save all editable parameter values for quick recall.
-    Optionally filtered by workflow preset.
-
-    Args:
-        workflow_preset: If provided, only return presets for this workflow
-
-    Returns:
-        Dict of preset_name -> {editable_values, workflow_preset, created}
-    """
-    settings = load_user_settings()
-    all_presets = settings.get("comfyui_style_presets", {})
-
-    if workflow_preset:
-        return {
-            name: preset for name, preset in all_presets.items()
-            if preset.get('workflow_preset') == workflow_preset
-        }
-    return all_presets
-
-
-def save_style_preset(
-    name: str,
-    editable_values: Dict[str, Any],
-    workflow_preset: str = None,
-    description: str = None
-) -> bool:
-    """Save a style preset with current editable parameter values.
-
-    Args:
-        name: Preset name
-        editable_values: Dict of node_id -> {display_name, value, node_type, widget_type}
-        workflow_preset: Associated workflow preset name
-        description: Optional description
-
-    Returns:
-        bool: True if saved successfully
-    """
-    from datetime import datetime
-
-    settings = load_user_settings()
-    if "comfyui_style_presets" not in settings:
-        settings["comfyui_style_presets"] = {}
-
-    # Serialize editable values (exclude non-serializable data)
-    serialized = {}
-    for node_id, entries in editable_values.items():
-        entry_list = entries if isinstance(entries, list) else [entries]
-        for data in entry_list:
-            if not isinstance(data, dict):
-                continue
-            widget_name = getattr(data.get('node'), 'widget_name', '') if data.get('node') else ''
-            serial_key = f"{node_id}:{widget_name}" if widget_name else str(node_id)
-            serialized[serial_key] = {
-                "display_name": data.get('display_name', ''),
-                "node_type": data.get('node_type', ''),
-                "widget_type": data.get('widget_type', ''),
-                "value": data.get('value'),
-            }
-
-    settings["comfyui_style_presets"][name] = {
-        "editable_values": serialized,
-        "workflow_preset": workflow_preset,
-        "description": description,
-        "created": datetime.now().isoformat(),
-    }
-
-    try:
-        save_user_settings(settings)
-        logger.info(f"Saved style preset: {name}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save style preset: {e}")
-        return False
-
-
-def load_style_preset(name: str) -> Optional[Dict[str, Any]]:
-    """Load a style preset by name.
-
-    Args:
-        name: Preset name
-
-    Returns:
-        Preset dict with editable_values, workflow_preset, etc. or None
-    """
-    settings = load_user_settings()
-    return settings.get("comfyui_style_presets", {}).get(name)
-
-
-def delete_style_preset(name: str) -> bool:
-    """Delete a style preset.
-
-    Args:
-        name: Preset name
-
-    Returns:
-        bool: True if deleted
-    """
-    settings = load_user_settings()
-    if "comfyui_style_presets" in settings and name in settings["comfyui_style_presets"]:
-        del settings["comfyui_style_presets"][name]
-        save_user_settings(settings)
-        logger.info(f"Deleted style preset: {name}")
-        return True
-    return False
-
-
-def get_style_preset_names(workflow_preset: str = None) -> list:
-    """Get list of style preset names.
-
-    Args:
-        workflow_preset: If provided, only return presets for this workflow
-
-    Returns:
-        List of preset names
-    """
-    presets = get_style_presets(workflow_preset)
-    return sorted(presets.keys())
-
-
 def is_workflow_preset_multi(name: str) -> bool:
     """Check if a workflow preset is a multi-workflow model."""
     return _get_workflow_preset_field(name, "is_multi", False)
@@ -656,7 +463,10 @@ def save_session(
 
     Args:
         workflow_preset: Name of the workflow preset
-        editable_values: Dict of node_id -> {display_name, value, node_type, widget_type}
+        editable_values: Flat dict of "node_id:widget_name" -> value, exactly as
+            produced by ComfyUIWidgetManager.get_editable_values_for_state().
+            Stored verbatim so restore_session() can hand it straight back to
+            _apply_pending_editable_values(), which understands those keys.
         seed: Current seed value
         generation_count: Number of generations
         input_images: List of input image paths (optional)
@@ -671,21 +481,12 @@ def save_session(
     if "comfyui_recent_sessions" not in settings:
         settings["comfyui_recent_sessions"] = []
 
-    # Serialize editable values
+    # Keep only JSON-serializable entries; the widget manager already flattens
+    # values to scalars and lists of paths.
     serialized_values = {}
-    for node_id, entries in editable_values.items():
-        entry_list = entries if isinstance(entries, list) else [entries]
-        for data in entry_list:
-            if not isinstance(data, dict):
-                continue
-            widget_name = getattr(data.get('node'), 'widget_name', '') if data.get('node') else ''
-            serial_key = f"{node_id}:{widget_name}" if widget_name else str(node_id)
-            serialized_values[serial_key] = {
-                "display_name": data.get('display_name', ''),
-                "node_type": data.get('node_type', ''),
-                "widget_type": data.get('widget_type', ''),
-                "value": data.get('value'),
-            }
+    for key, value in (editable_values or {}).items():
+        if isinstance(value, (str, int, float, bool, list, type(None))):
+            serialized_values[str(key)] = value
 
     # Auto-generate description if not provided
     if not description:
@@ -741,43 +542,6 @@ def get_session_by_index(index: int) -> Optional[Dict[str, Any]]:
     if 0 <= index < len(sessions):
         return sessions[index]
     return None
-
-
-def delete_session(index: int) -> bool:
-    """Delete a session by index.
-
-    Args:
-        index: 0-based index
-
-    Returns:
-        bool: True if deleted
-    """
-    settings = load_user_settings()
-    sessions = settings.get("comfyui_recent_sessions", [])
-    if 0 <= index < len(sessions):
-        deleted = sessions.pop(index)
-        settings["comfyui_recent_sessions"] = sessions
-        save_user_settings(settings)
-        logger.info(f"Deleted session: {deleted.get('description', 'unknown')}")
-        return True
-    return False
-
-
-def clear_recent_sessions() -> bool:
-    """Clear all recent sessions.
-
-    Returns:
-        bool: True if cleared successfully
-    """
-    settings = load_user_settings()
-    settings["comfyui_recent_sessions"] = []
-    try:
-        save_user_settings(settings)
-        logger.info("Cleared all recent sessions")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to clear sessions: {e}")
-        return False
 
 
 def format_session_display(session: Dict[str, Any]) -> str:

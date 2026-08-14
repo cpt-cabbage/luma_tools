@@ -278,7 +278,11 @@ WIDGET_MAPPINGS = {
     'VAEDecodeTiled': ['tile_size', 'overlap', 'temporal_size', 'temporal_overlap'],
 
     # ACE Step 1.5 Audio nodes
+    # NOTE: 'quality' is also patched in via node_info.MISSING_WIDGETS, because
+    # /object_info doesn't report it. These manual entries are the fallback for
+    # when the node_info cache is unavailable.
     'SaveAudioMP3': ['filename_prefix', 'quality'],
+    'SaveAudioOpus': ['filename_prefix', 'quality'],
     'VAEDecodeAudio': [],
     'TextEncodeAceStepAudio1.5': ['tags', 'lyrics', 'seed', None, 'bpm', 'duration', 'timesignature', 'language', 'keyscale'],
     'EmptyAceStep1.5LatentAudio': ['seconds', 'batch_size'],
@@ -294,12 +298,6 @@ WIDGET_MAPPINGS = {
     # We need to map all positions even for button widgets to get correct offsets
     'Load3D': ['model_file', None, None, None, None, 'width', 'height'],
 
-    # ACE Step 1.5 Audio nodes
-    # NOTE: Also defined in node_info.py MISSING_WIDGETS for programmatic patching.
-    # This manual entry serves as a fallback when node_info cache is unavailable.
-    'SaveAudioMP3': ['filename_prefix', 'quality'],  # audioUI widget not in widgets_values
-    'SaveAudioOpus': ['filename_prefix', 'quality'],  # same as MP3
-
     # Core ComfyUI utility nodes
     'PrimitiveNode': ['value', None],  # Value + control mode (None = skip control mode)
 
@@ -310,8 +308,10 @@ WIDGET_MAPPINGS = {
 
 
 # Node types that should be skipped during API conversion
-# These are UI-only nodes that don't affect workflow execution
-SKIP_NODE_TYPES = [
+# These are UI-only nodes that don't affect workflow execution.
+# frozenset (not list) — this is membership-tested once per node during
+# conversion, so a linear scan is pure waste on large workflows.
+SKIP_NODE_TYPES = frozenset({
     'Reroute', 'Note', 'PrimitiveNode',
     # Note/comment nodes from various extensions
     'MarkdownNote', 'CR Text', 'ShowText', 'ShowTextForGPT',
@@ -323,19 +323,14 @@ SKIP_NODE_TYPES = [
     'Fast Groups Muter (rgthree)', 'Image Comparer (rgthree)',
     # Utility/cleanup nodes
     'easy cleanGpuUsed', 'easy imageSizeByLongerSide',
-]
+})
 
 
-# Node types that have seeds which should be set during workflow modification
-SEED_NODE_TYPES = [
-    'KSampler',
-    'RandomNoise',
-    'HYMotionGenerate',
-    'Trellis2ImageToShape',
-    'Trellis2ShapeToTexturedMesh',
-    'Trellis2MeshWithVoxelAdvancedGenerator',
-    'UltraShapeRefine',
-]
+# NOTE: the former SEED_NODE_TYPES list lived here and duplicated
+# comfyui.utils._SEED_NODES. Both are gone — seed application is now driven by
+# the node's actual widget names (see comfyui.utils.iter_seed_inputs), so any
+# sampler exposing a `seed`/`noise_seed` widget is handled without a hardcoded
+# allow-list. Adding a new sampler node type no longer requires a code change.
 
 
 # Suffix convention for marking the primary output node in multi-output workflows.
@@ -348,16 +343,24 @@ OUTPUT_SUFFIX = '_output'
 # Node types that export files and need output prefix set
 # Nodes with 'output_dir' in WIDGET_MAPPINGS will also have output_dir set automatically
 EXPORT_NODE_TYPES = {
+    # --- Core ComfyUI image saves ---
     'SaveImage': 'filename_prefix',
+    'SaveAnimatedWEBP': 'filename_prefix',
+    'SaveAnimatedPNG': 'filename_prefix',
+    # --- Core ComfyUI video saves ---
+    'SaveVideo': 'filename_prefix',
+    'SaveWEBM': 'filename_prefix',
+    # --- Core ComfyUI audio saves ---
+    'SaveAudio': 'filename_prefix',        # FLAC
+    'SaveAudioMP3': 'filename_prefix',
+    'SaveAudioOpus': 'filename_prefix',
+    # --- Core ComfyUI 3D saves ---
+    'SaveGLB': 'filename_prefix',
+    # --- Custom node packs ---
     'HYMotionExportFBX': 'filename_prefix',
     'Trellis2ExportGLB': 'filename_prefix',
     'Trellis2ExportMesh': 'filename_prefix',
     'UltraShapeSaveGLB': 'filename_prefix',
     # SHARP 3D reconstruction
     'SharpPredict': 'output_prefix',
-    # Hunyuan Video
-    'SaveVideo': 'filename_prefix',
-    # ACE Step Audio
-    'SaveAudioMP3': 'filename_prefix',
-    'SaveAudioOpus': 'filename_prefix',
 }

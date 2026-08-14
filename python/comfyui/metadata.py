@@ -980,67 +980,6 @@ def get_per_file_metadata(output_dir: str, filename: str) -> Optional[Dict[str, 
         return None
 
 
-def get_file_lineage(output_dir: str, filename: str) -> list:
-    """Get the lineage chain for a file (iteration history).
-
-    Traces back through parent_id references to build the full lineage.
-
-    Args:
-        output_dir: Directory containing the file
-        filename: Starting filename
-
-    Returns:
-        List of dicts with file_id, filename, timestamp (oldest first)
-    """
-    metadata = load_gallery_metadata(output_dir)
-    lineage = []
-
-    # Build a lookup by file_id
-    file_id_to_entry = {}
-    file_id_to_filename = {}
-
-    for key, value in metadata.items():
-        if key.startswith("_file_") and isinstance(value, dict):
-            file_id = value.get("file_id")
-            if file_id:
-                file_id_to_entry[file_id] = value
-                file_id_to_filename[file_id] = key[6:]  # Remove "_file_" prefix
-
-    # Get starting file's metadata
-    basename = os.path.splitext(filename)[0]
-    file_key = f"_file_{basename}"
-    current = metadata.get(file_key)
-
-    if not current:
-        return []
-
-    # Trace back through parents
-    visited = set()
-    while current:
-        file_id = current.get("file_id")
-        if file_id in visited:
-            break  # Avoid infinite loops
-        visited.add(file_id)
-
-        lineage.append({
-            "file_id": file_id,
-            "filename": file_id_to_filename.get(file_id, "unknown"),
-            "timestamp": current.get("timestamp"),
-            "actual_seed": current.get("actual_seed"),
-        })
-
-        # Move to parent
-        parent_id = current.get("parent_id")
-        if parent_id and parent_id in file_id_to_entry:
-            current = file_id_to_entry[parent_id]
-        else:
-            break
-
-    # Return oldest first
-    lineage.reverse()
-    return lineage
-
-
 def has_per_file_metadata(output_dir: str, filename: str) -> bool:
     """Check if a file has per-file metadata (full traceability).
 
