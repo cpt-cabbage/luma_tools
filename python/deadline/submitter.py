@@ -243,9 +243,14 @@ def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[L
     """
     Collect all batch input files (images, 3D models, etc.) from editable values.
 
+    Fan-out slots (``_editable*``) are skipped — their files all belong to a
+    single generation rather than being separate jobs.
+
     Returns:
         Tuple of (list of file paths, node_id of the input node)
     """
+    from comfyui.editable import CARDINALITY_MANY
+
     if not editable_values:
         return [], -1
 
@@ -258,6 +263,11 @@ def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[L
             for data in entry_list:
                 node_info = data.get('node')
                 value = data.get('value')
+                # A fan-out slot holds every reference for ONE generation.
+                # Batching it would turn 5 references into 5 single-reference
+                # jobs, which is the opposite of what the artist asked for.
+                if getattr(node_info, 'cardinality', None) == CARDINALITY_MANY:
+                    continue
                 if node_info and node_info.widget_type == input_type:
                     if isinstance(value, list):
                         return [p for p in value if os.path.exists(p)], node_id

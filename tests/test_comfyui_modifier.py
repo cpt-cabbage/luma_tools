@@ -376,3 +376,61 @@ class TestFanoutSlots:
         assert '50' in wf
         assert wf['50']['inputs']['prompt'] == 'hi'
         assert 'media_type_1' not in wf['50']['inputs']
+
+
+# ============================================================================
+# Deadline batching must not split fan-out slots
+# ============================================================================
+
+class TestCollectBatchImagesSkipsFanout:
+    def _node(self, cardinality):
+        from comfyui.editable import EditableNode
+        return EditableNode(node_id="41", node_type="LoadImage",
+                            title="Refs_editable*", display_name="Refs",
+                            widget_type="image", widget_name="image",
+                            cardinality=cardinality)
+
+    def _files(self, tmp_path, *names):
+        out = []
+        for name in names:
+            p = tmp_path / name
+            p.write_bytes(b"x")
+            out.append(str(p))
+        return out
+
+    def test_fanout_slot_is_not_batched(self, tmp_path):
+        """N references belong to ONE generation, not N jobs."""
+        from deadline.submitter import _collect_batch_images
+        from comfyui.editable import CARDINALITY_MANY
+        files = self._files(tmp_path, "a.png", "b.png")
+        paths, node_id = _collect_batch_images(
+            {"41": [{"node": self._node(CARDINALITY_MANY), "value": files}]})
+        assert paths == []
+        assert node_id == -1
+
+    def test_normal_slot_still_batches(self, tmp_path):
+        from deadline.submitter import _collect_batch_images
+        from comfyui.editable import CARDINALITY_SINGLE
+        files = self._files(tmp_path, "c.png", "d.png")
+        paths, node_id = _collect_batch_images(
+            {"41": [{"node": self._node(CARDINALITY_SINGLE), "value": files}]})
+        assert paths == files
+        assert node_id == "41"
+
+    def test_normal_slot_wins_when_mixed(self, tmp_path):
+        """A fan-out slot must not shadow a real batching slot."""
+        from deadline.submitter import _collect_batch_images
+        from comfyui.editable import (EditableNode, CARDINALITY_MANY,
+                                      CARDINALITY_SINGLE)
+        refs = self._files(tmp_path, "r1.png", "r2.png")
+        batch = self._files(tmp_path, "b1.png")
+        single = EditableNode(node_id="42", node_type="LoadImage",
+                              title="Input_editable", display_name="Input",
+                              widget_type="image", widget_name="image",
+                              cardinality=CARDINALITY_SINGLE)
+        paths, node_id = _collect_batch_images({
+            "41": [{"node": self._node(CARDINALITY_MANY), "value": refs}],
+            "42": [{"node": single, "value": batch}],
+        })
+        assert paths == batch
+        assert node_id == "42"
