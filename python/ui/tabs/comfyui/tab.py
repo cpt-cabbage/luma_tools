@@ -1628,6 +1628,9 @@ class ComfyUITab(PollingMixin, BaseTab):
             elif node.widget_type == 'video':
                 input_widget.images_changed.connect(self._on_images_changed)
 
+            elif node.widget_type == 'audio':
+                input_widget.images_changed.connect(self._on_images_changed)
+
             else:
                 # Default widgets
                 if hasattr(input_widget, 'textChanged'):
@@ -1827,7 +1830,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     # =========================================================================
 
     # Widget types that carry a file selection (BatchImageSelector-style)
-    _FILE_INPUT_WIDGET_TYPES = ('image', 'video')
+    _FILE_INPUT_WIDGET_TYPES = ('image', 'video', 'audio')
 
     def _validate_inputs(self):
         """Validate inputs and enable/disable submit button.
@@ -1906,7 +1909,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                 checked += 1
                 selected = getattr(input_widget, 'selected_files', None)
                 if selected is not None and len(selected) == 0:
-                    kind = "image" if node.widget_type == 'image' else "video"
+                    kind = node.widget_type
                     problems.append(f"'{label}' has no {kind} selected")
 
             elif node.widget_type == 'text':

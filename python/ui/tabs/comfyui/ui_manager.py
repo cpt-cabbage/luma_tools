@@ -173,7 +173,11 @@ class ComfyUIWidgetManager:
         total_video_nodes = sum(1 for node in editable_nodes
                                if node.widget_type == 'video'
                                and self._get_node_override(node, node_overrides).get("enabled", True))
-        logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}, video nodes: {total_video_nodes}")
+        total_audio_nodes = sum(1 for node in editable_nodes
+                               if node.widget_type == 'audio'
+                               and self._get_node_override(node, node_overrides).get("enabled", True))
+        logger.info(f"[ComfyUI] Total enabled image nodes: {total_image_nodes}, "
+                    f"video nodes: {total_video_nodes}, audio nodes: {total_audio_nodes}")
 
         # Collect widgets separately for horizontal layout
         non_image_widgets = []  # List of (widget, node) tuples for text, toggles, etc.
@@ -197,14 +201,15 @@ class ComfyUIWidgetManager:
                 node = copy.copy(node)
                 node.current_value = default_value
 
-            widget = self._create_editable_node_widget(node, total_image_nodes, total_video_nodes)
+            widget = self._create_editable_node_widget(
+                node, total_image_nodes, total_video_nodes, total_audio_nodes)
             if widget:
                 # Store the node info on the widget for condition handling
                 widget.editable_node = node
                 self.dynamic_widgets[(node.node_id, node.widget_name)] = widget
 
                 # Separate file selector widgets (image/video) from non-file widgets
-                if node.widget_type in ('image', 'video'):
+                if node.widget_type in ('image', 'video', 'audio'):
                     image_widgets.append((widget, node))
                 else:
                     non_image_widgets.append((widget, node))
@@ -338,13 +343,15 @@ class ComfyUIWidgetManager:
             if widget:
                 widget.setVisible(checked)
 
-    def _create_editable_node_widget(self, node, total_image_nodes=1, total_video_nodes=1):
+    def _create_editable_node_widget(self, node, total_image_nodes=1,
+                                     total_video_nodes=1, total_audio_nodes=1):
         """Create a widget for an editable node.
 
         Args:
             node: EditableNode object
             total_image_nodes: Total number of image nodes in the workflow (for pairing)
             total_video_nodes: Total number of video nodes in the workflow (for pairing)
+            total_audio_nodes: Total number of audio nodes in the workflow (for pairing)
         """
         from ui_components import BatchImageSelector
         from ui.spell_checker import SpellCheckTextEdit
@@ -476,6 +483,28 @@ class ComfyUIWidgetManager:
 
             # Insert label at the beginning of the BatchImageSelector's toolbar
             label_min_w = 0 if total_video_nodes >= 3 else 160
+            label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
+            input_widget.toolbar_layout.insertWidget(0, label)
+
+            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
+            container.input_widget = input_widget
+
+        elif node.widget_type == 'audio':
+            from core.config import AUDIO_EXTENSIONS as _AUDIO_EXT
+            # Create BatchImageSelector configured for audio files
+            input_widget = BatchImageSelector(
+                supported_extensions=sorted(_AUDIO_EXT),
+                total_image_nodes=total_audio_nodes,
+                file_type_label="audio",
+            )
+            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            # Set last browse directory for audio selector
+            last_dir = get_last_browse_directory("comfyui_audio")
+            if last_dir:
+                input_widget.set_last_browse_dir(last_dir)
+
+            # Insert label at the beginning of the BatchImageSelector's toolbar
+            label_min_w = 0 if total_audio_nodes >= 3 else 160
             label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
             input_widget.toolbar_layout.insertWidget(0, label)
 
