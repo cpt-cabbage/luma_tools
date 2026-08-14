@@ -40,6 +40,56 @@ from core.import_utils import get_event_bus
 pipeline_events, EVENT_BUS_AVAILABLE = get_event_bus()
 
 
+# =============================================================================
+# Worker functions for server control (no Qt access - they run off the GUI
+# thread, because every one of them touches Deadline or the network share)
+# =============================================================================
+
+def _list_comfyui_workers():
+    """The Deadline workers that run ComfyUI."""
+    from deadline.server_job import list_group_workers
+    from deadline.utils import resolve_comfyui_targeting
+
+    _pool, group, _priority = resolve_comfyui_targeting()
+    return list_group_workers(group)
+
+
+def _read_server_state():
+    """Per-worker heartbeat state."""
+    from comfyui.server_status import read_server_heartbeats
+    from core.settings_manager import safe_get_setting
+
+    network_path = safe_get_setting("network_output_path", "")
+    if not network_path:
+        return {"servers": {}, "error": "Network output path not configured"}
+    return {
+        "servers": read_server_heartbeats(
+            network_path, ComfyUITab._HEARTBEAT_STALE_SECONDS),
+        "error": "",
+    }
+
+
+def _start_server_worker(worker):
+    """Submit a server job."""
+    from deadline.server_job import submit_server_job
+
+    return submit_server_job(worker)
+
+
+def _stop_server_worker(worker):
+    """Stop the server job for a worker.
+
+    Returns (ok, message). ok=False with message="no-job" means a server is
+    running that Luma Tools did not start - typically one launched by hand.
+    """
+    from deadline.server_job import find_server_jobs, stop_server_job
+
+    job_id = find_server_jobs().get(worker.lower())
+    if not job_id:
+        return (False, "no-job")
+    return stop_server_job(job_id)
+
+
 class ComfyUITab(PollingMixin, BaseTab):
     """Tab for ComfyUI AI image generation."""
 
@@ -110,6 +160,12 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Initialize polling state from mixin
         self._init_polling_state()
 
+        # Guards the submit button. Using the button's own enabled state as the
+        # lock didn't work: _validate_inputs() re-enables it, and it runs from
+        # several signals including on_tab_activated — so tabbing away and back
+        # mid-submit re-armed the button.
+        self._submit_in_flight = False
+
         # Debounce timer for state saves (created once, not lazily)
         self._save_timer = QTimer(self.main_window)
         self._save_timer.setSingleShot(True)
@@ -143,6 +199,15 @@ class ComfyUITab(PollingMixin, BaseTab):
         self._setup_server_behavior_controls()
 
         # Server status banner (prominent, in submit section)
+        # Server control state must exist before the banner is built: that
+        # method starts a worker whose callback reads these attributes.
+        self._server_states = {}
+        self._server_workers = []
+        self._selected_worker = ""
+        self._server_action = None
+        self._server_action_started = 0.0
+        self._server_restart_pending = False
+
         self._setup_server_status_banner()
 
         # Persistent submit failure banner (stays until the next submit)
@@ -255,9 +320,213 @@ class ComfyUITab(PollingMixin, BaseTab):
         self.ui.serverStatusLayout.addWidget(self._server_status_label)
         self.ui.serverStatusLayout.addStretch()
 
+        # Buttons live here rather than in comfyui.ui because this banner's
+        # layout is populated programmatically (the status label above is too).
+        self._server_start_button = QPushButton("Start Server")
+        self._server_start_button.clicked.connect(self._on_start_server)
+        self._server_stop_button = QPushButton("Stop")
+        self._server_stop_button.clicked.connect(self._on_stop_server)
+        self._server_restart_button = QPushButton("Restart")
+        self._server_restart_button.clicked.connect(self._on_restart_server)
+
+        for button in (self._server_start_button, self._server_stop_button,
+                       self._server_restart_button):
+            button.setProperty("density", "sm")
+            button.setProperty("role", "secondary")
+            button.setEnabled(False)
+            self.ui.serverStatusLayout.addWidget(button)
+
         # Always show the banner
         banner.setVisible(True)
         banner.setProperty("variant", "subtle")
+
+        # Which workers exist is a Deadline query - keep it off the GUI thread.
+        self.start_worker(
+            _list_comfyui_workers,
+            on_result=self._on_workers_listed,
+            on_error=lambda msg, tb="": logger.debug(f"Worker list unavailable: {msg}"),
+        )
+
+    # =========================================================================
+    # SERVER CONTROL (start / stop / restart the farm server)
+    # =========================================================================
+
+    _SERVER_FAST_POLL_MS = 5000
+    _SERVER_NORMAL_POLL_MS = 30000
+    _SERVER_ACTION_TIMEOUT_S = 300
+
+    def _on_workers_listed(self, workers):
+        """Remember the ComfyUI group's workers (GUI thread)."""
+        self._server_workers = workers or []
+        if not self._selected_worker and self._server_workers:
+            self._selected_worker = self._server_workers[0]
+        self._update_server_controls()
+
+    def _target_worker(self):
+        """The worker the buttons act on.
+
+        With one worker in the group there is nothing to choose. With several,
+        prefer the one already running a server so Stop and Restart act on
+        what the banner is reporting.
+        """
+        if self._selected_worker:
+            return self._selected_worker
+        for info in self._server_states.values():
+            if info["status"] == "online" and not info["stale"]:
+                return info["hostname"]
+        return ""
+
+    def _update_server_controls(self):
+        """Drive button enablement from the heartbeat state."""
+        if not hasattr(self, '_server_start_button'):
+            return
+
+        from core.config import DEADLINE_PATH
+
+        if not DEADLINE_PATH:
+            for button in (self._server_start_button, self._server_stop_button,
+                           self._server_restart_button):
+                button.setEnabled(False)
+                button.setToolTip("Deadline is not available on this machine")
+            return
+
+        worker = self._target_worker()
+        info = self._server_states.get(worker.lower(), {}) if worker else {}
+        is_online = bool(info) and info.get("status") == "online" and not info.get("stale")
+        busy = self._server_action is not None
+
+        self._server_start_button.setEnabled(bool(worker) and not is_online and not busy)
+        self._server_stop_button.setEnabled(is_online and not busy)
+        self._server_restart_button.setEnabled(is_online and not busy)
+
+        tip = f"Target worker: {worker}" if worker else "No ComfyUI workers found"
+        for button in (self._server_start_button, self._server_stop_button,
+                       self._server_restart_button):
+            button.setToolTip(tip)
+
+    def _set_server_poll(self, fast):
+        """Poll the heartbeat faster while waiting for a state change."""
+        timer = getattr(self, '_server_check_timer', None)
+        if timer:
+            timer.start(self._SERVER_FAST_POLL_MS if fast else self._SERVER_NORMAL_POLL_MS)
+
+    def _on_start_server(self):
+        worker = self._target_worker()
+        if not worker:
+            self.show_status("No ComfyUI workers found on Deadline", "warning")
+            return
+        self._server_action = "start"
+        self._update_server_controls()
+        self.show_status(f"Submitting ComfyUI server job for {worker}...", "info")
+        self.start_worker(
+            _start_server_worker, worker,
+            on_result=self._on_server_started,
+            on_error=self._on_server_action_error,
+        )
+
+    def _on_server_started(self, job_id):
+        if not job_id:
+            self._server_action = None
+            self._update_server_controls()
+            self.show_status("Deadline did not accept the server job", "error")
+            return
+        logger.info(f"ComfyUI server job submitted: {job_id}")
+        self.show_status("Server job queued - waiting for it to come online...", "info")
+        self._server_action_started = time.monotonic()
+        self._set_server_poll(True)
+        self._check_server_status()
+
+    def _on_stop_server(self):
+        worker = self._target_worker()
+        if not worker:
+            return
+        if not confirm_action(
+            "Stop ComfyUI Server",
+            f"Stop the ComfyUI server on {worker}?\n\n"
+            "Models loaded into VRAM will be discarded, and any ComfyUI job "
+            "currently rendering on that worker will fail.",
+            self.main_window,
+        ):
+            self._server_restart_pending = False
+            return
+        self._server_action = "stop"
+        self._update_server_controls()
+        self.show_status(f"Stopping the server on {worker}...", "info")
+        self.start_worker(
+            _stop_server_worker, worker,
+            on_result=self._on_server_stopped,
+            on_error=self._on_server_action_error,
+        )
+
+    def _on_server_stopped(self, result):
+        ok, message = result
+        if not ok and message == "no-job":
+            # The heartbeat is real but Luma Tools did not start it - almost
+            # always a server launched by hand on the worker itself.
+            self._server_action = None
+            self._server_restart_pending = False
+            self._update_server_controls()
+            self.show_status(
+                "That server was not started from Luma Tools, so it must be "
+                "stopped on the worker itself", "warning")
+            return
+        if not ok:
+            self._server_action = None
+            self._server_restart_pending = False
+            self._update_server_controls()
+            self.show_status(f"Could not stop the server: {message}", "error")
+            return
+        self.show_status("Server job completed - waiting for it to go offline...", "info")
+        self._server_action_started = time.monotonic()
+        self._set_server_poll(True)
+        self._check_server_status()
+
+    def _on_restart_server(self):
+        """Stop, then start again once the heartbeat has gone."""
+        self._server_restart_pending = True
+        self._on_stop_server()
+        if self._server_action is None:
+            self._server_restart_pending = False
+
+    def _on_server_action_error(self, error_msg, traceback_str=""):
+        logger.error(f"Server control failed: {error_msg}")
+        self._server_action = None
+        self._server_restart_pending = False
+        self._set_server_poll(False)
+        self._update_server_controls()
+        self.show_status(f"Server control failed: {error_msg}", "error")
+
+    def _settle_server_action(self):
+        """Resolve an in-flight start/stop against the latest heartbeat."""
+        if self._server_action is None:
+            return
+
+        worker = self._target_worker()
+        info = self._server_states.get(worker.lower(), {}) if worker else {}
+        is_online = bool(info) and info.get("status") == "online" and not info.get("stale")
+        elapsed = time.monotonic() - self._server_action_started
+
+        if self._server_action == "start" and is_online:
+            self._server_action = None
+            self._set_server_poll(False)
+            self.show_status(f"ComfyUI server online on {worker}", "success")
+        elif self._server_action == "stop" and not is_online:
+            self._server_action = None
+            self._set_server_poll(False)
+            if self._server_restart_pending:
+                self._server_restart_pending = False
+                self._on_start_server()
+            else:
+                self.show_status("ComfyUI server stopped", "success")
+        elif elapsed > self._SERVER_ACTION_TIMEOUT_S:
+            action = self._server_action
+            self._server_action = None
+            self._server_restart_pending = False
+            self._set_server_poll(False)
+            self.show_status(
+                f"Server {action} did not settle within 5 minutes - check Deadline",
+                "warning")
+        self._update_server_controls()
 
     def _check_server_status(self):
         """Read heartbeat file(s) from the network path to determine server status.
@@ -270,85 +539,60 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
         self._heartbeat_pending = True
         self.start_worker(
-            self._read_heartbeat_status,
+            _read_server_state,
             on_result=self._on_heartbeat_result,
             on_error=self._on_heartbeat_error,
         )
-
-    @staticmethod
-    def _read_heartbeat_status():
-        """Read heartbeat files from network path (runs on worker thread)."""
-        from core.settings_manager import safe_get_setting
-        from core.utils import load_json
-        from datetime import datetime, timezone
-        import glob
-
-        stale_seconds = ComfyUITab._HEARTBEAT_STALE_SECONDS
-
-        network_path = safe_get_setting("network_output_path", "")
-        if not network_path:
-            return ("unknown", "Network output path not configured")
-
-        heartbeat_dir = os.path.join(network_path, '_server_status')
-        if not os.path.isdir(heartbeat_dir):
-            return ("offline", "No server heartbeat found")
-
-        heartbeat_files = glob.glob(os.path.join(heartbeat_dir, 'heartbeat_*.json'))
-        if not heartbeat_files:
-            return ("offline", "No server heartbeat found")
-
-        best_status = "offline"
-        best_info = ""
-        # UTC for safe cross-timezone comparison with the farm server.
-        now = datetime.now(timezone.utc)
-
-        for hb_file in heartbeat_files:
-            data = load_json(hb_file, {})
-            if not data or 'timestamp' not in data:
-                continue
-
-            try:
-                ts = datetime.fromisoformat(data['timestamp'])
-                # Older heartbeats wrote naive local time; assume UTC if naive
-                # so we don't crash mixing aware/naive on subtraction.
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                age_seconds = (now - ts).total_seconds()
-            except (ValueError, TypeError):
-                continue
-
-            status = data.get('status', 'offline')
-            hostname = data.get('hostname', 'unknown')
-
-            if age_seconds > stale_seconds:
-                continue
-
-            if status == "online":
-                uptime = data.get('uptime_seconds', 0)
-                jobs = data.get('jobs_completed', 0)
-                best_status = "online"
-                hours = uptime // 3600
-                minutes = (uptime % 3600) // 60
-                uptime_str = f"{hours}h {minutes}m" if hours else f"{uptime // 60}m" if uptime >= 60 else f"{uptime}s"
-                best_info = (
-                    f"Server: {hostname} | "
-                    f"Uptime: {uptime_str} | "
-                    f"Jobs completed: {jobs}"
-                )
-                break
-            elif status == "starting":
-                best_status = "starting"
-                best_info = f"Server on {hostname} is loading models..."
-
-        return (best_status, best_info)
 
     def _on_heartbeat_result(self, result):
         """Handle heartbeat check result on the main thread."""
         self._heartbeat_pending = False
         if not hasattr(self, '_server_status_label') or not self._server_status_label:
             return
-        status, info = result
+
+        self._server_states = result.get("servers", {})
+        status, info = self._summarise_servers(
+            self._server_states, result.get("error", ""))
         self._update_server_indicator(status, info)
+        self._update_server_controls()
+        self._settle_server_action()
+
+    def _summarise_servers(self, servers, error):
+        """Turn per-worker heartbeats into (status, detail) for the banner.
+
+        The old code collapsed every worker into one "best" status, so any
+        server anywhere read as online even when the worker a job lands on had
+        none. The count is now explicit.
+        """
+        if error:
+            return ("unknown", error)
+
+        total = len(self._server_workers) or len(servers)
+        online = [i for i in servers.values()
+                  if i["status"] == "online" and not i["stale"]]
+        starting = [i for i in servers.values()
+                    if i["status"] == "starting" and not i["stale"]]
+
+        lines = []
+        for info in sorted(servers.values(), key=lambda i: i["hostname"]):
+            age = int(info["age_seconds"])
+            uptime_min = int(info["uptime_seconds"]) // 60
+            state = info["status"] if not info["stale"] else f"stale ({age}s)"
+            lines.append(
+                f"{info['hostname']}: {state} | up {uptime_min}m | "
+                f"jobs {info['jobs_completed']}"
+            )
+        if not lines:
+            lines.append("No server heartbeats found")
+        detail = "\n".join(lines)
+
+        if online:
+            names = ", ".join(sorted(i["hostname"] for i in online))
+            return ("online",
+                    f"{len(online)} of {total} workers online - {names}\n\n{detail}")
+        if starting:
+            return ("starting", detail)
+        return ("offline", detail)
 
     def _on_heartbeat_error(self, error_msg, traceback_str=""):
         """Handle heartbeat check error."""
@@ -625,28 +869,6 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Handle [Change] button — go back to model grid."""
         self._show_model_grid()
 
-    # Keep old method name as stub for backward compatibility
-    def _setup_model_info_card(self):
-        """Legacy stub — info is now in the header bar."""
-        pass
-
-    def _setup_workflow_settings_button(self):
-        """Legacy stub — gear is now in the header bar."""
-        pass
-
-    def _setup_input_empty_state(self):
-        """Legacy stub — empty state is handled by hiding the input frame."""
-        pass
-
-    # Legacy stubs for methods that no longer exist in the new UI
-    def _update_rating_widget(self):
-        """Legacy stub — ratings removed from main flow."""
-        pass
-
-    def _update_model_info_card(self):
-        """Legacy stub — info is in the header bar now."""
-        self._update_selected_header()
-
     def _on_workflow_settings_clicked(self):
         """Show the workflow settings dialog."""
         self.widget_manager.show_settings_dialog()
@@ -668,10 +890,6 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Select the preset (this updates the UI and loads the workflow)
         self._select_preset(model_name)
-
-    def _update_model_button_with_rating(self):
-        """Legacy stub — now updates the header bar instead."""
-        self._update_selected_header()
 
     def _setup_session_resume_banner(self):
         """Set up the session resume banner if a previous session is available."""
@@ -702,14 +920,24 @@ class ComfyUITab(PollingMixin, BaseTab):
         )
 
         if pending_values:
-            self.widget_manager.pending_editable_values = pending_values
-            self.widget_manager._apply_pending_editable_values()
+            # Same split as _restore_state: settings widgets live in a separate
+            # dict and are keyed with a "settings_" prefix.
+            settings_vals = {k: v for k, v in pending_values.items()
+                             if str(k).startswith("settings_")}
+            editable_vals = {k: v for k, v in pending_values.items()
+                             if not str(k).startswith("settings_")}
+            if editable_vals:
+                self.widget_manager.pending_editable_values = editable_vals
+                self.widget_manager._apply_pending_editable_values()
+            if settings_vals:
+                self.widget_manager.pending_settings_values = settings_vals
+                self.widget_manager._apply_pending_settings_values()
 
         # Get input images from session
         input_images = self.state_manager.get_session_input_images(session_index)
         if input_images:
             # Find image input widget and add images
-            for node_id, container in self.widget_manager.dynamic_widgets.items():
+            for widget_key, container in self.widget_manager.dynamic_widgets.items():
                 input_widget = getattr(container, 'input_widget', None)
                 if input_widget and hasattr(input_widget, 'add_images'):
                     # Filter to existing files only
@@ -907,10 +1135,6 @@ class ComfyUITab(PollingMixin, BaseTab):
         else:
             self._variant_selector.clear()
             self.ui.variantSelectorContainer.setVisible(False)
-
-    # Keep old name as alias for backward compat
-    def _update_workflow_selector_visibility(self):
-        self._update_variant_selector()
 
     def _on_workflow_selected(self, workflow_name):
         """Handle workflow selection change in multi-workflow model."""
@@ -1141,10 +1365,6 @@ class ComfyUITab(PollingMixin, BaseTab):
             return full_name.rsplit('\\', 1)[-1]
         return full_name
 
-    def _on_choose_preset_clicked(self):
-        """Legacy stub — redirects to showing the model grid."""
-        self._show_model_grid()
-
     def _select_preset(self, preset_name):
         """Select a workflow preset by name."""
         from comfyui.presets_manager import (
@@ -1368,7 +1588,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         connections that fire `_save_state` and `_on_text_changed` multiple
         times per change.
         """
-        for node_id, container in self.widget_manager.dynamic_widgets.items():
+        for widget_key, container in self.widget_manager.dynamic_widgets.items():
             if getattr(container, '_signals_connected', False):
                 continue
             input_widget = getattr(container, 'input_widget', None)
@@ -1623,7 +1843,12 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         workflow_ok = bool(self.app_state.comfyui_workflow_path)
         network_path_ok = bool(safe_get_setting("network_output_path", ""))
-        self.ui.ComfyUISubmit.setEnabled(workflow_ok and network_path_ok)
+        # Never re-enable while a submit is in flight — this method runs from
+        # several signals and would otherwise undo the double-submit guard.
+        in_flight = getattr(self, '_submit_in_flight', False)
+        self.ui.ComfyUISubmit.setEnabled(
+            workflow_ok and network_path_ok and not in_flight
+        )
 
         if not workflow_ok:
             return "No workflow selected"
@@ -1720,6 +1945,42 @@ class ComfyUITab(PollingMixin, BaseTab):
     # SUBMISSION
     # =========================================================================
 
+    def _collect_selected_input_files(self):
+        """Every file currently chosen in the image/video selectors."""
+        files = []
+        for _key, container in self.widget_manager.dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if not node or not input_widget:
+                continue
+            if node.widget_type not in ('image', 'video'):
+                continue
+            files.extend(getattr(input_widget, 'selected_files', None) or [])
+        return files
+
+    def _save_resumable_session(self):
+        """Persist the current setup as a resumable session (never fatal)."""
+        try:
+            saved = self.state_manager.save_current_session(
+                self.ui,
+                self.widget_manager,
+                input_images=self._collect_selected_input_files(),
+            )
+            if saved:
+                logger.debug("[ComfyUI] Saved resumable session")
+        except Exception:
+            # A session is a convenience; losing one must never block a submit.
+            logger.warning("[ComfyUI] Could not save resumable session", exc_info=True)
+
+    def _end_submit(self):
+        """Release the submit guard and re-enable the button.
+
+        Single exit point so every early return and both worker callbacks
+        clear the in-flight flag — a missed one would wedge the button.
+        """
+        self._submit_in_flight = False
+        self.ui.ComfyUISubmit.setEnabled(True)
+
     def _on_submit_clicked(self):
         """Submit the workflow to ComfyUI/Deadline."""
         from deadline.submitter import submit_comfyui_job
@@ -1727,9 +1988,13 @@ class ComfyUITab(PollingMixin, BaseTab):
         from comfyui.presets_manager import get_workflow_preset_config
         from .polling import format_elapsed_time
 
-        # Guard against double-submit (re-enabled in _on_submit_result/_on_submit_error)
+        # Guard against double-submit (cleared in _on_submit_result/_on_submit_error)
+        if getattr(self, '_submit_in_flight', False):
+            logger.debug("[ComfyUI] Submit ignored — a submission is already in flight")
+            return
         if not self.ui.ComfyUISubmit.isEnabled():
             return
+        self._submit_in_flight = True
         self.ui.ComfyUISubmit.setEnabled(False)
 
         # Clear any failure left over from the previous attempt
@@ -1746,14 +2011,14 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Validate workflow
         if not self.app_state.comfyui_workflow_path:
-            self.ui.ComfyUISubmit.setEnabled(True)
+            self._end_submit()
             self.show_status("No workflow selected", "error")
             return
 
         # Get network output path - always use user subfolder
         network_output_dir = safe_get_setting("network_output_path", "")
         if not network_output_dir:
-            self.ui.ComfyUISubmit.setEnabled(True)
+            self._end_submit()
             self.show_status("Network output path not configured in Settings", "error")
             return
 
@@ -1762,7 +2027,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         # isn't undone by that method re-enabling the button.)
         input_error = self._validate_dynamic_inputs()
         if input_error:
-            self.ui.ComfyUISubmit.setEnabled(True)
+            self._end_submit()
             self.show_status(input_error, "error")
             self._show_submit_failure(input_error)
             logger.warning(f"[ComfyUI] Submit blocked by input validation: {input_error}")
@@ -1785,6 +2050,11 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         # Collect editable values using widget manager
         editable_values, selected_image_count = self.widget_manager.collect_editable_values()
+
+        # Snapshot this configuration as a resumable session. Submitting is the
+        # natural "I care about this setup" moment, and it's what makes the
+        # resume banner appear next launch.
+        self._save_resumable_session()
 
         # Get workflow config (supports both single and multi-workflow models)
         workflow_config = get_workflow_preset_config(
@@ -1893,7 +2163,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _on_submit_result(self, result, ctx=None):
         """Handle ComfyUI job submission result."""
 
-        self.ui.ComfyUISubmit.setEnabled(True)
+        self._end_submit()
         try:
             logger.debug(f"[ComfyUI] on_result called with: {result}")
             job_ids, error_msg = result
@@ -1941,7 +2211,7 @@ class ComfyUITab(PollingMixin, BaseTab):
     def _on_submit_error(self, error_msg, traceback_str=""):
         """Handle ComfyUI job submission error."""
 
-        self.ui.ComfyUISubmit.setEnabled(True)
+        self._end_submit()
         self.main_window.stop_status_spinner()
         self.show_status(f"Submission error: {error_msg}", "error")
         self.update_status_with_spinner(
@@ -2056,45 +2326,78 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Get source image hashes for hash-based fallback
         source_image_hashes = metadata.get('source_image_hashes') or {}
 
-        # Build full paths for source files
-        image_paths = []
-        for basename in source_images:
+        # Resolve by name first — that's just a stat per file and covers the
+        # common case. Anything still missing needs a content-hash search, which
+        # reads whole files off the share and must not run on the GUI thread.
+        image_paths, missing_images = self._resolve_by_name(output_dir, source_images)
+        model_paths, missing_models = self._resolve_by_name(output_dir, source_models)
+
+        if missing_images or missing_models:
+            logger.info(
+                f"[ComfyUI] {len(missing_images) + len(missing_models)} source "
+                f"file(s) not found by name — searching by content hash in background"
+            )
+            self.start_worker(
+                self._resolve_sources_by_hash,
+                worker_kwargs={
+                    "directory": output_dir,
+                    "missing_images": missing_images,
+                    "missing_models": missing_models,
+                    "hashes": source_image_hashes,
+                },
+                on_result=lambda found, imgs=image_paths, mdls=model_paths:
+                    self._on_sources_resolved(found, imgs, mdls),
+                on_error=lambda msg, tb="", imgs=image_paths, mdls=model_paths: (
+                    logger.warning(f"[ComfyUI] Hash search failed: {msg}"),
+                    self._populate_source_widgets(imgs, mdls),
+                ),
+            )
+            return
+
+        self._populate_source_widgets(image_paths, model_paths)
+
+    @staticmethod
+    def _resolve_by_name(output_dir, basenames):
+        """Split source basenames into (found_paths, still_missing)."""
+        found, missing = [], []
+        for basename in basenames or []:
             if not basename:
                 continue
             full_path = os.path.join(output_dir, basename)
             if os.path.exists(full_path):
-                image_paths.append(full_path)
+                found.append(full_path)
             else:
-                # Try hash-based fallback: scan directory for file with matching hash
-                found_by_hash = self._find_file_by_hash(
-                    output_dir, source_image_hashes.get(basename)
-                )
-                if found_by_hash:
-                    image_paths.append(found_by_hash)
-                    logger.info(f"[ComfyUI] Found source image by hash: {basename} -> {os.path.basename(found_by_hash)}")
-                else:
-                    logger.warning(f"[ComfyUI] Source image not found: {full_path}")
+                missing.append(basename)
+        return found, missing
 
-        model_paths = []
-        for basename in source_models:
-            if not basename:
-                continue
-            full_path = os.path.join(output_dir, basename)
-            if os.path.exists(full_path):
-                model_paths.append(full_path)
-            else:
-                # Try hash-based fallback for models too
-                found_by_hash = self._find_file_by_hash(
-                    output_dir, source_image_hashes.get(basename)
-                )
-                if found_by_hash:
-                    model_paths.append(found_by_hash)
-                    logger.info(f"[ComfyUI] Found source model by hash: {basename} -> {os.path.basename(found_by_hash)}")
+    @staticmethod
+    def _resolve_sources_by_hash(directory, missing_images, missing_models, hashes):
+        """Locate renamed source files by content hash (worker thread)."""
+        result = {"images": [], "models": []}
+        for key, names in (("images", missing_images), ("models", missing_models)):
+            for basename in names:
+                match = ComfyUITab._find_file_by_hash(directory, hashes.get(basename))
+                if match:
+                    result[key].append(match)
+                    logger.info(
+                        f"[ComfyUI] Found source {key[:-1]} by hash: "
+                        f"{basename} -> {os.path.basename(match)}"
+                    )
                 else:
-                    logger.warning(f"[ComfyUI] Source model not found: {full_path}")
+                    logger.warning(f"[ComfyUI] Source not found: {basename}")
+        return result
 
+    def _on_sources_resolved(self, found, image_paths, model_paths):
+        """Merge hash-resolved paths and populate the widgets (GUI thread)."""
+        self._populate_source_widgets(
+            image_paths + (found or {}).get("images", []),
+            model_paths + (found or {}).get("models", []),
+        )
+
+    def _populate_source_widgets(self, image_paths, model_paths):
+        """Push resolved source files into the matching input widgets."""
         # Find and populate input widgets
-        for node_id, container in self.widget_manager.dynamic_widgets.items():
+        for widget_key, container in self.widget_manager.dynamic_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if not input_widget:
                 continue
@@ -2107,12 +2410,12 @@ class ComfyUITab(PollingMixin, BaseTab):
             if node.widget_type == 'image' and image_paths:
                 if hasattr(input_widget, 'set_images'):
                     input_widget.set_images(image_paths)
-                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node.node_id}")
                 elif hasattr(input_widget, 'add_images'):
                     if hasattr(input_widget, 'clear_images'):
                         input_widget.clear_images()
                     input_widget.add_images(image_paths)
-                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node_id}")
+                    logger.info(f"[ComfyUI] Restored {len(image_paths)} source image(s) to node {node.node_id}")
 
             # Add models to 3D model input widgets
             elif node.widget_type == '3d_model' and model_paths:
@@ -2122,12 +2425,19 @@ class ComfyUITab(PollingMixin, BaseTab):
                     logger.info(f"[ComfyUI] Restored source model: {model_paths[0]}")
 
     @staticmethod
-    def _find_file_by_hash(directory: str, expected_hash: str) -> str:
+    def _find_file_by_hash(directory: str, expected_hash: str,
+                           size_hint: int = None) -> str:
         """Scan directory for a file matching the expected content hash.
+
+        Hashing reads whole files, and this runs against a gallery directory on
+        a network share, so candidates are narrowed by size first where possible
+        and the caller is expected to run this off the GUI thread.
 
         Args:
             directory: Directory to scan
             expected_hash: SHA-256 hash to match
+            size_hint: Expected file size in bytes; when given, files of any
+                other size are skipped without being read.
 
         Returns:
             Full path to matching file, or empty string if not found
@@ -2151,6 +2461,12 @@ class ComfyUITab(PollingMixin, BaseTab):
                     ext = os.path.splitext(entry.name)[1].lower()
                     if ext not in scannable_exts:
                         continue
+                    if size_hint is not None:
+                        try:
+                            if entry.stat().st_size != size_hint:
+                                continue
+                        except OSError:
+                            continue
                     file_hash = compute_file_hash(entry.path)
                     if file_hash == expected_hash:
                         return entry.path
@@ -2239,7 +2555,7 @@ class ComfyUITab(PollingMixin, BaseTab):
             return
 
         # Find an image input widget and add the images
-        for node_id, container in self.widget_manager.dynamic_widgets.items():
+        for widget_key, container in self.widget_manager.dynamic_widgets.items():
             input_widget = getattr(container, 'input_widget', None)
             if input_widget and hasattr(input_widget, 'add_images'):
                 input_widget.add_images(paths)
