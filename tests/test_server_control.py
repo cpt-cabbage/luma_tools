@@ -145,3 +145,100 @@ class TestMaxHoursSetting:
         assert validate(-5) == 0        # 0 means "no cap"
         assert validate(9999) == 168
         assert validate("not a number") == 8
+
+
+class TestServerJobFiles:
+    def test_job_info_whitelists_the_chosen_worker(self):
+        from deadline.server_job import build_server_job_info
+
+        text = build_server_job_info("ls-ws-sim003", "luma", "temp_compute", 50, 8, "tree")
+
+        assert "Plugin=CommandLine\n" in text
+        assert "Name=LUMA TOOLS SERVER - ls-ws-sim003\n" in text
+        assert "Whitelist=ls-ws-sim003\n" in text
+        assert "MachineLimit=1\n" in text
+        assert "Pool=luma\n" in text
+        assert "Group=temp_compute\n" in text
+
+    def test_max_hours_becomes_a_task_timeout(self):
+        from deadline.server_job import build_server_job_info
+
+        text = build_server_job_info("w1", "luma", "temp_compute", 50, 8, "tree")
+
+        assert "TaskTimeoutSeconds=28800\n" in text
+        assert "OnTaskTimeout=Complete\n" in text
+
+    def test_zero_hours_writes_no_timeout_at_all(self):
+        # 0 means "no cap" - a TaskTimeoutSeconds=0 line would be read by
+        # Deadline as an immediate timeout.
+        from deadline.server_job import build_server_job_info
+
+        text = build_server_job_info("w1", "luma", "temp_compute", 50, 0, "tree")
+
+        assert "TaskTimeoutSeconds" not in text
+        assert "OnTaskTimeout" not in text
+
+    def test_the_comment_records_which_tree_submitted_it(self):
+        # A dev submit puts dev server.py on a shared worker; that must never
+        # be a silent surprise.
+        from deadline.server_job import build_server_job_info
+
+        text = build_server_job_info("w1", "luma", "temp_compute", 50, 8,
+                                     "L:/tools/dev/luma_tools")
+
+        assert "Comment=Started from L:/tools/dev/luma_tools\n" in text
+
+    def test_plugin_info_uses_forward_slashes(self):
+        from deadline.server_job import build_server_plugin_info
+
+        text = build_server_plugin_info(
+            r"D:\ComfyUI\python_embeded\python.exe",
+            r"L:\tools\luma_tools\python\comfyui\server.py",
+            r"D:\ComfyUI", "embedded", "", 8188, ["--lowvram"])
+
+        arguments = [ln for ln in text.splitlines() if ln.startswith("Arguments=")][0]
+        assert "\\" not in arguments
+        assert "Executable=D:/ComfyUI/python_embeded/python.exe\n" in text
+        assert '"L:/tools/luma_tools/python/comfyui/server.py"' in arguments
+        assert '--comfyui-path "D:/ComfyUI"' in arguments
+        assert "--port 8188" in arguments
+        assert "--mode embedded" in arguments
+        assert "--lowvram" in arguments
+
+    def test_python_path_only_travels_in_standalone_mode(self):
+        from deadline.server_job import build_server_plugin_info
+
+        embedded = build_server_plugin_info(
+            "py.exe", "s.py", "C:/ComfyUI", "embedded", "C:/py/python.exe", 8188, [])
+        standalone = build_server_plugin_info(
+            "py.exe", "s.py", "C:/ComfyUI", "standalone", "C:/py/python.exe", 8188, [])
+
+        assert "--python-path" not in embedded
+        assert '--python-path "C:/py/python.exe"' in standalone
+
+
+class TestWorkerNameRoundTrip:
+    def test_the_worker_survives_the_job_name(self):
+        from deadline.server_job import build_server_job_info, worker_from_job_name
+
+        text = build_server_job_info("ls-ws-sim003", "luma", "temp_compute", 50, 8, "t")
+        name = [ln for ln in text.splitlines() if ln.startswith("Name=")][0][len("Name="):]
+
+        assert worker_from_job_name(name) == "ls-ws-sim003"
+
+    def test_unrelated_job_names_yield_nothing(self):
+        from deadline.server_job import worker_from_job_name
+
+        assert worker_from_job_name("LUMA TOOLS - my_render") is None
+        assert worker_from_job_name("") is None
+
+
+class TestServerScriptPath:
+    def test_points_at_this_checkout(self):
+        # The job runs server.py from whichever tree submitted it.
+        from deadline.server_job import server_script_path
+
+        path = server_script_path()
+
+        assert path.replace("\\", "/").endswith("comfyui/server.py")
+        assert os.path.isfile(path), path
