@@ -110,3 +110,38 @@ class TestOnlineWorkers:
         _write_heartbeat(tmp_path, "fresh-starting", status="starting", age_seconds=1)
 
         assert online_workers(read_server_heartbeats(str(tmp_path))) == ["fresh-online"]
+
+
+class TestServerJobIsNotAGenerationJob:
+    """A server job must never be adopted by ComfyUI crash recovery.
+
+    Regression shape: the farm path check shipped with the plain
+    "LUMA TOOLS - " prefix, so every app launch recovered the probe as a
+    running generation job and announced phantom completions.
+    """
+
+    def test_server_prefix_is_excluded_from_recovery(self):
+        from core.config import DEADLINE_JOB_NAME_PREFIX_SERVER
+        from deadline.poller import is_recoverable_luma_job
+
+        assert not is_recoverable_luma_job(f"{DEADLINE_JOB_NAME_PREFIX_SERVER}ls-ws-sim003")
+
+    def test_real_generation_jobs_are_still_recovered(self):
+        from deadline.poller import is_recoverable_luma_job
+
+        assert is_recoverable_luma_job("LUMA TOOLS - my_render")
+
+
+class TestMaxHoursSetting:
+    def test_defaults_to_eight_hours(self):
+        from core.settings_manager import SETTINGS_REGISTRY
+
+        assert SETTINGS_REGISTRY["comfyui_server_max_hours"].default == 8
+
+    def test_out_of_range_values_are_clamped(self):
+        from core.settings_manager import SETTINGS_REGISTRY
+
+        validate = SETTINGS_REGISTRY["comfyui_server_max_hours"].validator
+        assert validate(-5) == 0        # 0 means "no cap"
+        assert validate(9999) == 168
+        assert validate("not a number") == 8

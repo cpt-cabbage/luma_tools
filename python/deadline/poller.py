@@ -17,6 +17,7 @@ from core.config import (
     DEADLINE_PATH,
     DEADLINE_JOB_NAME_PREFIX,
     DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC,
+    DEADLINE_JOB_NAME_PREFIX_SERVER,
 )
 from core.subprocess_utils import run_command
 from core.caching import cached_with_ttl
@@ -621,12 +622,15 @@ def complete_deadline_job(job_id: str) -> Tuple[bool, str]:
 def is_recoverable_luma_job(job_name: str) -> bool:
     """Is this a luma_tools job worth recovering as a running generation job?
 
-    Diagnostic jobs are excluded. They carry their own prefix precisely so
-    crash recovery skips them: a ComfyUI farm path check is a 13-second probe
-    that produces no renders, and adopting one makes the ComfyUI tab report
-    phantom submissions and glow the Gallery for outputs that never arrive.
+    Diagnostic and server jobs are excluded. They carry their own prefixes
+    precisely so crash recovery skips them: a ComfyUI farm path check is a
+    13-second probe and a ComfyUI server is a long-lived service, and neither
+    produces renders. Adopting either makes the ComfyUI tab report phantom
+    submissions and glow the Gallery for outputs that never arrive.
     """
-    if not job_name or job_name.startswith(DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC):
+    if not job_name or job_name.startswith(
+        (DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC, DEADLINE_JOB_NAME_PREFIX_SERVER)
+    ):
         return False
 
     return (

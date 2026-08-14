@@ -73,6 +73,14 @@ def _validate_deadline_priority(v):
         return DEADLINE_PRIORITY_COMFYUI
 
 
+def _validate_server_max_hours(v):
+    """0 means no cap; 168 (one week) is the ceiling."""
+    try:
+        return max(0, min(168, int(v)))
+    except (ValueError, TypeError):
+        return 8
+
+
 def _validate_deadline_poll_interval(v):
     """Validate Deadline poll interval (1-60 seconds)."""
     try:
@@ -144,6 +152,9 @@ SETTINGS_REGISTRY: Dict[str, SettingDef] = {
     "comfyui_deadline_priority": SettingDef(
         "comfyui_deadline_priority", DEADLINE_PRIORITY_COMFYUI, "global",
         _validate_deadline_priority
+    ),
+    "comfyui_server_max_hours": SettingDef(
+        "comfyui_server_max_hours", 8, "global", _validate_server_max_hours
     ),
     "deadline_poll_interval": SettingDef(
         "deadline_poll_interval", 5, "global", _validate_deadline_poll_interval

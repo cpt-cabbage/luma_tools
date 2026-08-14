@@ -243,6 +243,10 @@ DEADLINE_JOB_NAME_PREFIX = "LUMA TOOLS - "
 # job name, and adopting a probe makes the ComfyUI tab track a job that never
 # produces renders. See deadline.poller.is_recoverable_luma_job.
 DEADLINE_JOB_NAME_PREFIX_DIAGNOSTIC = "LUMA TOOLS DIAG - "
+# The persistent ComfyUI server runs as a long-lived Deadline job. Like the
+# diagnostic prefix above it must stay out of crash recovery - a server is not
+# a generation job and never produces renders.
+DEADLINE_JOB_NAME_PREFIX_SERVER = "LUMA TOOLS SERVER - "
 
 # ============================================================================
 # AYON SETTINGS

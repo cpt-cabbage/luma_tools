@@ -927,6 +927,29 @@
               </property>
              </widget>
             </item>
+            <item>
+             <widget class="QLabel" name="serverMaxHoursLabel">
+              <property name="text">
+               <string>Server max hours:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="ComfyUIServerMaxHoursSpinBox">
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>168</number>
+              </property>
+              <property name="value">
+               <number>8</number>
+              </property>
+              <property name="toolTip">
+               <string>A server started from Luma Tools is stopped by Deadline after this many hours, so one forgotten on a Friday does not hold a GPU worker all weekend. 0 means no limit.</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </item>
           <item>

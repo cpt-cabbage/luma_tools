@@ -96,6 +96,7 @@ _GLOBAL_SETTINGS_MAP = [
     ("comfyui_deadline_pool", "ComfyUIDeadlinePoolEdit", _TEXT),
     ("comfyui_deadline_group", "ComfyUIDeadlineGroupEdit", _TEXT),
     ("comfyui_deadline_priority", "ComfyUIDeadlinePrioritySpinBox", _SPINBOX),
+    ("comfyui_server_max_hours", "ComfyUIServerMaxHoursSpinBox", _SPINBOX),
     # Deadline polling settings
     ("deadline_poll_interval", "DeadlinePollIntervalSpinBox", _SPINBOX),
 ]

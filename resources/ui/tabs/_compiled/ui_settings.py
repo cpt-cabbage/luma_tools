@@ -483,6 +483,19 @@ class Ui_SettingsTab(object):
 
         self.deadlineTargetLayout.addWidget(self.ComfyUIDeadlinePrioritySpinBox)
 
+        self.serverMaxHoursLabel = QLabel(self.globalSettingsGroupBox)
+        self.serverMaxHoursLabel.setObjectName(u"serverMaxHoursLabel")
+
+        self.deadlineTargetLayout.addWidget(self.serverMaxHoursLabel)
+
+        self.ComfyUIServerMaxHoursSpinBox = QSpinBox(self.globalSettingsGroupBox)
+        self.ComfyUIServerMaxHoursSpinBox.setObjectName(u"ComfyUIServerMaxHoursSpinBox")
+        self.ComfyUIServerMaxHoursSpinBox.setMinimum(0)
+        self.ComfyUIServerMaxHoursSpinBox.setMaximum(168)
+        self.ComfyUIServerMaxHoursSpinBox.setValue(8)
+
+        self.deadlineTargetLayout.addWidget(self.ComfyUIServerMaxHoursSpinBox)
+
 
         self.globalSettingsLayout.addLayout(self.deadlineTargetLayout)
 
@@ -912,6 +925,10 @@ class Ui_SettingsTab(object):
         self.deadlinePriorityLabel.setText(QCoreApplication.translate("SettingsTab", u"Priority:", None))
 #if QT_CONFIG(tooltip)
         self.ComfyUIDeadlinePrioritySpinBox.setToolTip(QCoreApplication.translate("SettingsTab", u"Deadline job priority for ComfyUI jobs (0-100). The farm path check runs 20 higher so a quick diagnostic does not queue behind a render.", None))
+#endif // QT_CONFIG(tooltip)
+        self.serverMaxHoursLabel.setText(QCoreApplication.translate("SettingsTab", u"Server max hours:", None))
+#if QT_CONFIG(tooltip)
+        self.ComfyUIServerMaxHoursSpinBox.setToolTip(QCoreApplication.translate("SettingsTab", u"A server started from Luma Tools is stopped by Deadline after this many hours, so one forgotten on a Friday does not hold a GPU worker all weekend. 0 means no limit.", None))
 #endif // QT_CONFIG(tooltip)
         self.networkOutputLabel.setText(QCoreApplication.translate("SettingsTab", u"Network Output Path:", None))
         self.NetworkOutputEdit.setPlaceholderText(QCoreApplication.translate("SettingsTab", u"Network path for outputs...", None))
