@@ -27,13 +27,14 @@ _COMFYUI_PKG = os.path.join(_PYTHON_ROOT, "comfyui")
 _CORE_PKG = os.path.join(_PYTHON_ROOT, "core")
 
 # Files copied to the farm, mapping (source dir, source basename) -> farm basename
-# Must stay in sync with deadline/submitter.py
+# Must stay in sync with deadline/submitter.py and deadline/path_check.py
 FARM_COPIES = {
     (_COMFYUI_PKG, "runner.py"): "comfyui_runner.py",
     (_COMFYUI_PKG, "utils.py"): "comfyui_utils.py",
     (_COMFYUI_PKG, "analytics.py"): "comfyui_analytics.py",
     (_COMFYUI_PKG, "node_configs.py"): "comfyui_node_configs.py",
     (_COMFYUI_PKG, "metadata.py"): "comfyui_metadata.py",
+    (_COMFYUI_PKG, "path_check.py"): "comfyui_path_check.py",
     (_CORE_PKG, "metadata_file.py"): "comfyui_metadata_file.py",
 }
 
@@ -210,3 +211,26 @@ class TestSubmitterCopyListComplete:
             f"Farm scripts import modules that are NOT copied by submitter.py: "
             f"{missing}. Add them to FARM_COPIES in submitter.py."
         )
+
+
+class TestFarmPathCheckWorks:
+    """path_check.py is executed by Deadline's Python plugin on the worker.
+
+    Importing is not enough: it reaches resolve_comfyui_paths through
+    comfyui_utils, and that indirection is exactly what breaks in isolation.
+    """
+
+    def test_path_check_imports(self, farm_env):
+        mod = importlib.import_module("comfyui_path_check")
+        assert hasattr(mod, "run_checks")
+        assert hasattr(mod, "main")
+
+    def test_run_checks_works_in_farm_env(self, farm_env, tmp_path):
+        mod = importlib.import_module("comfyui_path_check")
+
+        result = mod.run_checks(str(tmp_path / "nope"), "embedded", "", str(tmp_path))
+
+        assert result["ok"] is False
+        assert any(c["id"] == "comfyui_dir" and not c["ok"] for c in result["checks"])
+        # Proves resolve_comfyui_paths resolved via comfyui_utils, not the package
+        assert any(c["id"] == "python_exe" for c in result["checks"])
