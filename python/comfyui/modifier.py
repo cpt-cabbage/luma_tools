@@ -9,6 +9,7 @@ import os
 import copy
 import logging
 import random
+import re
 from typing import Optional, Dict, Any, Tuple
 
 from comfyui.workflow import is_api_format, convert_to_api_format
@@ -470,6 +471,179 @@ def _is_expanded_subgraph_node(node_info) -> bool:
     return _is_uuid(node_info.node_type)
 
 
+_INDEXED_NAME_RE = re.compile(r'^(?P<prefix>.*?)(?P<idx>\d+)$')
+
+
+def _split_indexed_name(name: str) -> Optional[Tuple[str, int]]:
+    """Split 'media_1' into ('media_', 1). None when there is no trailing int."""
+    match = _INDEXED_NAME_RE.match(name or '')
+    if not match:
+        return None
+    return match.group('prefix'), int(match.group('idx'))
+
+
+def _find_consumers(workflow: Dict[str, Any], template_id: str):
+    """Every (consumer_id, input_name, output_slot) fed by ``template_id``."""
+    found = []
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+        for input_name, value in (node_data.get('inputs') or {}).items():
+            if _is_link(value) and str(value[0]) == str(template_id):
+                found.append((node_id, input_name, value[1]))
+    return found
+
+
+def _allocate_node_id(workflow: Dict[str, Any]) -> str:
+    """Next unused integer-like key."""
+    max_id = 0
+    for key in workflow:
+        try:
+            max_id = max(max_id, int(key))
+        except (TypeError, ValueError):
+            continue
+    return str(max_id + 1)
+
+
+def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
+    """Expand every fan-out slot into one loader node per selected file.
+
+    A slot titled ``Name_editable*`` holds a list of files. The first stays on
+    the template node; each extra file gets a cloned node wired into the next
+    free numbered input on the same consumer. Every consumer input sharing the
+    template's trailing index is duplicated too, so ``media_type_N`` follows
+    ``media_N`` without this code knowing either name.
+
+    Full paths are written deliberately — normalize_file_paths_in_workflow()
+    later basenames them, handles .exr -> .png renaming, and collects them for
+    staging, so there is no separate copy step for the generated nodes.
+    """
+    from comfyui.editable import CARDINALITY_MANY
+    from comfyui.node_info import get_optional_input_names
+
+    if not editable_values:
+        return
+
+    handled = []
+    for node_id, entries in list(editable_values.items()):
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            node_info = data.get('node')
+            if getattr(node_info, 'cardinality', None) != CARDINALITY_MANY:
+                continue
+
+            template_id = str(node_id)
+            template = workflow.get(template_id)
+            if template is None:
+                logger.warning(f"[Fanout] Template node {template_id} not in workflow")
+                continue
+
+            value = data.get('value')
+            files = [f for f in (value if isinstance(value, list) else [value]) if f]
+            file_input = getattr(node_info, 'widget_name', None) or 'image'
+
+            handled.append((node_id, data))
+            consumers = _find_consumers(workflow, template_id)
+
+            if not files:
+                # Drop the slot's inputs directly rather than going through
+                # remove_nodes_from_api_workflow: that treats a node_info cache
+                # miss as "all inputs required" and would cascade into deleting
+                # the consumer itself. A numbered fan-out slot is optional by
+                # construction, so removing it can never break the consumer.
+                for consumer_id, input_name, _slot in consumers:
+                    split = _split_indexed_name(input_name)
+                    if not split:
+                        continue
+                    consumer_inputs = workflow[consumer_id]['inputs']
+                    for name in [n for n in consumer_inputs
+                                 if (_split_indexed_name(n) or (None, None))[1] == split[1]]:
+                        del consumer_inputs[name]
+                        logger.info(f"[Fanout] Dropped optional input {consumer_id}.{name}")
+                workflow.pop(template_id, None)
+                logger.info(f"[Fanout] Slot {template_id} empty — template node removed")
+                continue
+
+            template['inputs'][file_input] = files[0]
+            if len(files) == 1:
+                continue
+
+            if not consumers:
+                logger.warning(f"[Fanout] Node {template_id} feeds nothing — "
+                               f"{len(files) - 1} extra file(s) ignored")
+                continue
+            consumer_id, input_name, out_slot = consumers[0]
+            split = _split_indexed_name(input_name)
+            if not split:
+                logger.warning(f"[Fanout] Consumer input '{input_name}' has no trailing "
+                               f"index — {len(files) - 1} extra file(s) ignored")
+                continue
+            prefix, base_idx = split
+
+            consumer_inputs = workflow[consumer_id]['inputs']
+            # Every input sharing the template's index travels with it, which
+            # is what carries media_type_N alongside media_N generically.
+            siblings = {}
+            for name, val in list(consumer_inputs.items()):
+                parsed = _split_indexed_name(name)
+                if parsed and parsed[1] == base_idx:
+                    siblings[parsed[0]] = val
+
+            consumer_type = workflow[consumer_id].get('class_type', '')
+            declared = get_optional_input_names(consumer_type) or []
+            ceiling = 0
+            for name in declared:
+                parsed = _split_indexed_name(name)
+                if parsed and parsed[0] == prefix:
+                    ceiling = max(ceiling, parsed[1])
+            if ceiling == 0:
+                # Writing an undeclared input would be dropped by ComfyUI without
+                # complaint, so refuse rather than fan out into nowhere.
+                logger.warning(
+                    f"[Fanout] node_info has no '{prefix}N' inputs for "
+                    f"'{consumer_type}' — cannot allocate slots, so "
+                    f"{len(files) - 1} extra file(s) are ignored. Refresh the "
+                    f"node info cache (restart the ComfyUI server) if this node "
+                    f"pack was installed recently."
+                )
+                continue
+            used = {p[1] for p in (_split_indexed_name(n) for n in consumer_inputs) if p}
+
+            for extra in files[1:]:
+                free = next((i for i in range(1, ceiling + 1) if i not in used), None)
+                if free is None:
+                    logger.warning(
+                        f"[Fanout] No free '{prefix}N' slot below {ceiling} on "
+                        f"{consumer_id} — dropping {os.path.basename(str(extra))}")
+                    continue
+                used.add(free)
+
+                clone_id = _allocate_node_id(workflow)
+                clone = copy.deepcopy(template)
+                clone['inputs'][file_input] = extra
+                workflow[clone_id] = clone
+
+                for sib_prefix, sib_value in siblings.items():
+                    if _is_link(sib_value):
+                        consumer_inputs[f"{sib_prefix}{free}"] = [clone_id, out_slot]
+                    else:
+                        consumer_inputs[f"{sib_prefix}{free}"] = sib_value
+                logger.info(f"[Fanout] {os.path.basename(str(extra))} -> node {clone_id} "
+                            f"-> {consumer_id}.{prefix}{free}")
+
+    # Handled entries must not reach the normal appliers, which would overwrite
+    # the template's path with a basename and undo the expansion.
+    for node_id, data in handled:
+        entries = editable_values.get(node_id)
+        if isinstance(entries, list):
+            if data in entries:
+                entries.remove(data)
+            if not entries:
+                del editable_values[node_id]
+        else:
+            editable_values.pop(node_id, None)
+
+
 def _apply_editable_values(workflow: Dict[str, Any], editable_values) -> None:
     """Write every value collected from the dynamic UI into the workflow.
 
@@ -782,6 +956,10 @@ def modify_workflow_api_format(
 
     # Apply values from the dynamic UI first, then the class_type rules below
     # fill in / override the pipeline-controlled settings.
+    # Fan-out slots become concrete loader nodes before any value is applied,
+    # so the normal appliers never see the multi-file entry.
+    _expand_fanout_slots(modified, editable_values)
+
     _apply_editable_values(modified, editable_values)
 
     # Nodes whose title carries an &if_/@if_ conditional are removed when the

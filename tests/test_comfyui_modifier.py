@@ -229,3 +229,150 @@ class TestPassthroughFormats:
         from comfyui.image_convert import (COMFYUI_PASSTHROUGH_FORMATS,
                                            COMFYUI_NATIVE_FORMATS)
         assert not (COMFYUI_PASSTHROUGH_FORMATS & COMFYUI_NATIVE_FORMATS)
+
+
+# ============================================================================
+# Fan-out slot expansion
+# ============================================================================
+
+class TestSplitIndexedName:
+    def test_splits_trailing_int(self):
+        from comfyui.modifier import _split_indexed_name
+        assert _split_indexed_name("media_1") == ("media_", 1)
+        assert _split_indexed_name("media_type_12") == ("media_type_", 12)
+
+    def test_none_without_trailing_int(self):
+        from comfyui.modifier import _split_indexed_name
+        assert _split_indexed_name("image") is None
+        assert _split_indexed_name("") is None
+
+
+def _fanout_workflow():
+    return {
+        "41": {"class_type": "LoadImage", "inputs": {"image": "a.png"},
+               "_meta": {"title": "Ref Images_editable*"}},
+        "50": {"class_type": "MiniMaxH3Easy",
+               "inputs": {"prompt": "hi", "media_1": ["41", 0], "media_type_1": "image"},
+               "_meta": {"title": "Video_editable"}},
+    }
+
+
+def _fanout_values(files, cardinality=None):
+    from comfyui.editable import EditableNode, CARDINALITY_MANY
+    node = EditableNode(node_id="41", node_type="LoadImage",
+                        title="Ref Images_editable*", display_name="Ref Images",
+                        widget_type="image", widget_name="image",
+                        cardinality=cardinality or CARDINALITY_MANY)
+    return {"41": [{"node": node, "value": files}]}
+
+
+@pytest.fixture
+def h3_slots(monkeypatch):
+    """MiniMaxH3Easy declares media_1..media_15 plus media_type_1..15.
+
+    The real ceiling comes from the node_info cache, which only has the class
+    once the node pack is installed on the farm, so tests supply it directly.
+    """
+    import comfyui.node_info as ni
+    declared = ([f"media_{i}" for i in range(1, 16)]
+                + [f"media_type_{i}" for i in range(1, 16)])
+    monkeypatch.setattr(
+        ni, "get_optional_input_names",
+        lambda class_type: declared if class_type == "MiniMaxH3Easy" else None)
+    return declared
+
+
+class TestFanoutSlots:
+    def test_single_file_writes_template_only(self):
+        from comfyui.modifier import _expand_fanout_slots
+        wf, vals = _fanout_workflow(), _fanout_values([r"C:\r\one.png"])
+        _expand_fanout_slots(wf, vals)
+        assert wf["41"]["inputs"]["image"] == r"C:\r\one.png"
+        assert len(wf) == 2
+        assert vals == {}
+
+    def test_three_files_create_two_clones(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([r"C:\r\1.png", r"C:\r\2.png", r"C:\r\3.png"]))
+        loaders = [n for n in wf.values() if n["class_type"] == "LoadImage"]
+        assert len(loaders) == 3
+        assert {n["inputs"]["image"] for n in loaders} == {
+            r"C:\r\1.png", r"C:\r\2.png", r"C:\r\3.png"}
+
+    def test_clones_wired_to_distinct_free_slots(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([r"C:\r\1.png", r"C:\r\2.png", r"C:\r\3.png"]))
+        consumer = wf["50"]["inputs"]
+        assert consumer["media_1"] == ["41", 0]
+        assert "media_2" in consumer and "media_3" in consumer
+        assert len({consumer[k][0] for k in ("media_1", "media_2", "media_3")}) == 3
+
+    def test_sibling_media_type_duplicated(self, h3_slots):
+        """media_type_N must follow media_N without the code naming either."""
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([r"C:\r\1.png", r"C:\r\2.png"]))
+        assert wf["50"]["inputs"]["media_type_2"] == "image"
+
+    def test_zero_files_removes_template_and_input(self):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([]))
+        assert "41" not in wf
+        assert "media_1" not in wf["50"]["inputs"]
+        assert "50" in wf  # optional input lost -> no cascade
+
+    def test_single_cardinality_untouched(self):
+        from comfyui.modifier import _expand_fanout_slots
+        from comfyui.editable import CARDINALITY_SINGLE
+        wf = _fanout_workflow()
+        vals = _fanout_values([r"C:\r\1.png", r"C:\r\2.png"], CARDINALITY_SINGLE)
+        _expand_fanout_slots(wf, vals)
+        assert len(wf) == 2
+        assert vals != {}  # left for the normal appliers
+
+    def test_clone_preserves_class_type(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([r"C:\r\1.png", r"C:\r\2.png"]))
+        new_ids = set(wf) - {"41", "50"}
+        assert all(wf[i]["class_type"] == "LoadImage" for i in new_ids)
+
+    def test_full_paths_written_for_later_normalization(self, h3_slots):
+        """Paths stay absolute so normalize_file_paths_in_workflow collects them."""
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([r"C:\r\1.png", r"C:\r\2.png"]))
+        assert all("\\" in n["inputs"]["image"]
+                   for n in wf.values() if n["class_type"] == "LoadImage")
+
+
+    def test_unknown_consumer_keeps_first_file_and_warns(self, caplog):
+        """Without a node_info entry the slot ceiling is unknowable.
+
+        Writing an undeclared input would be dropped by ComfyUI silently, so
+        the extra files must be refused loudly rather than fanned out.
+        """
+        import logging
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        with caplog.at_level(logging.WARNING):
+            _expand_fanout_slots(wf, _fanout_values(['C:/r/1.png', 'C:/r/2.png']))
+        assert len([n for n in wf.values() if n['class_type'] == 'LoadImage']) == 1
+        assert wf['41']['inputs']['image'] == 'C:/r/1.png'
+        assert any('cannot allocate slots' in r.message for r in caplog.records)
+
+    def test_zero_files_keeps_consumer_on_cache_miss(self):
+        """Regression: the empty path must not cascade into the consumer.
+
+        remove_nodes_from_api_workflow treats a node_info cache miss as
+        "all inputs required", which would delete MiniMaxH3Easy itself.
+        """
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        _expand_fanout_slots(wf, _fanout_values([]))
+        assert '50' in wf
+        assert wf['50']['inputs']['prompt'] == 'hi'
+        assert 'media_type_1' not in wf['50']['inputs']
