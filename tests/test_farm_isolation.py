@@ -236,26 +236,56 @@ class TestFarmPathCheckWorks:
         # Proves resolve_comfyui_paths resolved via comfyui_utils, not the package
         assert any(c["id"] == "python_exe" for c in result["checks"])
 
-    def test_runs_when_its_directory_is_not_on_sys_path(self, farm_env, tmp_path):
-        """Regression: Deadline's Python plugin runs the script through a
-        wrapper, so the script's directory is NOT on sys.path and the
-        comfyui_utils copy beside it is invisible. That crashed the job with
-        exit 1 and no result file, which the workstation could only report as
-        a timeout. runpy.run_path reproduces the plugin's invocation.
-        """
-        script = os.path.join(str(farm_env), "comfyui_path_check.py")
-        result_file = os.path.join(str(tmp_path), "out", "result.json")
 
-        # Strip PYTHONPATH too - otherwise the subprocess could reach the real
-        # comfyui package and the fallback import would mask the bug.
+class TestPathCheckJobShipsWhatItNeeds:
+    """The path check job has its OWN copy list, separate from the runner's.
+
+    It shipped comfyui_utils without comfyui_node_configs - which utils imports
+    at module level - so every check job died on import, exit 1, no result
+    file, and the workstation could only report a three-minute timeout.
+
+    The farm_env fixture above cannot catch this: it copies the runner's full
+    FARM_COPIES set and so masks anything missing from the smaller list. These
+    tests use the shipped list itself.
+    """
+
+    def test_copy_list_is_closed_under_its_own_imports(self):
+        from deadline.path_check import FARM_SCRIPTS
+
+        shipped = {os.path.splitext(dst)[0] for _src, dst in FARM_SCRIPTS}
+        collect = TestSubmitterCopyListComplete._collect_comfyui_fallback_imports
+
+        missing = set()
+        for src_name, _dst in FARM_SCRIPTS:
+            for module in collect(os.path.join(_COMFYUI_PKG, src_name)):
+                if module not in shipped:
+                    missing.add((src_name, module))
+
+        assert not missing, (
+            f"FARM_SCRIPTS in deadline/path_check.py is missing modules that its "
+            f"own scripts import: {missing}"
+        )
+
+    def test_the_shipped_set_actually_runs(self, tmp_path):
+        """Copy exactly what the job ships and run it the way Deadline does:
+        `python.exe -u <script> <args>` as a plain subprocess.
+        """
+        from deadline.path_check import FARM_SCRIPTS
+
+        job_dir = tmp_path / "job"
+        job_dir.mkdir()
+        for src_name, dst_name in FARM_SCRIPTS:
+            shutil.copy2(os.path.join(_COMFYUI_PKG, src_name), str(job_dir / dst_name))
+
+        result_file = str(tmp_path / "result.json")
+        # Strip PYTHONPATH - otherwise the subprocess reaches the real comfyui
+        # package and the fallback imports mask a missing farm copy.
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)
 
         proc = subprocess.run(
-            [sys.executable, "-c",
-             "import runpy, sys; sys.argv = sys.argv[1:]; "
-             "runpy.run_path(sys.argv[0], run_name='__main__')",
-             script, "--comfyui-path", str(tmp_path), "--result-file", result_file],
+            [sys.executable, "-u", str(job_dir / "comfyui_path_check.py"),
+             "--comfyui-path", str(tmp_path), "--result-file", result_file],
             capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=120,
         )
 

@@ -17,13 +17,10 @@ import sys
 import time
 import traceback
 
-# Deadline's Python plugin runs this file through a wrapper rather than as
-# `python script.py`, so the script's own directory is NOT on sys.path and the
-# comfyui_utils copy sitting right next to it is invisible. Without this line
-# the import below raises, the job exits 1 with no result file, and the
-# workstation can only report a timeout.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+# Deadline runs this as `python.exe -u <this file> <args>`, so sys.path[0] is
+# already this file's directory and the comfyui_* copies beside it import
+# normally. They must all be present though - see FARM_SCRIPTS in
+# deadline/path_check.py.
 try:
     from comfyui_utils import resolve_comfyui_paths
 except ImportError:  # workstation / test import, where the package exists
@@ -192,18 +189,6 @@ def main(argv=None):
     _log("wrote %s (ok=%s)" % (args.result_file, result["ok"]))
     print(json.dumps(result, indent=2))
     return 0
-
-
-def __main__(*args):
-    """Entry point for Deadline's Python plugin.
-
-    The plugin executes this file and then calls __main__() with the
-    plugin_info Arguments - it does not run the module as "__main__", so
-    without this function the script loads and then does nothing (or errors),
-    leaving the workstation waiting for a result file that never arrives.
-    """
-    _log("__main__ called by Deadline with args=%r" % (args,))
-    return main(list(args) if args else None)
 
 
 if __name__ == "__main__":

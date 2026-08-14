@@ -39,9 +39,13 @@ RESULT_FILENAME = "result.json"
 RESULT_SCHEMA = 1
 
 # (source basename in python/comfyui/, farm basename)
+# Must be closed under the farm scripts' own comfyui_<x> imports: utils.py
+# imports node_configs at module level, so shipping utils without it makes the
+# job die on import. tests/test_farm_isolation.py enforces the closure.
 FARM_SCRIPTS = (
     ("path_check.py", "comfyui_path_check.py"),
     ("utils.py", "comfyui_utils.py"),
+    ("node_configs.py", "comfyui_node_configs.py"),
 )
 
 
