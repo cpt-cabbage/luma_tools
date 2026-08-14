@@ -36,8 +36,49 @@ Nodes with `_editable` suffix in their title are extracted and presented as dyna
 - `toggle` - Checkbox for boolean values
 - `image` - Batch image selector with preview
 - `video` - Batch video selector
+- `audio` - Batch audio selector
 - `3d_model` - File browser for 3D models (GLB, OBJ, FBX, USD)
 - `directory` - Folder browser for directory selection
+
+**Cardinality markers** — a marker directly after `_editable`, before any `@if_`:
+
+| Title | Meaning |
+|---|---|
+| `Name_editable` | one value (default) |
+| `Name_editable?` | optional — the node is removed from the workflow when left empty |
+| `Name_editable*` | fan-out — one selector holding N files expands at submit time |
+| `Name_editable*@if_Toggle` | both, combined |
+
+Fan-out (`_expand_fanout_slots` in `modifier.py`) clones the template loader
+once per extra file and wires each clone into the consumer's next free numbered
+input. It splits the trailing integer off the consumer's input name and
+duplicates **every sibling input sharing that index**, which is how
+`media_type_N` follows `media_N` without the code naming either. The slot
+ceiling comes from `node_info.get_optional_input_names()`; if the consumer class
+isn't cached, extra files are refused with a warning rather than written to
+inputs ComfyUI would silently drop.
+
+Fan-out slots are excluded from `_collect_batch_images` — their files belong to
+one generation, not one Deadline job each.
+
+**Reference tags** (MiniMax H3): `<Picture N>`, `<Video N>`, `<Audio N>` are
+literals the model consumes directly — N is the ordinal *within that media
+type*. `<d>...</d>` marks dialogue. The "@ Reference" button beside a prompt's
+Presets button inserts them; there is no submit-time rewriting.
+
+### Workflow Formats — API format is fully supported
+
+Both `extract_editable_nodes` and `extract_settings_nodes` read either format.
+In API format the marker rides in `_meta.title` and values are keyed by input
+name in `inputs`, so there is no widget-index resolution, no subgraph expansion
+and no mute/bypass handling. The shared ladder lives in
+`_build_editable_widgets` / `_build_settings_widgets`; `_NodeView.get_value` is
+the only real difference between the two formats.
+
+API format is **required** for node packs whose frontend injects inputs at
+`graphToPrompt` time — e.g. `ComfyUI-MiniMaxH3-Easy`, whose media ports exist
+only in an API export. Those presets must be exported with **Export (API)**;
+a UI-format save loses the wiring silently.
 
 **Adding New Widget Types:**
 1. Add widget type to `EditableNode.widget_type` docstring in `editable.py`
@@ -70,7 +111,10 @@ All three paths use `_apply_boundary_overrides()` helper to propagate values thr
 Add to `EXPORT_NODE_TYPES` dict (maps node type → filename param) and `WIDGET_MAPPINGS`.
 
 ### Workflow Formats
-Two formats exist: UI/nodes format and API format. Use `is_api_format()` to detect. Workflows are converted to API format before execution.
+Two formats exist: UI/nodes format and API format. Use `is_api_format()` to detect. Workflows are converted to API format before execution. Editable/settings extraction handles both — see "Workflow Formats — API format is fully supported" above.
+
+### Submit-time validation
+`collect_missing_node_types()` (`workflow.py`) diffs a workflow's class types against `node_info.get_known_class_types()` and blocks Submit rather than failing on the farm minutes later. Two contracts matter: an **empty** known-set means the cache is unavailable, not that nothing is installed, so it reports nothing; and `SKIP_NODE_TYPES` is excluded because canvas-only nodes (`MarkdownNote`, `PrimitiveNode`, `Reroute`) have no backend class and never appear in `/object_info`.
 
 ### Metadata
 `metadata.py` stores/loads job metadata in `_gallery_metadata.json` per output directory. Fields include `job_prefix`, `is_output`, `source_images`, `output_type`.
