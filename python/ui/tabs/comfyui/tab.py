@@ -1617,6 +1617,13 @@ class ComfyUITab(PollingMixin, BaseTab):
                         lambda checked=False, w=input_widget, btn=preset_btn, nt=getattr(container, 'node_type', ''):
                         self._on_prompt_preset_clicked(w, btn, nt)
                     )
+                # Connect reference-tag insert button
+                reference_btn = getattr(container, 'reference_btn', None)
+                if reference_btn:
+                    reference_btn.clicked.connect(
+                        lambda checked=False, w=input_widget, btn=reference_btn:
+                        self._on_reference_insert_clicked(w, btn)
+                    )
                 input_widget.textChanged.connect(self._on_text_changed)
 
             elif node.widget_type == 'image':
@@ -1656,6 +1663,32 @@ class ComfyUITab(PollingMixin, BaseTab):
     # =========================================================================
     # PROMPT PRESETS
     # =========================================================================
+
+    def _on_reference_insert_clicked(self, text_widget, button):
+        """Insert a <Picture N>/<Video N>/<Audio N> tag at the cursor.
+
+        H3 substitutes these literals for its own reference mentions before the
+        text encoder sees them, so typing them directly is equivalent to using
+        the node pack's @ popup. The menu is rebuilt on every click so it always
+        reflects the files currently selected — ordinals shift when an artist
+        reorders or removes a reference.
+        """
+        from PySide6.QtWidgets import QMenu
+
+        entries = self.widget_manager.build_reference_entries()
+        menu = QMenu(button)
+        if not entries:
+            action = menu.addAction("No reference files selected")
+            action.setEnabled(False)
+        else:
+            for tag, filename in entries:
+                action = menu.addAction(f"{tag}   {filename}")
+                # Default arg captures by value; a bare closure would make
+                # every entry insert the last tag.
+                action.triggered.connect(
+                    lambda checked=False, t=tag: text_widget.insertPlainText(t)
+                )
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _on_prompt_preset_clicked(self, text_widget, button, node_type):
         """Show popup menu for prompt presets (per-node-type)."""

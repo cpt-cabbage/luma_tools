@@ -326,6 +326,36 @@ class ComfyUIWidgetManager:
                     return widget
         return None
 
+    def build_reference_entries(self):
+        """(tag, filename) pairs for every file currently in a fan-out slot.
+
+        H3 resolves reference mentions to the literals <Picture N>/<Video N>/
+        <Audio N>, where N is the 1-based ordinal WITHIN that media type. The
+        tags are therefore derived from the live selector contents rather than
+        stored anywhere, so reordering files is reflected immediately.
+        """
+        from comfyui.editable import CARDINALITY_MANY
+
+        tag_names = {'image': 'Picture', 'video': 'Video', 'audio': 'Audio'}
+        buckets = {'image': [], 'video': [], 'audio': []}
+
+        for _key, container in self.dynamic_widgets.items():
+            node = getattr(container, 'editable_node', None)
+            input_widget = getattr(container, 'input_widget', None)
+            if not node or not input_widget:
+                continue
+            if node.cardinality != CARDINALITY_MANY or node.widget_type not in buckets:
+                continue
+            buckets[node.widget_type].extend(
+                getattr(input_widget, 'selected_files', None) or [])
+
+        entries = []
+        for widget_type in ('image', 'video', 'audio'):
+            for ordinal, path in enumerate(buckets[widget_type], start=1):
+                entries.append((f"<{tag_names[widget_type]} {ordinal}>",
+                                os.path.basename(str(path))))
+        return entries
+
     @staticmethod
     def _parse_node_title(title: str) -> Tuple[bool, str, Optional[str]]:
         """Parse node title for editable marker and condition.
@@ -436,6 +466,12 @@ class ComfyUIWidgetManager:
             preset_btn = QPushButton("Presets")
             preset_btn.setFixedWidth(100)
             top_row.addWidget(preset_btn)
+
+            reference_btn = QPushButton("@ Reference")
+            reference_btn.setFixedWidth(110)
+            reference_btn.setToolTip(
+                "Insert a reference tag for one of the selected reference files")
+            top_row.addWidget(reference_btn)
             layout.addLayout(top_row)
 
             # Text input with spell checking - expands to fill available space
@@ -448,6 +484,7 @@ class ComfyUIWidgetManager:
             container.input_widget = input_widget
             container.node_type = node.node_type  # Store node type for preset lookup
             container.preset_btn = preset_btn  # Store button for signal connection
+            container.reference_btn = reference_btn  # Store button for signal connection
 
         elif node.widget_type == 'image':
             # Create BatchImageSelector first so we can access its toolbar
