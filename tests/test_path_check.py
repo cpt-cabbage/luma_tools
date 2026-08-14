@@ -2,10 +2,20 @@
 import json
 import os
 import sys
+import time
 
 import pytest
 
 from comfyui.path_check import RESULT_SCHEMA, main, run_checks
+from deadline.path_check import (
+    DEADLINE_PYTHON_PLUGIN_VERSION,
+    RESULT_FILENAME,
+    build_check_id,
+    build_job_info,
+    build_plugin_info,
+    cleanup_old_path_checks,
+    read_path_check_result,
+)
 
 
 def _checks_by_id(result):
@@ -114,3 +124,88 @@ class TestMain:
         ])
 
         assert code == 1
+
+
+class TestJobFiles:
+    def test_job_info_targets_the_python_plugin_and_comfyui_group(self):
+        text = build_job_info("W:/LumaRND/luma_tools/_path_checks/abc", "luma", "temp_compute", 70)
+
+        assert "Plugin=Python\n" in text
+        assert "Pool=luma\n" in text
+        assert "Group=temp_compute\n" in text
+        assert "Priority=70\n" in text
+        assert "Frames=0\n" in text
+        assert "MachineLimit=1\n" in text
+        assert "OnJobComplete=Delete\n" in text
+
+    def test_plugin_info_names_a_configured_interpreter_version(self):
+        text = build_plugin_info(
+            "W:/checks/abc/comfyui_path_check.py",
+            r"D:\apps\ComfyUI_windows_portable",
+            "embedded", "", "W:/checks/abc/result.json")
+
+        assert "Version=%s\n" % DEADLINE_PYTHON_PLUGIN_VERSION in text
+        assert "ScriptFile=W:/checks/abc/comfyui_path_check.py\n" in text
+        assert "SingleFramesOnly=True\n" in text
+
+    def test_plugin_info_uses_forward_slashes_in_arguments(self):
+        # Deadline parses backslashes inside quoted Arguments= as escapes.
+        text = build_plugin_info(
+            r"W:\checks\abc\comfyui_path_check.py",
+            "D:\\apps\\ComfyUI_windows_portable\\",
+            "standalone", r"C:\Python310\python.exe", r"W:\checks\abc\result.json")
+
+        arguments = [line for line in text.splitlines() if line.startswith("Arguments=")][0]
+        assert "\\" not in arguments
+        assert '--comfyui-path "D:/apps/ComfyUI_windows_portable"' in arguments
+        assert "--comfyui-mode standalone" in arguments
+        assert '--comfyui-python "C:/Python310/python.exe"' in arguments
+        assert '--result-file "W:/checks/abc/result.json"' in arguments
+
+    def test_check_id_is_unique_per_user_host_and_time(self):
+        assert build_check_id("alice", "WS01", "20260813_140000") == "alice_WS01_20260813_140000"
+
+
+class TestReadResult:
+    def test_missing_file_reads_as_none(self, tmp_path):
+        assert read_path_check_result(str(tmp_path / RESULT_FILENAME)) is None
+
+    def test_malformed_json_reads_as_none(self, tmp_path):
+        path = tmp_path / RESULT_FILENAME
+        path.write_text("{not json", encoding="utf-8")
+
+        assert read_path_check_result(str(path)) is None
+
+    def test_wrong_schema_reads_as_none(self, tmp_path):
+        path = tmp_path / RESULT_FILENAME
+        path.write_text(json.dumps({"schema": 99, "ok": True}), encoding="utf-8")
+
+        assert read_path_check_result(str(path)) is None
+
+    def test_valid_result_is_returned(self, tmp_path):
+        payload = {"schema": 1, "ok": True, "hostname": "RENDER07", "checks": []}
+        path = tmp_path / RESULT_FILENAME
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert read_path_check_result(str(path)) == payload
+
+
+class TestCleanup:
+    def test_old_directories_are_removed_and_fresh_ones_kept(self, tmp_path):
+        old = tmp_path / "alice_WS01_20200101_000000"
+        old.mkdir()
+        (old / RESULT_FILENAME).write_text("{}", encoding="utf-8")
+        fresh = tmp_path / "alice_WS01_20260813_140000"
+        fresh.mkdir()
+
+        two_days_ago = time.time() - 2 * 86400
+        os.utime(old, (two_days_ago, two_days_ago))
+
+        removed = cleanup_old_path_checks(str(tmp_path), keep_days=1)
+
+        assert removed == 1
+        assert not old.exists()
+        assert fresh.exists()
+
+    def test_missing_root_is_not_an_error(self, tmp_path):
+        assert cleanup_old_path_checks(str(tmp_path / "never_created")) == 0
