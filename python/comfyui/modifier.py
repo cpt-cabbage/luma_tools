@@ -413,6 +413,20 @@ def _apply_video_widget(inputs, value, widget_name, node_id, node_type):
                     f"{os.path.basename(video_path)}")
 
 
+def _apply_audio_widget(inputs, value, widget_name, node_id, node_type):
+    """Audio widget — stores the basename in the named input, else 'audio'."""
+    if not value:
+        # No audio provided — leave node as-is with its workflow default
+        logger.info(f"  Audio node {node_id} ({node_type}): no file selected, "
+                    f"keeping workflow default")
+        return
+    audio_path = _first_path(value)
+    if audio_path:
+        inputs[widget_name or 'audio'] = os.path.basename(audio_path)
+        logger.info(f"  Set audio node {node_id} ({node_type}): "
+                    f"{os.path.basename(audio_path)}")
+
+
 def _apply_directory_widget(inputs, value, widget_name, node_id, node_type):
     """Directory widget — writes the full path to the named input, else 'directory'."""
     if not value:
@@ -438,6 +452,7 @@ _WIDGET_APPLIERS = {
     'toggle': _apply_toggle_widget,
     '3d_model': _apply_model_widget,
     'video': _apply_video_widget,
+    'audio': _apply_audio_widget,
     'directory': _apply_directory_widget,
 }
 

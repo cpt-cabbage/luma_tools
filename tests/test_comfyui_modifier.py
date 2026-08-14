@@ -169,3 +169,63 @@ class TestNormalizeFilePathsInWorkflow:
         }
         files_to_copy = normalize_file_paths_in_workflow(wf)
         assert files_to_copy == {}
+
+
+# ============================================================================
+# Audio widget type
+# ============================================================================
+
+class TestApplyAudioWidget:
+    def test_writes_basename_to_audio(self):
+        from comfyui.modifier import _apply_audio_widget
+        inputs = {"audio": "old.wav"}
+        _apply_audio_widget(inputs, r"C:\refs\voice.wav", None, "5", "LoadAudio")
+        assert inputs["audio"] == "voice.wav"
+
+    def test_named_widget_wins(self):
+        from comfyui.modifier import _apply_audio_widget
+        inputs = {}
+        _apply_audio_widget(inputs, r"C:\refs\voice.wav", "audio_file", "5", "VHS_LoadAudio")
+        assert inputs["audio_file"] == "voice.wav"
+
+    def test_empty_value_keeps_default(self):
+        from comfyui.modifier import _apply_audio_widget
+        inputs = {"audio": "keep.wav"}
+        _apply_audio_widget(inputs, "", None, "5", "LoadAudio")
+        assert inputs["audio"] == "keep.wav"
+
+    def test_list_value_takes_first(self):
+        from comfyui.modifier import _apply_audio_widget
+        inputs = {}
+        _apply_audio_widget(inputs, [r"C:\a\one.wav", r"C:\a\two.wav"], None, "5", "LoadAudio")
+        assert inputs["audio"] == "one.wav"
+
+    def test_registered_in_dispatch_table(self):
+        from comfyui.modifier import _WIDGET_APPLIERS
+        assert "audio" in _WIDGET_APPLIERS
+
+
+class TestAudioNodeConfigs:
+    def test_loadaudio_registered(self):
+        from comfyui.node_configs import EDITABLE_NODE_CONFIGS
+        assert EDITABLE_NODE_CONFIGS["LoadAudio"] == [("audio", "audio")]
+
+    def test_vhs_loadaudioupload_registered(self):
+        from comfyui.node_configs import EDITABLE_NODE_CONFIGS
+        assert EDITABLE_NODE_CONFIGS["VHS_LoadAudioUpload"] == [("audio", "audio")]
+
+    def test_loadvideo_uses_correct_input_name(self):
+        """/object_info reports the native LoadVideo's input as 'file', not 'video'."""
+        from comfyui.node_configs import EDITABLE_NODE_CONFIGS
+        assert EDITABLE_NODE_CONFIGS["LoadVideo"] == [("file", "video")]
+
+
+class TestPassthroughFormats:
+    def test_audio_and_video_are_passthrough(self):
+        from comfyui.image_convert import COMFYUI_PASSTHROUGH_FORMATS
+        assert {".wav", ".mp3", ".mp4", ".mov"} <= COMFYUI_PASSTHROUGH_FORMATS
+
+    def test_passthrough_does_not_overlap_native(self):
+        from comfyui.image_convert import (COMFYUI_PASSTHROUGH_FORMATS,
+                                           COMFYUI_NATIVE_FORMATS)
+        assert not (COMFYUI_PASSTHROUGH_FORMATS & COMFYUI_NATIVE_FORMATS)

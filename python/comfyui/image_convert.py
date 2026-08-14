@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 # Formats that ComfyUI/PIL can load natively — no conversion needed
 COMFYUI_NATIVE_FORMATS = {'.png', '.jpg', '.jpeg', '.gif', '.tiff', '.tif', '.bmp', '.webp'}
 
+# Formats ComfyUI loads directly but that this module never converts. Without
+# this, every audio and video input trips the "may fail to load it" warning
+# below, which is misleading — those inputs are copied intentionally.
+COMFYUI_PASSTHROUGH_FORMATS = {
+    '.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac',
+    '.mp4', '.mov', '.mkv', '.avi', '.webm',
+}
+
 # Formats that OIIO can convert to PNG for ComfyUI consumption
 OIIO_CONVERTIBLE_FORMATS = {'.exr', '.hdr', '.dpx', '.tga'}
 
@@ -188,7 +196,7 @@ def copy_or_convert(
         return None
 
     ext = os.path.splitext(source_path)[1].lower()
-    if ext not in COMFYUI_NATIVE_FORMATS:
+    if ext not in COMFYUI_NATIVE_FORMATS and ext not in COMFYUI_PASSTHROUGH_FORMATS:
         # Neither natively loadable nor something OIIO is set up to convert.
         # Copy it anyway (a custom node may handle it) but say so up front,
         # because the usual outcome is a load failure on the farm.

@@ -37,7 +37,7 @@ class EditableNode:
     node_type: str
     title: str
     display_name: str  # User-friendly name derived from title
-    widget_type: str   # 'text', 'image', 'int', 'float', 'combo', 'toggle', '3d_model', 'directory', 'video'
+    widget_type: str   # 'text', 'image', 'int', 'float', 'combo', 'toggle', '3d_model', 'directory', 'video', 'audio'
     widget_name: str = ""  # Name of the specific widget parameter (e.g. 'steps', 'cfg', 'seed')
     current_value: Any = None
     options: List[str] = field(default_factory=list)  # For combo boxes

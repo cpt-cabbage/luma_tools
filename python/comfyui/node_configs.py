@@ -53,7 +53,15 @@ EDITABLE_NODE_CONFIGS = {
     # Video loading nodes - 'video' type can't be auto-discovered
     'VHS_LoadVideo': [('video', 'video')],
     'VHS_LoadVideoPath': [('video', 'video')],
-    'LoadVideo': [('video', 'video')],
+    # /object_info reports the native LoadVideo's input as 'file', not 'video'.
+    # Prefer this node over VHS for reference video: it returns a VIDEO object
+    # exposing get_components(), which is what H3 media-type inference keys on,
+    # whereas VHS returns plain IMAGE frames.
+    'LoadVideo': [('file', 'video')],
+
+    # Audio loading - 'audio' type can't be auto-discovered (reported as COMBO)
+    'LoadAudio': [('audio', 'audio')],
+    'VHS_LoadAudioUpload': [('audio', 'audio')],
 
     # Image path loading nodes - 'directory' type can't be auto-discovered
     'VHS_LoadImagesPath': [('directory', 'directory')],
