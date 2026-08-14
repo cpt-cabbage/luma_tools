@@ -33,24 +33,28 @@ RESULT_SCHEMA = 1
 # wedged process hold the whole check open.
 _PROBE_TIMEOUT_S = 60
 
-# Breadcrumb log written next to this script on the share. The Deadline
-# repository here is behind a connection server, so the workstation cannot
-# read task logs - without this, a farm-side failure is invisible.
+# Breadcrumb log written beside the result file, in the job's own directory.
+# The Deadline repository here is behind a connection server, so the
+# workstation cannot read task logs - without this, a farm-side failure that
+# still manages to reach main() is invisible.
+#
+# It deliberately does NOT log next to this script: on the workstation that is
+# the source tree, and running the tests would litter python/comfyui/.
 LOG_FILENAME = "check_log.txt"
+
+_LOG_DIR = None
 
 
 def _log(message):
-    """Append a breadcrumb next to this script. Never raises."""
+    """Append a breadcrumb to the job directory. No-op until it is known."""
+    if not _LOG_DIR:
+        return
     try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_FILENAME)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(path, "a", encoding="utf-8") as handle:
+        with open(os.path.join(_LOG_DIR, LOG_FILENAME), "a", encoding="utf-8") as handle:
             handle.write("%s %s\n" % (stamp, message))
     except Exception:  # a broken log must never break the check
         pass
-
-
-_log("module loaded on %s with python %s" % (socket.gethostname(), sys.version.split()[0]))
 
 
 def _check(check_id, label, ok, detail):
@@ -152,7 +156,8 @@ def run_checks(comfyui_path, comfyui_mode="embedded", comfyui_python="", network
 
 def main(argv=None):
     """Run the checks and write the result file. Returns a process exit code."""
-    _log("main() entered with argv=%r" % (argv,))
+    global _LOG_DIR
+
     parser = argparse.ArgumentParser(
         description="Verify the ComfyUI installation on this farm worker")
     parser.add_argument("--comfyui-path", required=True)
@@ -160,6 +165,11 @@ def main(argv=None):
     parser.add_argument("--comfyui-python", default="")
     parser.add_argument("--result-file", required=True)
     args = parser.parse_args(argv)
+
+    result_dir = os.path.dirname(os.path.abspath(args.result_file))
+    if os.path.isdir(result_dir):
+        _LOG_DIR = result_dir
+    _log("started on %s with python %s" % (socket.gethostname(), sys.version.split()[0]))
 
     try:
         result = run_checks(

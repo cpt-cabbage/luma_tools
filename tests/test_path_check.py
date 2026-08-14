@@ -94,6 +94,35 @@ class TestRunChecks:
         assert result["ok"] == all(check["ok"] for check in result["checks"])
 
 
+class TestBreadcrumbLog:
+    def test_log_lands_in_the_job_directory(self, tmp_path):
+        from comfyui.path_check import LOG_FILENAME
+
+        job_dir = tmp_path / "job"
+        job_dir.mkdir()
+        result_file = str(job_dir / "result.json")
+
+        main(["--comfyui-path", str(tmp_path), "--result-file", result_file])
+
+        log_path = job_dir / LOG_FILENAME
+        assert log_path.is_file()
+        assert "started on" in log_path.read_text(encoding="utf-8")
+
+    def test_the_source_tree_is_never_written_to(self, tmp_path):
+        # The breadcrumb used to log next to the script, which on a workstation
+        # is python/comfyui/ - running the tests littered the source tree.
+        import comfyui.path_check as path_check
+        from comfyui.path_check import LOG_FILENAME
+
+        source_log = os.path.join(os.path.dirname(path_check.__file__), LOG_FILENAME)
+        assert not os.path.exists(source_log), f"{source_log} should not exist yet"
+
+        main(["--comfyui-path", str(tmp_path),
+              "--result-file", str(tmp_path / "result.json")])
+
+        assert not os.path.exists(source_log)
+
+
 class TestCrashResult:
     def test_a_crash_becomes_a_readable_answer(self):
         # A bug in this script must reach the user as a message, not as a
