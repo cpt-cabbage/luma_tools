@@ -433,6 +433,7 @@ class NodeInfoCache:
                     widgets=widgets,
                     widget_names_for_values=widget_names,
                     required_input_names=node_data.get('required_input_names', []),
+                    optional_input_names=node_data.get('optional_input_names', []),
                 )
             except Exception as e:
                 logger.debug(f"Skipping cached node '{class_type}': {e}")
@@ -485,6 +486,8 @@ class NodeInfoCache:
                 }
                 if node_info.required_input_names:
                     node_entry['required_input_names'] = node_info.required_input_names
+                if node_info.optional_input_names:
+                    node_entry['optional_input_names'] = node_info.optional_input_names
                 data['nodes'][class_type] = node_entry
 
             # Atomic write (unique tmp + rename): this multi-MB file is read
