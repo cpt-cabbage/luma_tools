@@ -567,8 +567,10 @@ def _build_editable_widgets(view: '_NodeView', subgraph_defs: dict) -> List[Edit
         return out
 
     if view.raw_node is not None and _is_uuid(view.node_type) and view.node_type in subgraph_defs:
+        # Signature gained its `cardinality` parameter in Task 2 Step 6.
         return _extract_subgraph_widgets(
-            view.raw_node, view.display_name, view.condition_node, subgraph_defs
+            view.raw_node, view.display_name, view.condition_node, subgraph_defs,
+            view.cardinality
         )
 
     if view.fallback_value is not None:
