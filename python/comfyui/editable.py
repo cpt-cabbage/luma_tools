@@ -18,6 +18,18 @@ from comfyui.node_configs import EDITABLE_NODE_CONFIGS, SETTINGS_NODE_CONFIGS, W
 logger = logging.getLogger(__name__)
 
 
+# Cardinality of an editable slot, declared by a marker placed directly after
+# '_editable' and before any '@if_'/'&if_' condition:
+#   Name_editable    -> one value (historical behaviour)
+#   Name_editable?   -> optional; the node is removed when left empty
+#   Name_editable*   -> fan-out; one selector expands into N loader nodes
+CARDINALITY_SINGLE = 'single'
+CARDINALITY_OPTIONAL = 'optional'
+CARDINALITY_MANY = 'many'
+
+_CARDINALITY_MARKERS = {'*': CARDINALITY_MANY, '?': CARDINALITY_OPTIONAL}
+
+
 @dataclass
 class EditableNode:
     """Represents an editable node extracted from a workflow."""
@@ -30,6 +42,45 @@ class EditableNode:
     current_value: Any = None
     options: List[str] = field(default_factory=list)  # For combo boxes
     condition_node: Optional[str] = None  # Node name that controls visibility (from @if_<name> syntax)
+    cardinality: str = CARDINALITY_SINGLE  # 'single' | 'optional' | 'many'
+
+
+def _parse_editable_marker(title: str) -> Tuple[bool, str, Optional[str], str]:
+    """Parse an editable title into flag, base name, condition and cardinality.
+
+    The cardinality marker sits between the '_editable' suffix and any
+    condition, so it must be consumed before the '@if_'/'&if_' check — reading
+    the condition first would fail to match on 'Name_editable*@if_Toggle' and
+    silently drop the condition.
+
+    Returns:
+        (is_editable, base_title, condition_node_name, cardinality)
+    """
+    editable_markers = ['_editable', '_editble']
+    is_editable = False
+    condition_node = None
+    cardinality = CARDINALITY_SINGLE
+    base_title = title
+
+    for marker in editable_markers:
+        if marker not in title:
+            continue
+        is_editable = True
+        parts = title.split(marker)
+        base_title = parts[0]
+
+        if len(parts) > 1:
+            after_marker = parts[1]
+            if after_marker[:1] in _CARDINALITY_MARKERS:
+                cardinality = _CARDINALITY_MARKERS[after_marker[0]]
+                after_marker = after_marker[1:]
+            for sep in ('@if_', '&if_'):
+                if after_marker.startswith(sep):
+                    condition_node = after_marker[len(sep):]
+                    break
+        break
+
+    return is_editable, base_title, condition_node, cardinality
 
 
 def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
@@ -42,6 +93,9 @@ def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
 
     Note: Also supports older format with typo "editble" for backwards compatibility.
 
+    Cardinality markers ('*', '?') are parsed but not returned here — see
+    _parse_editable_marker(), which this delegates to.
+
     Args:
         title: Node title to parse
 
@@ -51,30 +105,7 @@ def _parse_editable_title(title: str) -> Tuple[bool, str, Optional[str]]:
         - base_title: Title without _editable and @if_ parts
         - condition_node_name: Name of condition node, or None if unconditional
     """
-    # Handle both correct spelling and common typo
-    editable_markers = ['_editable', '_editble']
-    is_editable = False
-    condition_node = None
-    base_title = title
-
-    for marker in editable_markers:
-        if marker in title:
-            is_editable = True
-            # Check for conditional syntax: _editable@if_NodeName or _editable&if_NodeName
-            # Split on the marker first
-            parts = title.split(marker)
-            base_title = parts[0]
-
-            # Check for condition after the marker
-            if len(parts) > 1:
-                after_marker = parts[1]
-                # Support both @ and & as separators
-                for sep in ['@if_', '&if_']:
-                    if after_marker.startswith(sep):
-                        condition_node = after_marker[len(sep):]
-                        break
-            break
-
+    is_editable, base_title, condition_node, _ = _parse_editable_marker(title)
     return is_editable, base_title, condition_node
 
 
@@ -215,6 +246,7 @@ def _extract_subgraph_widgets(
     display_name: str,
     condition_node: Optional[str],
     subgraph_defs: dict,
+    cardinality: str = CARDINALITY_SINGLE,
 ) -> List[EditableNode]:
     """Extract EditableNode entries from a subgraph/component node.
 
@@ -227,6 +259,7 @@ def _extract_subgraph_widgets(
         display_name: Cleaned display name for the node
         condition_node: Optional condition node name for visibility
         subgraph_defs: Dict mapping subgraph UUID -> definition dict
+        cardinality: Slot cardinality inherited from the node's title marker
 
     Returns:
         List of EditableNode objects, one per widget parameter
@@ -358,6 +391,7 @@ def _extract_subgraph_widgets(
                 current_value=value,
                 options=options,
                 condition_node=condition_node,
+                cardinality=cardinality,
             ))
 
     else:
@@ -401,6 +435,7 @@ def _extract_subgraph_widgets(
                 widget_name=widget_name,
                 current_value=value,
                 condition_node=condition_node,
+                cardinality=cardinality,
             ))
 
     return results
@@ -472,7 +507,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         title = node.get('title', '')
 
         # Parse the title for editable marker and condition
-        is_editable, base_title, condition_node_name = _parse_editable_title(title)
+        is_editable, base_title, condition_node_name, cardinality = _parse_editable_marker(title)
         if not is_editable:
             continue
 
@@ -524,6 +559,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     current_value=current_value,
                     options=options,
                     condition_node=condition_node_name,
+                    cardinality=cardinality,
                 ))
         else:
             # Try auto-discovery from node_info cache
@@ -557,11 +593,13 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                         current_value=current_value,
                         options=options,
                         condition_node=condition_node_name,
+                        cardinality=cardinality,
                     ))
             elif _is_uuid(node_type) and node_type in subgraph_defs:
                 # Subgraph/component node - extract widgets from proxyWidgets
                 sg_widgets = _extract_subgraph_widgets(
-                    node, display_name, condition_node_name, subgraph_defs
+                    node, display_name, condition_node_name, subgraph_defs,
+                    cardinality
                 )
                 editable_nodes.extend(sg_widgets)
                 if sg_widgets:
@@ -578,6 +616,7 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
                     widget_name='value',
                     current_value=str(widgets_values[0]) if widgets_values else '',
                     condition_node=condition_node_name,
+                    cardinality=cardinality,
                 ))
 
     # Sort by display_name using natural sort so "Image 2" < "Image 10"

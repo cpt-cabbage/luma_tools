@@ -238,3 +238,65 @@ class TestNodeInfoCacheRoundTrip:
         reader = NodeInfoCache(cache_dir=str(tmp_path))
         reader._load_from_disk()
         assert reader._node_types['NoOptionals'].optional_input_names == []
+
+
+# ============================================================================
+# _parse_editable_marker — cardinality
+# ============================================================================
+
+class TestParseEditableMarker:
+    def test_plain_is_single(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_SINGLE
+        assert _parse_editable_marker("Ref Image_editable") == (
+            True, "Ref Image", None, CARDINALITY_SINGLE)
+
+    def test_star_is_many(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_MANY
+        assert _parse_editable_marker("Ref Images_editable*") == (
+            True, "Ref Images", None, CARDINALITY_MANY)
+
+    def test_question_is_optional(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_OPTIONAL
+        assert _parse_editable_marker("Last Frame_editable?") == (
+            True, "Last Frame", None, CARDINALITY_OPTIONAL)
+
+    def test_star_with_condition(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_MANY
+        assert _parse_editable_marker("Refs_editable*@if_UseRefs") == (
+            True, "Refs", "UseRefs", CARDINALITY_MANY)
+
+    def test_question_with_ampersand_condition(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_OPTIONAL
+        assert _parse_editable_marker("Tail_editable?&if_Advanced") == (
+            True, "Tail", "Advanced", CARDINALITY_OPTIONAL)
+
+    def test_typo_marker_supports_cardinality(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_MANY
+        assert _parse_editable_marker("Refs_editble*") == (
+            True, "Refs", None, CARDINALITY_MANY)
+
+    def test_not_editable(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_SINGLE
+        assert _parse_editable_marker("KSampler") == (
+            False, "KSampler", None, CARDINALITY_SINGLE)
+
+    def test_condition_without_cardinality_still_parses(self):
+        from comfyui.editable import _parse_editable_marker, CARDINALITY_SINGLE
+        assert _parse_editable_marker("Upscale_editable@if_UseUpscale") == (
+            True, "Upscale", "UseUpscale", CARDINALITY_SINGLE)
+
+
+class TestParseEditableTitleBackCompat:
+    def test_still_returns_three_tuple(self):
+        from comfyui.editable import _parse_editable_title
+        result = _parse_editable_title("Refs_editable*@if_UseRefs")
+        assert len(result) == 3
+        assert result == (True, "Refs", "UseRefs")
+
+
+class TestEditableNodeCardinality:
+    def test_default_is_single(self):
+        from comfyui.editable import EditableNode, CARDINALITY_SINGLE
+        node = EditableNode(node_id=1, node_type="LoadImage", title="A_editable",
+                            display_name="A", widget_type="image")
+        assert node.cardinality == CARDINALITY_SINGLE
