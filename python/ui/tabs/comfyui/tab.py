@@ -1885,10 +1885,31 @@ class ComfyUITab(PollingMixin, BaseTab):
         if not widget_manager:
             return None
 
+        # Blocking: the workflow needs a node pack the farm's ComfyUI lacks.
+        # Without this the job fails on the farm minutes after Submit, even
+        # though node_info already holds the installed class list.
+        try:
+            from comfyui.node_info import get_known_class_types
+            from comfyui.workflow import collect_missing_node_types, load_workflow
+            workflow_path = self.app_state.comfyui_workflow_path
+            if workflow_path:
+                missing = collect_missing_node_types(
+                    load_workflow(workflow_path), get_known_class_types())
+                if missing:
+                    return ("Cannot submit — the ComfyUI server does not have "
+                            "these node types installed: " + ", ".join(missing))
+        except Exception as e:
+            logger.warning(f"[ComfyUI] Node availability check skipped: {e}")
+
+        from comfyui.editable import (CARDINALITY_MANY,
+                                     find_out_of_range_reference_tags)
+
         checked = 0
         problems = []
         empty_text_inputs = []
         text_input_count = 0
+        reference_counts = {'image': 0, 'video': 0, 'audio': 0}
+        prompt_texts = []
 
         for key, container in widget_manager.dynamic_widgets.items():
             node = getattr(container, 'editable_node', None)
@@ -1908,6 +1929,8 @@ class ComfyUITab(PollingMixin, BaseTab):
             if node.widget_type in self._FILE_INPUT_WIDGET_TYPES:
                 checked += 1
                 selected = getattr(input_widget, 'selected_files', None)
+                if node.cardinality == CARDINALITY_MANY:
+                    reference_counts[node.widget_type] += len(selected or [])
                 if selected is not None and len(selected) == 0:
                     kind = node.widget_type
                     problems.append(f"'{label}' has no {kind} selected")
@@ -1917,6 +1940,7 @@ class ComfyUITab(PollingMixin, BaseTab):
                     continue
                 checked += 1
                 text_input_count += 1
+                prompt_texts.append(input_widget.toPlainText())
                 if input_widget.toPlainText().strip():
                     continue
                 # Empty is fine when the workflow itself supplies a default.
@@ -1928,6 +1952,16 @@ class ComfyUITab(PollingMixin, BaseTab):
             problems.append(
                 f"'{empty_text_inputs[0]}' is empty and the workflow has no default prompt"
             )
+
+        # Non-blocking: a reference tag pointing past the selected files is
+        # substituted with an empty string by H3, so it fails silently.
+        stale_tags = []
+        for text in prompt_texts:
+            stale_tags.extend(find_out_of_range_reference_tags(text, reference_counts))
+        if stale_tags:
+            self.show_status(
+                f"Prompt references {', '.join(sorted(set(stale_tags)))} but fewer "
+                f"files are selected — H3 substitutes nothing for them.", "warning")
 
         if not problems:
             # Routine path runs on every slider tick — keep it at debug.

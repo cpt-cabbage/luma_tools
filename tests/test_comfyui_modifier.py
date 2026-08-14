@@ -434,3 +434,89 @@ class TestCollectBatchImagesSkipsFanout:
         })
         assert paths == batch
         assert node_id == "42"
+
+
+# ============================================================================
+# Submit-time validation
+# ============================================================================
+
+class TestMissingNodeTypes:
+    def test_reports_missing(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"1": {"class_type": "LoadImage", "inputs": {}},
+              "2": {"class_type": "MiniMaxH3Easy", "inputs": {}}}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == ["MiniMaxH3Easy"]
+
+    def test_empty_cache_reports_nothing(self):
+        """A cold workstation must never block a valid submission."""
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"1": {"class_type": "Whatever", "inputs": {}}}
+        assert collect_missing_node_types(wf, set()) == []
+
+    def test_all_known_is_clean(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"1": {"class_type": "LoadImage", "inputs": {}}}
+        assert collect_missing_node_types(wf, {"LoadImage", "SaveImage"}) == []
+
+    def test_ui_format_supported(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"nodes": [{"id": 1, "type": "LoadImage"}, {"id": 2, "type": "Nope"}]}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == ["Nope"]
+
+    def test_uuid_subgraph_nodes_ignored(self):
+        """Subgraph instances are expanded later; they are not class types."""
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"nodes": [{"id": 1, "type": "0f8c1e2a-3b4d-5e6f-7a8b-9c0d1e2f3a4b"}]}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+    def test_result_is_sorted(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"1": {"class_type": "Zeta", "inputs": {}},
+              "2": {"class_type": "Alpha", "inputs": {}}}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == ["Alpha", "Zeta"]
+
+
+class TestReferenceTagValidation:
+    def test_out_of_range_picture(self):
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags(
+            "a <Picture 3> b", {"image": 2, "video": 0, "audio": 0}) == ["<Picture 3>"]
+
+    def test_in_range_is_clean(self):
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags(
+            "<Picture 1> and <Picture 2>", {"image": 2, "video": 0, "audio": 0}) == []
+
+    def test_types_counted_separately(self):
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags(
+            "<Video 1> <Audio 2>", {"image": 9, "video": 1, "audio": 1}) == ["<Audio 2>"]
+
+    def test_dialogue_tags_ignored(self):
+        """<d>...</d> is speech markup, not a reference."""
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags(
+            "<d>hello there</d>", {"image": 0, "video": 0, "audio": 0}) == []
+
+    def test_empty_prompt_is_clean(self):
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags("", {"image": 0}) == []
+        assert find_out_of_range_reference_tags(None, {"image": 0}) == []
+
+    def test_zero_ordinal_flagged(self):
+        from comfyui.editable import find_out_of_range_reference_tags
+        assert find_out_of_range_reference_tags(
+            "<Picture 0>", {"image": 2, "video": 0, "audio": 0}) == ["<Picture 0>"]
+
+    def test_frontend_only_nodes_are_not_missing(self):
+        """MarkdownNote/PrimitiveNode never appear in /object_info.
+
+        They are canvas-only and are dropped during conversion, so counting
+        them as missing would block most existing presets.
+        """
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"nodes": [{"id": 1, "type": "MarkdownNote"},
+                        {"id": 2, "type": "PrimitiveNode"},
+                        {"id": 3, "type": "Reroute"},
+                        {"id": 4, "type": "LoadImage"}]}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []

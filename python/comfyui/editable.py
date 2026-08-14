@@ -905,3 +905,27 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
                  mtime, settings_nodes)
 
     return settings_nodes
+
+
+# H3 resolves every reference mention to one of these literals before the text
+# encoder sees it, so artists can type them directly. N is the 1-based ordinal
+# WITHIN that media type, not the media slot index.
+_REFERENCE_TAG_RE = re.compile(r'<(Picture|Video|Audio)\s+(\d+)>')
+_REFERENCE_TAG_TYPES = {'Picture': 'image', 'Video': 'video', 'Audio': 'audio'}
+
+
+def find_out_of_range_reference_tags(prompt: str, counts: dict) -> List[str]:
+    """Reference tags whose ordinal exceeds the files selected for that type.
+
+    An unmatched reference is substituted with an empty string rather than
+    erroring, so this fails silently at render time — worth warning about.
+    """
+    if not prompt:
+        return []
+    bad = []
+    for kind, number in _REFERENCE_TAG_RE.findall(prompt):
+        ordinal = int(number)
+        available = counts.get(_REFERENCE_TAG_TYPES[kind], 0)
+        if ordinal < 1 or ordinal > available:
+            bad.append(f"<{kind} {ordinal}>")
+    return bad

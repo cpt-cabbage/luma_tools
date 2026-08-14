@@ -1487,3 +1487,34 @@ def convert_to_api_format(workflow: Dict[str, Any]) -> Dict[str, Any]:
     _strip_invalid_references(api_workflow)
 
     return api_workflow
+
+
+def collect_missing_node_types(workflow: Dict[str, Any], known: set) -> List[str]:
+    """Class types the workflow uses that the node_info cache doesn't know.
+
+    An empty ``known`` set means the cache is unavailable, not that nothing is
+    installed, so it yields no findings — a cold workstation must never block a
+    valid submission.
+
+    Subgraph instances (UUID types) are skipped: they are expanded into real
+    class types before execution and are not node classes themselves.
+
+    SKIP_NODE_TYPES is excluded too. Those are frontend-only canvas nodes —
+    sticky notes, reroutes, PrimitiveNode — which never appear in /object_info
+    because no backend class implements them, and which conversion drops before
+    the prompt is submitted. Counting them as missing would block six of the
+    studio's existing presets.
+    """
+    if not known:
+        return []
+
+    from comfyui.node_configs import SKIP_NODE_TYPES
+
+    if is_api_format(workflow):
+        used = {n.get('class_type') for n in workflow.values()
+                if isinstance(n, dict) and n.get('class_type')}
+    else:
+        used = {n.get('type') for n in workflow.get('nodes', [])
+                if n.get('type') and not _is_uuid(n.get('type'))}
+
+    return sorted(used - known - SKIP_NODE_TYPES)
