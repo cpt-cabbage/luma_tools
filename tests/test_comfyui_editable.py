@@ -300,3 +300,105 @@ class TestEditableNodeCardinality:
         node = EditableNode(node_id=1, node_type="LoadImage", title="A_editable",
                             display_name="A", widget_type="image")
         assert node.cardinality == CARDINALITY_SINGLE
+
+
+# ============================================================================
+# API-format editable extraction
+# ============================================================================
+
+import json
+
+
+def _write_api_workflow(tmp_path, workflow, name="api_workflow.json"):
+    path = tmp_path / name
+    path.write_text(json.dumps(workflow), encoding="utf-8")
+    return str(path)
+
+
+def _h3_style_workflow():
+    return {
+        "41": {
+            "class_type": "LoadImage",
+            "inputs": {"image": "ref_a.png"},
+            "_meta": {"title": "Ref Images_editable*"},
+        },
+        "42": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": "a cat", "clip": ["9", 0]},
+            "_meta": {"title": "Prompt_editable"},
+        },
+        "43": {
+            "class_type": "LoadImage",
+            "inputs": {"image": "tail.png"},
+            "_meta": {"title": "Last Frame_editable?"},
+        },
+        "9": {"class_type": "CLIPLoader", "inputs": {"clip_name": "x.safetensors"}},
+    }
+
+
+class TestExtractEditableApiFormat:
+    def test_finds_marked_nodes_only(self, tmp_path):
+        from comfyui.editable import extract_editable_nodes
+        nodes = extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))
+        assert {n.node_id for n in nodes} == {"41", "42", "43"}
+
+    def test_reads_current_value_from_inputs(self, tmp_path):
+        from comfyui.editable import extract_editable_nodes
+        by_id = {n.node_id: n for n in
+                 extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))}
+        assert by_id["41"].current_value == "ref_a.png"
+        assert by_id["42"].current_value == "a cat"
+
+    def test_image_widget_type_from_configs(self, tmp_path):
+        from comfyui.editable import extract_editable_nodes
+        by_id = {n.node_id: n for n in
+                 extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))}
+        assert by_id["41"].widget_type == "image"
+        assert by_id["41"].widget_name == "image"
+
+    def test_cardinality_preserved(self, tmp_path):
+        from comfyui.editable import (extract_editable_nodes, CARDINALITY_MANY,
+                                      CARDINALITY_OPTIONAL, CARDINALITY_SINGLE)
+        by_id = {n.node_id: n for n in
+                 extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))}
+        assert by_id["41"].cardinality == CARDINALITY_MANY
+        assert by_id["43"].cardinality == CARDINALITY_OPTIONAL
+        assert by_id["42"].cardinality == CARDINALITY_SINGLE
+
+    def test_linked_inputs_are_not_editable(self, tmp_path):
+        """'clip' is a link ["9", 0] and must never become a widget."""
+        from comfyui.editable import extract_editable_nodes
+        nodes = extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))
+        assert not any(n.widget_name == "clip" for n in nodes)
+
+    def test_display_name_strips_marker_and_underscores(self, tmp_path):
+        from comfyui.editable import extract_editable_nodes
+        by_id = {n.node_id: n for n in
+                 extract_editable_nodes(_write_api_workflow(tmp_path, _h3_style_workflow()))}
+        assert by_id["41"].display_name == "Ref Images"
+        assert by_id["43"].display_name == "Last Frame"
+
+    def test_list_valued_widget_is_not_mistaken_for_link(self, tmp_path):
+        """[512, 512] is a value, not a node reference."""
+        from comfyui.editable import extract_editable_nodes
+        wf = {"7": {"class_type": "SomeUnknownCustomNode",
+                    "inputs": {"size": [512, 512]},
+                    "_meta": {"title": "Size_editable"}}}
+        nodes = extract_editable_nodes(_write_api_workflow(tmp_path, wf, "size.json"))
+        assert len(nodes) == 1
+        assert nodes[0].current_value == [512, 512]
+
+    def test_unmarked_nodes_ignored(self, tmp_path):
+        from comfyui.editable import extract_editable_nodes
+        wf = {"1": {"class_type": "LoadImage", "inputs": {"image": "a.png"}}}
+        assert extract_editable_nodes(_write_api_workflow(tmp_path, wf, "none.json")) == []
+
+    def test_ui_format_still_works(self):
+        """Regression guard: the UI path must be untouched."""
+        import os as _os
+        from comfyui.editable import extract_editable_nodes
+        path = _os.path.join(_os.path.dirname(__file__), "workflows",
+                             "image_qwen_image_edit_2511.json")
+        nodes = extract_editable_nodes(path)
+        assert len(nodes) > 0
+        assert all(n.widget_type for n in nodes)

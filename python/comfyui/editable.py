@@ -9,7 +9,7 @@ import os
 import re
 import logging
 import threading
-from typing import Optional, List, Tuple, Any
+from typing import Optional, List, Tuple, Any, Callable
 from dataclasses import dataclass, field
 
 from comfyui.workflow import load_workflow, _is_uuid, _get_subgraph_definitions
@@ -441,6 +441,88 @@ def _extract_subgraph_widgets(
     return results
 
 
+@dataclass
+class _NodeView:
+    """One workflow node, normalised across the UI and API formats.
+
+    ``get_value`` is the only thing that genuinely differs between the two:
+    UI format resolves a positional index into ``widgets_values``, while API
+    format reads the input name straight out of the ``inputs`` dict and needs
+    no index arithmetic at all.
+    """
+    node_id: Any
+    node_type: str
+    title: str
+    display_name: str
+    condition_node: Optional[str]
+    cardinality: str
+    connected_inputs: set
+    get_value: Callable[[str, Optional[int]], Any]
+    fallback_value: Any = None       # last-resort generic text widget
+    raw_node: Optional[dict] = None  # UI format only — subgraph extraction
+
+
+def _build_editable_widgets(view: _NodeView, subgraph_defs: dict) -> List[EditableNode]:
+    """Resolve one node into zero or more EditableNode descriptors.
+
+    Ladder: explicit config -> node_info auto-discovery -> subgraph
+    proxyWidgets -> last-resort generic text widget.
+    """
+    from comfyui.node_info import get_node_info, get_widget_index
+
+    def _make(widget_type, widget_name, current_value, options, multi):
+        return EditableNode(
+            node_id=view.node_id,
+            node_type=view.node_type,
+            title=view.title,
+            display_name=(f"{view.display_name} - {widget_name}" if multi
+                          else view.display_name),
+            widget_type=widget_type,
+            widget_name=widget_name,
+            current_value=current_value,
+            options=options,
+            condition_node=view.condition_node,
+            cardinality=view.cardinality,
+        )
+
+    config = EDITABLE_NODE_CONFIGS.get(view.node_type)
+    if config:
+        out = []
+        for widget_idx, widget_name, widget_type in _resolve_config_entries(view.node_type, config):
+            if widget_name in view.connected_inputs:
+                continue
+            out.append(_make(widget_type, widget_name,
+                             view.get_value(widget_name, widget_idx),
+                             _get_widget_options(view.node_type, widget_name),
+                             len(config) > 1))
+        return out
+
+    info = get_node_info(view.node_type)
+    if info and info.widgets:
+        out = []
+        for widget in info.widgets:
+            if widget.name in view.connected_inputs:
+                continue
+            out.append(_make(widget.widget_type, widget.name,
+                             view.get_value(widget.name,
+                                            get_widget_index(view.node_type, widget.name)),
+                             widget.options or [],
+                             len(info.widgets) > 1))
+        return out
+
+    if view.raw_node is not None and _is_uuid(view.node_type) and view.node_type in subgraph_defs:
+        return _extract_subgraph_widgets(
+            view.raw_node, view.display_name, view.condition_node, subgraph_defs,
+            view.cardinality
+        )
+
+    if view.fallback_value is not None:
+        logger.warning(f"Unknown editable node type: {view.node_type} (title: {view.title})")
+        return [_make('text', 'value', view.fallback_value, [], False)]
+
+    return []
+
+
 def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
     """
     Extract all nodes with '_editable' suffix in their title from a workflow.
@@ -471,153 +553,86 @@ def extract_editable_nodes(workflow_path: str) -> List[EditableNode]:
         logger.error(f"Error loading workflow for editable nodes: {e}")
         return []
 
-    # Editable-node extraction only understands the UI/nodes format — an
-    # API-format workflow has no 'nodes' list and silently produced an empty
-    # dynamic UI with no way for the user to tell why
-    from comfyui.workflow import is_api_format
-    if is_api_format(workflow):
-        logger.warning(
-            f"Workflow '{os.path.basename(workflow_path)}' is in API format — "
-            f"editable (_editable) nodes require the UI/nodes format. "
-            f"Re-export the preset with 'Save (not API)' to make its fields editable."
-        )
-        return []
+    from comfyui.workflow import is_api_format, _is_node_reference
 
-    nodes = workflow.get('nodes', [])
+    subgraph_defs = _get_subgraph_definitions(workflow)
     editable_nodes = []
 
-    # Build subgraph definitions map for UUID-type nodes
-    subgraph_defs = _get_subgraph_definitions(workflow)
+    if is_api_format(workflow):
+        # API format keeps the marker in _meta.title and every widget value in
+        # the inputs dict, so no widget-index resolution is needed. Node packs
+        # whose frontend injects inputs at serialization time (e.g. the
+        # MiniMax H3 Easy media ports) only survive as an API export, which is
+        # why this path exists at all.
+        for node_id, node_data in workflow.items():
+            if not isinstance(node_data, dict):
+                continue
+            title = (node_data.get('_meta') or {}).get('title', '')
+            is_editable, base_title, condition_node_name, cardinality =                 _parse_editable_marker(title)
+            if not is_editable:
+                continue
 
-    # First pass: build a map of node titles to node IDs (for condition resolution)
-    title_to_node_id = {}
-    for node in nodes:
-        title = node.get('title', '')
-        if title:
-            # Store the base name (without _editable suffix) for condition matching
-            is_edit, base, _ = _parse_editable_title(title)
-            if is_edit:
-                # Store both the full title and base name
-                title_to_node_id[title] = node.get('id')
-                title_to_node_id[base] = node.get('id')
-            else:
-                title_to_node_id[title] = node.get('id')
+            node_type = node_data.get('class_type', '')
+            inputs = node_data.get('inputs', {}) or {}
+            connected = {k for k, v in inputs.items() if _is_node_reference(v)}
+            plain = [v for k, v in inputs.items() if k not in connected]
 
-    for node in nodes:
-        title = node.get('title', '')
+            display_name = base_title.replace('_', ' ').strip()
+            if not display_name or display_name == node_type:
+                display_name = node_type.replace('Plus', '+')
 
-        # Parse the title for editable marker and condition
-        is_editable, base_title, condition_node_name, cardinality = _parse_editable_marker(title)
-        if not is_editable:
-            continue
+            editable_nodes.extend(_build_editable_widgets(_NodeView(
+                node_id=node_id,
+                node_type=node_type,
+                title=title,
+                display_name=display_name,
+                condition_node=condition_node_name,
+                cardinality=cardinality,
+                connected_inputs=connected,
+                get_value=lambda name, idx, _in=inputs: _in.get(name),
+                fallback_value=plain[0] if plain else None,
+            ), subgraph_defs))
+    else:
+        nodes = workflow.get('nodes', [])
 
-        # Skip muted/bypassed nodes
-        mode = node.get('mode', 0)
-        if mode in (2, 4):
-            continue
+        for node in nodes:
+            title = node.get('title', '')
+            is_editable, base_title, condition_node_name, cardinality =                 _parse_editable_marker(title)
+            if not is_editable:
+                continue
 
-        node_id = node.get('id')
-        node_type = node.get('type')
-        widgets_values = node.get('widgets_values', [])
-        # Normalize: some workflows store widgets_values as a dict instead of list
-        if isinstance(widgets_values, dict):
-            widgets_values = list(widgets_values.values())
+            # Skip muted/bypassed nodes
+            if node.get('mode', 0) in (2, 4):
+                continue
 
-        # Create display name from base title (clean up underscores)
-        display_name = base_title.replace('_', ' ').strip()
-        # If display name is just the node type, make it more readable
-        if not display_name or display_name == node_type:
-            display_name = node_type.replace('Plus', '+')
+            node_type = node.get('type')
+            widgets_values = node.get('widgets_values', [])
+            # Normalize: some workflows store widgets_values as a dict
+            if isinstance(widgets_values, dict):
+                widgets_values = list(widgets_values.values())
 
-        # Get widget configuration for this node type
-        config = EDITABLE_NODE_CONFIGS.get(node_type)
-        if config:
-            # Build lookup of connected inputs (those with links)
-            node_inputs = node.get('inputs', [])
-            connected_inputs = {inp.get('name') for inp in node_inputs if inp.get('link') is not None}
+            display_name = base_title.replace('_', ' ').strip()
+            if not display_name or display_name == node_type:
+                display_name = node_type.replace('Plus', '+')
 
-            resolved = _resolve_config_entries(node_type, config)
-            for widget_idx, widget_name, widget_type in resolved:
-                # Skip widgets that are connected to other nodes (not user-editable)
-                if widget_name in connected_inputs:
-                    continue
+            def _ui_get_value(name, idx, _wv=widgets_values):
+                if idx is not None and idx < len(_wv):
+                    return _wv[idx]
+                return None
 
-                current_value = None
-                if widget_idx is not None and widget_idx < len(widgets_values):
-                    current_value = widgets_values[widget_idx]
-
-                # Try to get combo options from node_info
-                options = _get_widget_options(node_type, widget_name)
-
-                editable_nodes.append(EditableNode(
-                    node_id=node_id,
-                    node_type=node_type,
-                    title=title,
-                    display_name=f"{display_name} - {widget_name}" if len(config) > 1 else display_name,
-                    widget_type=widget_type,
-                    widget_name=widget_name,
-                    current_value=current_value,
-                    options=options,
-                    condition_node=condition_node_name,
-                    cardinality=cardinality,
-                ))
-        else:
-            # Try auto-discovery from node_info cache
-            from comfyui.node_info import get_node_info, get_widget_index
-            info = get_node_info(node_type)
-            if info and info.widgets:
-                # Build lookup of connected inputs (those with links)
-                node_inputs = node.get('inputs', [])
-                connected_inputs = {inp.get('name') for inp in node_inputs if inp.get('link') is not None}
-                logger.info(f"Node {node_id} ({node_type}): total widgets={len(info.widgets)}, connected_inputs={connected_inputs}")
-
-                for widget in info.widgets:
-                    # Skip widgets that are connected to other nodes (not user-editable)
-                    if widget.name in connected_inputs:
-                        logger.info(f"  Skipping connected widget: {widget.name}")
-                        continue
-                    logger.info(f"  Adding editable widget: {widget.name}")
-
-                    widget_idx = get_widget_index(node_type, widget.name)
-                    current_value = None
-                    if widget_idx is not None and widget_idx < len(widgets_values):
-                        current_value = widgets_values[widget_idx]
-                    options = widget.options or []
-                    editable_nodes.append(EditableNode(
-                        node_id=node_id,
-                        node_type=node_type,
-                        title=title,
-                        display_name=f"{display_name} - {widget.name}" if len(info.widgets) > 1 else display_name,
-                        widget_type=widget.widget_type,
-                        widget_name=widget.name,
-                        current_value=current_value,
-                        options=options,
-                        condition_node=condition_node_name,
-                        cardinality=cardinality,
-                    ))
-            elif _is_uuid(node_type) and node_type in subgraph_defs:
-                # Subgraph/component node - extract widgets from proxyWidgets
-                sg_widgets = _extract_subgraph_widgets(
-                    node, display_name, condition_node_name, subgraph_defs,
-                    cardinality
-                )
-                editable_nodes.extend(sg_widgets)
-                if sg_widgets:
-                    logger.info(f"  Extracted {len(sg_widgets)} widgets from subgraph node {node_id}")
-            elif widgets_values:
-                # Last resort: generic text widget
-                logger.warning(f"Unknown editable node type: {node_type} (title: {title})")
-                editable_nodes.append(EditableNode(
-                    node_id=node_id,
-                    node_type=node_type,
-                    title=title,
-                    display_name=display_name,
-                    widget_type='text',
-                    widget_name='value',
-                    current_value=str(widgets_values[0]) if widgets_values else '',
-                    condition_node=condition_node_name,
-                    cardinality=cardinality,
-                ))
+            editable_nodes.extend(_build_editable_widgets(_NodeView(
+                node_id=node.get('id'),
+                node_type=node_type,
+                title=title,
+                display_name=display_name,
+                condition_node=condition_node_name,
+                cardinality=cardinality,
+                connected_inputs={inp.get('name') for inp in node.get('inputs', [])
+                                  if inp.get('link') is not None},
+                get_value=_ui_get_value,
+                fallback_value=(str(widgets_values[0]) if widgets_values else None),
+                raw_node=node,
+            ), subgraph_defs))
 
     # Sort by display_name using natural sort so "Image 2" < "Image 10"
     def _natural_sort_key(node):
