@@ -402,3 +402,56 @@ class TestExtractEditableApiFormat:
         nodes = extract_editable_nodes(path)
         assert len(nodes) > 0
         assert all(n.widget_type for n in nodes)
+
+
+# ============================================================================
+# API-format settings extraction
+# ============================================================================
+
+class TestExtractSettingsApiFormat:
+    def _workflow(self):
+        return {
+            "12": {
+                "class_type": "KSampler",
+                "inputs": {"steps": 20, "cfg": 7.5, "denoise": 1.0, "model": ["3", 0]},
+                "_meta": {"title": "Sampler_settings"},
+            },
+            "3": {"class_type": "CheckpointLoaderSimple",
+                  "inputs": {"ckpt_name": "a.safetensors"}},
+        }
+
+    def test_finds_settings_widgets(self, tmp_path):
+        from comfyui.editable import extract_settings_nodes
+        nodes = extract_settings_nodes(_write_api_workflow(tmp_path, self._workflow(), "s1.json"))
+        assert {n.widget_name for n in nodes} == {"steps", "cfg", "denoise"}
+
+    def test_group_name_from_title(self, tmp_path):
+        from comfyui.editable import extract_settings_nodes
+        nodes = extract_settings_nodes(_write_api_workflow(tmp_path, self._workflow(), "s2.json"))
+        assert all(n.group_name == "Sampler" for n in nodes)
+
+    def test_values_read_from_inputs(self, tmp_path):
+        from comfyui.editable import extract_settings_nodes
+        by_name = {n.widget_name: n for n in
+                   extract_settings_nodes(_write_api_workflow(tmp_path, self._workflow(), "s3.json"))}
+        assert by_name["steps"].current_value == 20
+        assert by_name["cfg"].current_value == 7.5
+
+    def test_linked_input_not_offered(self, tmp_path):
+        """'model' is a link and is driven by the graph, not the user."""
+        from comfyui.editable import extract_settings_nodes
+        nodes = extract_settings_nodes(_write_api_workflow(tmp_path, self._workflow(), "s4.json"))
+        assert not any(n.widget_name == "model" for n in nodes)
+
+    def test_unmarked_nodes_ignored(self, tmp_path):
+        from comfyui.editable import extract_settings_nodes
+        wf = {"1": {"class_type": "KSampler", "inputs": {"steps": 20}}}
+        assert extract_settings_nodes(_write_api_workflow(tmp_path, wf, "s5.json")) == []
+
+    def test_ui_format_still_works(self):
+        """Regression guard: the UI settings path must be untouched."""
+        import os as _os
+        from comfyui.editable import extract_settings_nodes
+        path = _os.path.join(_os.path.dirname(__file__), "workflows", "video_ltx2_i2v.json")
+        nodes = extract_settings_nodes(path)
+        assert isinstance(nodes, list)

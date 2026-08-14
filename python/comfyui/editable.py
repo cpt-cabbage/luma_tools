@@ -694,6 +694,54 @@ def _parse_settings_title(title: str) -> Tuple[bool, str]:
     return False, title
 
 
+def _build_settings_widgets(view: _NodeView, group_name: str) -> List[SettingsNode]:
+    """Resolve one node into zero or more SettingsNode descriptors.
+
+    Ladder: SETTINGS_NODE_CONFIGS -> EDITABLE_NODE_CONFIGS -> node_info
+    auto-discovery -> nothing (warn only).
+    """
+    from comfyui.node_info import get_node_info, get_widget_index
+
+    def _make(widget_type, widget_name, current_value, options):
+        return SettingsNode(
+            node_id=view.node_id,
+            node_type=view.node_type,
+            title=view.title,
+            group_name=group_name,
+            widget_name=widget_name,
+            widget_type=widget_type,
+            current_value=current_value,
+            options=options,
+        )
+
+    config = (SETTINGS_NODE_CONFIGS.get(view.node_type)
+              or EDITABLE_NODE_CONFIGS.get(view.node_type))
+    if config:
+        out = []
+        for widget_idx, widget_name, widget_type in _resolve_config_entries(view.node_type, config):
+            if widget_name in view.connected_inputs:
+                continue
+            out.append(_make(widget_type, widget_name,
+                             view.get_value(widget_name, widget_idx),
+                             _get_widget_options(view.node_type, widget_name)))
+        return out
+
+    info = get_node_info(view.node_type)
+    if info and info.widgets:
+        out = []
+        for widget in info.widgets:
+            if widget.name in view.connected_inputs:
+                continue
+            out.append(_make(widget.widget_type, widget.name,
+                             view.get_value(widget.name,
+                                            get_widget_index(view.node_type, widget.name)),
+                             widget.options or []))
+        return out
+
+    logger.warning(f"Unknown settings node type: {view.node_type} (title: {view.title})")
+    return []
+
+
 def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
     """
     Extract all nodes with '_settings' suffix in their title from a workflow.
@@ -722,17 +770,39 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
         logger.error(f"Error loading workflow for settings nodes: {e}")
         return []
 
-    # Same limitation as extract_editable_nodes: API format has no 'nodes'
-    from comfyui.workflow import is_api_format
+    from comfyui.workflow import is_api_format, _is_node_reference
+
+    settings_nodes = []
+
     if is_api_format(workflow):
-        logger.warning(
-            f"Workflow '{os.path.basename(workflow_path)}' is in API format — "
-            f"settings (_settings) nodes require the UI/nodes format."
-        )
-        return []
+        for node_id, node_data in workflow.items():
+            if not isinstance(node_data, dict):
+                continue
+            title = (node_data.get('_meta') or {}).get('title', '')
+            is_settings, group_name = _parse_settings_title(title)
+            if not is_settings:
+                continue
+
+            node_type = node_data.get('class_type', '')
+            inputs = node_data.get('inputs', {}) or {}
+            connected = {k for k, v in inputs.items() if _is_node_reference(v)}
+
+            settings_nodes.extend(_build_settings_widgets(_NodeView(
+                node_id=node_id,
+                node_type=node_type,
+                title=title,
+                display_name=group_name,
+                condition_node=None,
+                cardinality=CARDINALITY_SINGLE,
+                connected_inputs=connected,
+                get_value=lambda name, idx, _in=inputs: _in.get(name),
+            ), group_name))
+
+        _cache_store(_settings_cache, _settings_cache_lock, workflow_path,
+                     mtime, settings_nodes)
+        return settings_nodes
 
     nodes = workflow.get('nodes', [])
-    settings_nodes = []
 
     for node in nodes:
         title = node.get('title', '')
