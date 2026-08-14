@@ -26,7 +26,7 @@ import threading
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field, asdict, fields
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from core.config import USER_SETTINGS_DIR
 
@@ -66,6 +66,10 @@ class NodeTypeInfo:
     widget_names_for_values: List[Optional[str]] = field(default_factory=list)
     # Names of all required inputs (both widget and connection inputs)
     required_input_names: List[str] = field(default_factory=list)
+    # Names of all optional inputs (both widget and connection inputs).
+    # Used to discover the ceiling for numbered slot inputs such as
+    # media_1..media_15, which fan-out expansion allocates into.
+    optional_input_names: List[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -310,6 +314,9 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
     required_section = input_data.get('required', {})
     required_input_names = list(required_section.keys()) if isinstance(required_section, dict) else []
 
+    optional_section = input_data.get('optional', {})
+    optional_input_names = list(optional_section.keys()) if isinstance(optional_section, dict) else []
+
     return NodeTypeInfo(
         class_type=class_type,
         display_name=raw_info.get('display_name', class_type),
@@ -317,6 +324,7 @@ def _parse_node_info(class_type: str, raw_info: dict) -> NodeTypeInfo:
         widgets=widgets,
         widget_names_for_values=widget_names,
         required_input_names=required_input_names,
+        optional_input_names=optional_input_names,
     )
 
 
@@ -630,6 +638,23 @@ def get_required_input_names(class_type: str) -> Optional[List[str]]:
     if info is None:
         return None
     return info.required_input_names
+
+
+def get_optional_input_names(class_type: str) -> Optional[List[str]]:
+    """Names of a node type's optional inputs, or None if not cached."""
+    info = get_node_info(class_type)
+    return info.optional_input_names if info else None
+
+
+def get_known_class_types() -> Set[str]:
+    """Every class_type present in the cache.
+
+    Empty when the cache is unavailable — callers must treat an empty result
+    as "unknown", never as "nothing is installed".
+    """
+    _cache._ensure_loaded()
+    with _cache._lock:
+        return set(_cache._node_types.keys())
 
 
 def get_widget_info(class_type: str, widget_name: str) -> Optional[WidgetInfo]:

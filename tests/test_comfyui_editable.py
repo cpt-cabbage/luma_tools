@@ -118,3 +118,43 @@ class TestComfyuiTypeMap:
         assert _COMFYUI_TYPE_MAP["BOOLEAN"] == "toggle"
         assert _COMFYUI_TYPE_MAP["STRING"] == "string"
         assert _COMFYUI_TYPE_MAP["COMBO"] == "combo"
+
+
+# ============================================================================
+# node_info: optional inputs and known class types
+# ============================================================================
+
+class TestNodeInfoOptionalInputs:
+    def _raw(self):
+        return {
+            'input': {
+                'required': {'clip': ['CLIP'], 'prompt': ['STRING', {'multiline': True}]},
+                'optional': {'media_1': ['*'], 'media_type_1': ['STRING', {'default': ''}]},
+            },
+            'input_order': {
+                'required': ['clip', 'prompt'],
+                'optional': ['media_1', 'media_type_1'],
+            },
+            'display_name': 'Fake H3',
+            'category': 'test',
+        }
+
+    def test_optional_input_names_parsed(self):
+        from comfyui.node_info import _parse_node_info
+        info = _parse_node_info('FakeH3', self._raw())
+        assert info.optional_input_names == ['media_1', 'media_type_1']
+
+    def test_required_names_still_parsed(self):
+        from comfyui.node_info import _parse_node_info
+        info = _parse_node_info('FakeH3', self._raw())
+        assert info.required_input_names == ['clip', 'prompt']
+
+    def test_optional_defaults_empty(self):
+        from comfyui.node_info import NodeTypeInfo
+        info = NodeTypeInfo(class_type='X', display_name='X', category='')
+        assert info.optional_input_names == []
+
+    def test_known_class_types_returns_set(self):
+        from comfyui.node_info import get_known_class_types
+        result = get_known_class_types()
+        assert isinstance(result, set)
