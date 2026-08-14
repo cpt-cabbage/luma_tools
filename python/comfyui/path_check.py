@@ -15,6 +15,14 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
+
+# Deadline's Python plugin runs this file through a wrapper rather than as
+# `python script.py`, so the script's own directory is NOT on sys.path and the
+# comfyui_utils copy sitting right next to it is invisible. Without this line
+# the import below raises, the job exits 1 with no result file, and the
+# workstation can only report a timeout.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from comfyui_utils import resolve_comfyui_paths
@@ -27,6 +35,25 @@ RESULT_SCHEMA = 1
 # Sixty seconds is generous for `python -c print(version)` without letting a
 # wedged process hold the whole check open.
 _PROBE_TIMEOUT_S = 60
+
+# Breadcrumb log written next to this script on the share. The Deadline
+# repository here is behind a connection server, so the workstation cannot
+# read task logs - without this, a farm-side failure is invisible.
+LOG_FILENAME = "check_log.txt"
+
+
+def _log(message):
+    """Append a breadcrumb next to this script. Never raises."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_FILENAME)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("%s %s\n" % (stamp, message))
+    except Exception:  # a broken log must never break the check
+        pass
+
+
+_log("module loaded on %s with python %s" % (socket.gethostname(), sys.version.split()[0]))
 
 
 def _check(check_id, label, ok, detail):
@@ -56,6 +83,31 @@ def _probe_python(python_exe):
 
     version = proc.stdout.strip()
     return version, "Python %s" % version
+
+
+def _payload(checks, comfyui_mode="", version=None):
+    """Wrap a list of checks in the envelope the workstation reads."""
+    return {
+        "schema": RESULT_SCHEMA,
+        "ok": all(check["ok"] for check in checks),
+        "hostname": socket.gethostname(),
+        "os": platform.platform(),
+        "comfyui_mode": comfyui_mode,
+        "python_version": version,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "checks": checks,
+    }
+
+
+def crash_result(exc):
+    """Turn an unexpected crash into an answer the workstation can display.
+
+    Without this the script exits non-zero with no file written, and the
+    Settings tab has nothing to show but a three-minute timeout - the least
+    useful possible report of a bug in this script.
+    """
+    detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    return _payload([_check("script_error", "Check script", False, detail)])
 
 
 def run_checks(comfyui_path, comfyui_mode="embedded", comfyui_python="", network_path=""):
@@ -98,20 +150,12 @@ def run_checks(comfyui_path, comfyui_mode="embedded", comfyui_python="", network
         "network_path", "Network share", bool(network_path),
         network_path or "no network path given"))
 
-    return {
-        "schema": RESULT_SCHEMA,
-        "ok": all(check["ok"] for check in checks),
-        "hostname": socket.gethostname(),
-        "os": platform.platform(),
-        "comfyui_mode": comfyui_mode,
-        "python_version": version,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "checks": checks,
-    }
+    return _payload(checks, comfyui_mode, version)
 
 
 def main(argv=None):
-    """Deadline entry point. Writes the result file, prints it to the task log."""
+    """Run the checks and write the result file. Returns a process exit code."""
+    _log("main() entered with argv=%r" % (argv,))
     parser = argparse.ArgumentParser(
         description="Verify the ComfyUI installation on this farm worker")
     parser.add_argument("--comfyui-path", required=True)
@@ -120,12 +164,16 @@ def main(argv=None):
     parser.add_argument("--result-file", required=True)
     args = parser.parse_args(argv)
 
-    result = run_checks(
-        args.comfyui_path,
-        args.comfyui_mode,
-        args.comfyui_python,
-        network_path=os.path.dirname(args.result_file),
-    )
+    try:
+        result = run_checks(
+            args.comfyui_path,
+            args.comfyui_mode,
+            args.comfyui_python,
+            network_path=os.path.dirname(args.result_file),
+        )
+    except Exception as exc:  # the crash IS the answer - report it, don't hide it
+        traceback.print_exc()
+        result = crash_result(exc)
 
     # Failed CHECKS exit 0 - the file is the answer, and a red Deadline job
     # would hide the detail. Only an unwritable file is a job failure, because
@@ -137,11 +185,25 @@ def main(argv=None):
         with open(args.result_file, "w", encoding="utf-8") as handle:
             json.dump(result, handle, indent=2)
     except OSError as exc:
+        _log("FAILED to write %s: %s" % (args.result_file, exc))
         sys.stderr.write("Could not write result file %s: %s\n" % (args.result_file, exc))
         return 1
 
+    _log("wrote %s (ok=%s)" % (args.result_file, result["ok"]))
     print(json.dumps(result, indent=2))
     return 0
+
+
+def __main__(*args):
+    """Entry point for Deadline's Python plugin.
+
+    The plugin executes this file and then calls __main__() with the
+    plugin_info Arguments - it does not run the module as "__main__", so
+    without this function the script loads and then does nothing (or errors),
+    leaving the workstation waiting for a result file that never arrives.
+    """
+    _log("__main__ called by Deadline with args=%r" % (args,))
+    return main(list(args) if args else None)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import importlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 
 import pytest
@@ -234,3 +235,29 @@ class TestFarmPathCheckWorks:
         assert any(c["id"] == "comfyui_dir" and not c["ok"] for c in result["checks"])
         # Proves resolve_comfyui_paths resolved via comfyui_utils, not the package
         assert any(c["id"] == "python_exe" for c in result["checks"])
+
+    def test_runs_when_its_directory_is_not_on_sys_path(self, farm_env, tmp_path):
+        """Regression: Deadline's Python plugin runs the script through a
+        wrapper, so the script's directory is NOT on sys.path and the
+        comfyui_utils copy beside it is invisible. That crashed the job with
+        exit 1 and no result file, which the workstation could only report as
+        a timeout. runpy.run_path reproduces the plugin's invocation.
+        """
+        script = os.path.join(str(farm_env), "comfyui_path_check.py")
+        result_file = os.path.join(str(tmp_path), "out", "result.json")
+
+        # Strip PYTHONPATH too - otherwise the subprocess could reach the real
+        # comfyui package and the fallback import would mask the bug.
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import runpy, sys; sys.argv = sys.argv[1:]; "
+             "runpy.run_path(sys.argv[0], run_name='__main__')",
+             script, "--comfyui-path", str(tmp_path), "--result-file", result_file],
+            capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=120,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        assert os.path.isfile(result_file), proc.stderr

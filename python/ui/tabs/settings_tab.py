@@ -5,6 +5,7 @@ Handles user settings (local) and global settings management.
 """
 
 import os
+import html
 import logging
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtCore import Qt
@@ -41,6 +42,26 @@ def _clear_thumbnail_caches() -> int:
             except OSError as e:
                 logger.debug(f"Could not remove cached thumbnail {filepath}: {e}")
     return count
+
+
+def _poll_path_check_once(result_path: str, job_id: str, want_status: bool) -> dict:
+    """Worker function - one poll of the farm path check (no Qt access).
+
+    Both halves are network calls: the result file lives on the share, and
+    `deadlinecommand GetJob` regularly takes a second or more. Neither may run
+    on the GUI thread.
+    """
+    from deadline.path_check import read_path_check_result
+
+    result = read_path_check_result(result_path)
+    if result is not None:
+        return {"result": result, "status": None}
+
+    status = None
+    if want_status:
+        from deadline.poller import poll_deadline_job_status
+        status = poll_deadline_job_status(job_id)
+    return {"result": None, "status": status}
 
 
 # Widget type constants for settings mapping
@@ -125,6 +146,8 @@ class SettingsTab(BaseTab):
         # Update Python path display when ComfyUI path or Python path changes
         self.ui.ComfyUIPathEdit.textChanged.connect(self._update_comfyui_python_visibility)
         self.ui.ComfyUIPythonEdit.textChanged.connect(self._update_comfyui_python_visibility)
+        if hasattr(self.ui, 'VerifyComfyUIPathButton'):
+            self.ui.VerifyComfyUIPathButton.clicked.connect(self._on_verify_comfyui_path)
 
         # Admin user management
         if hasattr(self.ui, 'AddAdminUserButton'):
@@ -164,6 +187,12 @@ class SettingsTab(BaseTab):
         self._is_active = False
         self._save_button_texts = {}
         self._prompting_unsaved = False
+
+        # Farm path check state. Initialized here because initialize() is the
+        # setup method for this tab - an uninitialized attribute is the usual
+        # source of AttributeError in signal handlers.
+        self._path_check = None
+        self._path_check_timer = None
 
         # ComfyUI mode option manager
         self._comfyui_mode_manager = OptionButtonManager(
@@ -983,6 +1012,206 @@ class SettingsTab(BaseTab):
                     self.ui.comfyuiCurrentPath.setText(f"Current: {python_exe}{exists_note}")
                 except ValueError as e:
                     self.ui.comfyuiCurrentPath.setText(f"Current: (error: {e})")
+
+    # =========================================================================
+    # Farm path check
+    # =========================================================================
+    # comfyui_path is resolved on a Deadline worker, never here, so the only
+    # honest way to check it is to ask the farm: submit a tiny job, let the
+    # worker write its answer to the shared path, and poll for that file.
+
+    _PATH_CHECK_POLL_MS = 2000
+    _PATH_CHECK_TIMEOUT_S = 180
+    # The Deadline query is far more expensive than an isfile() on the share
+    # and only drives the wording, so ask for it every Nth tick.
+    _PATH_CHECK_STATUS_EVERY = 3
+
+    def _on_verify_comfyui_path(self):
+        """Submit a Deadline job that checks the ComfyUI paths on a worker."""
+        from core.config import DEADLINE_PATH
+        from core.settings_manager import safe_get_setting
+        from deadline.path_check import submit_path_check
+
+        if self._path_check is not None:
+            return  # a check is already in flight
+
+        comfyui_path = self.ui.ComfyUIPathEdit.text().strip()
+        if not comfyui_path:
+            self._set_verify_status("Enter a ComfyUI path first.", "warning")
+            return
+        if not DEADLINE_PATH:
+            self._set_verify_status("Deadline is not available on this machine.", "error")
+            return
+
+        network_path = (self.ui.NetworkOutputEdit.text().strip()
+                        or safe_get_setting("network_output_path", ""))
+        if not network_path:
+            self._set_verify_status(
+                "No network output path is set - the farm has nowhere to write the result.",
+                "error")
+            return
+
+        self.ui.VerifyComfyUIPathButton.setEnabled(False)
+        self._set_verify_status(
+            "Submitting a check job for the values currently in these fields "
+            "(not the saved settings)...", "info")
+
+        self.start_worker(
+            submit_path_check,
+            worker_kwargs={
+                "comfyui_path": comfyui_path,
+                "comfyui_mode": self._comfyui_mode,
+                "comfyui_python": self.ui.ComfyUIPythonEdit.text().strip(),
+                "network_output_path": network_path,
+            },
+            on_result=self._on_path_check_submitted,
+            on_error=self._on_path_check_submit_error,
+        )
+
+    def _on_path_check_submitted(self, submit_result):
+        """Start polling for the worker's answer (GUI thread)."""
+        from PySide6.QtCore import QTimer
+
+        job_id, result_path = submit_result
+        if not job_id:
+            self._finish_path_check(
+                "Deadline did not return a job id - the submission failed.", "error")
+            return
+
+        self._path_check = {
+            "job_id": job_id,
+            "result_path": result_path,
+            "ticks": 0,
+            "in_flight": False,
+            "saw_running": False,
+        }
+        self._set_verify_status(f"Queued on the farm (job {job_id})...", "info")
+
+        self._path_check_timer = QTimer(self.main_window)
+        self._path_check_timer.timeout.connect(self._poll_path_check)
+        self._path_check_timer.start(self._PATH_CHECK_POLL_MS)
+        logger.info(f"Path check job {job_id} submitted; polling {result_path}")
+
+    def _on_path_check_submit_error(self, error_msg, traceback_str=""):
+        """The submission itself raised in the worker thread."""
+        logger.error(f"Path check submission failed: {error_msg}")
+        self._finish_path_check(f"Could not submit the check job: {error_msg}", "error")
+
+    def _poll_path_check(self):
+        """Timer tick - hand the actual network work to a worker."""
+        check = self._path_check
+        if not check or check["in_flight"]:
+            return
+
+        check["ticks"] += 1
+        elapsed = check["ticks"] * self._PATH_CHECK_POLL_MS / 1000.0
+        if elapsed > self._PATH_CHECK_TIMEOUT_S:
+            self._finish_path_check(
+                "No answer from the farm after 3 minutes - the check job may still be queued.",
+                "warning")
+            return
+
+        check["in_flight"] = True
+        self.start_worker(
+            _poll_path_check_once,
+            check["result_path"],
+            check["job_id"],
+            check["ticks"] % self._PATH_CHECK_STATUS_EVERY == 0,
+            on_result=self._on_path_check_polled,
+            on_error=self._on_path_check_poll_error,
+        )
+
+    def _on_path_check_polled(self, payload):
+        """A poll came back: either the answer, or a job status for the wording."""
+        check = self._path_check
+        if not check:
+            return  # finished or cancelled while the poll was in flight
+        check["in_flight"] = False
+
+        result = payload.get("result")
+        if result is not None:
+            self._render_path_check_result(result)
+            return
+
+        status_info = payload.get("status")
+        if not status_info:
+            return
+
+        status = status_info.get("status", "Unknown")
+        if status == "Failed":
+            message = status_info.get("error_message") or "the job errored on the farm"
+            self._finish_path_check(f"The check job failed: {message}", "error")
+        elif status in ("Rendering", "Active"):
+            check["saw_running"] = True
+            self._set_verify_status("Running on a farm worker...", "info")
+        elif not check["saw_running"]:
+            self._set_verify_status(f"Queued on the farm (job {check['job_id']})...", "info")
+
+    def _on_path_check_poll_error(self, error_msg, traceback_str=""):
+        """A poll failed. Keep waiting - the share or Deadline may just be busy."""
+        logger.debug(f"Path check poll failed (will retry): {error_msg}")
+        if self._path_check:
+            self._path_check["in_flight"] = False
+
+    def _render_path_check_result(self, result):
+        """Show one line per check, plus which worker answered."""
+        from core.config import UIColors
+
+        lines = []
+        for check in result.get("checks", []):
+            ok = bool(check.get("ok"))
+            colour = UIColors.SUCCESS if ok else UIColors.ERROR
+            mark = "✓" if ok else "✗"
+            label = html.escape(str(check.get("label", check.get("id", "check"))))
+            detail = html.escape(str(check.get("detail", "")))
+            lines.append(f'<span style="color:{colour};">{mark}</span> {label}: {detail}')
+
+        footer = f"Answered by {html.escape(str(result.get('hostname', 'an unknown worker')))}"
+        version = result.get("python_version")
+        if version:
+            footer += f" - Python {html.escape(str(version))}"
+        lines.append(footer)
+
+        ok = bool(result.get("ok"))
+        headline_colour = UIColors.SUCCESS if ok else UIColors.ERROR
+        headline = ("ComfyUI is reachable from the farm" if ok
+                    else "Problems found on the farm worker")
+        self.ui.comfyuiVerifyStatus.setText(
+            f'<b style="color:{headline_colour};">{headline}</b><br>' + "<br>".join(lines))
+
+        logger.info(
+            f"Path check result from {result.get('hostname')}: ok={ok}")
+        self._end_path_check()
+
+    def _set_verify_status(self, message, level="info"):
+        """Set the one-line status under the ComfyUI path fields."""
+        from core.config import UIColors
+
+        colours = {
+            "info": UIColors.TEXT_MUTED,
+            "success": UIColors.SUCCESS,
+            "warning": UIColors.WARNING,
+            "error": UIColors.ERROR,
+        }
+        colour = colours.get(level, UIColors.TEXT_MUTED)
+        self.ui.comfyuiVerifyStatus.setText(
+            f'<span style="color:{colour};">{html.escape(message)}</span>')
+
+    def _finish_path_check(self, message, level):
+        """Stop polling and leave a final message on the status line."""
+        self._end_path_check()
+        self._set_verify_status(message, level)
+
+    def _end_path_check(self):
+        """Tear down the timer and state, and re-enable the button."""
+        timer = self._path_check_timer
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+        self._path_check_timer = None
+        self._path_check = None
+        if hasattr(self.ui, 'VerifyComfyUIPathButton'):
+            self.ui.VerifyComfyUIPathButton.setEnabled(True)
 
     def _on_add_pass_clicked(self):
         """Add a custom pass to the default passes list."""

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from comfyui.path_check import RESULT_SCHEMA, main, run_checks
+from comfyui.path_check import RESULT_SCHEMA, crash_result, main, run_checks
 from deadline.path_check import (
     DEADLINE_PYTHON_PLUGIN_VERSION,
     RESULT_FILENAME,
@@ -92,6 +92,36 @@ class TestRunChecks:
             assert key in result
         assert result["schema"] == RESULT_SCHEMA
         assert result["ok"] == all(check["ok"] for check in result["checks"])
+
+
+class TestCrashResult:
+    def test_a_crash_becomes_a_readable_answer(self):
+        # A bug in this script must reach the user as a message, not as a
+        # three-minute timeout with nothing to show.
+        result = crash_result(RuntimeError("the worker exploded"))
+
+        assert result["schema"] == RESULT_SCHEMA
+        assert result["ok"] is False
+        checks = _checks_by_id(result)
+        assert "the worker exploded" in checks["script_error"]["detail"]
+
+    def test_main_writes_a_result_when_run_checks_raises(self, tmp_path, monkeypatch):
+        import comfyui.path_check as path_check
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("resolver blew up")
+
+        monkeypatch.setattr(path_check, "run_checks", boom)
+        result_file = str(tmp_path / "result.json")
+
+        code = path_check.main([
+            "--comfyui-path", str(tmp_path), "--result-file", result_file])
+
+        assert code == 0
+        with open(result_file, encoding="utf-8") as handle:
+            written = json.load(handle)
+        assert written["ok"] is False
+        assert "resolver blew up" in written["checks"][0]["detail"]
 
 
 class TestMain:
