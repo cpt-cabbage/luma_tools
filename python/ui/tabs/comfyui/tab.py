@@ -1934,7 +1934,7 @@ class ComfyUITab(PollingMixin, BaseTab):
         except Exception as e:
             logger.warning(f"[ComfyUI] Node availability check skipped: {e}")
 
-        from comfyui.editable import (CARDINALITY_MANY,
+        from comfyui.editable import (CARDINALITY_MANY, CARDINALITY_SINGLE,
                                      find_out_of_range_reference_tags)
 
         checked = 0
@@ -1964,7 +1964,10 @@ class ComfyUITab(PollingMixin, BaseTab):
                 selected = getattr(input_widget, 'selected_files', None)
                 if node.cardinality == CARDINALITY_MANY:
                     reference_counts[node.widget_type] += len(selected or [])
-                if selected is not None and len(selected) == 0:
+                # '?' and '*' slots are legitimately empty: the modifier
+                # removes the node instead of submitting a stale default.
+                if (node.cardinality == CARDINALITY_SINGLE
+                        and selected is not None and len(selected) == 0):
                     kind = node.widget_type
                     problems.append(f"'{label}' has no {kind} selected")
 

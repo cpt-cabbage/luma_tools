@@ -387,7 +387,7 @@ def _apply_toggle_widget(inputs, value, widget_name, node_id, node_type):
 
 
 def _apply_model_widget(inputs, value, widget_name, node_id, node_type):
-    """3D model widget — stores the basename in 'model_file'."""
+    """3D model widget — stores the basename in the named input, else 'model_file'."""
     if not value:
         # No model provided — leave node as-is with its workflow default
         logger.info(f"  3D model node {node_id} ({node_type}): no file selected, "
@@ -395,13 +395,13 @@ def _apply_model_widget(inputs, value, widget_name, node_id, node_type):
         return
     model_path = _first_path(value)
     if model_path:
-        inputs['model_file'] = os.path.basename(model_path)
+        inputs[widget_name or 'model_file'] = os.path.basename(model_path)
         logger.info(f"  Set 3D model node {node_id} ({node_type}): "
                     f"{os.path.basename(model_path)}")
 
 
 def _apply_video_widget(inputs, value, widget_name, node_id, node_type):
-    """Video widget — stores the basename in 'video'."""
+    """Video widget — stores the basename in the named input, else 'video'."""
     if not value:
         # No video provided — leave node as-is with its workflow default
         logger.info(f"  Video node {node_id} ({node_type}): no file selected, "
@@ -409,7 +409,7 @@ def _apply_video_widget(inputs, value, widget_name, node_id, node_type):
         return
     video_path = _first_path(value)
     if video_path:
-        inputs['video'] = os.path.basename(video_path)
+        inputs[widget_name or 'video'] = os.path.basename(video_path)
         logger.info(f"  Set video node {node_id} ({node_type}): "
                     f"{os.path.basename(video_path)}")
 
@@ -505,6 +505,65 @@ def _allocate_node_id(workflow: Dict[str, Any]) -> str:
     return str(max_id + 1)
 
 
+def _detach_slot_node(workflow: Dict[str, Any], template_id: str) -> None:
+    """Remove a slot's node and every consumer input it feeds.
+
+    Used for empty '?' and '*' slots, which are optional by construction, so
+    dropping the inputs can never break the consumer. Goes input-by-input
+    rather than through remove_nodes_from_api_workflow: that treats a
+    node_info cache miss as "all inputs required" and would cascade into
+    deleting the consumer itself.
+
+    The linking input is always dropped — a link to a removed node fails the
+    whole prompt on the farm. Indexed siblings (media_type_N alongside
+    media_N) travel with the linked input.
+    """
+    for consumer_id, input_name, _slot in _find_consumers(workflow, template_id):
+        consumer_inputs = workflow[consumer_id]['inputs']
+        consumer_inputs.pop(input_name, None)
+        logger.info(f"[Slot] Dropped optional input {consumer_id}.{input_name}")
+        split = _split_indexed_name(input_name)
+        if not split:
+            continue
+        for name in [n for n in consumer_inputs
+                     if (_split_indexed_name(n) or (None, None))[1] == split[1]]:
+            del consumer_inputs[name]
+            logger.info(f"[Slot] Dropped optional input {consumer_id}.{name}")
+    workflow.pop(template_id, None)
+
+
+# Widget types where "left empty" is unambiguous — a False toggle or blank
+# combo is a legitimate value, not an empty slot.
+_FILE_SLOT_WIDGET_TYPES = ('image', 'video', 'audio', '3d_model', 'directory')
+
+
+def _remove_empty_optional_slots(workflow: Dict[str, Any], editable_values) -> None:
+    """'Name_editable?' semantics: remove the node when the slot is left empty.
+
+    A filled optional slot is applied by the normal appliers like any single
+    slot; only the empty case differs from CARDINALITY_SINGLE, which keeps
+    the workflow's baked-in default instead.
+    """
+    from comfyui.editable import CARDINALITY_OPTIONAL
+
+    if not editable_values:
+        return
+    for node_id, data in _iter_editable_entries(editable_values):
+        node_info = data.get('node')
+        if getattr(node_info, 'cardinality', None) != CARDINALITY_OPTIONAL:
+            continue
+        if getattr(node_info, 'widget_type', None) not in _FILE_SLOT_WIDGET_TYPES:
+            continue
+        value = data.get('value')
+        files = [f for f in (value if isinstance(value, list) else [value]) if f]
+        if files:
+            continue
+        template_id = str(node_id)
+        if template_id in workflow:
+            _detach_slot_node(workflow, template_id)
+            logger.info(f"[Optional] Slot {template_id} empty — node removed")
+
+
 def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
     """Expand every fan-out slot into one loader node per selected file.
 
@@ -546,21 +605,7 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
             consumers = _find_consumers(workflow, template_id)
 
             if not files:
-                # Drop the slot's inputs directly rather than going through
-                # remove_nodes_from_api_workflow: that treats a node_info cache
-                # miss as "all inputs required" and would cascade into deleting
-                # the consumer itself. A numbered fan-out slot is optional by
-                # construction, so removing it can never break the consumer.
-                for consumer_id, input_name, _slot in consumers:
-                    split = _split_indexed_name(input_name)
-                    if not split:
-                        continue
-                    consumer_inputs = workflow[consumer_id]['inputs']
-                    for name in [n for n in consumer_inputs
-                                 if (_split_indexed_name(n) or (None, None))[1] == split[1]]:
-                        del consumer_inputs[name]
-                        logger.info(f"[Fanout] Dropped optional input {consumer_id}.{name}")
-                workflow.pop(template_id, None)
+                _detach_slot_node(workflow, template_id)
                 logger.info(f"[Fanout] Slot {template_id} empty — template node removed")
                 continue
 
@@ -665,6 +710,10 @@ def _apply_editable_values(workflow: Dict[str, Any], editable_values) -> None:
 
         if node_id_str not in workflow:
             if _is_expanded_subgraph_node(node_info):
+                continue
+            from comfyui.editable import CARDINALITY_OPTIONAL
+            if getattr(node_info, 'cardinality', None) == CARDINALITY_OPTIONAL:
+                # Removed by _remove_empty_optional_slots — expected, not an error
                 continue
             logger.warning(f"  Node {node_id} not found in workflow")
             continue
@@ -957,8 +1006,10 @@ def modify_workflow_api_format(
     # Apply values from the dynamic UI first, then the class_type rules below
     # fill in / override the pipeline-controlled settings.
     # Fan-out slots become concrete loader nodes before any value is applied,
-    # so the normal appliers never see the multi-file entry.
+    # so the normal appliers never see the multi-file entry. Empty optional
+    # ('?') slots are removed outright rather than keeping a stale default.
     _expand_fanout_slots(modified, editable_values)
+    _remove_empty_optional_slots(modified, editable_values)
 
     _apply_editable_values(modified, editable_values)
 

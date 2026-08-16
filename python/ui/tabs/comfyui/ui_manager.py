@@ -791,7 +791,7 @@ class ComfyUIWidgetManager:
                 if input_widget:
                     if node.widget_type == 'text':
                         value = input_widget.toPlainText().strip()
-                    elif node.widget_type in ('image', 'video'):
+                    elif node.widget_type in ('image', 'video', 'audio'):
                         value = getattr(input_widget, 'selected_files', [])
                         selected_image_count = max(selected_image_count, len(value) if value else 0)
                     elif hasattr(input_widget, 'isChecked'):

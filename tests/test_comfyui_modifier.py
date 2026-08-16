@@ -379,6 +379,76 @@ class TestFanoutSlots:
 
 
 # ============================================================================
+# Optional slots: 'Name_editable?' removes the node when left empty
+# ============================================================================
+
+class TestOptionalSlots:
+    """Documented in python/comfyui/CLAUDE.md: the node is removed from the
+    workflow when the slot is left empty; when filled it behaves like a
+    normal single slot."""
+
+    def _workflow(self, consumer_input="media_1", extra_inputs=None):
+        inputs = {"prompt": "hi", consumer_input: ["41", 0]}
+        inputs.update(extra_inputs or {})
+        return {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "stale.png"},
+                   "_meta": {"title": "Last Frame_editable?"}},
+            "50": {"class_type": "MiniMaxH3Easy", "inputs": inputs,
+                   "_meta": {"title": "Video_editable"}},
+        }
+
+    def _values(self, files, widget_type="image"):
+        from comfyui.editable import EditableNode, CARDINALITY_OPTIONAL
+        node = EditableNode(node_id="41", node_type="LoadImage",
+                            title="Last Frame_editable?", display_name="Last Frame",
+                            widget_type=widget_type, widget_name="image",
+                            cardinality=CARDINALITY_OPTIONAL)
+        return {"41": [{"node": node, "value": files}]}
+
+    def test_empty_removes_node_and_indexed_inputs(self):
+        from comfyui.modifier import _remove_empty_optional_slots
+        wf = self._workflow(extra_inputs={"media_type_1": "image"})
+        _remove_empty_optional_slots(wf, self._values([]))
+        assert "41" not in wf
+        assert "media_1" not in wf["50"]["inputs"]
+        assert "media_type_1" not in wf["50"]["inputs"]
+        assert wf["50"]["inputs"]["prompt"] == "hi"
+
+    def test_empty_unindexed_input_does_not_dangle(self):
+        """A consumer input without a trailing index must still be dropped —
+        a link to a removed node fails the whole prompt on the farm."""
+        from comfyui.modifier import _remove_empty_optional_slots
+        wf = self._workflow(consumer_input="reference_image")
+        _remove_empty_optional_slots(wf, self._values([]))
+        assert "41" not in wf
+        assert "reference_image" not in wf["50"]["inputs"]
+
+    def test_selected_file_keeps_node(self):
+        from comfyui.modifier import _remove_empty_optional_slots
+        wf = self._workflow()
+        _remove_empty_optional_slots(wf, self._values(["C:/r/last.png"]))
+        assert "41" in wf
+        assert wf["50"]["inputs"]["media_1"] == ["41", 0]
+
+    def test_single_cardinality_slot_is_untouched(self):
+        from comfyui.modifier import _remove_empty_optional_slots
+        from comfyui.editable import CARDINALITY_SINGLE
+        wf = self._workflow()
+        values = self._values([])
+        values["41"][0]["node"].cardinality = CARDINALITY_SINGLE
+        _remove_empty_optional_slots(wf, values)
+        assert "41" in wf
+
+    def test_non_file_widget_is_untouched(self):
+        """'Empty' is only unambiguous for file slots — a False toggle or
+        blank combo must not delete its node."""
+        from comfyui.modifier import _remove_empty_optional_slots
+        wf = self._workflow()
+        _remove_empty_optional_slots(wf, self._values(False, widget_type="toggle"))
+        assert "41" in wf
+
+
+# ============================================================================
 # Deadline batching must not split fan-out slots
 # ============================================================================
 
@@ -406,7 +476,7 @@ class TestCollectBatchImagesSkipsFanout:
         paths, node_id = _collect_batch_images(
             {"41": [{"node": self._node(CARDINALITY_MANY), "value": files}]})
         assert paths == []
-        assert node_id == -1
+        assert node_id is None
 
     def test_normal_slot_still_batches(self, tmp_path):
         from deadline.submitter import _collect_batch_images
@@ -434,6 +504,110 @@ class TestCollectBatchImagesSkipsFanout:
         })
         assert paths == batch
         assert node_id == "42"
+
+
+class TestFileWidgetAppliersHonorWidgetName:
+    """Native LoadVideo's input is 'file' (node_configs maps ('file', 'video')).
+    The applier must write the configured input name, not a hardcoded one —
+    an undeclared input is silently dropped by ComfyUI."""
+
+    def test_video_applier_writes_configured_input(self):
+        from comfyui.modifier import _apply_video_widget
+        inputs = {'file': 'stale.mp4'}
+        _apply_video_widget(inputs, ['C:/refs/clip.mp4'], 'file', '9', 'LoadVideo')
+        assert inputs['file'] == 'clip.mp4'
+        assert 'video' not in inputs
+
+    def test_video_applier_falls_back_to_video(self):
+        from comfyui.modifier import _apply_video_widget
+        inputs = {'video': 'stale.mp4'}
+        _apply_video_widget(inputs, ['C:/refs/clip.mp4'], '', '9', 'VHS_LoadVideo')
+        assert inputs['video'] == 'clip.mp4'
+
+    def test_model_applier_writes_configured_input(self):
+        from comfyui.modifier import _apply_model_widget
+        inputs = {'mesh': 'stale.glb'}
+        _apply_model_widget(inputs, ['C:/refs/head.glb'], 'mesh', '9', 'LoadMesh')
+        assert inputs['mesh'] == 'head.glb'
+        assert 'model_file' not in inputs
+
+    def test_model_applier_falls_back_to_model_file(self):
+        from comfyui.modifier import _apply_model_widget
+        inputs = {'model_file': 'stale.glb'}
+        _apply_model_widget(inputs, ['C:/refs/head.glb'], '', '9', 'Load3D')
+        assert inputs['model_file'] == 'head.glb'
+
+
+class TestCollectFilesToStage:
+    """Every file-typed editable slot — audio included — must be staged to the
+    farm working dir; the farm has no access to workstation paths."""
+
+    def _entry(self, widget_type, value, node_id="7"):
+        from comfyui.editable import EditableNode
+        node = EditableNode(node_id=node_id, node_type="X",
+                            title="X_editable", display_name="X",
+                            widget_type=widget_type, widget_name=widget_type)
+        return {node_id: [{"node": node, "value": value}]}
+
+    def test_audio_file_is_staged(self, tmp_path):
+        from deadline.submitter import _collect_files_to_stage
+        wav = tmp_path / "voice.wav"
+        wav.write_bytes(b"x")
+        files = _collect_files_to_stage(self._entry("audio", [str(wav)]))
+        assert [f for f, _ in files] == [str(wav)]
+
+    def test_image_string_value_is_staged(self, tmp_path):
+        from deadline.submitter import _collect_files_to_stage
+        png = tmp_path / "a.png"
+        png.write_bytes(b"x")
+        files = _collect_files_to_stage(self._entry("image", str(png)))
+        assert [f for f, _ in files] == [str(png)]
+
+    def test_primary_input_is_excluded(self, tmp_path):
+        from deadline.submitter import _collect_files_to_stage
+        png = tmp_path / "a.png"
+        png.write_bytes(b"x")
+        files = _collect_files_to_stage(self._entry("image", [str(png)]),
+                                        exclude=str(png))
+        assert files == []
+
+    def test_missing_and_non_file_slots_are_skipped(self, tmp_path):
+        from deadline.submitter import _collect_files_to_stage
+        values = self._entry("audio", [str(tmp_path / "gone.wav")])
+        values.update(self._entry("text", "a prompt", node_id="8"))
+        assert _collect_files_to_stage(values) == []
+
+
+class TestApplyBatchFileToValues:
+    """API-format extraction keys nodes by JSON dict key, so node_id is a
+    string — the per-file override must handle that, not just legacy ints."""
+
+    def _values(self, node_id):
+        from comfyui.editable import EditableNode, CARDINALITY_SINGLE
+        node = EditableNode(node_id=node_id, node_type="LoadImage",
+                            title="Input_editable", display_name="Input",
+                            widget_type="image", widget_name="image",
+                            cardinality=CARDINALITY_SINGLE)
+        return {node_id: [{"node": node, "value": ["old.png"]}]}
+
+    def test_string_node_id_gets_current_file(self):
+        from deadline.submitter import _apply_batch_file_to_values
+        values = self._values("43")
+        _apply_batch_file_to_values(values, "43", "C:/batch/new.png")
+        assert values["43"][0]["value"] == "C:/batch/new.png"
+
+    def test_int_node_id_still_works(self):
+        from deadline.submitter import _apply_batch_file_to_values
+        values = self._values(43)
+        _apply_batch_file_to_values(values, 43, "C:/batch/new.png")
+        assert values[43][0]["value"] == "C:/batch/new.png"
+
+    def test_no_batch_slot_is_a_no_op(self):
+        from deadline.submitter import _apply_batch_file_to_values, _collect_batch_images
+        _, sentinel = _collect_batch_images(None)
+        values = self._values("43")
+        _apply_batch_file_to_values(values, sentinel, "C:/batch/new.png")
+        assert values["43"][0]["value"] == ["old.png"]
 
 
 # ============================================================================

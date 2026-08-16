@@ -239,7 +239,7 @@ ExitCodeTreatedAsFailure=1-255
     return job_id
 
 
-def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[List[str], int]:
+def _collect_batch_images(editable_values: Optional[Dict[Any, list]]) -> Tuple[List[str], Optional[Any]]:
     """
     Collect all batch input files (images, 3D models, etc.) from editable values.
 
@@ -247,12 +247,14 @@ def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[L
     single generation rather than being separate jobs.
 
     Returns:
-        Tuple of (list of file paths, node_id of the input node)
+        Tuple of (list of file paths, node_id of the input node). node_id is
+        None when there is no batching slot; it is an int for UI-format
+        workflows and a string for API-format ones.
     """
     from comfyui.editable import CARDINALITY_MANY
 
     if not editable_values:
-        return [], -1
+        return [], None
 
     # Priority order: images first, then videos, then 3D models
     input_types = ['image', 'video', '3d_model']
@@ -274,7 +276,54 @@ def _collect_batch_images(editable_values: Optional[Dict[int, list]]) -> Tuple[L
                     elif value and os.path.exists(value):
                         return [value], node_id
 
-    return [], -1
+    return [], None
+
+
+# File-typed widgets whose selections must be copied to the farm working dir
+# (and content-hashed for gallery source matching). The farm cannot see
+# workstation paths, so anything missing here fails minutes after submit.
+_STAGEABLE_WIDGET_TYPES = ('image', 'video', '3d_model', 'audio')
+
+
+def _collect_files_to_stage(editable_values, exclude=None):
+    """Existing files selected in file-typed editable slots.
+
+    Returns (path, widget_type) pairs. ``exclude`` skips the primary input
+    file, which the caller stages separately.
+    """
+    out = []
+    if not editable_values:
+        return out
+    for _, entries in editable_values.items():
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            node_info = data.get('node')
+            value = data.get('value')
+            if not (node_info and node_info.widget_type in _STAGEABLE_WIDGET_TYPES):
+                continue
+            files = value if isinstance(value, list) else ([value] if value else [])
+            for file_path in files:
+                if file_path and file_path != exclude and os.path.exists(file_path):
+                    out.append((file_path, node_info.widget_type))
+    return out
+
+
+def _apply_batch_file_to_values(current_editable_values, input_node_id, current_file):
+    """Point the batching slot's entry at the current batch file.
+
+    node_id is an int for UI-format workflows but a JSON dict key (string)
+    for API-format ones, so the sentinel is None — never an ordering
+    comparison.
+    """
+    if input_node_id is not None and input_node_id in current_editable_values:
+        # Update the image/3d_model entry's value to the current batch file
+        entries = current_editable_values[input_node_id]
+        entry_list = entries if isinstance(entries, list) else [entries]
+        for data in entry_list:
+            node_info = data.get('node')
+            if node_info and node_info.widget_type in ('image', 'video', '3d_model'):
+                data['value'] = current_file
+                break
 
 
 def submit_comfyui_job(
@@ -390,15 +439,7 @@ def submit_comfyui_job(
         current_editable_values = None
         if editable_values:
             current_editable_values = copy.deepcopy(editable_values)
-            if input_node_id >= 0 and input_node_id in current_editable_values:
-                # Update the image/3d_model entry's value to the current batch file
-                entries = current_editable_values[input_node_id]
-                entry_list = entries if isinstance(entries, list) else [entries]
-                for data in entry_list:
-                    node_info = data.get('node')
-                    if node_info and node_info.widget_type in ('image', 'video', '3d_model'):
-                        data['value'] = current_file
-                        break
+            _apply_batch_file_to_values(current_editable_values, input_node_id, current_file)
 
         modified, found_editable, workflow_files_to_copy = modify_workflow(
             workflow,
@@ -467,21 +508,11 @@ def submit_comfyui_job(
                 if file_hash:
                     source_image_hashes[os.path.basename(current_file)] = file_hash
 
-            # Hash all file-type editable values (images, videos, 3D models)
-            _hashable_types = ('image', 'video', '3d_model')
-            if current_editable_values:
-                for _, entries in current_editable_values.items():
-                    entry_list = entries if isinstance(entries, list) else [entries]
-                    for data in entry_list:
-                        node_info = data.get('node')
-                        value = data.get('value')
-                        if node_info and node_info.widget_type in _hashable_types:
-                            files = value if isinstance(value, list) else ([value] if value else [])
-                            for fpath in files:
-                                if fpath and os.path.exists(fpath):
-                                    fhash = compute_file_hash(fpath)
-                                    if fhash:
-                                        source_image_hashes[os.path.basename(fpath)] = fhash
+            # Hash all file-type editable values (images, videos, 3D models, audio)
+            for fpath, _widget_type in _collect_files_to_stage(current_editable_values):
+                fhash = compute_file_hash(fpath)
+                if fhash:
+                    source_image_hashes[os.path.basename(fpath)] = fhash
 
             if source_image_hashes:
                 logger.info(f"Computed {len(source_image_hashes)} source file hash(es)")
@@ -523,28 +554,11 @@ def submit_comfyui_job(
         if current_file and os.path.exists(current_file):
             _stage_input(current_file, "input file")
 
-        # Copy additional files (images, 3D models) from editable values
-        if current_editable_values:
-            for _, entries in current_editable_values.items():
-                entry_list = entries if isinstance(entries, list) else [entries]
-                for data in entry_list:
-                    node_info = data.get('node')
-                    value = data.get('value')
-
-                    # Handle image, video, and 3D model widgets
-                    if not (node_info and node_info.widget_type in ('image', 'video', '3d_model')):
-                        continue
-                    # Value might be a string or a list
-                    files_to_copy = []
-                    if isinstance(value, list):
-                        files_to_copy = value
-                    elif value:
-                        files_to_copy = [value]
-
-                    for file_path in files_to_copy:
-                        # Skip the primary input file (already copied above)
-                        if file_path and file_path != current_file and os.path.exists(file_path):
-                            _stage_input(file_path, f"{node_info.widget_type} file")
+        # Copy additional files (images, videos, 3D models, audio) from
+        # editable values; the primary input file was already copied above.
+        for file_path, widget_type in _collect_files_to_stage(
+                current_editable_values, exclude=current_file):
+            _stage_input(file_path, f"{widget_type} file")
 
         # Copy all files detected in workflow (from automatic path normalization)
         if workflow_files_to_copy:
