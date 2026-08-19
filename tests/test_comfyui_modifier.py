@@ -735,6 +735,73 @@ class TestApplyBatchFileToValues:
 # Submit-time validation
 # ============================================================================
 
+class TestMissingNodeTypesUIFormat:
+    """The UI-format branch must mirror what actually executes: muted nodes
+    are dropped before submission, while subgraph definitions are inlined
+    into real class types."""
+
+    _SG_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0001"
+    _SG_B = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0002"
+
+    def test_muted_node_of_unknown_type_is_not_missing(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"nodes": [{"type": "LoadImage", "mode": 0},
+                        {"type": "ExperimentalNode", "mode": 2}]}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+    def test_bypassed_node_of_unknown_type_is_not_missing(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {"nodes": [{"type": "LoadImage", "mode": 0},
+                        {"type": "ExperimentalNode", "mode": 4}]}
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+    def test_unknown_type_inside_used_subgraph_is_missing(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {
+            "nodes": [{"type": self._SG_A, "mode": 0}],
+            "definitions": {"subgraphs": [
+                {"id": self._SG_A,
+                 "nodes": [{"type": "MiniMaxH3Easy", "mode": 0}]},
+            ]},
+        }
+        assert collect_missing_node_types(wf, {"LoadImage"}) == ["MiniMaxH3Easy"]
+
+    def test_unknown_type_inside_unused_subgraph_is_not_missing(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {
+            "nodes": [{"type": "LoadImage", "mode": 0}],
+            "definitions": {"subgraphs": [
+                {"id": self._SG_A,
+                 "nodes": [{"type": "MiniMaxH3Easy", "mode": 0}]},
+            ]},
+        }
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+    def test_nested_subgraphs_are_walked(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {
+            "nodes": [{"type": self._SG_A, "mode": 0}],
+            "definitions": {"subgraphs": [
+                {"id": self._SG_A, "nodes": [{"type": self._SG_B, "mode": 0}]},
+                {"id": self._SG_B,
+                 "nodes": [{"type": "MiniMaxH3Easy", "mode": 0}]},
+            ]},
+        }
+        assert collect_missing_node_types(wf, {"LoadImage"}) == ["MiniMaxH3Easy"]
+
+    def test_muted_subgraph_instance_is_not_descended(self):
+        from comfyui.workflow import collect_missing_node_types
+        wf = {
+            "nodes": [{"type": "LoadImage", "mode": 0},
+                      {"type": self._SG_A, "mode": 2}],
+            "definitions": {"subgraphs": [
+                {"id": self._SG_A,
+                 "nodes": [{"type": "MiniMaxH3Easy", "mode": 0}]},
+            ]},
+        }
+        assert collect_missing_node_types(wf, {"LoadImage"}) == []
+
+
 class TestMissingNodeTypes:
     def test_reports_missing(self):
         from comfyui.workflow import collect_missing_node_types

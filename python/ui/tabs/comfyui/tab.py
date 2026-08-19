@@ -237,6 +237,8 @@ class ComfyUITab(PollingMixin, BaseTab):
 
     def on_tab_activated(self):
         """Called when tab becomes visible."""
+        # The node_info cache may have refreshed while another tab was active
+        self._recheck_missing_nodes()
         self._validate_inputs()
         # Resume the heartbeat poll and refresh immediately
         timer = getattr(self, '_server_check_timer', None)
@@ -1541,6 +1543,10 @@ class ComfyUITab(PollingMixin, BaseTab):
         """Refresh dynamic UI widgets based on editable nodes in the workflow."""
         from comfyui.presets_manager import get_workflow_preset_config
 
+        # Workflow changed — recompute the cached missing-node-type blocker
+        # here rather than in per-tick validation (one network read, not many)
+        self._recheck_missing_nodes()
+
         # Get node overrides from current preset (supports both single and multi-workflow)
         node_overrides = {}
         if self.state_manager.current_preset_name:
@@ -1893,6 +1899,30 @@ class ComfyUITab(PollingMixin, BaseTab):
 
         return self._validate_dynamic_inputs()
 
+    def _recheck_missing_nodes(self):
+        """Recompute the missing-node-type submit blocker for the workflow.
+
+        The result only changes when the workflow or the node_info cache
+        does, so this runs at workflow-selection and tab-activation time —
+        never inside _validate_dynamic_inputs, which fires per slider tick
+        and would otherwise re-read the preset JSON from the network share
+        on the GUI thread.
+        """
+        self._missing_nodes_error = None
+        try:
+            from comfyui.node_info import get_known_class_types
+            from comfyui.workflow import collect_missing_node_types, load_workflow
+            workflow_path = self.app_state.comfyui_workflow_path
+            if workflow_path:
+                missing = collect_missing_node_types(
+                    load_workflow(workflow_path), get_known_class_types())
+                if missing:
+                    self._missing_nodes_error = (
+                        "Cannot submit — the ComfyUI server does not have "
+                        "these node types installed: " + ", ".join(missing))
+        except Exception as e:
+            logger.warning(f"[ComfyUI] Node availability check skipped: {e}")
+
     def _validate_dynamic_inputs(self):
         """Check the workflow's editable widgets for empty required inputs.
 
@@ -1919,20 +1949,12 @@ class ComfyUITab(PollingMixin, BaseTab):
             return None
 
         # Blocking: the workflow needs a node pack the farm's ComfyUI lacks.
-        # Without this the job fails on the farm minutes after Submit, even
-        # though node_info already holds the installed class list.
-        try:
-            from comfyui.node_info import get_known_class_types
-            from comfyui.workflow import collect_missing_node_types, load_workflow
-            workflow_path = self.app_state.comfyui_workflow_path
-            if workflow_path:
-                missing = collect_missing_node_types(
-                    load_workflow(workflow_path), get_known_class_types())
-                if missing:
-                    return ("Cannot submit — the ComfyUI server does not have "
-                            "these node types installed: " + ", ".join(missing))
-        except Exception as e:
-            logger.warning(f"[ComfyUI] Node availability check skipped: {e}")
+        # Computed once per workflow selection (_recheck_missing_nodes) — this
+        # method runs on every generation-count slider tick and must not
+        # re-read the workflow JSON from the network share.
+        missing_error = getattr(self, '_missing_nodes_error', None)
+        if missing_error:
+            return missing_error
 
         from comfyui.editable import (CARDINALITY_MANY, CARDINALITY_SINGLE,
                                      find_out_of_range_reference_tags)
@@ -1990,14 +2012,19 @@ class ComfyUITab(PollingMixin, BaseTab):
             )
 
         # Non-blocking: a reference tag pointing past the selected files is
-        # substituted with an empty string by H3, so it fails silently.
+        # substituted with an empty string by H3, so it fails silently. Warn
+        # only when the tag set changes — this method runs per slider tick
+        # and would otherwise clobber the status bar continuously.
         stale_tags = []
         for text in prompt_texts:
             stale_tags.extend(find_out_of_range_reference_tags(text, reference_counts))
-        if stale_tags:
-            self.show_status(
-                f"Prompt references {', '.join(sorted(set(stale_tags)))} but fewer "
-                f"files are selected — H3 substitutes nothing for them.", "warning")
+        stale_tags = sorted(set(stale_tags))
+        if stale_tags != getattr(self, '_last_stale_tags', []):
+            self._last_stale_tags = stale_tags
+            if stale_tags:
+                self.show_status(
+                    f"Prompt references {', '.join(stale_tags)} but fewer "
+                    f"files are selected — H3 substitutes nothing for them.", "warning")
 
         if not problems:
             # Routine path runs on every slider tick — keep it at debug.

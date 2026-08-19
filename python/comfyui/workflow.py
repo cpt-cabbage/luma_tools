@@ -1514,7 +1514,24 @@ def collect_missing_node_types(workflow: Dict[str, Any], known: set) -> List[str
         used = {n.get('class_type') for n in workflow.values()
                 if isinstance(n, dict) and n.get('class_type')}
     else:
-        used = {n.get('type') for n in workflow.get('nodes', [])
-                if n.get('type') and not _is_uuid(n.get('type'))}
+        # Mirror what actually executes: muted/bypassed nodes (mode 2/4) are
+        # dropped before submission, while subgraph definitions are inlined
+        # into real class types — so walk every definition reachable from a
+        # live instance node, and only those.
+        subgraph_defs = _get_subgraph_definitions(workflow)
+        used = set()
+        seen_defs = set()
+        pending = [workflow.get('nodes', [])]
+        while pending:
+            for node in pending.pop():
+                node_type = node.get('type')
+                if not node_type or node.get('mode', 0) in (2, 4):
+                    continue
+                if _is_uuid(node_type):
+                    if node_type in subgraph_defs and node_type not in seen_defs:
+                        seen_defs.add(node_type)
+                        pending.append(subgraph_defs[node_type].get('nodes', []))
+                    continue
+                used.add(node_type)
 
     return sorted(used - known - SKIP_NODE_TYPES)
