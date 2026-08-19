@@ -151,6 +151,28 @@ class TestStaleTagWarningDedupe:
         assert "<Picture 2>" in calls[0]
 
 
+class TestBrowseDirectoryMemory:
+    """Each selector type saves under its own context key — audio and video
+    selectors read comfyui_audio/comfyui_videos, so saving everything under
+    comfyui_images left their browse memory permanently stale."""
+
+    def test_context_key_is_saved(self, monkeypatch):
+        import core.user_preferences as up
+
+        saved = {}
+        monkeypatch.setattr(up, "set_last_browse_directory",
+                            lambda ctx, d: saved.update({ctx: d}))
+        tab = _make_tab({})
+        tab._on_images_changed(["C:/refs/voice.wav"], "comfyui_audio")
+        assert saved == {"comfyui_audio": "C:/refs"}
+
+    def test_context_covers_every_selector_type(self):
+        from ui.tabs.comfyui.ui_manager import BROWSE_CONTEXTS
+        assert BROWSE_CONTEXTS == {"image": "comfyui_images",
+                                   "video": "comfyui_videos",
+                                   "audio": "comfyui_audio"}
+
+
 class TestValidateEmptyFileSlots:
     def test_single_slot_with_no_files_blocks(self):
         from comfyui.editable import CARDINALITY_SINGLE

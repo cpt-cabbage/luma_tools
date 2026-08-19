@@ -735,6 +735,22 @@ class TestApplyBatchFileToValues:
 # Submit-time validation
 # ============================================================================
 
+class TestReferenceTagMapping:
+    """REFERENCE_TAG_NAMES is the single source of truth: tags built by the
+    UI must round-trip through the validator's parser."""
+
+    def test_tags_round_trip_through_validator(self):
+        from comfyui.editable import (REFERENCE_TAG_NAMES,
+                                      find_out_of_range_reference_tags)
+        assert set(REFERENCE_TAG_NAMES) == {'image', 'video', 'audio'}
+        for widget_type, tag_name in REFERENCE_TAG_NAMES.items():
+            prompt = f"use <{tag_name} 1> here"
+            assert find_out_of_range_reference_tags(
+                prompt, {widget_type: 1}) == []
+            assert find_out_of_range_reference_tags(
+                prompt, {widget_type: 0}) == [f"<{tag_name} 1>"]
+
+
 class TestMissingNodeTypesUIFormat:
     """The UI-format branch must mirror what actually executes: muted nodes
     are dropped before submission, while subgraph definitions are inlined

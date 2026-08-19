@@ -10,7 +10,8 @@ import shutil
 import logging
 from typing import Optional
 
-from core.config import OIIO_PATH, get_ocio_config
+from core.config import (OIIO_PATH, get_ocio_config,
+                         AUDIO_EXTENSIONS, VIDEO_EXTENSIONS)
 from core.error_handling import safe_operation
 from core.subprocess_utils import run_command
 
@@ -22,10 +23,9 @@ COMFYUI_NATIVE_FORMATS = {'.png', '.jpg', '.jpeg', '.gif', '.tiff', '.tif', '.bm
 # Formats ComfyUI loads directly but that this module never converts. Without
 # this, every audio and video input trips the "may fail to load it" warning
 # below, which is misleading — those inputs are copied intentionally.
-COMFYUI_PASSTHROUGH_FORMATS = {
-    '.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac',
-    '.mp4', '.mov', '.mkv', '.avi', '.webm',
-}
+# Derived from the config constants so the set can't drift from what the
+# audio/video selectors actually let the user pick.
+COMFYUI_PASSTHROUGH_FORMATS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
 # Formats that OIIO can convert to PNG for ComfyUI consumption
 OIIO_CONVERTIBLE_FORMATS = {'.exr', '.hdr', '.dpx', '.tga'}

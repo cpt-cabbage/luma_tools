@@ -27,7 +27,7 @@ from ..base_tab import BaseTab, TabConfig
 from dialog_helpers import confirm_action
 from ui_components import StatusColors
 from .polling import PollingMixin
-from .ui_manager import ComfyUIWidgetManager
+from .ui_manager import ComfyUIWidgetManager, BROWSE_CONTEXTS
 from .state_manager import ComfyUIStateManager, read_seed, write_seed, random_seed
 from .inline_model_grid import InlineModelGrid
 from .variant_selector import VariantSelector
@@ -1632,17 +1632,16 @@ class ComfyUITab(PollingMixin, BaseTab):
                     )
                 input_widget.textChanged.connect(self._on_text_changed)
 
-            elif node.widget_type == 'image':
-                input_widget.images_changed.connect(self._on_images_changed)
+            elif node.widget_type in BROWSE_CONTEXTS:
+                # Capture the context by value so each selector saves its own
+                # browse-memory key (comfyui_images / _videos / _audio)
+                input_widget.images_changed.connect(
+                    lambda files, ctx=BROWSE_CONTEXTS[node.widget_type]:
+                    self._on_images_changed(files, ctx)
+                )
 
             elif node.widget_type == '3d_model':
                 input_widget.textChanged.connect(self._on_text_changed)
-
-            elif node.widget_type == 'video':
-                input_widget.images_changed.connect(self._on_images_changed)
-
-            elif node.widget_type == 'audio':
-                input_widget.images_changed.connect(self._on_images_changed)
 
             else:
                 # Default widgets
@@ -1853,13 +1852,18 @@ class ComfyUITab(PollingMixin, BaseTab):
         # Restart timer on each change (200ms debounce for faster crash recovery)
         self._save_timer.start(200)
 
-    def _on_images_changed(self, images):
-        """Handle image selection changes - save the last browse directory and trigger state save."""
+    def _on_images_changed(self, images, context="comfyui_images"):
+        """Handle file selection changes - save the last browse directory and trigger state save.
+
+        ``context`` is the browse-memory key for the selector's file type
+        (BROWSE_CONTEXTS) so audio/video selectors don't overwrite the image
+        directory — and their own keys actually get written.
+        """
         from core.user_preferences import set_last_browse_directory
 
         if images:
             last_dir = os.path.dirname(images[0])
-            set_last_browse_directory("comfyui_images", last_dir)
+            set_last_browse_directory(context, last_dir)
 
         # Trigger debounced save so image selections are persisted per-workflow
         self._on_text_changed()
@@ -1957,13 +1961,14 @@ class ComfyUITab(PollingMixin, BaseTab):
             return missing_error
 
         from comfyui.editable import (CARDINALITY_MANY, CARDINALITY_SINGLE,
+                                     REFERENCE_TAG_NAMES,
                                      find_out_of_range_reference_tags)
 
         checked = 0
         problems = []
         empty_text_inputs = []
         text_input_count = 0
-        reference_counts = {'image': 0, 'video': 0, 'audio': 0}
+        reference_counts = {widget_type: 0 for widget_type in REFERENCE_TAG_NAMES}
         prompt_texts = []
 
         for key, container in widget_manager.dynamic_widgets.items():

@@ -43,6 +43,36 @@ def _write_workflow(tmp_path, nodes):
     return str(path)
 
 
+class _FanoutContainer:
+    def __init__(self, widget_type, files):
+        from comfyui.editable import EditableNode, CARDINALITY_MANY
+
+        self.editable_node = EditableNode(
+            node_id="41", node_type="X", title="Refs_editable*",
+            display_name="Refs", widget_type=widget_type,
+            widget_name=widget_type, cardinality=CARDINALITY_MANY)
+        self.input_widget = _FileSelectorStub(files)
+
+
+class TestBuildReferenceEntries:
+    def test_entries_use_shared_tag_names(self):
+        """Pin: tags come from editable.REFERENCE_TAG_NAMES, ordinals are
+        1-based within each media type."""
+        from ui.tabs.comfyui.ui_manager import ComfyUIWidgetManager
+
+        mgr = object.__new__(ComfyUIWidgetManager)
+        mgr.dynamic_widgets = {
+            ("41", "image"): _FanoutContainer("image",
+                                              ["C:/r/a.png", "C:/r/b.png"]),
+            ("42", "audio"): _FanoutContainer("audio", ["C:/r/v.wav"]),
+        }
+        assert mgr.build_reference_entries() == [
+            ("<Picture 1>", "a.png"),
+            ("<Picture 2>", "b.png"),
+            ("<Audio 1>", "v.wav"),
+        ]
+
+
 class TestCollectEditableValues:
     def test_audio_selection_is_collected(self, tmp_path):
         """A LoadAudio_editable slot must submit the user's file, not the

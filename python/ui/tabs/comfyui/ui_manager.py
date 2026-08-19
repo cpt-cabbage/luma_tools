@@ -18,6 +18,15 @@ from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QComboBox,
 )
 
+# Browse-memory context per file selector type. The selectors read these at
+# creation time and tab._on_images_changed saves under the same key, so the
+# two sides can never drift apart again.
+BROWSE_CONTEXTS = {
+    'image': 'comfyui_images',
+    'video': 'comfyui_videos',
+    'audio': 'comfyui_audio',
+}
+
 
 class ComfyUIWidgetManager:
     """Manages dynamic widget creation and state for ComfyUI editable nodes."""
@@ -334,10 +343,9 @@ class ComfyUIWidgetManager:
         tags are therefore derived from the live selector contents rather than
         stored anywhere, so reordering files is reflected immediately.
         """
-        from comfyui.editable import CARDINALITY_MANY
+        from comfyui.editable import CARDINALITY_MANY, REFERENCE_TAG_NAMES
 
-        tag_names = {'image': 'Picture', 'video': 'Video', 'audio': 'Audio'}
-        buckets = {'image': [], 'video': [], 'audio': []}
+        buckets = {widget_type: [] for widget_type in REFERENCE_TAG_NAMES}
 
         for _key, container in self.dynamic_widgets.items():
             node = getattr(container, 'editable_node', None)
@@ -350,9 +358,9 @@ class ComfyUIWidgetManager:
                 getattr(input_widget, 'selected_files', None) or [])
 
         entries = []
-        for widget_type in ('image', 'video', 'audio'):
+        for widget_type, tag_name in REFERENCE_TAG_NAMES.items():
             for ordinal, path in enumerate(buckets[widget_type], start=1):
-                entries.append((f"<{tag_names[widget_type]} {ordinal}>",
+                entries.append((f"<{tag_name} {ordinal}>",
                                 os.path.basename(str(path))))
         return entries
 
@@ -486,62 +494,33 @@ class ComfyUIWidgetManager:
             container.preset_btn = preset_btn  # Store button for signal connection
             container.reference_btn = reference_btn  # Store button for signal connection
 
-        elif node.widget_type == 'image':
+        elif node.widget_type in BROWSE_CONTEXTS:
+            from core.config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
+
+            totals = {'image': total_image_nodes, 'video': total_video_nodes,
+                      'audio': total_audio_nodes}
+            total_nodes = totals[node.widget_type]
+
+            # Images are the selector's default; video/audio override the
+            # accepted extensions and the toolbar wording.
+            selector_kwargs = {'total_image_nodes': total_nodes}
+            if node.widget_type == 'video':
+                selector_kwargs.update(supported_extensions=sorted(VIDEO_EXTENSIONS),
+                                       file_type_label="videos")
+            elif node.widget_type == 'audio':
+                selector_kwargs.update(supported_extensions=sorted(AUDIO_EXTENSIONS),
+                                       file_type_label="audio")
+
             # Create BatchImageSelector first so we can access its toolbar
-            input_widget = BatchImageSelector(total_image_nodes=total_image_nodes)
+            input_widget = BatchImageSelector(**selector_kwargs)
             input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            # Set last browse directory for image selector
-            last_dir = get_last_browse_directory("comfyui_images")
+            last_dir = get_last_browse_directory(BROWSE_CONTEXTS[node.widget_type])
             if last_dir:
                 input_widget.set_last_browse_dir(last_dir)
 
-            # Insert label at the beginning of the BatchImageSelector's toolbar
-            # Use smaller min-width when many image nodes to prevent toolbar truncation
-            label_min_w = 0 if total_image_nodes >= 3 else 160
-            label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
-            input_widget.toolbar_layout.insertWidget(0, label)
-
-            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
-            container.input_widget = input_widget
-
-        elif node.widget_type == 'video':
-            from core.config import VIDEO_EXTENSIONS as _VIDEO_EXT
-            # Create BatchImageSelector configured for video files
-            input_widget = BatchImageSelector(
-                supported_extensions=sorted(_VIDEO_EXT),
-                total_image_nodes=total_video_nodes,
-                file_type_label="videos",
-            )
-            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            # Set last browse directory for video selector
-            last_dir = get_last_browse_directory("comfyui_videos")
-            if last_dir:
-                input_widget.set_last_browse_dir(last_dir)
-
-            # Insert label at the beginning of the BatchImageSelector's toolbar
-            label_min_w = 0 if total_video_nodes >= 3 else 160
-            label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
-            input_widget.toolbar_layout.insertWidget(0, label)
-
-            layout.addWidget(input_widget, 1)  # Stretch factor of 1 to expand
-            container.input_widget = input_widget
-
-        elif node.widget_type == 'audio':
-            from core.config import AUDIO_EXTENSIONS as _AUDIO_EXT
-            # Create BatchImageSelector configured for audio files
-            input_widget = BatchImageSelector(
-                supported_extensions=sorted(_AUDIO_EXT),
-                total_image_nodes=total_audio_nodes,
-                file_type_label="audio",
-            )
-            input_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            # Set last browse directory for audio selector
-            last_dir = get_last_browse_directory("comfyui_audio")
-            if last_dir:
-                input_widget.set_last_browse_dir(last_dir)
-
-            # Insert label at the beginning of the BatchImageSelector's toolbar
-            label_min_w = 0 if total_audio_nodes >= 3 else 160
+            # Insert label at the beginning of the BatchImageSelector's toolbar.
+            # Smaller min-width when many nodes prevents toolbar truncation.
+            label_min_w = 0 if total_nodes >= 3 else 160
             label = self._create_label_with_tooltip(f"{node.display_name}:", min_width=label_min_w)
             input_widget.toolbar_layout.insertWidget(0, label)
 

@@ -910,8 +910,14 @@ def extract_settings_nodes(workflow_path: str) -> List[SettingsNode]:
 # H3 resolves every reference mention to one of these literals before the text
 # encoder sees it, so artists can type them directly. N is the 1-based ordinal
 # WITHIN that media type, not the media slot index.
-_REFERENCE_TAG_RE = re.compile(r'<(Picture|Video|Audio)\s+(\d+)>')
-_REFERENCE_TAG_TYPES = {'Picture': 'image', 'Video': 'video', 'Audio': 'audio'}
+#
+# Single source of truth for the widget-type -> tag-name mapping: the UI's
+# "@ Reference" menu (ui_manager.build_reference_entries) and the submit-time
+# validator both derive from it.
+REFERENCE_TAG_NAMES = {'image': 'Picture', 'video': 'Video', 'audio': 'Audio'}
+_REFERENCE_TAG_TYPES = {name: wt for wt, name in REFERENCE_TAG_NAMES.items()}
+_REFERENCE_TAG_RE = re.compile(
+    r'<(%s)\s+(\d+)>' % '|'.join(REFERENCE_TAG_NAMES.values()))
 
 
 def find_out_of_range_reference_tags(prompt: str, counts: dict) -> List[str]:
