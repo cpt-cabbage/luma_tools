@@ -289,7 +289,9 @@ class TestFanoutSlots:
         _expand_fanout_slots(wf, vals)
         assert wf["41"]["inputs"]["image"] == r"C:\r\one.png"
         assert len(wf) == 2
-        assert vals == {}
+        # The entry stays in editable_values (the submitter reads it for
+        # metadata/hashes); _apply_editable_values skips it by cardinality.
+        assert "41" in vals
 
     def test_three_files_create_two_clones(self, h3_slots):
         from comfyui.modifier import _expand_fanout_slots
@@ -376,6 +378,125 @@ class TestFanoutSlots:
         assert '50' in wf
         assert wf['50']['inputs']['prompt'] == 'hi'
         assert 'media_type_1' not in wf['50']['inputs']
+
+
+class TestFanoutDoesNotMutateEditableValues:
+    """submit_comfyui_job reads the same dict after modify_workflow for
+    gallery metadata and content hashes — pruning it silently loses every
+    fan-out reference file from the job's record."""
+
+    def test_entry_survives_expansion(self):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        vals = _fanout_values(["C:/r/1.png"])
+        _expand_fanout_slots(wf, vals)
+        assert "41" in vals
+        assert vals["41"][0]["value"] == ["C:/r/1.png"]
+
+    def test_empty_entry_survives_removal(self):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = _fanout_workflow()
+        vals = _fanout_values([])
+        _expand_fanout_slots(wf, vals)
+        assert "41" in vals
+
+
+class TestFanoutSiblingWiring:
+    """Each sibling input must keep its own output slot and its own source —
+    wiring a MASK input to an IMAGE output type-fails on the farm, and an
+    input fed by an unrelated node must not be rehomed onto the clone."""
+
+    def test_multi_output_template_keeps_slot_per_sibling(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "a.png"},
+                   "_meta": {"title": "Refs_editable*"}},
+            "50": {"class_type": "MiniMaxH3Easy",
+                   "inputs": {"prompt": "hi",
+                              "media_1": ["41", 0],
+                              "media_type_1": "image",
+                              "mask_1": ["41", 1]},
+                   "_meta": {"title": "Video_editable"}},
+        }
+        _expand_fanout_slots(wf, _fanout_values(["C:/r/1.png", "C:/r/2.png"]))
+        clone_id = wf["50"]["inputs"]["media_2"][0]
+        assert wf["50"]["inputs"]["media_2"] == [clone_id, 0]
+        assert wf["50"]["inputs"]["mask_2"] == [clone_id, 1]
+
+    def test_sibling_fed_by_other_node_is_not_rehomed(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "a.png"},
+                   "_meta": {"title": "Refs_editable*"}},
+            "77": {"class_type": "StyleModel", "inputs": {},
+                   "_meta": {"title": "Style"}},
+            "50": {"class_type": "MiniMaxH3Easy",
+                   "inputs": {"prompt": "hi",
+                              "media_1": ["41", 0],
+                              "media_type_1": "image",
+                              "media_style_1": ["77", 0]},
+                   "_meta": {"title": "Video_editable"}},
+        }
+        _expand_fanout_slots(wf, _fanout_values(["C:/r/1.png", "C:/r/2.png"]))
+        assert wf["50"]["inputs"]["media_style_2"] == ["77", 0]
+        # And the original stays put
+        assert wf["50"]["inputs"]["media_style_1"] == ["77", 0]
+
+
+class TestFanoutSlotFamilies:
+    """Unrelated numbered inputs on the same consumer (lora_1 next to
+    media_1) are a different slot family: they must not travel with a clone,
+    block a free slot, or be deleted when the slot empties."""
+
+    def _workflow(self, extra_inputs):
+        inputs = {"prompt": "hi", "media_1": ["41", 0], "media_type_1": "image"}
+        inputs.update(extra_inputs)
+        return {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "a.png"},
+                   "_meta": {"title": "Refs_editable*"}},
+            "50": {"class_type": "MiniMaxH3Easy", "inputs": inputs,
+                   "_meta": {"title": "Video_editable"}},
+        }
+
+    def test_unrelated_input_does_not_travel_with_clone(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = self._workflow({"lora_1": "style.safetensors"})
+        _expand_fanout_slots(wf, _fanout_values(["C:/r/1.png", "C:/r/2.png"]))
+        assert "media_2" in wf["50"]["inputs"]
+        assert "lora_2" not in wf["50"]["inputs"]
+
+    def test_unrelated_input_does_not_block_a_free_slot(self, h3_slots):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = self._workflow({"lora_2": "style.safetensors"})
+        _expand_fanout_slots(wf, _fanout_values(["C:/r/1.png", "C:/r/2.png"]))
+        # Slot 2 is free for the media family; lora_2 must not push it to 3
+        clone_id = wf["50"]["inputs"]["media_2"][0]
+        assert wf["50"]["inputs"]["media_2"] == [clone_id, 0]
+        assert wf["50"]["inputs"]["lora_2"] == "style.safetensors"
+
+    def test_unrelated_input_survives_empty_slot_removal(self):
+        from comfyui.modifier import _expand_fanout_slots
+        wf = self._workflow({"lora_1": "style.safetensors"})
+        _expand_fanout_slots(wf, _fanout_values([]))
+        assert "41" not in wf
+        assert "media_1" not in wf["50"]["inputs"]
+        assert "media_type_1" not in wf["50"]["inputs"]
+        assert wf["50"]["inputs"]["lora_1"] == "style.safetensors"
+
+    def test_empty_slot_with_unindexed_input_does_not_dangle(self):
+        """Same guarantee the optional path has: no link left pointing at a
+        removed template."""
+        from comfyui.modifier import _expand_fanout_slots
+        wf = {
+            "41": {"class_type": "LoadImage", "inputs": {"image": "a.png"},
+                   "_meta": {"title": "Refs_editable*"}},
+            "50": {"class_type": "MiniMaxH3Easy",
+                   "inputs": {"prompt": "hi", "reference_image": ["41", 0]},
+                   "_meta": {"title": "Video_editable"}},
+        }
+        _expand_fanout_slots(wf, _fanout_values([]))
+        assert "41" not in wf
+        assert "reference_image" not in wf["50"]["inputs"]
 
 
 # ============================================================================

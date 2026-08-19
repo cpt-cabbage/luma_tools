@@ -505,6 +505,16 @@ def _allocate_node_id(workflow: Dict[str, Any]) -> str:
     return str(max_id + 1)
 
 
+def _related_prefixes(a: str, b: str) -> bool:
+    """Whether two indexed-input prefixes belong to the same slot family.
+
+    'media_' and 'media_type_' are one family — media_type_N travels with
+    media_N. 'lora_' is not related to 'media_', so lora_1 neither travels
+    with media_1, nor blocks its free slots, nor is deleted alongside it.
+    """
+    return a.startswith(b) or b.startswith(a)
+
+
 def _detach_slot_node(workflow: Dict[str, Any], template_id: str) -> None:
     """Remove a slot's node and every consumer input it feeds.
 
@@ -525,10 +535,14 @@ def _detach_slot_node(workflow: Dict[str, Any], template_id: str) -> None:
         split = _split_indexed_name(input_name)
         if not split:
             continue
-        for name in [n for n in consumer_inputs
-                     if (_split_indexed_name(n) or (None, None))[1] == split[1]]:
-            del consumer_inputs[name]
-            logger.info(f"[Slot] Dropped optional input {consumer_id}.{name}")
+        for name, val in list(consumer_inputs.items()):
+            parsed = _split_indexed_name(name)
+            if not parsed or parsed[1] != split[1]:
+                continue
+            if ((_is_link(val) and str(val[0]) == template_id)
+                    or _related_prefixes(parsed[0], split[0])):
+                del consumer_inputs[name]
+                logger.info(f"[Slot] Dropped optional input {consumer_id}.{name}")
     workflow.pop(template_id, None)
 
 
@@ -583,7 +597,6 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
     if not editable_values:
         return
 
-    handled = []
     for node_id, entries in list(editable_values.items()):
         entry_list = entries if isinstance(entries, list) else [entries]
         for data in entry_list:
@@ -601,7 +614,6 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
             files = [f for f in (value if isinstance(value, list) else [value]) if f]
             file_input = getattr(node_info, 'widget_name', None) or 'image'
 
-            handled.append((node_id, data))
             consumers = _find_consumers(workflow, template_id)
 
             if not files:
@@ -617,7 +629,7 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
                 logger.warning(f"[Fanout] Node {template_id} feeds nothing — "
                                f"{len(files) - 1} extra file(s) ignored")
                 continue
-            consumer_id, input_name, out_slot = consumers[0]
+            consumer_id, input_name, _out_slot = consumers[0]
             split = _split_indexed_name(input_name)
             if not split:
                 logger.warning(f"[Fanout] Consumer input '{input_name}' has no trailing "
@@ -626,12 +638,16 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
             prefix, base_idx = split
 
             consumer_inputs = workflow[consumer_id]['inputs']
-            # Every input sharing the template's index travels with it, which
-            # is what carries media_type_N alongside media_N generically.
+            # Inputs sharing the template's index travel with it — but only
+            # those in the same slot family (media_type_N alongside media_N)
+            # or fed by the template itself. An unrelated lora_1 stays put.
             siblings = {}
             for name, val in list(consumer_inputs.items()):
                 parsed = _split_indexed_name(name)
-                if parsed and parsed[1] == base_idx:
+                if not parsed or parsed[1] != base_idx:
+                    continue
+                if ((_is_link(val) and str(val[0]) == template_id)
+                        or _related_prefixes(parsed[0], prefix)):
                     siblings[parsed[0]] = val
 
             consumer_type = workflow[consumer_id].get('class_type', '')
@@ -652,7 +668,16 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
                     f"pack was installed recently."
                 )
                 continue
-            used = {p[1] for p in (_split_indexed_name(n) for n in consumer_inputs) if p}
+            # Occupied slot indices — counted within the slot family only, so
+            # an unrelated lora_2 doesn't shadow a free media_2.
+            used = set()
+            for name, val in consumer_inputs.items():
+                parsed = _split_indexed_name(name)
+                if not parsed:
+                    continue
+                if ((_is_link(val) and str(val[0]) == template_id)
+                        or _related_prefixes(parsed[0], prefix)):
+                    used.add(parsed[1])
 
             for extra in files[1:]:
                 free = next((i for i in range(1, ceiling + 1) if i not in used), None)
@@ -669,25 +694,18 @@ def _expand_fanout_slots(workflow: Dict[str, Any], editable_values) -> None:
                 workflow[clone_id] = clone
 
                 for sib_prefix, sib_value in siblings.items():
-                    if _is_link(sib_value):
-                        consumer_inputs[f"{sib_prefix}{free}"] = [clone_id, out_slot]
+                    if _is_link(sib_value) and str(sib_value[0]) == template_id:
+                        # Same source: keep each sibling's own output slot —
+                        # a MASK input must not end up on the IMAGE output.
+                        consumer_inputs[f"{sib_prefix}{free}"] = [clone_id, sib_value[1]]
+                    elif _is_link(sib_value):
+                        # Fed by an unrelated node — duplicate that link, do
+                        # not rehome it onto the clone.
+                        consumer_inputs[f"{sib_prefix}{free}"] = list(sib_value)
                     else:
                         consumer_inputs[f"{sib_prefix}{free}"] = sib_value
                 logger.info(f"[Fanout] {os.path.basename(str(extra))} -> node {clone_id} "
                             f"-> {consumer_id}.{prefix}{free}")
-
-    # Handled entries must not reach the normal appliers, which would overwrite
-    # the template's path with a basename and undo the expansion.
-    for node_id, data in handled:
-        entries = editable_values.get(node_id)
-        if isinstance(entries, list):
-            if data in entries:
-                entries.remove(data)
-            if not entries:
-                del editable_values[node_id]
-        else:
-            editable_values.pop(node_id, None)
-
 
 def _apply_editable_values(workflow: Dict[str, Any], editable_values) -> None:
     """Write every value collected from the dynamic UI into the workflow.
@@ -703,15 +721,24 @@ def _apply_editable_values(workflow: Dict[str, Any], editable_values) -> None:
     logger.info(f"=== Applying {total_entries} editable values across "
                 f"{len(editable_values)} nodes ===")
 
+    from comfyui.editable import CARDINALITY_MANY, CARDINALITY_OPTIONAL
+
     for node_id, data in _iter_editable_entries(editable_values):
         node_id_str = str(node_id)
         node_info = data.get('node')
         value = data.get('value')
 
+        # Fan-out entries were already expanded into concrete loader nodes.
+        # Applying them here would overwrite the template's full path with a
+        # basename and undo the expansion. The entry itself is left in
+        # editable_values on purpose: the submitter reads it afterwards for
+        # gallery metadata and content hashes.
+        if getattr(node_info, 'cardinality', None) == CARDINALITY_MANY:
+            continue
+
         if node_id_str not in workflow:
             if _is_expanded_subgraph_node(node_info):
                 continue
-            from comfyui.editable import CARDINALITY_OPTIONAL
             if getattr(node_info, 'cardinality', None) == CARDINALITY_OPTIONAL:
                 # Removed by _remove_empty_optional_slots — expected, not an error
                 continue
