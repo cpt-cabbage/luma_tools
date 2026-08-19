@@ -52,11 +52,22 @@ Nodes with `_editable` suffix in their title are extracted and presented as dyna
 Fan-out (`_expand_fanout_slots` in `modifier.py`) clones the template loader
 once per extra file and wires each clone into the consumer's next free numbered
 input. It splits the trailing integer off the consumer's input name and
-duplicates **every sibling input sharing that index**, which is how
-`media_type_N` follows `media_N` without the code naming either. The slot
-ceiling comes from `node_info.get_optional_input_names()`; if the consumer class
-isn't cached, extra files are refused with a warning rather than written to
-inputs ComfyUI would silently drop.
+duplicates the sibling inputs sharing that index **within the same slot
+family** — prefixes related by containment (`media_` / `media_type_`) or
+inputs fed by the template itself — which is how `media_type_N` follows
+`media_N` without the code naming either, while an unrelated `lora_N` neither
+travels, blocks a free slot, nor is deleted when the slot empties. Siblings
+fed by the template keep their own output slot; siblings fed by other nodes
+are duplicated as-is. The slot ceiling comes from
+`node_info.get_optional_input_names()`; if the consumer class isn't cached,
+extra files are refused with a warning rather than written to inputs ComfyUI
+would silently drop.
+
+`_expand_fanout_slots` never mutates `editable_values` — the submitter reads
+the same dict afterwards for gallery metadata and content hashes, so
+`_apply_editable_values` skips fan-out entries by cardinality instead. Empty
+`?`/`*` slots are detached via `_detach_slot_node`, which also drops
+un-indexed consumer inputs that link to the removed node.
 
 Fan-out slots are excluded from `_collect_batch_images` — their files belong to
 one generation, not one Deadline job each.
